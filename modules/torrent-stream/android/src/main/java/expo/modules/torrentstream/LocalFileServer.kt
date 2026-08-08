@@ -86,9 +86,23 @@ class LocalFileServer(
         if (line.startsWith("Range:", true)) rangeHeader = line.substringAfter(':').trim()
       }
 
-      val (start, end) = parseRange(rangeHeader)
-      val generationAtStart = generation.incrementAndGet()
       val out = socket.getOutputStream()
+
+      val range = parseRange(rangeHeader)
+      if (range == null) {
+        out.write(
+          (
+            "HTTP/1.1 416 Range Not Satisfiable\r\n" +
+              "Content-Range: bytes */$fileSize\r\n" +
+              "Content-Length: 0\r\nConnection: close\r\n\r\n"
+            ).toByteArray()
+        )
+        out.flush()
+        return
+      }
+
+      val (start, end) = range
+      val generationAtStart = generation.incrementAndGet()
 
       val length = end - start + 1
       val header = buildString {
@@ -149,20 +163,32 @@ class LocalFileServer(
     }
   }
 
-  private fun parseRange(header: String?): Pair<Long, Long> {
+  /**
+   * @return the byte range to serve, or null when the client asked for one that
+   *   starts past the end of the file. Players probe exactly there — VLC asks
+   *   for `bytes=<fileSize>-` — and the answer is 416, not a clamped range.
+   */
+  private fun parseRange(header: String?): Pair<Long, Long>? {
     val last = fileSize - 1
     val spec = header?.substringAfter("bytes=", "")?.trim().orEmpty()
     if (spec.isEmpty()) return 0L to last
 
-    val start = spec.substringBefore('-').toLongOrNull() ?: 0L
-    val end = spec.substringAfter('-').toLongOrNull() ?: last
-    return start.coerceIn(0, last) to end.coerceIn(start, last)
+    val requested = spec.substringBefore('-').toLongOrNull() ?: 0L
+    if (requested > last) return null
+
+    // Clamp the start *first* and measure the end against that. Reading the
+    // unclamped value here is an empty range and an exception, not a bad
+    // response — coerceIn(start, last) throws when start > last.
+    val start = requested.coerceAtLeast(0)
+    val end = (spec.substringAfter('-').toLongOrNull() ?: last).coerceIn(start, last)
+    return start to end
   }
 }
 
 private fun String.urlEncoded() = replace(" ", "%20")
 
-private fun contentType(name: String) = when (name.substringAfterLast('.', "").lowercase()) {
+/** Also used to tell an external player what it is being handed. */
+internal fun contentType(name: String) = when (name.substringAfterLast('.', "").lowercase()) {
   "mkv" -> "video/x-matroska"
   "mp4", "m4v" -> "video/mp4"
   "webm" -> "video/webm"

@@ -203,7 +203,14 @@ function Shell() {
 
     return (
       <PlayerScreen
-        subtitle={stored.subtitle}
+        // fileName is what the engine actually opened; before it reports back,
+        // the stored file list is the next best thing.
+        title={
+          fileName ??
+          stored.files?.find((f) => f.index === playingIndex)?.name ??
+          stored.torrentName ??
+          stored.title
+        }
         resumeAt={stored.positions?.[playingIndex]}
         url={url}
         progress={progress}
@@ -213,10 +220,7 @@ function Shell() {
         onDuration={(seconds) =>
           setDuration(stored, playingIndex, seconds).then(setHistory)
         }
-        onPoster={(uri) => {
-          console.log(`[poster] saved for ${stored.uri} file ${playingIndex}`);
-          setPoster(stored, playingIndex, uri).then(setHistory);
-        }}
+        onPoster={(uri) => setPoster(stored, playingIndex, uri).then(setHistory)}
         onExit={reset}
       />
     );

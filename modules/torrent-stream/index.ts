@@ -45,6 +45,12 @@ type TorrentStream = {
   inspect(uri: string, timeoutSec: number): Promise<TorrentMeta>;
   /** Start streaming one file from the torrent. */
   play(uri: string, fileIndex: number, options: PlayOptions): Promise<void>;
+  /**
+   * Open the running stream in another installed player. The torrent keeps
+   * running — the other app reads from the same local server — so do not stop
+   * the stream while it is being watched elsewhere.
+   */
+  openExternally(url: string): Promise<void>;
   /** Move the prefetch window; `ratio` is 0-1 through the file. */
   setPosition(ratio: number): Promise<void>;
   stop(): Promise<void>;

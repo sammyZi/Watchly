@@ -84,15 +84,33 @@ private fun tailBytesFor(size: Long) =
  */
 private const val HEAD_BYTES = 2L * 1024 * 1024
 
+/** A .torrent is a description, not the payload — even a huge multi-file one
+ *  with a million pieces stays in the low MB. Anything past this is the wrong
+ *  file, and reading it whole is how you OOM. */
+private const val MAX_TORRENT_BYTES = 16L * 1024 * 1024
+
 /**
- * Prefetch window, in bytes — the whole of what the torrent is allowed to
- * download ahead of the viewer. Everything in it carries a deadline, and
- * everything outside it is switched off, so the swarm has exactly one job.
+ * Deadline window, in bytes — how far ahead of the viewer pieces are marked
+ * time-critical. Not the same as the zone (READAHEAD_PIECES), which is what the
+ * torrent is *allowed* to fetch; this is only what it is told to hurry.
  *
  * Sized in bytes because piece size varies hugely between torrents: a fixed
  * piece count is a 3MB window on one and a 300MB window on another.
  */
 private const val WINDOW_BYTES = 32L * 1024 * 1024
+
+/**
+ * The zone: how far past each reader the torrent may fetch *at all*. Everything
+ * outside is IGNORE.
+ *
+ * Wide on purpose. Too small a wanted set leaves every peer holding the same few
+ * blocks, which puts libtorrent in permanent end-game — a swarm full of seeds
+ * delivering duplicates and almost no unique bytes. Bounded in bytes as well as
+ * pieces, because piece size varies by two orders of magnitude between torrents
+ * and a fixed count is a generous zone on one and a starved one on another.
+ */
+private const val READAHEAD_PIECES = 240
+private const val READAHEAD_MIN_BYTES = 256L * 1024 * 1024
 
 class PlayOptions : Record {
   /** MB of the file head buffered before the player is handed the URL. The
@@ -148,7 +166,11 @@ class TorrentStreamModule : Module() {
    *  libtorrent could complete a piece for either. */
   private val readers = ConcurrentHashMap<Long, Long>()
 
-  /** Metadata is expensive to fetch; keep the last one so play() need not refetch. */
+  /**
+   * Metadata is expensive to fetch; keep the last one so play() need not
+   * refetch. Only valid while its torrent is still in the session — see
+   * forgetMeta.
+   */
   private var cachedUri: String? = null
   private var cached: TorrentInfo? = null
 
@@ -202,6 +224,31 @@ class TorrentStreamModule : Module() {
 
     AsyncFunction("play") { uri: String, index: Int, options: PlayOptions ->
       play(uri, index, options)
+    }
+
+    /**
+     * Hand the running stream to another player — VLC, MX Player, whatever is
+     * installed. They can reach the server because loopback is device-wide, not
+     * per-app, and they get the same blocking range requests our own player
+     * does. The torrent has to stay up while they read, so this deliberately
+     * does not touch the session.
+     */
+    AsyncFunction("openExternally") { url: String ->
+      val context = appContext.reactContext!!
+      val name = Uri.parse(url).lastPathSegment ?: ""
+      val view = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(Uri.parse(url), contentType(name))
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      val chooser = Intent.createChooser(view, "Play with").apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      try {
+        context.startActivity(chooser)
+      } catch (e: android.content.ActivityNotFoundException) {
+        throw CodedException("No player on this device can open this stream.", e)
+      }
+      log("handed off to an external player")
     }
 
     AsyncFunction("stop") { teardown() }
@@ -268,24 +315,24 @@ class TorrentStreamModule : Module() {
       // trackers return 200 more, so dial them all at once.
       .setInteger(settings_pack.int_types.torrent_connect_boost.swigValue(), 200)
       .setInteger(settings_pack.int_types.connection_speed.swigValue(), 200)
-      // Half those cached endpoints are stale by the next session; 15s each is a
-      // long time to hold a connection slot open for a peer that is gone.
-      .setInteger(settings_pack.int_types.peer_connect_timeout.swigValue(), 5)
+      // Half those cached endpoints are stale by the next session, and 15s each
+      // is a long time to hold a slot open for a peer that is gone. Not much
+      // below that though: a mobile handshake to a distant peer genuinely takes
+      // a few seconds, and 5 was cutting off peers that would have connected.
+      .setInteger(settings_pack.int_types.peer_connect_timeout.swigValue(), 10)
       // Streaming cares about *completing* a piece, not raw throughput: 32MB
       // arrived in the time it took to finish one 2.9MB piece, because blocks
       // were scattered across peers. This is the threshold at which a peer is
       // considered fast enough to be asked for a whole piece at a time — with
       // pieces this large, the 20s default excludes almost every peer.
       .setInteger(settings_pack.int_types.whole_pieces_threshold.swigValue(), 60)
-      // Re-request a stalled block sooner. One slow peer holding the last block
-      // of the piece the viewer is waiting on stalls playback, and the defaults
-      // (60s, 20s) are tuned for finishing a download, not for starting one.
-      .setInteger(settings_pack.int_types.request_timeout.swigValue(), 20)
-      .setInteger(settings_pack.int_types.piece_timeout.swigValue(), 10)
-      // Lets a block be requested from a second peer before every remaining piece
-      // has been asked for once. Wasteful for a whole-file download; exactly what
-      // is wanted when one piece is blocking the picture.
-      .setBoolean(settings_pack.bool_types.strict_end_game_mode.swigValue(), false)
+      // request_timeout, piece_timeout and strict_end_game_mode are left at their
+      // defaults on purpose. Shortening the first two churns peers off a mobile
+      // link — libtorrent counts timeouts against a peer and disconnects it — and
+      // relaxing end-game mode is actively harmful here: the wanted set is
+      // already tiny because everything outside the zones is IGNORE, so allowing
+      // early duplicate requests means many peers sending the same blocks and
+      // almost no unique bytes arriving.
       .setString(settings_pack.string_types.listen_interfaces.swigValue(), "0.0.0.0:6881")
       .setString(settings_pack.string_types.dht_bootstrap_nodes.swigValue(), BOOTSTRAP)
       .setBoolean(settings_pack.bool_types.enable_dht.swigValue(), true)
@@ -417,21 +464,18 @@ class TorrentStreamModule : Module() {
 
       // Anything still holding a content:// URI at this point never went through
       // importSource — take the copy now, and reuse it on the next call.
-      clean.startsWith("content://", true) -> {
-        val data = File(importSource(clean)).readBytes()
-        TorrentInfo.bdecode(data) to data
-      }
+      clean.startsWith("content://", true) ->
+        localTorrent(File(importSource(clean))) to ByteArray(0)
 
       clean.startsWith("http", true) -> {
         log("metadata: downloading .torrent")
-        val data = URL(clean).readBytes()
+        val data = downloadTorrent(clean)
         TorrentInfo.bdecode(data) to data
       }
 
       else -> {
         log("metadata: reading local .torrent")
-        val data = File(clean).readBytes()
-        TorrentInfo.bdecode(data) to data
+        localTorrent(File(clean)) to ByteArray(0)
       }
     }
 
@@ -499,6 +543,21 @@ class TorrentStreamModule : Module() {
     )
   }
 
+  /**
+   * Drop the metadata cache.
+   *
+   * A TorrentInfo obtained from a handle — everything the magnet path returns —
+   * is a view onto memory the *torrent* owns. Remove the torrent from the
+   * session and that memory goes with it, leaving a Java object that still
+   * answers questions with garbage: a piece length of zero (divide by zero in
+   * play), or a file count large enough to OOM allocating the priority array.
+   * So any removal invalidates it.
+   */
+  private fun forgetMeta() {
+    cached = null
+    cachedUri = null
+  }
+
   /** Let go of a warm torrent that is not the one we are about to use. Never
    *  touches the torrent currently playing. */
   private fun dropWarm(keepHex: String?) {
@@ -508,8 +567,51 @@ class TorrentStreamModule : Module() {
     if (w.isValid && hex != infoHashHex) {
       log("session: dropping warm torrent $hex")
       runCatching { session.remove(w) }
+      forgetMeta()
     }
     warm = null
+  }
+
+  /**
+   * Parse a `.torrent` sitting on disk.
+   *
+   * libtorrent reads the file itself, so a path that turns out to be something
+   * else — the media file, say — cannot be pulled into a byte array first.
+   * Doing that is an instant OOM: a 2.9GB allocation on a heap capped at a few
+   * hundred MB, thrown from inside play() where it reads as an engine failure
+   * rather than "you handed me the wrong file".
+   */
+  private fun localTorrent(file: File): TorrentInfo {
+    if (!file.exists()) throw CodedException("There is no file at ${file.path}")
+    if (file.length() > MAX_TORRENT_BYTES) {
+      throw CodedException(
+        "${file.name} is ${file.length() / 1024 / 1024}MB, so it is not a .torrent file — " +
+          "a torrent describes the download, it does not contain it."
+      )
+    }
+    return try {
+      TorrentInfo(file)
+    } catch (e: Exception) {
+      throw CodedException("${file.name} could not be read as a torrent", e)
+    }
+  }
+
+  /** Same ceiling for a remote .torrent, where the size is not known up front. */
+  private fun downloadTorrent(url: String): ByteArray {
+    val limit = MAX_TORRENT_BYTES.toInt()
+    URL(url).openStream().use { input ->
+      val buffer = ByteArray(limit + 1)
+      var filled = 0
+      while (filled < buffer.size) {
+        val read = input.read(buffer, filled, buffer.size - filled)
+        if (read < 0) break
+        filled += read
+      }
+      if (filled > limit) {
+        throw CodedException("That URL is too large to be a .torrent file.")
+      }
+      return buffer.copyOf(filled)
+    }
   }
 
   private fun loadMeta(uri: String): TorrentInfo? {
@@ -613,6 +715,13 @@ class TorrentStreamModule : Module() {
     // Resolve before tearing down, so teardown knows whether the torrent it is
     // about to drop is the one we are about to play.
     val ti = resolve(uri, 60)
+    // Metadata that outlived its torrent answers with garbage rather than
+    // failing, and the first thing to notice is a division a few lines down.
+    // Say so here instead.
+    if (!ti.isValid || ti.pieceLength() <= 0 || ti.numPieces() <= 0) {
+      forgetMeta()
+      throw CodedException("This torrent's metadata went stale. Open it again.")
+    }
     val files = ti.files()
     if (index < 0 || index >= files.numFiles()) {
       throw CodedException("No file at index $index")
@@ -745,33 +854,47 @@ class TorrentStreamModule : Module() {
     // want the instant it does: the container header at byte 0, and the point it
     // resumes from. Buffering only the resume point leaves it stalling on the
     // header the moment it opens the file.
+    // One region when the resume point is close enough to the header to share a
+    // window — two overlapping zones a piece apart help nobody.
     val preroll =
-      if (startPiece == firstPiece) listOf(firstPiece)
+      if (startPiece - firstPiece <= windowPieces) listOf(firstPiece)
       else listOf(firstPiece, startPiece)
 
     val targets = readers.values.map { pieceAt(it) }.distinct().sorted()
       .ifEmpty { preroll }
     headPiece = targets.first()
 
-    // Until the player has enough to start, the window is only as wide as the
-    // pre-roll needs. A wide window spreads the swarm across tens of MB of
-    // readahead nobody is waiting for, so the one piece that unblocks playback
-    // finishes last. Narrow first, wide once playing.
+    // Two widths, and the difference matters.
+    //
+    // `reach` is the deadline window: the pieces the swarm is told to rush.
+    // Narrow before playback starts, so everything converges on what unblocks
+    // the first frame instead of spreading over tens of MB of readahead.
     val reach = if (announcedReady) {
       windowPieces
     } else {
       maxOf(2, Math.ceil(prepareBytes.toDouble() / ti.pieceLength()).toInt())
     }
 
+    // `width` is the zone: everything the torrent is *allowed* to fetch. It
+    // stays wide even during pre-roll. Narrowing it to `reach` left about ten
+    // pieces wanted in the whole torrent, so every peer held the same few
+    // blocks — permanent end-game, a swarm full of seeds, and almost no unique
+    // bytes arriving. Priority still puts the urgent pieces first; the rest of
+    // the zone just keeps the peers doing something useful.
+    val width = maxOf(
+      READAHEAD_PIECES,
+      (READAHEAD_MIN_BYTES / ti.pieceLength()).toInt()
+    )
+
     // Re-aim the zones when a reader leaves the half of one it was given (a
     // seek), when their number changes, or when the pre-roll ends and they
     // should open up. Before the window loop, because it wipes the piece
     // priorities the loop sets — and with hysteresis, because a full
     // reprioritise every tick would cost more than it buys.
-    val stale = zoneWidth != reach ||
+    val stale = zoneWidth != width ||
       zoneStarts.size != targets.size ||
-      targets.any { t -> zoneStarts.none { t >= it && t <= it + reach / 2 } }
-    if (stale) applyZone(h, targets, reach)
+      targets.any { t -> zoneStarts.none { t >= it && t <= it + width / 2 } }
+    if (stale) applyZone(h, targets, width)
 
     val keep = mutableSetOf<Int>()
     targets.forEachIndexed { rank, target ->
@@ -957,7 +1080,10 @@ class TorrentStreamModule : Module() {
     handle?.let { h ->
       if (h.isValid) {
         h.clearPieceDeadlines()
-        if (!keeping) session.remove(h)
+        if (!keeping) {
+          session.remove(h)
+          forgetMeta()
+        }
       }
     }
     dropWarm(keep)

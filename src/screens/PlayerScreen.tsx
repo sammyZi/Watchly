@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   AppState,
@@ -15,26 +15,25 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 // Feather has no closed-caption glyph, and "type" reads as a bare T. The badge
 // is the one subtitle symbol everyone recognises, so borrow it from Material.
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import Video, { SelectedTrackType, TextTrackType } from 'react-native-video';
-import type { VideoRef } from 'react-native-video';
+import { VlcPlayer, type VlcPlayerRef, type VlcTrack } from '../../modules/vlc-player';
 import TorrentStream, { type Progress } from '../../modules/torrent-stream';
 import { Icon } from '../components/Icon';
 import { clock, speed } from '../lib/format';
-import { capturePoster } from '../lib/poster';
-import { font, type } from '../theme';
+import { font, space, type } from '../theme';
+
+/** How often to refresh the library tile while watching. Cheap now: it copies
+ *  the frame already on screen, so it never touches the stream. */
+const POSTER_EVERY_MS = 30_000;
 
 const SKIP_SECONDS = 10;
 const RATES = [0.75, 1, 1.25, 1.5, 2];
 
-/** How often to refresh the library tile's frame while watching. */
-const POSTER_EVERY_MS = 60_000;
-
 /**
- * Custom overlay — react-native-video's native `controls` + `controlsStyles`
- * on Android ≥ 6.16 hide after the first tap and never come back.
+ * Player chrome over a libVLC surface. The controls are ours because no engine
+ * ships an overlay that knows about swarm stats or piece-level buffering.
  */
 export function PlayerScreen({
-  subtitle,
+  title,
   resumeAt,
   url,
   progress,
@@ -43,7 +42,8 @@ export function PlayerScreen({
   onPoster,
   onExit,
 }: {
-  subtitle?: string;
+  /** What is playing — the file inside the torrent, not the torrent. */
+  title?: string;
   resumeAt?: number;
   /** null until the first piece lands — the player mounts before that. */
   url: string | null;
@@ -60,11 +60,14 @@ export function PlayerScreen({
   const [current, setCurrent] = useState(resumeAt ?? 0);
   const [rate, setRate] = useState(1);
   const [buffering, setBuffering] = useState(false);
-  /** Every text track the player found — embedded ones plus the external file. */
-  const [tracks, setTracks] = useState<{ index: number; title?: string; language?: string }[]>([]);
+  /** Every subtitle track libVLC found inside the media. */
+  const [tracks, setTracks] = useState<VlcTrack[]>([]);
   /** Index of the chosen track, null for off. */
   const [subTrack, setSubTrack] = useState<number | null>(null);
   const [picking, setPicking] = useState(false);
+  /** Tracks that failed to select. libVLC renders essentially every subtitle
+   *  format, so this should stay empty — it is a safety net, not a workaround. */
+  const [badTracks, setBadTracks] = useState<number[]>([]);
   /** Brief "+10s" flash so a double-tap in the dark is acknowledged. */
   const [nudge, setNudge] = useState<number | null>(null);
   /** Swarm stats, subscribed to only while they are on screen. */
@@ -76,13 +79,16 @@ export function PlayerScreen({
   const warnTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** When a subtitle track was last chosen, so onError can blame the right thing. */
   const pickedAt = useRef(0);
+  const pickedTrack = useRef<number | null>(null);
   /** When a seek was last asked for. Progress reported inside this window is
    *  still the old position and would drag the thumb backwards. */
   const seekAt = useRef(0);
+  /** Consecutive recoveries from a dropped stream, so a genuinely dead source
+   *  cannot put the player in a reload loop. Reset once playback gets going. */
+  const reloads = useRef(0);
   const posterAt = useRef(0);
-  const capturing = useRef(false);
   const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const videoRef = useRef<VideoRef>(null);
+  const videoRef = useRef<VlcPlayerRef>(null);
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
@@ -92,33 +98,13 @@ export function PlayerScreen({
   const save = useRef(onSavePosition);
   const leave = useRef(onExit);
   const poster = useRef(onPoster);
-  const src = useRef(url);
   save.current = onSavePosition;
   leave.current = onExit;
   poster.current = onPoster;
-  src.current = url;
 
-  // Rebuilt only when the track list changes — saving the resume point must not
-  // churn the source, or the player would reload on every checkpoint.
-  const source = useMemo(
-    () => ({
-      uri: url ?? '',
-      startPosition: Math.floor(position.current * 1000) || undefined,
-      textTracks: subtitle
-        ? [
-            {
-              title: 'External',
-              language: 'en' as const,
-              type: subtitle.toLowerCase().endsWith('.vtt')
-                ? TextTrackType.VTT
-                : TextTrackType.SUBRIP,
-              uri: subtitle,
-            },
-          ]
-        : undefined,
-    }),
-    [url, subtitle]
-  );
+  // Captured once: the native side reads it when the media loads, and letting
+  // it track `position` would restart playback on every checkpoint.
+  const startAt = useRef(resumeAt ?? 0).current;
 
   const exit = useCallback(() => {
     const at = position.current;
@@ -127,35 +113,27 @@ export function PlayerScreen({
     leave.current();
   }, []);
 
-  /**
-   * Frame for the library tile.
-   *
-   * Taken while playing, not on the way out. Capturing on exit is the obvious
-   * place — it is exactly "where they left off" — but it is also the one moment
-   * that must not wait: the decode has to finish before the torrent is torn
-   * down, so the back button sat there for the whole budget. Sampling as it
-   * plays keeps the stored frame close to the current position and costs
-   * nothing on the way out.
-   */
-  const grabPoster = useCallback((seconds: number) => {
-    if (capturing.current) return;
-    capturing.current = true;
-    posterAt.current = Date.now();
-    capturePoster(src.current, seconds)
-      .then((uri) => {
-        if (uri) poster.current(uri);
-      })
-      .finally(() => {
-        capturing.current = false;
-      });
-  }, []);
-
   /** Transient banner — says what happened without ending playback. */
   const warn = useCallback((message: string) => {
     setFailure({ text: message, fatal: false });
     if (warnTimer.current) clearTimeout(warnTimer.current);
     warnTimer.current = setTimeout(() => setFailure(null), 3000);
   }, []);
+
+  const handOff = useCallback(async () => {
+    if (!url) return;
+    setPaused(true);
+    try {
+      // Silence this player before the other one starts. Awaited rather than
+      // left to the `paused` prop: that is a round trip through React, and it
+      // does not reliably land before Android switches activities — which is
+      // exactly when you hear both at once.
+      await videoRef.current?.pause();
+      await TorrentStream.openExternally(url);
+    } catch (e: any) {
+      warn(String(e?.message ?? e));
+    }
+  }, [url, warn]);
 
   // No setCurrent here: every caller either seeks (which sets it) or is only
   // reachable while the overlay is already up and the clock already live. The
@@ -173,7 +151,7 @@ export function PlayerScreen({
       if (!duration) return;
       const next = Math.max(0, Math.min(duration, seconds));
       seekAt.current = Date.now();
-      videoRef.current?.seek(next);
+      videoRef.current?.seekTo(next);
       position.current = next;
       setCurrent(next);
     },
@@ -270,7 +248,12 @@ export function PlayerScreen({
     });
     // Losing focus can mean the process is about to die — checkpoint the resume point.
     const app = AppState.addEventListener('change', (s) => {
-      if (s !== 'active') save.current(position.current);
+      if (s === 'active') return;
+      save.current(position.current);
+      // libVLC keeps decoding in the background on its own. react-native-video
+      // had playInBackground={false} doing this; without it, leaving the app
+      // leaves the audio running.
+      setPaused(true);
     });
     return () => {
       back.remove();
@@ -284,6 +267,11 @@ export function PlayerScreen({
 
       {!url ? (
         <View style={styles.preparing}>
+          {!!title && (
+            <Text numberOfLines={2} style={styles.preparingTitle}>
+              {title}
+            </Text>
+          )}
           <ActivityIndicator color="#fff" />
           <Text style={styles.preparingText}>
             {progress ? stageLabel(progress.state) : 'Starting'}
@@ -297,33 +285,16 @@ export function PlayerScreen({
         </View>
       ) : (
         <View style={StyleSheet.absoluteFill}>
-          <Video
+          <VlcPlayer
             ref={videoRef}
             style={StyleSheet.absoluteFill}
-            source={source}
+            source={url}
+            startPosition={startAt}
             paused={paused}
             rate={rate}
-            selectedTextTrack={
-              subTrack === null
-                ? { type: SelectedTrackType.DISABLED }
-                : { type: SelectedTrackType.INDEX, value: subTrack }
-            }
-            onTextTracks={({ textTracks }) => {
-              setTracks(textTracks);
-              // An external file was chosen deliberately, so turn it on; embedded
-              // tracks stay off until asked for.
-              if (subtitle && textTracks.length > 0) {
-                setSubTrack((cur) => cur ?? textTracks[textTracks.length - 1].index);
-              }
-            }}
-            resizeMode="contain"
-            playInBackground={false}
-            progressUpdateInterval={500}
-            // Defaults hold the first frame for 2.5s of decoded media, on top of
-            // whatever the swarm already made us wait. Keep the steady-state
-            // buffer large, just start sooner.
-            bufferConfig={{ bufferForPlaybackMs: 1000, bufferForPlaybackAfterRebufferMs: 2000 }}
-            onProgress={({ currentTime }) => {
+            subtitleTrack={subTrack}
+            onTracks={({ nativeEvent }) => setTracks(nativeEvent.subtitles)}
+            onProgress={({ nativeEvent: { currentTime } }) => {
               // Between asking for a seek and it landing, this still reports
               // where playback was — over a torrent that can be several seconds.
               // Taking it would snap the thumb back, hold it there, then jump.
@@ -336,38 +307,67 @@ export function PlayerScreen({
               // the picture feel dead.
               if (showUi) setCurrent(currentTime);
 
-              // Never while rebuffering: the capture opens its own connection,
-              // and the server drops a *parked* reader when a newer one arrives.
-              // With playback already starved that would cut the stream short.
+              // Playing steadily again — allow the drop recovery to arm afresh.
+              if (currentTime > 5) reloads.current = 0;
+
+              // Only while actually showing a frame: a copy taken mid-rebuffer
+              // is whatever was last drawn, which may be nothing at all.
               if (
                 !buffering &&
                 currentTime > 5 &&
                 Date.now() - posterAt.current > POSTER_EVERY_MS
               ) {
-                grabPoster(currentTime);
+                posterAt.current = Date.now();
+                videoRef.current
+                  ?.snapshot()
+                  .then((uri) => {
+                    if (uri) poster.current(uri);
+                  })
+                  .catch(() => {});
               }
             }}
-            onSeek={() => {
+            onLoaded={({ nativeEvent: { duration: d } }) => {
+              // A seek is only honoured once the media is open, so the window
+              // that suppresses stale progress can close here too.
               seekAt.current = 0;
-            }}
-            onLoad={({ duration: d }) => {
               setDuration(d);
               onDuration(d);
             }}
-            onBuffer={({ isBuffering }) => setBuffering(isBuffering)}
-            onEnd={exit}
-            onError={(e) => {
-              console.warn('[player] error', JSON.stringify(e));
-              // A failed subtitle track is not a failed file. Selecting one makes
-              // ExoPlayer go and load that track, and if it cannot, the error
-              // arrives here looking exactly like an unplayable video.
-              if (Date.now() - pickedAt.current < 8000) {
-                setSubTrack(null);
-                warn('That subtitle track could not be loaded');
+            onBuffering={({ nativeEvent: { isBuffering } }) => setBuffering(isBuffering)}
+            onEnded={() => {
+              // "End of stream" is what the player reports when the HTTP body
+              // finishes — which over a torrent can mean the connection dropped
+              // twenty minutes into a three-hour film. Only treat it as the end
+              // if we are actually near the end.
+              const at = position.current;
+              if (duration > 0 && at < duration - 10) {
+                if (reloads.current > 2) {
+                  setFailure({ text: 'The stream keeps dropping', fatal: true });
+                  return;
+                }
+                reloads.current += 1;
+                warn('Stream dropped — picking it back up');
+                videoRef.current?.reload(at);
                 return;
               }
-              // Already playing: a load error mid-stream means the swarm has not
-              // caught up, not that the file is broken. ExoPlayer retries.
+              exit();
+            }}
+            onFailed={({ nativeEvent }) => {
+              console.warn('[player] error', nativeEvent.message);
+              // A failed subtitle track is not a failed file: selecting one
+              // makes the player load it, and a failure there arrives here
+              // looking exactly like an unplayable video.
+              if (Date.now() - pickedAt.current < 8000) {
+                const failed = pickedTrack.current;
+                if (failed != null) {
+                  setBadTracks((bad) => (bad.includes(failed) ? bad : [...bad, failed]));
+                }
+                setSubTrack(null);
+                warn('That subtitle format is not supported');
+                return;
+              }
+              // Already playing: an error mid-stream means the swarm has not
+              // caught up, not that the file is broken.
               if (duration > 0) {
                 warn('Playback stalled — waiting for data');
                 return;
@@ -402,6 +402,12 @@ export function PlayerScreen({
                     <Icon name="arrow-left" size={20} color="#fff" />
                   </Pressable>
 
+                  {!!title && (
+                    <Text numberOfLines={1} style={styles.title}>
+                      {title}
+                    </Text>
+                  )}
+
                   {/* Fixed-width, tabular figures — the numbers change every
                       second and must not shove the buttons around. */}
                   <View style={styles.stats}>
@@ -417,6 +423,14 @@ export function PlayerScreen({
                   </View>
 
                   <View style={styles.topRight}>
+                    <Pressable
+                      onPress={handOff}
+                      hitSlop={12}
+                      style={styles.iconBtn}
+                      accessibilityLabel="Play in another app"
+                    >
+                      <Icon name="external-link" size={18} color="#fff" />
+                    </Pressable>
                     {tracks.length > 0 && (
                       <Pressable
                         onPress={() => {
@@ -512,12 +526,14 @@ export function PlayerScreen({
               />
               {tracks.map((t) => (
                 <TrackOption
-                  key={t.index}
-                  label={trackLabel(t)}
-                  active={subTrack === t.index}
+                  key={t.id}
+                  label={t.name}
+                  active={subTrack === t.id}
+                  unsupported={badTracks.includes(t.id)}
                   onPress={() => {
                     pickedAt.current = Date.now();
-                    setSubTrack(t.index);
+                    pickedTrack.current = t.id;
+                    setSubTrack(t.id);
                     setPicking(false);
                     bumpUi();
                   }}
@@ -563,22 +579,31 @@ export function PlayerScreen({
 function TrackOption({
   label,
   active,
+  unsupported,
   onPress,
 }: {
   label: string;
   active: boolean;
+  unsupported?: boolean;
   onPress: () => void;
 }) {
   return (
-    <Pressable onPress={onPress} style={[styles.option, active && styles.optionOn]}>
-      <Text style={styles.optionText}>{label}</Text>
-      {active && <Icon name="check" size={14} color="#fff" />}
+    <Pressable
+      onPress={onPress}
+      disabled={unsupported}
+      style={[styles.option, active && styles.optionOn, unsupported && styles.optionOff]}
+    >
+      <Text numberOfLines={1} style={styles.optionText}>
+        {label}
+      </Text>
+      {unsupported ? (
+        <Text style={styles.optionNote}>unsupported</Text>
+      ) : (
+        active && <Icon name="check" size={14} color="#fff" />
+      )}
     </Pressable>
   );
 }
-
-const trackLabel = (t: { title?: string; language?: string; index: number }) =>
-  t.title || t.language || `Track ${t.index + 1}`;
 
 /**
  * Thin scrubber — tap anywhere on the track, or drag the head, to seek.
@@ -652,6 +677,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 12,
   },
+  preparingTitle: {
+    ...type.title,
+    color: '#fff',
+    textAlign: 'center',
+    marginBottom: space.sm,
+    maxWidth: '80%',
+  },
   preparingText: { ...type.meta, color: '#ffffffb0' },
   preparingMeta: { ...type.meta, color: '#ffffff70', fontSize: 11 },
   dim: { backgroundColor: '#0006' },
@@ -683,13 +715,23 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   optionOn: { backgroundColor: '#3b6fe0' },
-  optionText: { ...type.meta, color: '#fff' },
+  optionOff: { opacity: 0.45 },
+  optionText: { ...type.meta, color: '#fff', flex: 1 },
+  optionNote: { ...type.meta, color: '#ffffff90', fontSize: 10 },
   top: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingTop: 16,
     paddingHorizontal: 16,
+  },
+  // flexShrink, not flex: the stats pill and the buttons keep their size and a
+  // long release name gives way instead of pushing them off the edge.
+  title: {
+    ...type.label,
+    color: '#fff',
+    flexShrink: 1,
+    marginRight: space.sm,
   },
   topRight: { flexDirection: 'row', gap: 10 },
   stats: {

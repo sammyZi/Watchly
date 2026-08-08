@@ -7,12 +7,12 @@ import { radius } from '../theme';
 /**
  * Poster tile for a torrent.
  *
- * `poster` is the frame the viewer stopped on, grabbed on the way out of the
- * player — the only moment the file is readable, since the pieces are wiped
- * when the torrent stops. It lives in the cache directory, so Android can
- * reclaim it at any time; when that happens (or before anything has been
- * watched) the tile falls back to a colour derived from the name, which is
- * stable across launches and still tells rows apart at a glance.
+ * The colour is derived from the name: stable across launches, and enough to
+ * tell rows apart at a glance.
+ *
+ * `poster` is a frame copied off the video surface while watching, so the tile
+ * shows roughly where you left off. It lives in the cache directory, so Android
+ * can reclaim it at any time — hence the colour fallback and the onError guard.
  */
 export function Thumb({
   name,

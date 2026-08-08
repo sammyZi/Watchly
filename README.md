@@ -40,6 +40,9 @@ modules/torrent-stream/
   index.ts                     JS surface
   android/…/TorrentStreamModule.kt   libtorrent4j session + piece scheduler
   android/…/LocalFileServer.kt       localhost HTTP server over the partial file
+modules/vlc-player/
+  index.ts                     JS surface
+  android/…/VlcPlayerView.kt         libVLC video surface
 ```
 
 ## Features
@@ -52,19 +55,38 @@ modules/torrent-stream/
 - Resume per file — position checkpointed on exit and when the app backgrounds,
   and the engine buffers *at* the resume point rather than the start of the file
 - Custom player overlay: scrub bar, ±10s buttons, double-tap sides to skip,
-  playback speed, embedded subtitle track picker, live swarm stats
+  playback speed, subtitle track picker, live swarm stats
+- Hand the running stream to VLC, MX Player or anything else installed
 - Library tiles show a frame sampled from what you were watching, falling back
   to a colour derived from the torrent name
 - Settings: pre-roll buffer size, whether to inject public trackers, and
   whether to wipe piece data when a stream stops
+
+## Why libVLC and not ExoPlayer
+
+`modules/vlc-player` is a small Expo view module around
+[libVLC](https://mvnrepository.com/artifact/org.videolan.android/libvlc-all).
+
+react-native-video and Media3 defer to the platform `MediaCodec` for audio, and
+Android devices are not required to ship AC3, E-AC3 or DTS decoders — most do
+not, for licensing reasons. A release with `AC3 5.1` in the name therefore plays
+as picture with silence, and no player prop fixes it: Media3's only Android
+extensions are RTSP/SmoothStreaming/DASH/HLS, which are transports, not codecs.
+The FFmpeg extension that would fix it has to be compiled from source with the
+NDK.
+
+libVLC carries its own decoders, so that class of file simply plays, and it
+renders bitmap subtitles (PGS, VOBSUB) that Media3 cannot. The cost is size:
+38-50 MB of native code per ABI, which is what the ABI splits in
+`android/app/build.gradle` are there to contain.
 
 ## How the streaming works
 
 `modules/torrent-stream` is an Expo native module wrapping
 [libtorrent4j](https://github.com/aldenml/libtorrent4j).
 
-The chosen file is served to `react-native-video` over an HTTP server on
-localhost rather than as a `file://` path. That matters: the file on disk is
+The chosen file is served to the player over an HTTP server on localhost
+rather than as a `file://` path. That matters: the file on disk is
 sparse, so the parts that have not arrived read back as zeros instead of
 blocking, and the player sees corrupt data. Serving it over HTTP lets the
 reader block until the piece lands, and lets the player use range requests.
@@ -95,11 +117,13 @@ cache directory and is wiped when the stream stops.
 
 ## Notes
 
-- Debug APK is ~190 MB because libtorrent4j ships for four ABIs. A release
-  build with ABI splits is roughly 35 MB each.
+- Release builds split by ABI — install `app-arm64-v8a-release.apk`. libtorrent4j
+  and libVLC both ship large native libraries per architecture, so a universal
+  APK would make every device carry code it cannot run.
 - iOS is unsupported — no comparable torrent library exists for it.
 - `Item.subtitle` exists in the history model but nothing sets it; the subtitle
-  picker only lists tracks embedded in the video file.
+  picker only lists tracks embedded in the video file. libVLC can take an
+  external one via `addSlave`, which is where that would hook in.
 - A shared `content://` URI is copied into app storage on arrival. The grant
   behind one is tied to the delivering intent and does not survive a relaunch,
   so it cannot be read twice or resumed from history later.

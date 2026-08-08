@@ -91,7 +91,6 @@
           }
         }
       ],
-      "react-native-video",
       "expo-font",
       [
         "expo-splash-screen",
