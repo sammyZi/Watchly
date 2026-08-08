@@ -17,11 +17,15 @@ import { colors, font, radius, space, type } from '../theme';
 /** Files inside the torrent, grouped by folder and in natural order. */
 export function FilesScreen({
   meta,
+  mode,
   onPlay,
+  onDownload,
   onBack,
 }: {
   meta: TorrentMeta;
+  mode?: 'stream' | 'download';
   onPlay: (file: TorrentFile) => void;
+  onDownload: (file: TorrentFile) => void;
   onBack: () => void;
 }) {
   const sections = useMemo(() => {
@@ -51,6 +55,7 @@ export function FilesScreen({
 
   const videos = meta.files.filter((f) => f.isVideo).length;
   const insets = useSafeAreaInsets();
+  const downloading = mode === 'download';
 
   return (
     <View style={styles.screen}>
@@ -63,9 +68,28 @@ export function FilesScreen({
             {meta.name}
           </Text>
           <Text style={styles.subtitle}>
-            {videos} playable · {meta.files.length} files total
+            {videos} playable · {meta.files.length} files
           </Text>
         </View>
+        <View style={[styles.modeChip, downloading && styles.modeChipDownload]}>
+          <Icon
+            name={downloading ? 'download' : 'play'}
+            size={12}
+            color={downloading ? colors.onAccent : colors.accent}
+          />
+          <Text style={[styles.modeChipText, downloading && styles.modeChipTextOn]}>
+            {downloading ? 'Download' : 'Stream'}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.hintBar}>
+        <Icon name="info" size={13} color={colors.muted} />
+        <Text style={styles.hintText}>
+          {downloading
+            ? 'Tap a video to download it to your device'
+            : 'Tap a video to start watching'}
+        </Text>
       </View>
 
       <SectionList
@@ -81,50 +105,78 @@ export function FilesScreen({
               <Text numberOfLines={1} style={styles.folderName}>
                 {section.title}
               </Text>
+              <Text style={styles.folderCount}>{section.data.length}</Text>
             </View>
           ) : null
         }
-        renderItem={({ item }) => (
-          <Pressable
-            disabled={!item.isVideo}
-            onPress={() => onPlay(item)}
-            style={({ pressed }) => [
-              styles.row,
-              item.isVideo ? styles.playable : styles.muted,
-              pressed && styles.pressed,
-            ]}
-          >
-            {item.isVideo ? (
-              <View style={styles.number}>
-                <Icon name="play" size={13} color={colors.accent} />
-              </View>
-            ) : item.isSubtitle ? (
-              <View style={styles.subIcon}>
-                <Icon name="type" size={14} color={colors.faint} />
-              </View>
-            ) : (
-              <View style={styles.fileIcon}>
-                <Icon name="file" size={15} color={colors.faint} />
-              </View>
-            )}
+        renderItem={({ item }) => {
+          const action = () =>
+            downloading ? onDownload(item) : onPlay(item);
 
-            <View style={styles.body}>
-              <Text numberOfLines={2} style={[styles.name, !item.isVideo && styles.nameMuted]}>
-                {item.name}
-              </Text>
-              <Text style={styles.size}>
-                {bytes(item.size)}
-                {item.isSubtitle ? ' · subtitle' : item.isVideo ? '' : ' · not playable'}
-              </Text>
-            </View>
-
-            {item.isVideo && (
-              <View style={styles.play}>
-                <Icon name="chevron-right" size={14} color={colors.accent} />
+          return (
+            <Pressable
+              disabled={!item.isVideo}
+              onPress={action}
+              style={({ pressed }) => [
+                styles.row,
+                item.isVideo ? styles.playable : styles.muted,
+                pressed && item.isVideo && styles.pressed,
+              ]}
+            >
+              <View
+                style={[
+                  styles.mark,
+                  item.isVideo && styles.markVideo,
+                  item.isSubtitle && styles.markSub,
+                ]}
+              >
+                <Icon
+                  name={item.isVideo ? (downloading ? 'download' : 'play') : item.isSubtitle ? 'type' : 'file'}
+                  size={14}
+                  color={item.isVideo ? colors.accent : colors.faint}
+                />
               </View>
-            )}
-          </Pressable>
-        )}
+
+              <View style={styles.body}>
+                <Text
+                  numberOfLines={2}
+                  style={[styles.name, !item.isVideo && styles.nameMuted]}
+                >
+                  {item.name}
+                </Text>
+                <Text style={styles.size}>
+                  {bytes(item.size)}
+                  {item.isSubtitle
+                    ? ' · subtitle'
+                    : item.isVideo
+                      ? ''
+                      : ' · not playable'}
+                </Text>
+              </View>
+
+              {item.isVideo && (
+                <View style={styles.actions}>
+                  {!downloading && (
+                    <Pressable
+                      onPress={() => onDownload(item)}
+                      hitSlop={8}
+                      style={styles.sideBtn}
+                    >
+                      <Icon name="download" size={14} color={colors.muted} />
+                    </Pressable>
+                  )}
+                  <View style={[styles.goBtn, downloading && styles.goBtnFill]}>
+                    <Icon
+                      name={downloading ? 'download' : 'chevron-right'}
+                      size={14}
+                      color={downloading ? colors.onAccent : colors.accent}
+                    />
+                  </View>
+                </View>
+              )}
+            </Pressable>
+          );
+        }}
       />
     </View>
   );
@@ -140,9 +192,31 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.md,
     backgroundColor: colors.control,
   },
-  headerText: { flex: 1 },
+  headerText: { flex: 1, gap: 2 },
   title: { ...type.title, fontFamily: font.semibold, fontSize: 16, color: colors.text },
   subtitle: { ...type.meta, color: colors.faint },
+  modeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: space.sm,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    backgroundColor: colors.accentSoft,
+  },
+  modeChipDownload: { backgroundColor: colors.accent },
+  modeChipText: { ...type.meta, fontSize: 11, fontFamily: font.semibold, color: colors.accent },
+  modeChipTextOn: { color: colors.onAccent },
+
+  hintBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingHorizontal: space.xl,
+    paddingVertical: space.md,
+    backgroundColor: colors.surface,
+  },
+  hintText: { ...type.meta, color: colors.muted, flex: 1 },
 
   list: { padding: space.lg, paddingBottom: space.xxl },
   folder: {
@@ -154,6 +228,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.xs,
   },
   folderName: { ...type.overline, color: colors.faint, flex: 1 },
+  folderCount: { ...type.meta, fontSize: 11, color: colors.faint },
 
   row: {
     flexDirection: 'row',
@@ -161,44 +236,40 @@ const styles = StyleSheet.create({
     gap: space.md,
     padding: space.md,
     marginBottom: space.sm,
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
   },
   playable: { backgroundColor: colors.surface },
-  muted: { backgroundColor: 'transparent', opacity: 0.7 },
-  pressed: { opacity: 0.6 },
-  number: {
-    width: 34,
-    height: 34,
-    borderRadius: radius.sm,
-    backgroundColor: colors.accentSoft,
+  muted: { backgroundColor: 'transparent', opacity: 0.65 },
+  pressed: { opacity: 0.65 },
+  mark: {
+    width: 38,
+    height: 38,
+    borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  numberText: { ...type.label, color: colors.accent, fontFamily: font.semibold },
-  fileIcon: {
-    width: 34,
-    height: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  subIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: radius.sm,
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  markVideo: { backgroundColor: colors.accentSoft },
+  markSub: { backgroundColor: colors.surface },
   body: { flex: 1, gap: 2 },
   name: { ...type.body, fontFamily: font.medium, color: colors.text },
   nameMuted: { fontFamily: font.regular, color: colors.muted },
   size: { ...type.meta, color: colors.faint },
-  play: {
-    width: 30,
-    height: 30,
+  actions: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
+  sideBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.pill,
+    backgroundColor: colors.control,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  goBtn: {
+    width: 32,
+    height: 32,
     borderRadius: radius.pill,
     backgroundColor: colors.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  goBtnFill: { backgroundColor: colors.accent },
 });

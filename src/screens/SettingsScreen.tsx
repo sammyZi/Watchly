@@ -1,4 +1,5 @@
-import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { useRef, useState } from 'react';
 import { Icon, type IconName } from '../components/Icon';
 import { Screen } from '../components/Screen';
 import type { Settings } from '../lib/settings';
@@ -17,15 +18,23 @@ export function SettingsScreen({
   onClearHistory: () => void;
   historyCount: number;
 }) {
+  const [showKey, setShowKey] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) =>
     onChange({ ...settings, [key]: value });
 
   return (
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
     <Screen title="Settings" icon="sliders">
-      <ScrollView
-        contentContainerStyle={styles.body}
-        showsVerticalScrollIndicator={false}
-      >
+        <ScrollView
+          ref={scrollRef}
+          contentContainerStyle={styles.body}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
         <Group title="Startup speed">
           <Row
             icon="radio"
@@ -105,15 +114,30 @@ export function SettingsScreen({
               </Text>
             </View>
           </View>
-          <TextInput
-            style={styles.apiInput}
-            value={settings.openSubtitlesKey}
-            onChangeText={(v) => set('openSubtitlesKey', v)}
-            placeholder="Paste your API key..."
-            placeholderTextColor={colors.faint}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
+          <View style={styles.keyRow}>
+            <TextInput
+              style={styles.apiInput}
+              value={showKey ? settings.openSubtitlesKey : (settings.openSubtitlesKey ? '••••••••••••••••••••••••' : '')}
+              onChangeText={(v) => set('openSubtitlesKey', v)}
+              placeholder="Paste your API key..."
+              placeholderTextColor={colors.faint}
+              onFocus={() => {
+                setTimeout(() => {
+                  scrollRef.current?.scrollToEnd({ animated: true });
+                }, 300);
+              }}
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry={!showKey}
+            />
+            <Pressable
+              onPress={() => setShowKey((s) => !s)}
+              hitSlop={8}
+              style={styles.eyeBtn}
+            >
+              <Icon name={showKey ? 'eye-off' : 'eye'} size={16} color={colors.faint} />
+            </Pressable>
+          </View>
         </Group>
 
         <Text style={styles.footer}>
@@ -122,6 +146,7 @@ export function SettingsScreen({
         </Text>
       </ScrollView>
     </Screen>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -225,12 +250,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.lg,
   },
   apiInput: {
+    flex: 1,
     ...type.body,
     color: colors.text,
     backgroundColor: colors.surfaceAlt,
     borderRadius: radius.md,
     paddingHorizontal: space.lg,
     paddingVertical: space.sm,
+  },
+  keyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
     marginBottom: space.lg,
+  },
+  eyeBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

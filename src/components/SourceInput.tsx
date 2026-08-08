@@ -7,7 +7,17 @@ import { Icon } from './Icon';
 import { colors, font, radius, space, type } from '../theme';
 
 /** Magnet / .torrent box with paste and file-picker shortcuts. */
-export function SourceInput({ onSubmit }: { onSubmit: (uri: string) => void }) {
+export function SourceInput({
+  onSubmit,
+  actionLabel = 'Stream',
+  title = 'Start streaming',
+  subtitle = 'Magnet link or .torrent file',
+}: {
+  onSubmit: (uri: string) => void;
+  actionLabel?: string;
+  title?: string;
+  subtitle?: string;
+}) {
   const [value, setValue] = useState('');
   const [focused, setFocused] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
@@ -43,8 +53,8 @@ export function SourceInput({ onSubmit }: { onSubmit: (uri: string) => void }) {
           <Icon name="zap" size={14} color={colors.accent} />
         </View>
         <View style={styles.headText}>
-          <Text style={styles.title}>Start streaming</Text>
-          <Text style={styles.sub}>Magnet link or .torrent file</Text>
+          <Text style={styles.title}>{title}</Text>
+          <Text style={styles.sub}>{subtitle}</Text>
         </View>
       </View>
 
@@ -71,7 +81,7 @@ export function SourceInput({ onSubmit }: { onSubmit: (uri: string) => void }) {
         <Button label="File" icon="folder" onPress={pickTorrent} />
         <View style={styles.spacer} />
         <Button
-          label="Stream"
+          label={actionLabel}
           icon="play"
           variant="solid"
           disabled={!ready}

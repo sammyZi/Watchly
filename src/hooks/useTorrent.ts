@@ -46,10 +46,10 @@ export function useTorrent(settings: Settings) {
   // Latest source, so play() uses the same (tracker-augmented) uri as inspect().
   const source = useRef<string | null>(null);
   const lastState = useRef<string | null>(null);
-  // Progress ticks once a second. Nothing renders it once playback starts, but
-  // the state write still re-renders the whole app — including the player —
-  // which is enough to make the video controls feel unresponsive.
+  // Progress ticks once a second. Once the player is up that re-render makes
+  // controls feel laggy — mute it for streaming. Download mode needs every tick.
   const streaming = useRef(false);
+  const keepProgress = useRef(false);
 
   useEffect(() => {
     const subs = [
@@ -63,7 +63,7 @@ export function useTorrent(settings: Settings) {
           lastState.current = p.state;
           console.log(`[torrent] ${p.state} seeds=${p.seeds} dht=${p.dhtNodes}`);
         }
-        if (!streaming.current) setProgress(p);
+        if (!streaming.current || keepProgress.current) setProgress(p);
       }),
       TorrentStream.addListener('ready', ({ url, name, subtitleFiles: subs }) => {
         console.log('[torrent] ready', name);
@@ -99,6 +99,7 @@ export function useTorrent(settings: Settings) {
     source.current = null;
     lastState.current = null;
     streaming.current = false;
+    keepProgress.current = false;
   }, []);
 
   /** Stage 1 — resolve the file list. Returns the metadata so callers can auto-pick. */
@@ -138,7 +139,7 @@ export function useTorrent(settings: Settings) {
    * the head of the file and the player immediately jumps somewhere else.
    */
   const play = useCallback(
-    (fileIndex: number, startRatio = 0) => {
+    (fileIndex: number, startRatio = 0, opts?: { keepProgress?: boolean }) => {
       const uri = source.current;
       if (!uri) return;
 
@@ -146,6 +147,7 @@ export function useTorrent(settings: Settings) {
       setUrl(null);
       setSubtitleFiles([]);
       streaming.current = false;
+      keepProgress.current = !!opts?.keepProgress;
       setPlayingIndex(fileIndex);
       setPhase('playing');
 
@@ -167,7 +169,7 @@ export function useTorrent(settings: Settings) {
    * Metadata/peers are still pulled from the on-disk cache inside play().
    */
   const playKnown = useCallback(
-    (next: Item, fileIndex: number) => {
+    (next: Item, fileIndex: number, opts?: { keepProgress?: boolean }) => {
       const uri = settings.addTrackers ? withTrackers(next.uri) : next.uri;
       source.current = uri;
       setError(null);
@@ -185,7 +187,11 @@ export function useTorrent(settings: Settings) {
           })),
         });
       }
-      play(fileIndex, resumeRatio(next, fileIndex));
+      play(
+        fileIndex,
+        opts?.keepProgress ? 0 : resumeRatio(next, fileIndex),
+        opts
+      );
     },
     [play, settings.addTrackers]
   );

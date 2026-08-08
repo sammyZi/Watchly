@@ -23,6 +23,7 @@ import TorrentStream, { type Progress } from '../../modules/torrent-stream';
 import { Icon } from '../components/Icon';
 import { clock, speed } from '../lib/format';
 import { searchSubtitles, downloadSubtitle, type SubtitleResult } from '../lib/opensubtitles';
+import { recordDownload } from './DownloadsScreen';
 import { font, space, type } from '../theme';
 
 /** How often to refresh the library tile while watching. Cheap now: it copies
@@ -42,6 +43,7 @@ export function PlayerScreen({
   url,
   subtitleFiles,
   openSubtitlesKey,
+  fileIndex,
   progress,
   onSavePosition,
   onDuration,
@@ -55,6 +57,7 @@ export function PlayerScreen({
   url: string | null;
   subtitleFiles?: string[];
   openSubtitlesKey?: string;
+  fileIndex: number;
   progress: Progress | null;
   onSavePosition: (seconds: number) => void;
   onDuration: (seconds: number) => void;
@@ -153,6 +156,18 @@ export function PlayerScreen({
       warn(String(e?.message ?? e));
     }
   }, [url, warn]);
+
+  const saveCopy = useCallback(async () => {
+    if (fileIndex < 0) return;
+    const name = title ?? 'video.mp4';
+    try {
+      const path = await TorrentStream.copyTo(fileIndex, name);
+      recordDownload(name, 0, path);
+      warn(`Saved to Downloads/${name}`);
+    } catch (e: any) {
+      warn(String(e?.message ?? e));
+    }
+  }, [fileIndex, title, warn]);
 
   const searchSubs = useCallback(async () => {
     const q = subQuery.trim() || title;
@@ -489,19 +504,31 @@ export function PlayerScreen({
 
                   {/* Fixed-width, tabular figures — the numbers change every
                       second and must not shove the buttons around. */}
-                  <View style={styles.stats}>
-                    <Icon name="users" size={12} color="#ffffff90" />
-                    <Text style={styles.statsText}>
-                      {(stats?.seeds ?? 0).toString().padStart(2, ' ')}/
-                      {(stats?.peers ?? 0).toString().padStart(2, ' ')}
-                    </Text>
-                    <Icon name="download" size={12} color="#ffffff90" />
-                    <Text style={[styles.statsText, styles.statsSpeed]}>
-                      {speed(stats?.speed ?? 0)}
-                    </Text>
-                  </View>
+                  {fileIndex >= 0 && (
+                    <View style={styles.stats}>
+                      <Icon name="users" size={12} color="#ffffff90" />
+                      <Text style={styles.statsText}>
+                        {(stats?.seeds ?? 0).toString().padStart(2, ' ')}/
+                        {(stats?.peers ?? 0).toString().padStart(2, ' ')}
+                      </Text>
+                      <Icon name="download" size={12} color="#ffffff90" />
+                      <Text style={[styles.statsText, styles.statsSpeed]}>
+                        {speed(stats?.speed ?? 0)}
+                      </Text>
+                    </View>
+                  )}
 
                   <View style={styles.topRight}>
+                    {fileIndex >= 0 && (
+                      <Pressable
+                        onPress={saveCopy}
+                        hitSlop={12}
+                        style={styles.iconBtn}
+                        accessibilityLabel="Save to Downloads"
+                      >
+                        <Icon name="download" size={18} color="#fff" />
+                      </Pressable>
+                    )}
                     <Pressable
                       onPress={handOff}
                       hitSlop={12}

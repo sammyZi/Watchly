@@ -3,11 +3,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from './Icon';
 import { colors, font, radius, space, type } from '../theme';
 
-export type TabKey = 'stream' | 'history' | 'settings';
+export type TabKey = 'stream' | 'history' | 'downloads' | 'settings';
 
 const TABS: { key: TabKey; label: string; icon: IconName }[] = [
   { key: 'stream', label: 'Stream', icon: 'play-circle' },
   { key: 'history', label: 'Library', icon: 'clock' },
+  { key: 'downloads', label: 'Downloads', icon: 'download' },
   { key: 'settings', label: 'Settings', icon: 'sliders' },
 ];
 

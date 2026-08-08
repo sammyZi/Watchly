@@ -1,5 +1,15 @@
-import { useCallback, useEffect, useState } from 'react';
-import { BackHandler, Linking, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  AppState,
+  BackHandler,
+  Linking,
+  PermissionsAndroid,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as SplashScreen from 'expo-splash-screen';
 import {
@@ -11,6 +21,7 @@ import {
 } from '@expo-google-fonts/noto-sans';
 import TorrentStream from '../modules/torrent-stream';
 import { ConfirmModal, type Confirm } from './components/ConfirmModal';
+import { Icon } from './components/Icon';
 import { TabBar, type TabKey } from './components/TabBar';
 import { resumeRatio, useTorrent } from './hooks/useTorrent';
 import {
@@ -29,6 +40,7 @@ import { isTorrentSource } from './lib/magnet';
 import { titleOf } from './lib/title';
 import { FilesScreen } from './screens/FilesScreen';
 import { HistoryScreen } from './screens/HistoryScreen';
+import { DownloadsScreen, recordDownload } from './screens/DownloadsScreen';
 import { PlayerScreen } from './screens/PlayerScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
 import { StreamScreen } from './screens/StreamScreen';
@@ -69,6 +81,12 @@ function Shell() {
     reset,
   } = torrent;
 
+  const [torrentMode, setTorrentMode] = useState<'stream' | 'download' | null>(null);
+  /** Playing a finished file from Completed — no torrent session involved. */
+  const [localPlay, setLocalPlay] = useState<{ url: string; title: string } | null>(
+    null
+  );
+
   const [fontsLoaded] = useFonts({
     NotoSans_400Regular,
     NotoSans_500Medium,
@@ -79,11 +97,25 @@ function Shell() {
   useEffect(() => {
     loadHistory().then(setHistory);
     loadSettings().then(setSettings);
+    // Drop leftover stream pieces from a previous kill (can be multi‑GB).
+    TorrentStream.clearCache().catch(() => {});
   }, []);
 
   useEffect(() => {
     if (fontsLoaded) SplashScreen.hideAsync();
   }, [fontsLoaded]);
+
+  // Leaving the app while idle: clear stream cache. Active downloads keep data
+  // until finish/cancel; public Downloads/ copies are never touched.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'background' && state !== 'inactive') return;
+      if (torrentMode === 'download' && phase === 'playing') return;
+      if (phase === 'playing' || phase === 'inspecting' || phase === 'choosing') return;
+      TorrentStream.clearCache().catch(() => {});
+    });
+    return () => sub.remove();
+  }, [torrentMode, phase]);
 
   // Remember the whole torrent, not just the file that got opened.
   useEffect(() => {
@@ -108,7 +140,11 @@ function Shell() {
 
   /** Resolve the torrent, then either play `fileIndex` or let the user choose. */
   const open = useCallback(
-    async (next: Item, fileIndex?: number) => {
+    async (
+      next: Item,
+      fileIndex?: number,
+      opts?: { keepProgress?: boolean }
+    ) => {
       const items = await put({ ...next, at: Date.now() });
       setHistory(items);
       // Merged copy — `next` can arrive without the resume points already stored
@@ -117,7 +153,7 @@ function Shell() {
 
       // Resume with a known file — skip inspect; native side uses cached meta/peers.
       if (fileIndex != null && fresh.files?.length) {
-        playKnown(fresh, fileIndex);
+        playKnown(fresh, fileIndex, opts);
         return;
       }
 
@@ -125,12 +161,13 @@ function Shell() {
       if (!found) return;
 
       if (fileIndex != null) {
-        play(fileIndex, resumeRatio(fresh, fileIndex));
+        play(
+          fileIndex,
+          opts?.keepProgress ? 0 : resumeRatio(fresh, fileIndex),
+          opts
+        );
         return;
       }
-      const videos = found.files.filter((f) => f.isVideo);
-      if (videos.length === 1) play(videos[0].index, resumeRatio(fresh, videos[0].index));
-      else if (videos.length === 0 && found.files.length === 1) play(0, resumeRatio(fresh, 0));
     },
     [inspect, play, playKnown]
   );
@@ -191,15 +228,74 @@ function Shell() {
   useEffect(() => {
     if (phase === 'idle' || phase === 'playing') return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setTorrentMode(null);
       reset();
       return true;
     });
     return () => sub.remove();
   }, [phase, reset]);
 
+  /** Ask for notification permission (Android 13+) then show the download notif. */
+  const enableDownloadNotify = useCallback(async () => {
+    if (Platform.OS === 'android' && Platform.Version >= 33) {
+      await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
+      );
+    }
+    TorrentStream.setNotify(true).catch(() => {});
+  }, []);
+
+  // Auto-save when a Downloads-tab transfer hits 100%, then keep it in Completed.
+  const downloadDoneRef = useRef(false);
+  useEffect(() => {
+    if (torrentMode !== 'download' || phase !== 'playing' || !fileName) {
+      downloadDoneRef.current = false;
+      return;
+    }
+    const pct = progress?.progress ?? 0;
+    if (pct < 100 || downloadDoneRef.current) return;
+    downloadDoneRef.current = true;
+    const size =
+      meta?.files.find((f) => f.index === playingIndex)?.size ??
+      item?.files?.find((f) => f.index === playingIndex)?.size ??
+      0;
+    TorrentStream.copyTo(playingIndex, fileName)
+      .then((path) => recordDownload(fileName, size, path))
+      .catch(() => {})
+      .finally(() => {
+        TorrentStream.setNotify(false).catch(() => {});
+        reset();
+        setTorrentMode(null);
+      });
+  }, [
+    progress?.progress,
+    torrentMode,
+    phase,
+    fileName,
+    playingIndex,
+    meta,
+    item,
+    reset,
+  ]);
+
   if (!fontsLoaded) return null;
 
-  if (phase === 'playing' && item) {
+  if (localPlay) {
+    return (
+      <PlayerScreen
+        title={localPlay.title}
+        url={localPlay.url}
+        fileIndex={-1}
+        progress={null}
+        onSavePosition={() => {}}
+        onDuration={() => {}}
+        onPoster={() => {}}
+        onExit={() => setLocalPlay(null)}
+      />
+    );
+  }
+
+  if (phase === 'playing' && item && torrentMode !== 'download') {
     // Freshest copy, so subtitle and resume edits reach the player.
     const stored = history.find((h) => h.uri === item.uri) ?? item;
 
@@ -217,6 +313,7 @@ function Shell() {
         url={url}
         subtitleFiles={subtitleFiles}
         openSubtitlesKey={settings.openSubtitlesKey}
+        fileIndex={playingIndex}
         progress={progress}
         onSavePosition={(seconds) =>
           setPosition(stored, playingIndex, seconds).then(setHistory)
@@ -230,12 +327,67 @@ function Shell() {
     );
   }
 
+  if (phase === 'choosing' && meta && torrentMode === null) {
+    const playable = meta.files.filter((f) => f.isVideo).length;
+    return (
+      <View style={styles.modePicker}>
+        <View style={styles.modeCard}>
+          <View style={styles.modeMark}>
+            <Icon name="layers" size={22} color={colors.accent} />
+          </View>
+          <Text style={styles.modeTitle} numberOfLines={2}>
+            {meta.name}
+          </Text>
+          <Text style={styles.modeSub}>
+            {playable} playable · {meta.files.length} files — how do you want to
+            open it?
+          </Text>
+          <View style={styles.modeButtons}>
+            <Pressable
+              onPress={() => setTorrentMode('stream')}
+              style={({ pressed }) => [styles.modeBtn, pressed && styles.modeBtnPressed]}
+            >
+              <View style={styles.modeBtnIcon}>
+                <Icon name="play" size={20} color={colors.accent} />
+              </View>
+              <Text style={styles.modeBtnLabel}>Stream</Text>
+              <Text style={styles.modeBtnSub}>Watch as pieces arrive</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setTorrentMode('download')}
+              style={({ pressed }) => [styles.modeBtn, pressed && styles.modeBtnPressed]}
+            >
+              <View style={styles.modeBtnIcon}>
+                <Icon name="download" size={20} color={colors.accent} />
+              </View>
+              <Text style={styles.modeBtnLabel}>Download</Text>
+              <Text style={styles.modeBtnSub}>Save fully, then open</Text>
+            </Pressable>
+          </View>
+          <Pressable onPress={reset} hitSlop={10} style={styles.modeCancel}>
+            <Text style={styles.modeCancelText}>Cancel</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
   if (phase === 'choosing' && meta) {
     return (
       <FilesScreen
         meta={meta}
+        mode={torrentMode ?? 'stream'}
         onPlay={(file) => play(file.index, item ? resumeRatio(item, file.index) : 0)}
-        onBack={reset}
+        onDownload={(file) => {
+          setTorrentMode('download');
+          setTab('downloads');
+          enableDownloadNotify();
+          play(file.index, 0, { keepProgress: true });
+        }}
+        onBack={() => {
+          setTorrentMode(null);
+          reset();
+        }}
       />
     );
   }
@@ -258,8 +410,58 @@ function Shell() {
             history={history}
             onOpenItem={open}
             onPlayFile={(target, index) => open(target, index)}
+            onDownloadFile={(target, index) => {
+              setTorrentMode('download');
+              setTab('downloads');
+              enableDownloadNotify();
+              open(target, index, { keepProgress: true });
+            }}
             onRemove={askRemove}
             onClear={askClear}
+          />
+        )}
+        {tab === 'downloads' && (
+          <DownloadsScreen
+            onOpenUri={(uri) => {
+              setTorrentMode('download');
+              openUri(uri);
+            }}
+            onPlayFile={async (entry) => {
+              try {
+                const uri =
+                  entry.path ?? (await TorrentStream.downloadUri(entry.name));
+                setLocalPlay({ url: uri, title: entry.name });
+              } catch (e: any) {
+                fail(String(e?.message ?? e));
+              }
+            }}
+            active={
+              torrentMode === 'download' && phase === 'playing'
+                ? {
+                    name:
+                      fileName ??
+                      meta?.files.find((f) => f.index === playingIndex)?.name ??
+                      item?.title ??
+                      'Downloading…',
+                    size:
+                      meta?.files.find((f) => f.index === playingIndex)?.size ??
+                      item?.files?.find((f) => f.index === playingIndex)?.size ??
+                      0,
+                    progress,
+                    onPause: () => {
+                      TorrentStream.pause().catch(() => {});
+                    },
+                    onResume: () => {
+                      TorrentStream.resume().catch(() => {});
+                    },
+                    onCancel: () => {
+                      TorrentStream.setNotify(false).catch(() => {});
+                      setTorrentMode(null);
+                      reset();
+                    },
+                  }
+                : null
+            }
           />
         )}
         {tab === 'settings' && (
@@ -281,4 +483,85 @@ function Shell() {
 const styles = StyleSheet.create({
   app: { flex: 1, backgroundColor: colors.bg },
   body: { flex: 1 },
+  modePicker: {
+    flex: 1,
+    backgroundColor: colors.bg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modeCard: {
+    width: '100%',
+    maxWidth: 360,
+    alignItems: 'center',
+    gap: 14,
+  },
+  modeMark: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: colors.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  modeTitle: {
+    fontFamily: 'NotoSans_600SemiBold',
+    fontSize: 18,
+    color: colors.text,
+    textAlign: 'center',
+    lineHeight: 26,
+  },
+  modeSub: {
+    fontFamily: 'NotoSans_400Regular',
+    fontSize: 13,
+    color: colors.muted,
+    textAlign: 'center',
+    lineHeight: 19,
+    marginBottom: 4,
+  },
+  modeButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  modeBtn: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 22,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    backgroundColor: colors.surface,
+  },
+  modeBtnPressed: { opacity: 0.7 },
+  modeBtnIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.control,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modeBtnLabel: {
+    fontFamily: 'NotoSans_600SemiBold',
+    fontSize: 16,
+    color: colors.text,
+  },
+  modeBtnSub: {
+    fontFamily: 'NotoSans_400Regular',
+    fontSize: 11,
+    color: colors.faint,
+    textAlign: 'center',
+    lineHeight: 15,
+  },
+  modeCancel: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+  },
+  modeCancelText: {
+    fontFamily: 'NotoSans_500Medium',
+    fontSize: 14,
+    color: colors.muted,
+  },
 });

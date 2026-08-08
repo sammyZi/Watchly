@@ -18,12 +18,14 @@ export function HistoryScreen({
   history,
   onOpenItem,
   onPlayFile,
+  onDownloadFile,
   onRemove,
   onClear,
 }: {
   history: Item[];
   onOpenItem: (item: Item) => void;
   onPlayFile: (item: Item, index: number) => void;
+  onDownloadFile: (item: Item, index: number) => void;
   onRemove: (item: Item) => void;
   onClear: () => void;
 }) {
@@ -136,6 +138,7 @@ export function HistoryScreen({
               item={item}
               onOpen={() => onOpenItem(item)}
               onPlayFile={(index) => onPlayFile(item, index)}
+              onDownloadFile={(index) => onDownloadFile(item, index)}
               onRemove={() => onRemove(item)}
             />
           </View>

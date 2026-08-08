@@ -22,6 +22,7 @@ export type Progress = {
   peers: number;
   dhtNodes: number;
   state: string; // libtorrent state, e.g. DOWNLOADING_METADATA
+  paused?: boolean;
 };
 
 export type PlayOptions = {
@@ -53,9 +54,22 @@ type TorrentStream = {
    * elsewhere.
    */
   openExternally(url: string, positionSeconds: number): Promise<void>;
+  /** Copy the currently-downloaded file to the public Downloads folder.
+   *  Returns a `file://` URI for the saved file. */
+  copyTo(fileIndex: number, fileName: string): Promise<string>;
+  /** `file://` URI for a finished file in public Downloads/. */
+  downloadUri(fileName: string): Promise<string>;
+  /** Pause the active transfer (Download Manager). */
+  pause(): Promise<void>;
+  /** Resume a paused transfer. */
+  resume(): Promise<void>;
+  /** Show / hide the ongoing download notification. */
+  setNotify(enabled: boolean): Promise<void>;
   /** Move the prefetch window; `ratio` is 0-1 through the file. */
   setPosition(ratio: number): Promise<void>;
   stop(): Promise<void>;
+  /** Delete cached stream piece data. No-op while a torrent is active. */
+  clearCache(): Promise<boolean>;
   addListener(
     event: 'log' | 'progress' | 'ready' | 'error',
     cb: (e: any) => void

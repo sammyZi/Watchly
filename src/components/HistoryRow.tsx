@@ -15,11 +15,13 @@ export function HistoryRow({
   item,
   onOpen,
   onPlayFile,
+  onDownloadFile,
   onRemove,
 }: {
   item: Item;
   onOpen: () => void;
   onPlayFile: (index: number) => void;
+  onDownloadFile: (index: number) => void;
   onRemove: () => void;
 }) {
   // Torrents list files in whatever order they were packed; sort naturally so
@@ -78,6 +80,19 @@ export function HistoryRow({
           size={18}
           color={colors.faint}
         />
+        <Pressable
+          onPress={() => {
+            if (videos.length === 1) {
+              onDownloadFile(videos[0].index);
+            } else {
+              setExpanded((e) => !e);
+            }
+          }}
+          hitSlop={8}
+          style={styles.rowBtn}
+        >
+          <Icon name="download" size={15} color={colors.accent} />
+        </Pressable>
       </Pressable>
 
       {expanded && (
@@ -104,6 +119,13 @@ export function HistoryRow({
                     <ProgressBar value={(position / duration) * 100} height={2} />
                   )}
                 </View>
+                <Pressable
+                  onPress={() => onDownloadFile(file.index)}
+                  hitSlop={8}
+                  style={styles.downloadBtn}
+                >
+                  <Icon name="download" size={14} color={colors.accent} />
+                </Pressable>
               </Pressable>
             );
           })}
@@ -142,4 +164,12 @@ const styles = StyleSheet.create({
   fileBody: { flex: 1, gap: 3 },
   fileName: { ...type.body, fontFamily: font.medium, color: colors.text },
   fileMeta: { ...type.meta, color: colors.faint },
+  downloadBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: radius.pill,
+    backgroundColor: colors.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });
