@@ -38,4 +38,17 @@ yarn-error.*
 
 # generated native folders
 /ios
-/android
+
+# Android: the project is committed (it carries the native module and the
+# intent filters), its build output is not.
+/android/.gradle/
+/android/.idea/
+/android/build/
+/android/app/build/
+/android/app/.cxx/
+/android/local.properties
+*.iml
+# Same for the native module's own gradle output.
+modules/*/android/build/
+modules/*/android/.gradle/
+modules/*/android/.cxx/

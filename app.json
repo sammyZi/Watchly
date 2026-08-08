@@ -5,15 +5,15 @@
     "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "dark",
-    "backgroundColor": "#0b0b0e",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#ffffff",
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "package": "com.torrentviewer.app",
       "adaptiveIcon": {
-        "backgroundColor": "#0b0b0e",
+        "backgroundColor": "#3b6fe0",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -92,9 +92,9 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#0b0b0e",
+          "backgroundColor": "#ffffff",
           "image": "./assets/splash-icon.png",
-          "imageWidth": 160
+          "imageWidth": 120
         }
       ]
     ]
