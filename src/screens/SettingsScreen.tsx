@@ -1,4 +1,4 @@
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { Icon, type IconName } from '../components/Icon';
 import { Screen } from '../components/Screen';
 import type { Settings } from '../lib/settings';
@@ -91,6 +91,29 @@ export function SettingsScreen({
               <Icon name="chevron-right" size={18} color={colors.faint} />
             </Row>
           </Pressable>
+        </Group>
+
+        <Group title="Subtitles">
+          <View style={styles.row}>
+            <View style={styles.rowIcon}>
+              <Icon name="type" size={16} color={colors.accent} />
+            </View>
+            <View style={styles.rowText}>
+              <Text style={styles.rowTitle}>OpenSubtitles API key</Text>
+              <Text style={styles.rowSubtitle}>
+                Free signup at opensubtitles.com
+              </Text>
+            </View>
+          </View>
+          <TextInput
+            style={styles.apiInput}
+            value={settings.openSubtitlesKey}
+            onChangeText={(v) => set('openSubtitlesKey', v)}
+            placeholder="Paste your API key..."
+            placeholderTextColor={colors.faint}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
         </Group>
 
         <Text style={styles.footer}>
@@ -200,5 +223,14 @@ const styles = StyleSheet.create({
     color: colors.faint,
     textAlign: 'center',
     paddingHorizontal: space.lg,
+  },
+  apiInput: {
+    ...type.body,
+    color: colors.text,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.sm,
+    marginBottom: space.lg,
   },
 });

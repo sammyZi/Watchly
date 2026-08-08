@@ -18,6 +18,7 @@ import expo.modules.kotlin.views.ExpoView
 import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.Media
 import org.videolan.libvlc.MediaPlayer
+import org.videolan.libvlc.interfaces.IMedia
 import org.videolan.libvlc.util.VLCVideoLayout
 import java.io.File
 import java.io.FileOutputStream
@@ -61,6 +62,8 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
   private var restartQueued = false
   /** Buffering flaps at 100% constantly; only report real changes. */
   private var buffering = false
+  /** External subtitle file paths (local files from the torrent). */
+  private var subtitleFiles: List<String>? = null
 
   /**
    * The video surface is added here, not by React, and React Native does not
@@ -131,6 +134,18 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
 
   fun setAudioTrack(id: Int?) {
     if (id != null) player?.setAudioTrack(id)
+  }
+
+  fun setSubtitleFiles(paths: List<String>?) {
+    subtitleFiles = paths
+    val p = player ?: return
+    val m = p.media ?: return
+    (paths ?: emptyList()).forEach { subPath ->
+      val subFile = File(subPath)
+      if (subFile.exists()) {
+        m.addSlave(IMedia.Slave(IMedia.Slave.Type.Subtitle, 4, Uri.fromFile(subFile).toString()))
+      }
+    }
   }
 
   /* ---------------------------------------------------------------- control */
@@ -268,6 +283,13 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
       // Seconds, fractional. Starting the demuxer here rather than seeking
       // after play means no decoding from byte zero of a two-hour file.
       if (startMs > 0) media.addOption(":start-time=${startMs / 1000.0}")
+      // External subtitle files alongside the video (e.g. from the torrent)
+      subtitleFiles?.forEach { subPath ->
+        val subFile = File(subPath)
+        if (subFile.exists()) {
+          media.addSlave(IMedia.Slave(IMedia.Slave.Type.Subtitle, 4, Uri.fromFile(subFile).toString()))
+        }
+      }
       mediaPlayer.media = media
       media.release()
 

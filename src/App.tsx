@@ -59,6 +59,7 @@ function Shell() {
     meta,
     url,
     fileName,
+    subtitleFiles,
     playingIndex,
     progress,
     fail,
@@ -89,11 +90,12 @@ function Shell() {
     if (!item || !meta) return;
     patch(item.uri, {
       torrentName: meta.name,
-      files: meta.files.map(({ index, name, size, isVideo }) => ({
+      files: meta.files.map(({ index, name, size, isVideo, isSubtitle }) => ({
         index,
         name,
         size,
         isVideo,
+        isSubtitle,
       })),
     }).then(setHistory);
   }, [item, meta]);
@@ -213,6 +215,8 @@ function Shell() {
         }
         resumeAt={stored.positions?.[playingIndex]}
         url={url}
+        subtitleFiles={subtitleFiles}
+        openSubtitlesKey={settings.openSubtitlesKey}
         progress={progress}
         onSavePosition={(seconds) =>
           setPosition(stored, playingIndex, seconds).then(setHistory)

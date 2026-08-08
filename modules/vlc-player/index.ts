@@ -36,6 +36,8 @@ export type VlcPlayerProps = {
   /** libVLC track id, or null for off. */
   subtitleTrack?: number | null;
   audioTrack?: number | null;
+  /** Absolute paths of external subtitle files to load alongside the media. */
+  subtitleFiles?: string[] | null;
 
   onLoaded?: (e: { nativeEvent: { duration: number } }) => void;
   onProgress?: (e: { nativeEvent: { currentTime: number } }) => void;

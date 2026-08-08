@@ -62,6 +62,10 @@ private val VIDEO = setOf(
   "mp4", "mkv", "avi", "mov", "m4v", "webm", "flv", "wmv", "mpg", "mpeg", "ts", "m2ts"
 )
 
+private val SUBTITLE = setOf(
+  "srt", "vtt", "sub", "ass", "ssa", "idx"
+)
+
 /** Trackers hand back ~200 at a time and most are stale by the next session;
  *  keeping a wide list is what makes a warm start find a swarm immediately. */
 private const val MAX_CACHED_PEERS = 200
@@ -158,6 +162,8 @@ class TorrentStreamModule : Module() {
   private var announcedReady = false
   private var peerSaveTick = 0
   private val deadlined = mutableSetOf<Int>()
+  /** Absolute paths of subtitle files found in the same folder as the video. */
+  private var subtitleFiles = emptyList<String>()
 
   /** Byte offset each live HTTP reader is sitting at, keyed by connection id.
    *  The player runs more than one at a time — playback at the head plus a probe
@@ -210,12 +216,14 @@ class TorrentStreamModule : Module() {
       val files = ti.files()
       val entries = (0 until files.numFiles()).map { i ->
         val path = files.filePath(i)
+        val ext = path.substringAfterLast('.', "").lowercase()
         mapOf(
           "index" to i,
           "path" to path,
           "name" to files.fileName(i),
           "size" to files.fileSize(i),
-          "isVideo" to (path.substringAfterLast('.', "").lowercase() in VIDEO)
+          "isVideo" to (ext in VIDEO),
+          "isSubtitle" to (ext in SUBTITLE)
         )
       }
       log("inspect: ${ti.name()} — ${entries.size} file(s)")
@@ -453,6 +461,21 @@ class TorrentStreamModule : Module() {
   private fun resolve(uri: String, timeoutSec: Int): TorrentInfo {
     cached?.takeIf { cachedUri == uri }?.let {
       log("metadata: memory cache hit")
+      // Re-add magnet to the session so play() can reuse it instead of calling
+      // session.download(ti,…), which serialises the full TorrentInfo and OOMs
+      // on large files.
+      val clean = normalize(uri)
+      if (clean.startsWith("magnet:", true)) {
+        val hex = infoHashOf(clean)
+        if (hex != null) {
+          val hash = runCatching { Sha1Hash.parseHex(hex) }.getOrNull()
+          if (hash != null && session.find(hash) == null) {
+            ensureSession()
+            log("metadata: re-adding magnet torrent for reuse")
+            session.download(clean, saveDir, TorrentFlags.SEQUENTIAL_DOWNLOAD)
+          }
+        }
+      }
       return it
     }
 
@@ -757,6 +780,29 @@ class TorrentStreamModule : Module() {
     // Everything except the chosen file is skipped entirely.
     val priorities = Array(files.numFiles()) { Priority.IGNORE }
     priorities[index] = Priority.DEFAULT
+    // Also download subtitle files sitting next to the video or in a subfolder
+    val targetPath = files.filePath(index).replace("\\", "/")
+    val targetDir = targetPath.substringBeforeLast("/", "")
+    subtitleFiles = (0 until files.numFiles())
+      .filter { i ->
+        i != index &&
+          files.filePath(i).substringAfterLast('.', "").lowercase() in SUBTITLE
+      }
+      .filter { i ->
+        val subDir = files.filePath(i).replace("\\", "/")
+          .substringBeforeLast("/", "")
+        // Same folder, or a subfolder relative to the video (e.g. Subs/, subtitles/)
+        subDir == targetDir ||
+          (targetDir.isEmpty() && subDir.isNotEmpty()) ||
+          (targetDir.isNotEmpty() && subDir.startsWith("$targetDir/"))
+      }
+      .also { indices ->
+        indices.forEach { priorities[it] = Priority.DEFAULT }
+        if (indices.isNotEmpty()) {
+          log("play: found ${indices.size} subtitle file(s) alongside the video")
+        }
+      }
+      .map { File(saveDir, files.filePath(it)).absolutePath }
 
     log("play: ${files.fileName(index)} (${files.fileSize(index)} bytes)")
 
@@ -1004,7 +1050,13 @@ class TorrentStreamModule : Module() {
           "$startPiece, at ${status.downloadRate() / 1024}kB/s (${status.numPeers()} peers) " +
           "-> ${srv.url}"
       )
-      sendEvent("ready", mapOf("url" to srv.url, "name" to ti.files().fileName(fileIndex)))
+      sendEvent("ready", mapOf(
+        "url" to srv.url,
+        "name" to ti.files().fileName(fileIndex),
+        "subtitleFiles" to subtitleFiles.also {
+          if (it.isNotEmpty()) log("ready: including ${it.size} subtitle file(s)")
+        }
+      ))
     }
   }
 
@@ -1119,6 +1171,7 @@ class TorrentStreamModule : Module() {
     readers.clear()
     zoneStarts = emptyList()
     zoneWidth = -1
+    subtitleFiles = emptyList()
     handle = null
     info = null
     infoHashHex = null

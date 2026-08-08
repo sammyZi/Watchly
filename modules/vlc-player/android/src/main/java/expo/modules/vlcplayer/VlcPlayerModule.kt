@@ -22,6 +22,7 @@ class VlcPlayerModule : Module() {
       }
       Prop("subtitleTrack") { view: VlcPlayerView, value: Int? -> view.setSubtitleTrack(value) }
       Prop("audioTrack") { view: VlcPlayerView, value: Int? -> view.setAudioTrack(value) }
+      Prop("subtitleFiles") { view: VlcPlayerView, value: List<String>? -> view.setSubtitleFiles(value) }
 
       AsyncFunction("seekTo") { view: VlcPlayerView, seconds: Double ->
         view.seekTo((seconds * 1000).toLong())

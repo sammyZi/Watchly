@@ -38,6 +38,7 @@ export function useTorrent(settings: Settings) {
   const [meta, setMeta] = useState<TorrentMeta | null>(null);
   const [url, setUrl] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [subtitleFiles, setSubtitleFiles] = useState<string[]>([]);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [playingIndex, setPlayingIndex] = useState(0);
@@ -64,11 +65,12 @@ export function useTorrent(settings: Settings) {
         }
         if (!streaming.current) setProgress(p);
       }),
-      TorrentStream.addListener('ready', ({ url, name }) => {
+      TorrentStream.addListener('ready', ({ url, name, subtitleFiles: subs }) => {
         console.log('[torrent] ready', name);
         streaming.current = true;
         setUrl(url);
         setFileName(name);
+        setSubtitleFiles(subs ?? []);
       }),
       TorrentStream.addListener('error', ({ message }) => {
         console.warn('[torrent] error', message);
@@ -92,6 +94,7 @@ export function useTorrent(settings: Settings) {
     setMeta(null);
     setUrl(null);
     setFileName(null);
+    setSubtitleFiles([]);
     setProgress(null);
     source.current = null;
     lastState.current = null;
@@ -141,6 +144,7 @@ export function useTorrent(settings: Settings) {
 
       setProgress(null);
       setUrl(null);
+      setSubtitleFiles([]);
       streaming.current = false;
       setPlayingIndex(fileIndex);
       setPhase('playing');
@@ -177,6 +181,7 @@ export function useTorrent(settings: Settings) {
             name: f.name,
             size: f.size,
             isVideo: f.isVideo,
+            isSubtitle: f.isSubtitle ?? false,
           })),
         });
       }
@@ -191,6 +196,7 @@ export function useTorrent(settings: Settings) {
     meta,
     url,
     fileName,
+    subtitleFiles,
     playingIndex,
     progress,
     error,

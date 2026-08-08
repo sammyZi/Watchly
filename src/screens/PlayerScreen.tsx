@@ -4,14 +4,17 @@ import {
   AppState,
   BackHandler,
   Pressable,
+  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ScreenOrientation from 'expo-screen-orientation';
+import * as FileSystem from 'expo-file-system';
 // Feather has no closed-caption glyph, and "type" reads as a bare T. The badge
 // is the one subtitle symbol everyone recognises, so borrow it from Material.
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -19,6 +22,7 @@ import { VlcPlayer, type VlcPlayerRef, type VlcTrack } from '../../modules/vlc-p
 import TorrentStream, { type Progress } from '../../modules/torrent-stream';
 import { Icon } from '../components/Icon';
 import { clock, speed } from '../lib/format';
+import { searchSubtitles, downloadSubtitle, type SubtitleResult } from '../lib/opensubtitles';
 import { font, space, type } from '../theme';
 
 /** How often to refresh the library tile while watching. Cheap now: it copies
@@ -36,6 +40,8 @@ export function PlayerScreen({
   title,
   resumeAt,
   url,
+  subtitleFiles,
+  openSubtitlesKey,
   progress,
   onSavePosition,
   onDuration,
@@ -47,6 +53,8 @@ export function PlayerScreen({
   resumeAt?: number;
   /** null until the first piece lands — the player mounts before that. */
   url: string | null;
+  subtitleFiles?: string[];
+  openSubtitlesKey?: string;
   progress: Progress | null;
   onSavePosition: (seconds: number) => void;
   onDuration: (seconds: number) => void;
@@ -72,6 +80,12 @@ export function PlayerScreen({
   const [nudge, setNudge] = useState<number | null>(null);
   /** Swarm stats, subscribed to only while they are on screen. */
   const [stats, setStats] = useState<Progress | null>(null);
+  /** OpenSubtitles search state. */
+  const [searching, setSearching] = useState(false);
+  const [subResults, setSubResults] = useState<SubtitleResult[]>([]);
+  const [subLoading, setSubLoading] = useState(false);
+  const [subQuery, setSubQuery] = useState('');
+  const [externalSubs, setExternalSubs] = useState<string[]>([]);
 
   const position = useRef(resumeAt ?? 0);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -87,6 +101,8 @@ export function PlayerScreen({
    *  cannot put the player in a reload loop. Reset once playback gets going. */
   const reloads = useRef(0);
   const posterAt = useRef(0);
+  /** Whether the app has been away since playback last ran. */
+  const left = useRef(false);
   const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const videoRef = useRef<VlcPlayerRef>(null);
   const { width } = useWindowDimensions();
@@ -101,6 +117,9 @@ export function PlayerScreen({
   save.current = onSavePosition;
   leave.current = onExit;
   poster.current = onPoster;
+  /** Same trick for bumpUi: it changes with `picking`, and the AppState effect
+   *  must not resubscribe every time that flips. Assigned below its definition. */
+  const bump = useRef<() => void>(() => {});
 
   // Captured once: the native side reads it when the media loads, and letting
   // it track `position` would restart playback on every checkpoint.
@@ -135,6 +154,51 @@ export function PlayerScreen({
     }
   }, [url, warn]);
 
+  const searchSubs = useCallback(async () => {
+    const q = subQuery.trim() || title;
+    const key = openSubtitlesKey || process.env.EXPO_PUBLIC_OPENSUBTITLES_KEY;
+    if (!q) return;
+    if (!key) { warn('Set your OpenSubtitles API key in Settings'); setSearching(false); return; }
+    setSubLoading(true);
+    setSubResults([]);
+    try {
+      const results = await searchSubtitles(q, key);
+      setSubResults(results.slice(0, 20));
+    } catch (e: any) {
+      const msg = String(e?.message ?? e);
+      if (msg.includes('403') || msg.includes('401')) {
+        warn('Invalid API key — check Settings');
+      } else {
+        warn(msg);
+      }
+      setSearching(false);
+    } finally {
+      setSubLoading(false);
+    }
+  }, [subQuery, title, openSubtitlesKey, warn]);
+
+  const applySubtitle = useCallback(async (result: SubtitleResult) => {
+    const file = result.attributes.files[0];
+    const key = openSubtitlesKey || process.env.EXPO_PUBLIC_OPENSUBTITLES_KEY;
+    if (!file || !key) return;
+    try {
+      const content = await downloadSubtitle(file.file_id, key);
+      const dest = `${FileSystem.cacheDirectory}sub_${file.file_id}.srt`;
+      await FileSystem.writeAsStringAsync(dest, content);
+      setExternalSubs((prev) => [...prev, dest]);
+      setSearching(false);
+      bumpUi();
+    } catch (e: any) {
+      const msg = String(e?.message ?? e);
+      if (msg.includes('403') || msg.includes('401')) {
+        warn('Invalid API key — check Settings');
+      } else {
+        warn(msg);
+      }
+      setSearching(false);
+    }
+  }, [openSubtitlesKey, bumpUi, warn]);
+
   // No setCurrent here: every caller either seeks (which sets it) or is only
   // reachable while the overlay is already up and the clock already live. The
   // one path that needs it — revealing a hidden overlay — does it itself.
@@ -144,6 +208,7 @@ export function PlayerScreen({
     // The picker is a deliberate stop — do not yank it away mid-choice.
     hideTimer.current = setTimeout(() => setShowUi(false), picking ? 12000 : 4000);
   }, [picking]);
+  bump.current = bumpUi;
 
   /** Absolute seek. `duration` is 0 until onLoad, so guard every caller. */
   const seekTo = useCallback(
@@ -248,7 +313,20 @@ export function PlayerScreen({
     });
     // Losing focus can mean the process is about to die — checkpoint the resume point.
     const app = AppState.addEventListener('change', (s) => {
-      if (s === 'active') return;
+      if (s === 'active') {
+        // Coming back from another app, the video surface has been destroyed and
+        // recreated. A paused player draws nothing into the new one — it has no
+        // frame to redraw — so the screen is black with no hint that anything is
+        // there. Reopen the stream where we left it and put the controls up, so
+        // there is a title, a scrubber and a play button rather than a void.
+        if (left.current) {
+          left.current = false;
+          videoRef.current?.reload(position.current);
+          bump.current();
+        }
+        return;
+      }
+      left.current = true;
       save.current(position.current);
       // libVLC keeps decoding in the background on its own. react-native-video
       // had playInBackground={false} doing this; without it, leaving the app
@@ -293,6 +371,7 @@ export function PlayerScreen({
             paused={paused}
             rate={rate}
             subtitleTrack={subTrack}
+            subtitleFiles={[...(subtitleFiles ?? []), ...externalSubs]}
             onTracks={({ nativeEvent }) => setTracks(nativeEvent.subtitles)}
             onProgress={({ nativeEvent: { currentTime } }) => {
               // Between asking for a seek and it landing, this still reports
@@ -431,22 +510,32 @@ export function PlayerScreen({
                     >
                       <Icon name="external-link" size={18} color="#fff" />
                     </Pressable>
-                    {tracks.length > 0 && (
-                      <Pressable
-                        onPress={() => {
-                          setPicking((p) => !p);
-                          bumpUi();
-                        }}
-                        hitSlop={12}
-                        style={[styles.iconBtn, subTrack !== null && styles.iconBtnOn]}
-                      >
-                        <MaterialIcons
-                          name={subTrack === null ? 'subtitles-off' : 'subtitles'}
-                          size={20}
-                          color="#fff"
-                        />
-                      </Pressable>
-                    )}
+                    <Pressable
+                      onPress={() => {
+                        setSearching((s) => !s);
+                        if (!searching) setSubQuery(title ?? '');
+                        bumpUi();
+                      }}
+                      hitSlop={12}
+                      style={[styles.iconBtn, searching && styles.iconBtnOn]}
+                      accessibilityLabel="Search OpenSubtitles"
+                    >
+                      <Icon name="search" size={18} color="#fff" />
+                    </Pressable>
+                    <Pressable
+                      onPress={() => {
+                        setPicking((p) => !p);
+                        bumpUi();
+                      }}
+                      hitSlop={12}
+                      style={[styles.iconBtn, subTrack !== null && styles.iconBtnOn]}
+                    >
+                      <MaterialIcons
+                        name={subTrack === null ? 'subtitles-off' : 'subtitles'}
+                        size={20}
+                        color="#fff"
+                      />
+                    </Pressable>
                     <Pressable
                       onPress={() => {
                         setRate((r) => RATES[(RATES.indexOf(r) + 1) % RATES.length]);
@@ -524,6 +613,16 @@ export function PlayerScreen({
                   bumpUi();
                 }}
               />
+              {tracks.length === 0 &&
+                (subtitleFiles?.length ?? 0) === 0 &&
+                externalSubs.length === 0 && (
+                  <Text style={styles.noSubs}>
+                    No subtitles found.{' '}
+                    {openSubtitlesKey
+                      ? 'Use the search icon to find subtitles online.'
+                      : 'Set an OpenSubtitles API key in Settings to search online.'}
+                  </Text>
+                )}
               {tracks.map((t) => (
                 <TrackOption
                   key={t.id}
@@ -539,6 +638,98 @@ export function PlayerScreen({
                   }}
                 />
               ))}
+              {(subtitleFiles ?? []).map((path, i) => (
+                <TrackOption
+                  key={`ext-${i}`}
+                  label={`${fileBaseName(path)} (file)`}
+                  active={false}
+                  sublabel="loaded from torrent"
+                  onPress={() => {
+                    setPicking(false);
+                    bumpUi();
+                  }}
+                />
+              ))}
+              {externalSubs.map((path, i) => (
+                <TrackOption
+                  key={`os-${i}`}
+                  label={`${fileBaseName(path)} (opensubtitles)`}
+                  active={false}
+                  sublabel="downloaded"
+                  onPress={() => {
+                    setPicking(false);
+                    bumpUi();
+                  }}
+                />
+              ))}
+            </View>
+          )}
+
+          {searching && (
+            <View style={styles.sheet}>
+              <Text style={styles.sheetTitle}>Open Subtitles</Text>
+              <View style={styles.searchRow}>
+                <TextInput
+                  style={styles.searchInput}
+                  value={subQuery}
+                  onChangeText={setSubQuery}
+                  placeholder="Search by file name..."
+                  placeholderTextColor="#ffffff60"
+                  onSubmitEditing={searchSubs}
+                  returnKeyType="search"
+                />
+                <Pressable onPress={searchSubs} style={styles.searchBtn}>
+                  {subLoading ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Icon name="search" size={16} color="#fff" />
+                  )}
+                </Pressable>
+              </View>
+              {subResults.length > 0 ? (
+                <ScrollView style={styles.resultList}>
+                  {subResults.map((r) => {
+                    const a = r.attributes;
+                    const d = a.feature_details;
+                    const label = [
+                      d?.title ?? a.release,
+                      d?.season_number != null ? `S${d.season_number}` : null,
+                      d?.episode_number != null ? `E${d.episode_number}` : null,
+                      a.language.toUpperCase(),
+                    ]
+                      .filter(Boolean)
+                      .join(' ');
+                    return (
+                      <Pressable
+                        key={r.id}
+                        onPress={() => applySubtitle(r)}
+                        style={styles.subResult}
+                      >
+                        <View style={styles.subResultBody}>
+                          <Text numberOfLines={1} style={styles.subResultTitle}>
+                            {label}
+                          </Text>
+                          <Text style={styles.subResultMeta}>
+                            {a.files[0]?.file_name} · {a.download_count} downloads
+                          </Text>
+                        </View>
+                        <Icon name="download" size={14} color="#ffffff80" />
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              ) : subLoading ? (
+                <ActivityIndicator
+                  color="#fff"
+                  style={{ marginVertical: 20 }}
+                />
+              ) : subQuery ? (
+                <Text style={styles.noResults}>No subtitles found</Text>
+              ) : (
+                <Text style={styles.noResults}>
+                  Enter a search term and press Search
+                </Text>
+              )}
             </View>
           )}
 
@@ -580,11 +771,13 @@ function TrackOption({
   label,
   active,
   unsupported,
+  sublabel,
   onPress,
 }: {
   label: string;
   active: boolean;
   unsupported?: boolean;
+  sublabel?: string;
   onPress: () => void;
 }) {
   return (
@@ -593,9 +786,12 @@ function TrackOption({
       disabled={unsupported}
       style={[styles.option, active && styles.optionOn, unsupported && styles.optionOff]}
     >
-      <Text numberOfLines={1} style={styles.optionText}>
-        {label}
-      </Text>
+      <View style={{ flex: 1 }}>
+        <Text numberOfLines={1} style={styles.optionText}>
+          {label}
+        </Text>
+        {!!sublabel && <Text style={styles.optionNote}>{sublabel}</Text>}
+      </View>
       {unsupported ? (
         <Text style={styles.optionNote}>unsupported</Text>
       ) : (
@@ -604,6 +800,8 @@ function TrackOption({
     </Pressable>
   );
 }
+
+const fileBaseName = (path: string) => path.split(/[/\\]/).pop() ?? path;
 
 /**
  * Thin scrubber — tap anywhere on the track, or drag the head, to seek.
@@ -718,6 +916,12 @@ const styles = StyleSheet.create({
   optionOff: { opacity: 0.45 },
   optionText: { ...type.meta, color: '#fff', flex: 1 },
   optionNote: { ...type.meta, color: '#ffffff90', fontSize: 10 },
+  noSubs: {
+    ...type.meta,
+    color: '#ffffff70',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
   top: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -857,4 +1061,47 @@ const styles = StyleSheet.create({
   },
   notice: { backgroundColor: '#000c' },
   failureText: { ...type.meta, color: '#fff' },
+
+  // OpenSubtitles search sheet
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 4,
+    marginTop: 4,
+  },
+  searchInput: {
+    flex: 1,
+    ...type.meta,
+    color: '#fff',
+    backgroundColor: '#ffffff14',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  searchBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: '#3b6fe0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  resultList: { maxHeight: 280, marginTop: 4 },
+  subResult: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+  },
+  subResultBody: { flex: 1 },
+  subResultTitle: { ...type.meta, color: '#fff' },
+  subResultMeta: { ...type.meta, color: '#ffffff60', fontSize: 10, marginTop: 1 },
+  noResults: {
+    ...type.meta,
+    color: '#ffffff60',
+    textAlign: 'center',
+    paddingVertical: 20,
+  },
 });

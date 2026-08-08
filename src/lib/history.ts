@@ -5,6 +5,7 @@ export type StoredFile = {
   name: string;
   size: number;
   isVideo: boolean;
+  isSubtitle: boolean;
 };
 
 export type Item = {

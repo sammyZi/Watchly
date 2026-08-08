@@ -6,6 +6,7 @@ export type TorrentFile = {
   name: string; // basename
   size: number; // bytes
   isVideo: boolean;
+  isSubtitle: boolean;
 };
 
 export type TorrentMeta = {

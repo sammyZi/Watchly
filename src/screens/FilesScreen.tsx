@@ -84,7 +84,7 @@ export function FilesScreen({
             </View>
           ) : null
         }
-        renderItem={({ item, index }) => (
+        renderItem={({ item }) => (
           <Pressable
             disabled={!item.isVideo}
             onPress={() => onPlay(item)}
@@ -96,7 +96,11 @@ export function FilesScreen({
           >
             {item.isVideo ? (
               <View style={styles.number}>
-                <Text style={styles.numberText}>{index + 1}</Text>
+                <Icon name="play" size={13} color={colors.accent} />
+              </View>
+            ) : item.isSubtitle ? (
+              <View style={styles.subIcon}>
+                <Icon name="type" size={14} color={colors.faint} />
               </View>
             ) : (
               <View style={styles.fileIcon}>
@@ -110,13 +114,13 @@ export function FilesScreen({
               </Text>
               <Text style={styles.size}>
                 {bytes(item.size)}
-                {item.isVideo ? '' : ' · not playable'}
+                {item.isSubtitle ? ' · subtitle' : item.isVideo ? '' : ' · not playable'}
               </Text>
             </View>
 
             {item.isVideo && (
               <View style={styles.play}>
-                <Icon name="play" size={14} color={colors.accent} />
+                <Icon name="chevron-right" size={14} color={colors.accent} />
               </View>
             )}
           </Pressable>
@@ -174,6 +178,14 @@ const styles = StyleSheet.create({
   fileIcon: {
     width: 34,
     height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  subIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },

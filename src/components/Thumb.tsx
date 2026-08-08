@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Image, StyleSheet, View } from 'react-native';
 import { Icon, type IconName } from './Icon';
 import { hueOf } from '../lib/title';
-import { radius } from '../theme';
+import { colors, radius } from '../theme';
 
 /**
  * Poster tile for a torrent.
@@ -101,5 +101,5 @@ const styles = StyleSheet.create({
     height: 3,
     backgroundColor: '#ffffff59',
   },
-  fill: { height: 3, backgroundColor: '#fff' },
+  fill: { height: 3, backgroundColor: colors.accent },
 });
