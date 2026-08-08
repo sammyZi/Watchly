@@ -1,0 +1,29 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.torrentstream'
+version = '0.1.0'
+
+android {
+  namespace "expo.modules.torrentstream"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  // libtorrent4j — maintained successor to frostwire-jlibtorrent by the same
+  // author, on libtorrent 2.x. This is what LibreTorrent ships.
+  def lt = '2.1.0-38'
+  implementation "org.libtorrent4j:libtorrent4j:$lt"
+  implementation "org.libtorrent4j:libtorrent4j-android-arm:$lt"
+  implementation "org.libtorrent4j:libtorrent4j-android-arm64:$lt"
+  implementation "org.libtorrent4j:libtorrent4j-android-x86:$lt"
+  implementation "org.libtorrent4j:libtorrent4j-android-x86_64:$lt"
+}

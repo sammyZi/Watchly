@@ -1,25 +1,102 @@
 {
   "expo": {
-    "name": "torrent_viewer",
+    "name": "Torrent Viewer",
     "slug": "torrent_viewer",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0b0b0e",
     "ios": {
       "supportsTablet": true
     },
     "android": {
+      "package": "com.torrentviewer.app",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#0b0b0e",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "category": [
+            "DEFAULT",
+            "BROWSABLE"
+          ],
+          "data": [
+            {
+              "scheme": "magnet"
+            }
+          ]
+        },
+        {
+          "action": "VIEW",
+          "category": [
+            "DEFAULT",
+            "BROWSABLE"
+          ],
+          "data": [
+            {
+              "mimeType": "application/x-bittorrent"
+            },
+            {
+              "scheme": "content",
+              "mimeType": "application/x-bittorrent"
+            },
+            {
+              "scheme": "file",
+              "mimeType": "application/x-bittorrent"
+            }
+          ]
+        },
+        {
+          "action": "VIEW",
+          "category": [
+            "DEFAULT",
+            "BROWSABLE"
+          ],
+          "data": [
+            {
+              "scheme": "content",
+              "mimeType": "*/*",
+              "pathPattern": ".*\\.torrent"
+            },
+            {
+              "scheme": "file",
+              "mimeType": "*/*",
+              "pathPattern": ".*\\.torrent"
+            }
+          ]
+        }
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "extraMavenRepos": [
+              "https://jitpack.io"
+            ]
+          }
+        }
+      ],
+      "react-native-video",
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0b0b0e",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 160
+        }
+      ]
+    ]
   }
 }
