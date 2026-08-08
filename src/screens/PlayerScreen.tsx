@@ -129,7 +129,7 @@ export function PlayerScreen({
       // does not reliably land before Android switches activities — which is
       // exactly when you hear both at once.
       await videoRef.current?.pause();
-      await TorrentStream.openExternally(url);
+      await TorrentStream.openExternally(url, position.current);
     } catch (e: any) {
       warn(String(e?.message ?? e));
     }

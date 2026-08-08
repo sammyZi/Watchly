@@ -232,13 +232,26 @@ class TorrentStreamModule : Module() {
      * per-app, and they get the same blocking range requests our own player
      * does. The torrent has to stay up while they read, so this deliberately
      * does not touch the session.
+     *
+     * `positionSeconds` carries the playback point across. The extra follows
+     * VLC's convention; players that read `position` as an Int rather than a
+     * Long (MX Player among them) will ignore it and start from the beginning.
      */
-    AsyncFunction("openExternally") { url: String ->
+    AsyncFunction("openExternally") { url: String, positionSeconds: Double ->
       val context = appContext.reactContext!!
-      val name = Uri.parse(url).lastPathSegment ?: ""
+      val name = Uri.decode(Uri.parse(url).lastPathSegment ?: "")
       val view = Intent(Intent.ACTION_VIEW).apply {
         setDataAndType(Uri.parse(url), contentType(name))
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        putExtra("title", name)
+        // VideoLAN's documented contract for third-party launches: milliseconds,
+        // as a Long. Without it the other player has no idea where we were and
+        // opens at zero. `from_start` stops VLC preferring its own saved point
+        // for a file it has seen before.
+        if (positionSeconds > 0) {
+          putExtra("position", (positionSeconds * 1000).toLong())
+          putExtra("from_start", false)
+        }
       }
       val chooser = Intent.createChooser(view, "Play with").apply {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
