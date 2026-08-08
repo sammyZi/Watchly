@@ -17,3 +17,7 @@
 -keepclassmembers class org.libtorrent4j.** { *; }
 -dontwarn org.libtorrent4j.**
 -keep class com.facebook.react.** { *; }
+
+# react-native-video
+-keep class com.brentvatne.** { *; }
+-dontwarn com.brentvatne.**
