@@ -4,11 +4,12 @@ import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
 import { Button } from './Button';
 import { Icon } from './Icon';
-import { colors, radius, space, type } from '../theme';
+import { colors, font, radius, space, type } from '../theme';
 
 /** Magnet / .torrent box with paste and file-picker shortcuts. */
 export function SourceInput({ onSubmit }: { onSubmit: (uri: string) => void }) {
   const [value, setValue] = useState('');
+  const [focused, setFocused] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
   const ready = value.trim().length > 0;
 
@@ -39,26 +40,31 @@ export function SourceInput({ onSubmit }: { onSubmit: (uri: string) => void }) {
     <View style={styles.card}>
       <View style={styles.head}>
         <View style={styles.mark}>
-          <Icon name="link-2" size={13} color={colors.accent} />
+          <Icon name="zap" size={14} color={colors.accent} />
         </View>
-        <Text style={styles.heading}>Magnet or torrent URL</Text>
+        <View style={styles.headText}>
+          <Text style={styles.title}>Start streaming</Text>
+          <Text style={styles.sub}>Magnet link or .torrent file</Text>
+        </View>
       </View>
 
-      <TextInput
-        style={styles.input}
-        value={value}
-        onChangeText={setValue}
-        placeholder={'magnet:?xt=urn:btih:…\nor https://site/file.torrent'}
-        placeholderTextColor={colors.faint}
-        autoCapitalize="none"
-        autoCorrect={false}
-        multiline
-        scrollEnabled
-      />
+      <View style={[styles.well, focused && styles.wellOn]}>
+        <TextInput
+          style={styles.input}
+          value={value}
+          onChangeText={setValue}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          placeholder={'magnet:?xt=urn:btih:…\nor https://site/file.torrent'}
+          placeholderTextColor={colors.faint}
+          autoCapitalize="none"
+          autoCorrect={false}
+          multiline
+          scrollEnabled
+        />
+      </View>
 
       {!!hint && <Text style={styles.hint}>{hint}</Text>}
-
-      <View style={styles.divider} />
 
       <View style={styles.actions}>
         <Button label="Paste" icon="clipboard" onPress={paste} />
@@ -81,32 +87,37 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     padding: space.lg,
+    gap: space.md,
   },
-  head: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  head: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   mark: {
-    width: 24,
-    height: 24,
-    borderRadius: radius.sm,
-    backgroundColor: colors.control,
+    width: 36,
+    height: 36,
+    borderRadius: radius.md,
+    backgroundColor: colors.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  heading: { ...type.overline, color: colors.muted },
+  headText: { flex: 1, gap: 1 },
+  title: { ...type.label, fontFamily: font.semibold, color: colors.text, fontSize: 15 },
+  sub: { ...type.meta, color: colors.muted },
+  well: {
+    backgroundColor: colors.control,
+    borderRadius: radius.md,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+  },
+  wellOn: { borderColor: colors.accent },
   input: {
     ...type.body,
     color: colors.text,
-    height: 72,
-    marginTop: space.md,
+    height: 68,
     padding: 0,
     textAlignVertical: 'top',
   },
-  hint: { ...type.meta, color: colors.danger, marginTop: space.sm },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.line,
-    marginVertical: space.lg,
-    marginHorizontal: -space.lg,
-  },
+  hint: { ...type.meta, color: colors.danger, marginTop: -space.xs },
   actions: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   spacer: { flex: 1 },
 });

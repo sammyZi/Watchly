@@ -17,7 +17,7 @@ import { radius } from '../theme';
 export function Thumb({
   name,
   poster,
-  icon = 'play',
+  icon,
   width = 84,
   height = 52,
   progress,
@@ -56,9 +56,11 @@ export function Thumb({
         />
       )}
 
-      <View style={[styles.glyph, showPoster && styles.glyphOnPhoto]}>
-        <Icon name={icon} size={16} color="#fff" />
-      </View>
+      {!!icon && (
+        <View style={[styles.glyph, showPoster && styles.glyphOnPhoto]}>
+          <Icon name={icon} size={16} color="#fff" />
+        </View>
+      )}
 
       {progress != null && progress > 0 && (
         <View style={styles.track}>
