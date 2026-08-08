@@ -97,6 +97,18 @@ android {
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
+    // One APK per architecture. libtorrent4j ships a large .so per ABI and it
+    // dominates the download, so a combined APK makes every phone carry a copy
+    // of native code it can never run. No universal APK: it would be the very
+    // thing this avoids. Install app-arm64-v8a-release.apk on anything modern.
+    splits {
+        abi {
+            enable true
+            reset()
+            include 'arm64-v8a', 'armeabi-v7a'
+            universalApk false
+        }
+    }
     signingConfigs {
         debug {
             storeFile file('debug.keystore')
