@@ -11,4 +11,9 @@
 -keep class com.swmansion.reanimated.** { *; }
 -keep class com.facebook.react.turbomodule.** { *; }
 
-# Add any project specific keep options here:
+# Expo + libtorrent (JNI / reflection)
+-keep class expo.modules.** { *; }
+-keep class org.libtorrent4j.** { *; }
+-keepclassmembers class org.libtorrent4j.** { *; }
+-dontwarn org.libtorrent4j.**
+-keep class com.facebook.react.** { *; }

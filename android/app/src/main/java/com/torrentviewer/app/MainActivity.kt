@@ -21,6 +21,38 @@ class MainActivity : ReactActivity() {
     SplashScreenManager.registerOnActivity(this)
     // @generated end expo-splashscreen
     super.onCreate(null)
+    preferHighRefreshRate()
+  }
+
+  override fun onResume() {
+    super.onResume()
+    preferHighRefreshRate()
+  }
+
+  /** Prefer the panel's highest mode up to 120Hz when the device offers it. */
+  private fun preferHighRefreshRate() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+    try {
+      val display =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) display
+        else windowManager.defaultDisplay
+      val current = display.mode
+      val best =
+        display.supportedModes
+          .filter {
+            it.physicalWidth == current.physicalWidth &&
+              it.physicalHeight == current.physicalHeight &&
+              it.refreshRate <= 120.5f
+          }
+          .maxByOrNull { it.refreshRate } ?: return
+
+      val params = window.attributes
+      params.preferredDisplayModeId = best.modeId
+      params.preferredRefreshRate = best.refreshRate.coerceAtMost(120f)
+      window.attributes = params
+    } catch (_: Exception) {
+      // Some OEMs reject mode switches; stay on the system default.
+    }
   }
 
   /**
