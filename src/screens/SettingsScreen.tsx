@@ -35,6 +35,20 @@ export function SettingsScreen({
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
+        <View style={styles.note}>
+          <View style={styles.noteHead}>
+            <View style={styles.noteMark}>
+              <Icon name="hard-drive" size={15} color={colors.accent} />
+            </View>
+            <Text style={styles.noteTitle}>How storage works here</Text>
+          </View>
+          <Text style={styles.noteText}>
+            A stream holds what you have watched — an hour of a 3 GB film is
+            about 2 GB — and clears it on stop. Needs 512 MB free to start. For
+            4K remuxes use Download instead.
+          </Text>
+        </View>
+
         <Group title="Startup speed">
           <Row
             icon="radio"
@@ -205,6 +219,28 @@ const Divider = () => <View style={styles.divider} />;
 
 const styles = StyleSheet.create({
   body: { padding: space.xl, gap: space.xl, paddingBottom: space.xxl },
+  note: {
+    gap: space.sm,
+    padding: space.lg,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface,
+  },
+  noteHead: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  noteMark: {
+    width: 30,
+    height: 30,
+    borderRadius: radius.sm,
+    backgroundColor: colors.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noteTitle: {
+    ...type.label,
+    fontFamily: font.semibold,
+    fontSize: 14,
+    color: colors.text,
+  },
+  noteText: { ...type.meta, color: colors.muted, lineHeight: 18 },
   group: { gap: space.md },
   groupTitle: { ...type.overline, color: colors.faint },
   card: {

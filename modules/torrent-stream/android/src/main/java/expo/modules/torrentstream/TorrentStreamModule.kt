@@ -103,7 +103,7 @@ private const val MAX_TORRENT_BYTES = 16L * 1024 * 1024
 
 /**
  * Deadline window, in bytes — how far ahead of the viewer pieces are marked
- * time-critical. Not the same as the zone (READAHEAD_PIECES), which is what the
+ * time-critical. Not the same as the zone (READAHEAD_BYTES), which is what the
  * torrent is *allowed* to fetch; this is only what it is told to hurry.
  *
  * Sized in bytes because piece size varies hugely between torrents: a fixed
@@ -115,14 +115,21 @@ private const val WINDOW_BYTES = 32L * 1024 * 1024
  * The zone: how far past each reader the torrent may fetch *at all*. Everything
  * outside is IGNORE.
  *
- * Wide on purpose. Too small a wanted set leaves every peer holding the same few
- * blocks, which puts libtorrent in permanent end-game — a swarm full of seeds
- * delivering duplicates and almost no unique bytes. Bounded in bytes as well as
- * pieces, because piece size varies by two orders of magnitude between torrents
- * and a fixed count is a generous zone on one and a starved one on another.
+ * Bytes first, with a piece floor. Bytes because piece size varies by two orders
+ * of magnitude between torrents, so a fixed count is a 3MB window on one and a
+ * 700MB window on another — the old 240-piece floor was 686MB of readahead on a
+ * feature film, and every byte of it stays on disk for the session. The floor
+ * survives because too small a wanted set leaves every peer holding the same few
+ * blocks, which puts libtorrent in permanent end-game: a swarm full of seeds
+ * delivering duplicates and almost no unique bytes.
+ *
+ * 128MB is roughly six minutes of a 1080p release, one minute of 4K.
  */
-private const val READAHEAD_PIECES = 240
-private const val READAHEAD_MIN_BYTES = 256L * 1024 * 1024
+private const val READAHEAD_BYTES = 128L * 1024 * 1024
+private const val READAHEAD_MIN_PIECES = 48
+
+/** Refuse to start below this much free space rather than dying on a write. */
+private const val FREE_SPACE_MIN = 512L * 1024 * 1024
 
 /**
  * Kept behind each reader as well as ahead.
@@ -902,6 +909,23 @@ class TorrentStreamModule : Module() {
     if (index < 0 || index >= files.numFiles()) {
       throw CodedException("No file at index $index")
     }
+
+    // Nothing can free the middle of a file once libtorrent has written it, so
+    // a session keeps every piece it fetches until it stops. Check the room up
+    // front instead of failing on a write half an hour in.
+    val free = saveDir.usableSpace
+    if (free < FREE_SPACE_MIN) {
+      throw CodedException(
+        "Only ${free / 1024 / 1024}MB free. Clear some space and try again."
+      )
+    }
+    val fileBytes = files.fileSize(index)
+    if (free < fileBytes) {
+      log(
+        "warning: ${free / 1024 / 1024}MB free for a ${fileBytes / 1024 / 1024}MB " +
+          "file — playback will stop if you watch far enough to fill the disk"
+      )
+    }
     teardown(keep = ti.infoHash().toHex())
 
     // Never less than a piece: nothing is readable until one completes.
@@ -1046,6 +1070,21 @@ class TorrentStreamModule : Module() {
 
     ticks++
 
+    // A session only grows: every piece it fetches stays until it stops, so a
+    // long enough film on a small enough phone will run the disk out. Stop on
+    // our own terms — with a message and a wipe — rather than letting libtorrent
+    // discover it on a write and stall with no explanation.
+    if (ticks % 20 == 0 && saveDir.usableSpace < FREE_SPACE_MIN) {
+      log("out of space — stopping")
+      sendEvent(
+        "error",
+        mapOf("message" to "Out of storage space. The stream has been stopped and its files cleared.")
+      )
+      teardown()
+      wipeStreamCache()
+      return
+    }
+
     // One window per live reader, lowest offset first — that is the playback
     // connection, and it gets the tightest deadlines.
     //
@@ -1081,8 +1120,8 @@ class TorrentStreamModule : Module() {
     // bytes arriving. Priority still puts the urgent pieces first; the rest of
     // the zone just keeps the peers doing something useful.
     val width = maxOf(
-      READAHEAD_PIECES,
-      (READAHEAD_MIN_BYTES / ti.pieceLength()).toInt()
+      READAHEAD_MIN_PIECES,
+      (READAHEAD_BYTES / ti.pieceLength()).toInt()
     )
 
     /** How far behind each reader stays wanted. See REWIND_BYTES. */
@@ -1239,7 +1278,7 @@ class TorrentStreamModule : Module() {
     // everything it wants goes to "finished" and drops its seeds, so pausing
     // playback long enough to fill the window would disconnect the swarm and
     // stall on resume.
-    val spare = targets.map { (it + width + 1)..minOf(it + 2 * width, lastPiece) }
+    val spare = targets.map { (it + width + 1)..minOf(it + width + width / 2, lastPiece) }
 
     for (p in firstPiece..lastPiece) {
       if (p >= prios.size) break

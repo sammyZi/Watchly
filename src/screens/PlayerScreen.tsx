@@ -103,6 +103,8 @@ export function PlayerScreen({
   /** Swarm stats, subscribed to only while they are on screen. */
   const [stats, setStats] = useState<Progress | null>(null);
   const [scaleIdx, setScaleIdx] = useState(0);
+  /** Controls locked out, so a hand on the screen cannot pause or seek. */
+  const [locked, setLocked] = useState(false);
   /** Transient readout for the fit mode, which has no control of its own. */
   const [hud, setHud] = useState<{ icon: IconName; label: string } | null>(null);
   /** OpenSubtitles search state. */
@@ -132,6 +134,9 @@ export function PlayerScreen({
   const nudgeFade = useRef(new Animated.Value(0)).current;
   const videoRef = useRef<VlcPlayerRef>(null);
   const hudTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The back handler is subscribed once and would hold the first render's
+   *  value otherwise — same reason as `bump`. */
+  const lockRef = useRef(false);
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
@@ -314,6 +319,11 @@ export function PlayerScreen({
    */
   const tapPicture = useCallback(
     (x: number) => {
+      // Locked: the only thing a touch does is show the way out.
+      if (locked) {
+        bumpUi();
+        return;
+      }
       if (tapTimer.current) {
         clearTimeout(tapTimer.current);
         tapTimer.current = null;
@@ -332,8 +342,9 @@ export function PlayerScreen({
         });
       }, 220);
     },
-    [skip, width]
+    [skip, width, locked, bumpUi]
   );
+
 
   const showHud = useCallback(
     (next: { icon: IconName; label: string }) => {
@@ -342,6 +353,19 @@ export function PlayerScreen({
       hudTimer.current = setTimeout(() => setHud(null), 900);
     },
     []
+  );
+
+  const lock = useCallback(
+    (next: boolean) => {
+      setLocked(next);
+      lockRef.current = next;
+      // Locking hides the controls at once — leaving them up for four seconds
+      // is four seconds in which the thing you locked against can still happen.
+      if (next) setShowUi(false);
+      else bumpUi();
+      showHud({ icon: next ? 'lock' : 'unlock', label: next ? 'Locked' : 'Unlocked' });
+    },
+    [bumpUi, showHud]
   );
 
   const cycleScale = useCallback(() => {
@@ -381,6 +405,12 @@ export function PlayerScreen({
 
   useEffect(() => {
     const back = BackHandler.addEventListener('hardwareBackPress', () => {
+      // Locked means locked: leaving by the back key would defeat the point of
+      // guarding against a stray touch in the first place.
+      if (lockRef.current) {
+        bump.current();
+        return true;
+      }
       exit();
       return true;
     });
@@ -540,7 +570,25 @@ export function PlayerScreen({
             onPress={(e) => tapPicture(e.nativeEvent.locationX)}
           />
 
-          {showUi && (
+          {/* Locked: one button, and nothing else responds. A tap on the picture
+              brings it back for the usual four seconds. */}
+          {showUi && locked && (
+            <View
+              style={[styles.lockDock, { paddingLeft: insets.left }]}
+              pointerEvents="box-none"
+            >
+              <Pressable
+                onPress={() => lock(false)}
+                hitSlop={16}
+                style={styles.lockBtn}
+                accessibilityLabel="Unlock controls"
+              >
+                <Icon name="lock" size={20} color="#fff" />
+              </Pressable>
+            </View>
+          )}
+
+          {showUi && !locked && (
             <View
               // Landscape puts the notch and the gesture bar on the *sides*, so
               // the controls have to inset horizontally, not vertically.
@@ -634,6 +682,7 @@ export function PlayerScreen({
                       six buttons crowding the title; down here each one gets a
                       label and the top bar is just context again. */}
                   <View style={styles.actions}>
+                    <Action icon="lock" label="Lock" onPress={() => lock(true)} />
                     <Action
                       icon="maximize"
                       label={SCALES[scaleIdx].label}
@@ -1082,6 +1131,22 @@ const styles = StyleSheet.create({
     color: '#fff',
     flexShrink: 1,
     marginRight: space.sm,
+  },
+  // Left edge, vertically centred: away from the transport it replaces, and out
+  // of the way of the picture.
+  lockDock: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  lockBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: radius.pill,
+    backgroundColor: '#000a',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   bottomWrap: { paddingBottom: 8 },
   actions: {
