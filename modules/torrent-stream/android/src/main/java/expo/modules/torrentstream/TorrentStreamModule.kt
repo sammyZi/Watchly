@@ -124,6 +124,21 @@ private const val WINDOW_BYTES = 32L * 1024 * 1024
 private const val READAHEAD_PIECES = 240
 private const val READAHEAD_MIN_BYTES = 256L * 1024 * 1024
 
+/**
+ * Kept behind each reader as well as ahead.
+ *
+ * A short rewind is the one seek that lands on data the session already paid
+ * for, and it was the worst-served: everything behind the reader went to
+ * IGNORE the moment it passed, so stepping back a single piece put the reader
+ * outside its zone and re-aimed every zone in the torrent — which clears every
+ * piece deadline and re-prioritises the whole file mid-playback.
+ *
+ * The band itself is LOW, never DEFAULT: it must not take bandwidth from the
+ * pieces the viewer is about to need. It only spends what the forward window
+ * is not using.
+ */
+private const val REWIND_BYTES = 32L * 1024 * 1024
+
 class PlayOptions : Record {
   /** MB of the file head buffered before the player is handed the URL. The
    *  server blocks on data that has not arrived, so one piece is enough — the
@@ -199,9 +214,27 @@ class TorrentStreamModule : Module() {
    *  instead of finding the swarm a second time. */
   private var warm: TorrentHandle? = null
 
-  /** Piece data — safe to wipe on stop. */
+  /**
+   * Piece data — safe to wipe on stop, and wiped on startup, on backgrounding
+   * while idle, and in OnDestroy.
+   *
+   * Deliberately not cacheDir. Android sweeps cache directories when the device
+   * runs low on space, and a multi-GB film being read live is the largest thing
+   * there — so the OS would truncate the file mid-playback, as would the user
+   * tapping "Clear cache". App-specific external storage is the same flash at
+   * the same speed, needs no permission, goes on uninstall, and is not eligible
+   * for that sweep. It returns null only while the volume is unmounted.
+   */
   private val saveDir: File
-    get() = File(appContext.reactContext!!.cacheDir, "torrents").apply { mkdirs() }
+    get() {
+      val ctx = appContext.reactContext!!
+      return File(ctx.getExternalFilesDir(null) ?: ctx.filesDir, "torrents")
+        .apply { mkdirs() }
+    }
+
+  /** Where pieces lived before the move off cacheDir. Wiped, never written. */
+  private val legacySaveDir: File
+    get() = File(appContext.reactContext!!.cacheDir, "torrents")
 
   /** Survives stop/restart: .torrent bytes, peer endpoints, DHT routing table. */
   private val cacheRoot: File
@@ -1052,15 +1085,21 @@ class TorrentStreamModule : Module() {
       (READAHEAD_MIN_BYTES / ti.pieceLength()).toInt()
     )
 
+    /** How far behind each reader stays wanted. See REWIND_BYTES. */
+    val back = maxOf(8, (REWIND_BYTES / ti.pieceLength()).toInt())
+
     // Re-aim the zones when a reader leaves the half of one it was given (a
     // seek), when their number changes, or when the pre-roll ends and they
     // should open up. Before the window loop, because it wipes the piece
     // priorities the loop sets — and with hysteresis, because a full
     // reprioritise every tick would cost more than it buys.
+    // `t >= it - back`: a rewind inside the band it already covers is not a new
+    // zone. Without that tolerance the cheapest seek in the app was also the
+    // one that threw away every deadline in the torrent.
     val stale = zoneWidth != width ||
       zoneStarts.size != targets.size ||
-      targets.any { t -> zoneStarts.none { t >= it && t <= it + width / 2 } }
-    if (stale) applyZone(h, targets, width)
+      targets.any { t -> zoneStarts.none { t >= it - back && t <= it + width / 2 } }
+    if (stale) applyZone(h, targets, width, back)
 
     val keep = mutableSetOf<Int>()
     targets.forEachIndexed { rank, target ->
@@ -1174,7 +1213,8 @@ class TorrentStreamModule : Module() {
   /**
    * Point the download at where the readers actually are.
    *
-   * One zone per reader, each `width` pieces of it, plus the tail. Without this
+   * One zone per reader, each `width` pieces of it, plus a `back` band behind
+   * it at LOW and the tail at DEFAULT. Without this
    * the picker is free to work anywhere in the file, and a seek leaves the
    * swarm grinding through everything between the old position and the target
    * while the viewer waits.
@@ -1182,9 +1222,15 @@ class TorrentStreamModule : Module() {
    * Pieces outside the selected file keep whatever the file priorities gave
    * them — only this file's range is touched.
    */
-  private fun applyZone(h: TorrentHandle, targets: List<Int>, width: Int) {
+  private fun applyZone(h: TorrentHandle, targets: List<Int>, width: Int, back: Int) {
     val prios = runCatching { h.piecePriorities() }.getOrNull() ?: return
     val zones = targets.map { it..minOf(it + width, lastPiece) }
+    // Behind each reader, kept only at LOW — a rewind of a few seconds should
+    // find the data already there, but never at the cost of the pieces the
+    // viewer is about to reach.
+    val behind = targets.mapNotNull {
+      if (it > firstPiece) maxOf(firstPiece, it - back)..(it - 1) else null
+    }
     // A band of spare work just past each zone, kept at LOW.
     //
     // It exists for two reasons. Spare bandwidth goes to the data the viewer is
@@ -1203,7 +1249,7 @@ class TorrentStreamModule : Module() {
       // the whole point is that the swarm has exactly one job.
       prios[p] = when {
         p in tailPiece..lastPiece || zones.any { p in it } -> Priority.DEFAULT
-        spare.any { p in it } -> Priority.LOW
+        spare.any { p in it } || behind.any { p in it } -> Priority.LOW
         else -> Priority.IGNORE
       }
     }
@@ -1214,7 +1260,10 @@ class TorrentStreamModule : Module() {
     deadlined.clear()
     zoneStarts = targets
     zoneWidth = width
-    log("zone: ${zones.joinToString(", ") { "${it.first}..${it.last}" }} of $firstPiece..$lastPiece")
+    log(
+      "zone: ${zones.joinToString(", ") { "${it.first}..${it.last}" }} " +
+        "(back $back) of $firstPiece..$lastPiece"
+    )
   }
 
   /** Bytes available in an unbroken run starting at `from`. */
@@ -1305,7 +1354,11 @@ class TorrentStreamModule : Module() {
 
   /** Delete streamed/downloaded piece files. Meta + peer cache stays (tiny). */
   private fun wipeStreamCache() {
-    val dir = File(appContext.reactContext!!.cacheDir, "torrents")
+    // Anything an older build left in cacheDir is stranded otherwise — it can be
+    // several GB, and nothing writes there any more to notice it.
+    legacySaveDir.takeIf { it.exists() }?.deleteRecursively()
+
+    val dir = saveDir
     if (!dir.exists()) return
     val ok = dir.deleteRecursively()
     dir.mkdirs()
