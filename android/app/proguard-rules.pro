@@ -7,8 +7,6 @@
 # For more details, see
 #   http://developer.android.com/guide/developing/tools/proguard.html
 
-# react-native-reanimated
--keep class com.swmansion.reanimated.** { *; }
 -keep class com.facebook.react.turbomodule.** { *; }
 
 # Expo + libtorrent (JNI / reflection)
@@ -18,6 +16,10 @@
 -dontwarn org.libtorrent4j.**
 -keep class com.facebook.react.** { *; }
 
-# react-native-video
--keep class com.brentvatne.** { *; }
--dontwarn com.brentvatne.**
+# libVLC. libvlcjni.so resolves the video-output callbacks by name over JNI —
+# AWindowNativeHandler, onSurfacesCreated, dispatchEventFromNative. R8 renames
+# them, and the lookup happens the moment VLC attaches to the surface, so the
+# release build dies exactly when buffering ends and the first frame goes up.
+-keep class org.videolan.** { *; }
+-keep interface org.videolan.** { *; }
+-dontwarn org.videolan.**

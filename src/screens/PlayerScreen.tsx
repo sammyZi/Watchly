@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   AppState,
   BackHandler,
   Pressable,
@@ -79,8 +80,11 @@ export function PlayerScreen({
   /** Tracks that failed to select. libVLC renders essentially every subtitle
    *  format, so this should stay empty — it is a safety net, not a workaround. */
   const [badTracks, setBadTracks] = useState<number[]>([]);
-  /** Brief "+10s" flash so a double-tap in the dark is acknowledged. */
-  const [nudge, setNudge] = useState<number | null>(null);
+  /** The side that was double-tapped and how far the run of taps has moved, so
+   *  tapping four times reads "40 seconds" rather than flashing 10 four times. */
+  const [nudge, setNudge] = useState<{ side: 'left' | 'right'; total: number } | null>(
+    null
+  );
   /** Swarm stats, subscribed to only while they are on screen. */
   const [stats, setStats] = useState<Progress | null>(null);
   /** OpenSubtitles search state. */
@@ -107,6 +111,7 @@ export function PlayerScreen({
   /** Whether the app has been away since playback last ran. */
   const left = useRef(false);
   const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nudgeFade = useRef(new Animated.Value(0)).current;
   const videoRef = useRef<VlcPlayerRef>(null);
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -254,15 +259,31 @@ export function PlayerScreen({
   );
 
   const skip = useCallback(
-    (delta: number) => {
+    /** `quiet` is the double-tap: YouTube does not raise the controls for it,
+     *  and neither do we — the ripple is the whole acknowledgement. */
+    (delta: number, quiet = false) => {
       if (!duration) return;
       seekTo(position.current + delta);
-      bumpUi();
-      setNudge(delta);
+      if (!quiet) bumpUi();
+
+      const side = delta < 0 ? 'left' : 'right';
+      setNudge((prev) =>
+        prev && prev.side === side
+          ? { side, total: prev.total + delta }
+          : { side, total: delta }
+      );
+      // Hold at full strength while the taps keep coming, then fade.
+      nudgeFade.setValue(1);
+      Animated.timing(nudgeFade, {
+        toValue: 0,
+        duration: 350,
+        delay: 300,
+        useNativeDriver: true,
+      }).start();
       if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
       nudgeTimer.current = setTimeout(() => setNudge(null), 700);
     },
-    [duration, seekTo, bumpUi]
+    [duration, seekTo, bumpUi, nudgeFade]
   );
 
   /**
@@ -275,7 +296,7 @@ export function PlayerScreen({
       if (tapTimer.current) {
         clearTimeout(tapTimer.current);
         tapTimer.current = null;
-        skip(x < width / 2 ? -SKIP_SECONDS : SKIP_SECONDS);
+        skip(x < width / 2 ? -SKIP_SECONDS : SKIP_SECONDS, true);
         return;
       }
       tapTimer.current = setTimeout(() => {
@@ -761,11 +782,32 @@ export function PlayerScreen({
           )}
 
           {nudge !== null && (
-            <View pointerEvents="none" style={styles.nudge}>
-              <Text style={styles.nudgeText}>
-                {nudge > 0 ? `+${nudge}s` : `${nudge}s`}
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.ripple,
+                nudge.side === 'left' ? styles.rippleLeft : styles.rippleRight,
+                { opacity: nudgeFade },
+              ]}
+            >
+              <View style={styles.rippleArrows}>
+                <Icon
+                  name={nudge.side === 'left' ? 'chevron-left' : 'chevron-right'}
+                  size={20}
+                  color="#fff"
+                />
+                <View style={styles.rippleArrowSecond}>
+                  <Icon
+                    name={nudge.side === 'left' ? 'chevron-left' : 'chevron-right'}
+                    size={20}
+                    color="#fff"
+                  />
+                </View>
+              </View>
+              <Text style={styles.rippleText}>
+                {Math.abs(nudge.total)} seconds
               </Text>
-            </View>
+            </Animated.View>
           )}
 
           {/* A seek lands in a region the swarm has not sent yet — say so, with
@@ -1061,19 +1103,35 @@ const styles = StyleSheet.create({
     marginLeft: -6,
     backgroundColor: '#3b6fe0',
   },
-  nudge: {
+  // Half the picture, bulging inwards from the edge that was tapped — the outer
+  // edge stays flush with the screen, exactly the shape YouTube uses.
+  ripple: {
     position: 'absolute',
-    alignSelf: 'center',
-    top: '45%',
-    backgroundColor: '#000a',
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 999,
+    top: 0,
+    bottom: 0,
+    width: '50%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    backgroundColor: '#ffffff1f',
   },
-  nudgeText: {
+  rippleLeft: {
+    left: 0,
+    borderTopRightRadius: 1000,
+    borderBottomRightRadius: 1000,
+  },
+  rippleRight: {
+    right: 0,
+    borderTopLeftRadius: 1000,
+    borderBottomLeftRadius: 1000,
+  },
+  rippleArrows: { flexDirection: 'row' },
+  // Overlapped rather than spaced: two chevrons read as one arrowhead.
+  rippleArrowSecond: { marginLeft: -10 },
+  rippleText: {
     ...type.meta,
     color: '#fff',
-    fontSize: 16,
+    fontSize: 13,
     fontFamily: font.medium,
     fontVariant: ['tabular-nums'],
   },

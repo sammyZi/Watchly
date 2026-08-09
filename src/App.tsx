@@ -189,10 +189,13 @@ function Shell() {
     [open, fail]
   );
 
-  // Opened from another app: a magnet link, or a .torrent shared in.
+  // Opened from another app: a magnet link, or a .torrent shared in. Only this
+  // path leaves the mode unset, so only it gets the stream/download picker.
   useEffect(() => {
     const handle = (incoming: string | null) => {
-      if (incoming && isTorrentSource(incoming)) openUri(incoming);
+      if (!incoming || !isTorrentSource(incoming)) return;
+      setTorrentMode(null);
+      openUri(incoming);
     };
     Linking.getInitialURL().then(handle);
     const sub = Linking.addEventListener('url', ({ url }) => handle(url));
@@ -400,7 +403,10 @@ function Shell() {
             recent={history}
             error={torrent.error}
             busy={phase === 'inspecting'}
-            onOpenUri={openUri}
+            onOpenUri={(uri) => {
+              setTorrentMode('stream');
+              openUri(uri);
+            }}
             onPlayFile={(target, index) => open(target, index)}
             onSeeAll={() => setTab('history')}
           />
@@ -408,7 +414,10 @@ function Shell() {
         {tab === 'history' && (
           <HistoryScreen
             history={history}
-            onOpenItem={open}
+            onOpenItem={(target) => {
+              setTorrentMode('stream');
+              open(target);
+            }}
             onPlayFile={(target, index) => open(target, index)}
             onDownloadFile={(target, index) => {
               setTorrentMode('download');

@@ -42,8 +42,20 @@ export function SourceInput({
   };
 
   const pickTorrent = async () => {
-    const r = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
-    if (!r.canceled) submit(r.assets[0].uri);
+    const r = await DocumentPicker.getDocumentAsync({
+      // Only .torrent. The name check is the real guard: providers that do not
+      // map the extension hand back octet-stream, so a MIME filter alone either
+      // hides every torrent or lets everything through.
+      type: ['application/x-bittorrent', 'application/octet-stream'],
+      copyToCacheDirectory: true,
+    });
+    if (r.canceled) return;
+    const file = r.assets[0];
+    if (!file.name?.toLowerCase().endsWith('.torrent')) {
+      setHint('That is not a .torrent file');
+      return;
+    }
+    submit(file.uri);
   };
 
   return (
