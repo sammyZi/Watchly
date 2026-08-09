@@ -25,6 +25,15 @@ export type VlcPlayerRef = {
   snapshot(): Promise<string | null>;
 };
 
+/** libVLC's own fit modes, by their enum names. */
+export type VlcScaleType =
+  | 'SURFACE_BEST_FIT'
+  | 'SURFACE_FIT_SCREEN'
+  | 'SURFACE_FILL'
+  | 'SURFACE_16_9'
+  | 'SURFACE_4_3'
+  | 'SURFACE_ORIGINAL';
+
 export type VlcPlayerProps = {
   style?: ViewStyle;
   /** http(s) or file uri. Changing it reloads the player. */
@@ -38,6 +47,8 @@ export type VlcPlayerProps = {
   audioTrack?: number | null;
   /** Absolute paths of external subtitle files to load alongside the media. */
   subtitleFiles?: string[] | null;
+  /** How the picture is fitted to the surface. Defaults to best fit. */
+  scaleType?: VlcScaleType;
 
   onLoaded?: (e: { nativeEvent: { duration: number } }) => void;
   onProgress?: (e: { nativeEvent: { currentTime: number } }) => void;

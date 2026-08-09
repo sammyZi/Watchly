@@ -21,11 +21,11 @@ import * as FileSystem from 'expo-file-system';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { VlcPlayer, type VlcPlayerRef, type VlcTrack } from '../../modules/vlc-player';
 import TorrentStream, { type Progress } from '../../modules/torrent-stream';
-import { Icon } from '../components/Icon';
+import { Icon, type IconName } from '../components/Icon';
 import { clock, speed } from '../lib/format';
 import { searchSubtitles, downloadSubtitle, type SubtitleResult } from '../lib/opensubtitles';
 import { recordDownload } from './DownloadsScreen';
-import { font, space, type } from '../theme';
+import { font, radius, space, type } from '../theme';
 
 /** How often to refresh the library tile while watching. Cheap now: it copies
  *  the frame already on screen, so it never touches the stream. */
@@ -33,6 +33,21 @@ const POSTER_EVERY_MS = 30_000;
 
 const SKIP_SECONDS = 10;
 const RATES = [0.75, 1, 1.25, 1.5, 2];
+
+/**
+ * libVLC's fit modes, in the order the button cycles them.
+ *
+ * Fill crops to the screen and keeps the shape; stretch distorts to it. Both
+ * are here because they are the two different things people mean by "fill".
+ */
+const SCALES = [
+  { type: 'SURFACE_BEST_FIT', label: 'Best fit' },
+  { type: 'SURFACE_FIT_SCREEN', label: 'Fill (crop)' },
+  { type: 'SURFACE_FILL', label: 'Stretch' },
+  { type: 'SURFACE_16_9', label: '16:9' },
+  { type: 'SURFACE_4_3', label: '4:3' },
+  { type: 'SURFACE_ORIGINAL', label: 'Original' },
+] as const;
 
 /**
  * Player chrome over a libVLC surface. The controls are ours because no engine
@@ -87,6 +102,9 @@ export function PlayerScreen({
   );
   /** Swarm stats, subscribed to only while they are on screen. */
   const [stats, setStats] = useState<Progress | null>(null);
+  const [scaleIdx, setScaleIdx] = useState(0);
+  /** Transient readout for the fit mode, which has no control of its own. */
+  const [hud, setHud] = useState<{ icon: IconName; label: string } | null>(null);
   /** OpenSubtitles search state. */
   const [searching, setSearching] = useState(false);
   const [subResults, setSubResults] = useState<SubtitleResult[]>([]);
@@ -113,6 +131,7 @@ export function PlayerScreen({
   const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nudgeFade = useRef(new Animated.Value(0)).current;
   const videoRef = useRef<VlcPlayerRef>(null);
+  const hudTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
@@ -207,7 +226,9 @@ export function PlayerScreen({
       await FileSystem.writeAsStringAsync(dest, content);
       setExternalSubs((prev) => [...prev, dest]);
       setSearching(false);
-      bumpUi();
+      // Through the ref: bumpUi is declared below this callback, so naming it
+      // here read it inside its own temporal dead zone.
+      bump.current();
     } catch (e: any) {
       const msg = String(e?.message ?? e);
       if (msg.includes('403') || msg.includes('401')) {
@@ -217,7 +238,7 @@ export function PlayerScreen({
       }
       setSearching(false);
     }
-  }, [openSubtitlesKey, bumpUi, warn]);
+  }, [openSubtitlesKey, warn]);
 
   // No setCurrent here: every caller either seeks (which sets it) or is only
   // reachable while the overlay is already up and the clock already live. The
@@ -314,6 +335,22 @@ export function PlayerScreen({
     [skip, width]
   );
 
+  const showHud = useCallback(
+    (next: { icon: IconName; label: string }) => {
+      setHud(next);
+      if (hudTimer.current) clearTimeout(hudTimer.current);
+      hudTimer.current = setTimeout(() => setHud(null), 900);
+    },
+    []
+  );
+
+  const cycleScale = useCallback(() => {
+    const next = (scaleIdx + 1) % SCALES.length;
+    setScaleIdx(next);
+    showHud({ icon: 'maximize', label: SCALES[next].label });
+    bumpUi();
+  }, [scaleIdx, showHud, bumpUi]);
+
   // Video is a landscape medium; go there on open and hand the phone back on exit.
   useEffect(() => {
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
@@ -408,6 +445,7 @@ export function PlayerScreen({
             rate={rate}
             subtitleTrack={subTrack}
             subtitleFiles={[...(subtitleFiles ?? []), ...externalSubs]}
+            scaleType={SCALES[scaleIdx].type}
             onTracks={({ nativeEvent }) => setTracks(nativeEvent.subtitles)}
             onProgress={({ nativeEvent: { currentTime } }) => {
               // Between asking for a seek and it landing, this still reports
@@ -539,65 +577,9 @@ export function PlayerScreen({
                     </View>
                   )}
 
-                  <View style={styles.topRight}>
-                    {fileIndex >= 0 && (
-                      <Pressable
-                        onPress={saveCopy}
-                        hitSlop={12}
-                        style={styles.iconBtn}
-                        accessibilityLabel="Save to Downloads"
-                      >
-                        <Icon name="download" size={18} color="#fff" />
-                      </Pressable>
-                    )}
-                    <Pressable
-                      onPress={handOff}
-                      hitSlop={12}
-                      style={styles.iconBtn}
-                      accessibilityLabel="Play in another app"
-                    >
-                      <Icon name="external-link" size={18} color="#fff" />
-                    </Pressable>
-                    <Pressable
-                      onPress={() => {
-                        setSearching((s) => !s);
-                        if (!searching) setSubQuery(title ?? '');
-                        bumpUi();
-                      }}
-                      hitSlop={12}
-                      style={[styles.iconBtn, searching && styles.iconBtnOn]}
-                      accessibilityLabel="Search OpenSubtitles"
-                    >
-                      <Icon name="search" size={18} color="#fff" />
-                    </Pressable>
-                    <Pressable
-                      onPress={() => {
-                        setPicking((p) => !p);
-                        bumpUi();
-                      }}
-                      hitSlop={12}
-                      style={[styles.iconBtn, subTrack !== null && styles.iconBtnOn]}
-                    >
-                      <MaterialIcons
-                        name={subTrack === null ? 'subtitles-off' : 'subtitles'}
-                        size={20}
-                        color="#fff"
-                      />
-                    </Pressable>
-                    <Pressable
-                      onPress={() => {
-                        setRate((r) => RATES[(RATES.indexOf(r) + 1) % RATES.length]);
-                        bumpUi();
-                      }}
-                      hitSlop={12}
-                      style={[styles.iconBtn, styles.rateBtn, rate !== 1 && styles.iconBtnOn]}
-                    >
-                      <Text style={styles.rateText}>{rate}x</Text>
-                    </Pressable>
-                  </View>
                 </View>
 
-                <View style={styles.center}>
+                <View style={styles.center} pointerEvents="box-none">
                   <Pressable
                     onPress={() => skip(-SKIP_SECONDS)}
                     hitSlop={12}
@@ -634,17 +616,67 @@ export function PlayerScreen({
                   </Pressable>
                 </View>
 
-                <View style={styles.bottom}>
-                  <Text style={styles.time}>{clock(current)}</Text>
-                  <SeekBar
-                    value={duration ? current / duration : 0}
-                    onScrub={scrubTo}
-                    onSeek={(ratio) => {
-                      seekTo(ratio * duration);
-                      bumpUi();
-                    }}
-                  />
-                  <Text style={styles.time}>{clock(duration)}</Text>
+                <View style={styles.bottomWrap}>
+                  <View style={styles.bottom}>
+                    <Text style={styles.time}>{clock(current)}</Text>
+                    <SeekBar
+                      value={duration ? current / duration : 0}
+                      onScrub={scrubTo}
+                      onSeek={(ratio) => {
+                        seekTo(ratio * duration);
+                        bumpUi();
+                      }}
+                    />
+                    <Text style={styles.time}>{clock(duration)}</Text>
+                  </View>
+
+                  {/* Everything that is not playback itself. It was a stack of
+                      six buttons crowding the title; down here each one gets a
+                      label and the top bar is just context again. */}
+                  <View style={styles.actions}>
+                    <Action
+                      icon="maximize"
+                      label={SCALES[scaleIdx].label}
+                      on={scaleIdx !== 0}
+                      onPress={cycleScale}
+                    />
+                    <Action
+                      material={subTrack === null ? 'subtitles-off' : 'subtitles'}
+                      label="Subtitles"
+                      on={subTrack !== null}
+                      onPress={() => {
+                        setPicking((p) => !p);
+                        bumpUi();
+                      }}
+                    />
+                    <Action
+                      icon="search"
+                      label="Find subs"
+                      on={searching}
+                      onPress={() => {
+                        setSearching((s) => !s);
+                        if (!searching) setSubQuery(title ?? '');
+                        bumpUi();
+                      }}
+                    />
+                    <Action
+                      text={`${rate}x`}
+                      label="Speed"
+                      on={rate !== 1}
+                      onPress={() => {
+                        setRate((r) => RATES[(RATES.indexOf(r) + 1) % RATES.length]);
+                        bumpUi();
+                      }}
+                    />
+                    {fileIndex >= 0 && (
+                      <Action icon="download" label="Save" onPress={saveCopy} />
+                    )}
+                    <Action
+                      icon="external-link"
+                      label="Open in"
+                      onPress={handOff}
+                    />
+                  </View>
                 </View>
             </View>
           )}
@@ -781,6 +813,13 @@ export function PlayerScreen({
             </View>
           )}
 
+          {hud !== null && (
+            <View pointerEvents="none" style={styles.hud}>
+              <Icon name={hud.icon} size={16} color="#fff" />
+              <Text style={styles.hudLabel}>{hud.label}</Text>
+            </View>
+          )}
+
           {nudge !== null && (
             <Animated.View
               pointerEvents="none"
@@ -833,6 +872,44 @@ export function PlayerScreen({
         </View>
       )}
     </View>
+  );
+}
+
+/** One control in the bottom row: glyph over a label, tinted when active. */
+function Action({
+  icon,
+  material,
+  text,
+  label,
+  on,
+  onPress,
+}: {
+  icon?: IconName;
+  /** Feather has no closed-caption glyph — see the MaterialIcons note above. */
+  material?: 'subtitles' | 'subtitles-off';
+  /** For the speed control, which is a number rather than a symbol. */
+  text?: string;
+  label: string;
+  on?: boolean;
+  onPress: () => void;
+}) {
+  const tint = on ? '#7aa2ff' : '#fff';
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={8}
+      accessibilityLabel={label}
+      style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}
+    >
+      <View style={styles.actionGlyph}>
+        {!!icon && <Icon name={icon} size={18} color={tint} />}
+        {!!material && <MaterialIcons name={material} size={19} color={tint} />}
+        {!!text && <Text style={[styles.actionText, { color: tint }]}>{text}</Text>}
+      </View>
+      <Text numberOfLines={1} style={[styles.actionLabel, on && styles.actionLabelOn]}>
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -1006,7 +1083,27 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     marginRight: space.sm,
   },
-  topRight: { flexDirection: 'row', gap: 10 },
+  bottomWrap: { paddingBottom: 8 },
+  actions: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-around',
+    paddingHorizontal: 12,
+    paddingTop: 2,
+  },
+  action: { alignItems: 'center', gap: 3, minWidth: 62, paddingVertical: 4 },
+  actionPressed: { opacity: 0.55 },
+  // Fixed height so the "1.5x" label and the icons sit on the same baseline.
+  actionGlyph: { height: 20, alignItems: 'center', justifyContent: 'center' },
+  actionText: {
+    ...type.meta,
+    fontSize: 15,
+    lineHeight: 19,
+    fontFamily: font.medium,
+    fontVariant: ['tabular-nums'],
+  },
+  actionLabel: { ...type.meta, color: '#ffffffa0', fontSize: 10, lineHeight: 13 },
+  actionLabelOn: { color: '#7aa2ff' },
   stats: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1032,13 +1129,22 @@ const styles = StyleSheet.create({
   },
   waitingText: { ...type.meta, color: '#ffffffd0' },
   waitingMeta: { ...type.meta, color: '#ffffff80', fontSize: 11 },
-  center: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 28 },
+  // Centred on the picture, not between the bars. As a flex child of a
+  // space-between column it drifted upwards the moment the bottom grew a second
+  // row — the transport belongs in the middle of the screen either way.
+  center: {
+    ...StyleSheet.absoluteFill,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 28,
+  },
   bottom: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
     paddingHorizontal: 16,
-    paddingBottom: 18,
+    paddingBottom: 4,
   },
   iconBtn: {
     width: 40,
@@ -1047,14 +1153,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#0008',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  iconBtnOn: { backgroundColor: '#3b6fe0' },
-  rateBtn: { width: 48 },
-  rateText: {
-    ...type.meta,
-    color: '#fff',
-    fontFamily: font.medium,
-    fontVariant: ['tabular-nums'],
   },
   skipBtn: {
     width: 52,
@@ -1102,6 +1200,27 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     marginLeft: -6,
     backgroundColor: '#3b6fe0',
+  },
+  // Under the title rather than mid-screen: at 38% it landed straight on the
+  // play button, which is the one thing that must never be covered.
+  hud: {
+    position: 'absolute',
+    alignSelf: 'center',
+    top: 76,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#000c',
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: radius.pill,
+  },
+  hudLabel: {
+    ...type.meta,
+    color: '#fff',
+    fontSize: 14,
+    fontFamily: font.medium,
+    fontVariant: ['tabular-nums'],
   },
   // Half the picture, bulging inwards from the edge that was tapped — the outer
   // edge stays flush with the screen, exactly the shape YouTube uses.

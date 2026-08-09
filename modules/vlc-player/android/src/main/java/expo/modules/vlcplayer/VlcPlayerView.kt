@@ -64,6 +64,8 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
   private var buffering = false
   /** External subtitle file paths (local files from the torrent). */
   private var subtitleFiles: List<String>? = null
+  /** Survives a restart(), which rebuilds the player it is set on. */
+  private var scale = MediaPlayer.ScaleType.SURFACE_BEST_FIT
 
   /**
    * The video surface is added here, not by React, and React Native does not
@@ -134,6 +136,17 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
 
   fun setAudioTrack(id: Int?) {
     if (id != null) player?.setAudioTrack(id)
+  }
+
+  /**
+   * How the picture is fitted to the surface. libVLC's own enum — best fit,
+   * fit screen (crop to fill), fill (stretch), 16:9, 4:3, original — so this is
+   * a name lookup, not a matrix of our own.
+   */
+  fun setScaleType(name: String?) {
+    scale = runCatching { MediaPlayer.ScaleType.valueOf(name ?: "") }
+      .getOrDefault(MediaPlayer.ScaleType.SURFACE_BEST_FIT)
+    player?.videoScale = scale
   }
 
   fun setSubtitleFiles(paths: List<String>?) {
@@ -273,7 +286,7 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
       )
       val mediaPlayer = MediaPlayer(instance)
       mediaPlayer.attachViews(videoLayout, null, true, false)
-      mediaPlayer.videoScale = MediaPlayer.ScaleType.SURFACE_BEST_FIT
+      mediaPlayer.videoScale = scale
       mediaPlayer.setEventListener(::onVlcEvent)
 
       val media = Media(instance, Uri.parse(uri))
