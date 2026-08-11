@@ -5,6 +5,27 @@ const API = 'https://apibay.org/q.php';
 
 export type Kind = 'movie' | 'tv' | 'other';
 
+/** What a release actually contains — one episode, a season, or the lot. */
+export type Scope = 'episode' | 'season' | 'complete';
+
+/** "Ted Lasso" + S1E2 -> the string an indexer will match. */
+export const episodeTag = (season: number, episode: number) =>
+  `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
+
+/**
+ * Order matters: "S01.COMPLETE" is a season, "Seasons 1-3" is the lot, and
+ * anything carrying an episode marker is a single episode whatever else it
+ * says. Unmarked names are treated as one episode — for a film that is true,
+ * and for a series it is the safe assumption.
+ */
+export function scopeOf(name: string): Scope {
+  if (/\bs\d{1,2}\s?e\d{1,2}\b|\b\d{1,2}x\d{2}\b/i.test(name)) return 'episode';
+  if (/\bseasons?\s*\d{1,2}\s*[-–]\s*\d{1,2}\b|\ball seasons\b|\bcomplete series\b/i.test(name))
+    return 'complete';
+  if (/\bs\d{1,2}\b|\bseason\s*\d{1,2}\b/i.test(name)) return 'season';
+  return 'episode';
+}
+
 export type Hit = {
   id: string;
   name: string;
@@ -14,6 +35,7 @@ export type Hit = {
   size: number;
   quality: string | null;
   kind: Kind;
+  scope: Scope;
   /** IMDb id when the uploader tagged one — the index carries no genre. */
   imdb: string | null;
 };
@@ -45,6 +67,7 @@ export function toHits(rows: Row[]): Hit[] {
         leechers: Number(r.leechers),
         size: Number(r.size),
         quality: quality(name),
+        scope: scopeOf(name),
         kind: kindOf(Number(r.category)),
         imdb: /^tt\d+$/.test(String(r.imdb ?? '')) ? String(r.imdb) : null,
       };
@@ -105,4 +128,43 @@ export async function searchTorrents(
 ): Promise<Hit[]> {
   const rows = await get(`${API}?q=${encodeURIComponent(query)}&cat=200`, signal);
   return rank(toHits(rows), query);
+}
+
+/**
+ * Every release that can play one episode — including the packs.
+ *
+ * Searching for "Show S01E02" alone finds the loose episode and misses the
+ * season pack sitting next to it with thirty times the seeders. A pack streams
+ * just as well, because only the one file inside it is ever fetched, so all
+ * three shapes are searched and ranked together on swarm health.
+ */
+export async function searchEpisode(
+  show: string,
+  season: number,
+  episode: number,
+  signal?: AbortSignal
+): Promise<Hit[]> {
+  const season2 = String(season).padStart(2, '0');
+  const queries = [
+    `${show} ${episodeTag(season, episode)}`,
+    `${show} S${season2}`,
+    `${show} complete`,
+  ];
+
+  const found = await Promise.all(
+    queries.map((q) => searchTorrents(q, signal).catch(() => [] as Hit[]))
+  );
+
+  // The same torrent comes back from more than one query.
+  const seen = new Map<string, Hit>();
+  for (const hit of found.flat()) if (!seen.has(hit.id)) seen.set(hit.id, hit);
+
+  // A pack for a different season is worse than useless — it cannot contain
+  // this episode at all, and it would outrank everything on seeders.
+  const wrongSeason = new RegExp(`\bs(?!${season2}\b)\d{2}\b`, 'i');
+  const usable = [...seen.values()].filter(
+    (h) => h.scope === 'complete' || !wrongSeason.test(h.name)
+  );
+
+  return rank(usable, show);
 }

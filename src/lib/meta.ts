@@ -37,10 +37,6 @@ export type Title = Meta & {
   episodes: Episode[];
 };
 
-/** "Ted Lasso" + S1E2 -> the string an indexer will match. */
-export const episodeTag = (season: number, episode: number) =>
-  `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
-
 export type Meta = {
   title: string;
   year: string | null;
@@ -204,13 +200,25 @@ export function toTitles(metas: Record<string, any>[], kind: 'movie' | 'tv'): Ti
     }));
 }
 
-/** Cinemeta omits fields rather than nulling them, and `released` is a date. */
+/**
+ * Cinemeta omits fields rather than nulling them, and the same title comes back
+ * at three different levels of detail: a search result carries little more than
+ * a name and a poster, a catalog row has genres and a rating, `/meta` has
+ * everything. Each field falls back through the shapes it can appear in.
+ */
 export function toMeta(m: Record<string, any>): Meta {
   return {
     title: String(m.name ?? ''),
-    year: m.year ? String(m.year) : (String(m.released ?? '').slice(0, 4) || null),
+    // `releaseInfo` is a search result's only date, and for a series it is a
+    // range ("2020–2023") — the leading year is the useful part either way.
+    year:
+      (m.year ? String(m.year) : null) ??
+      (m.releaseInfo ? String(m.releaseInfo) : null) ??
+      (String(m.released ?? '').slice(0, 4) || null),
     rating: m.imdbRating ? String(m.imdbRating) : null,
-    genres: Array.isArray(m.genre) ? m.genre.slice(0, 3).map(String) : [],
+    genres: Array.isArray(m.genre ?? m.genres)
+      ? (m.genre ?? m.genres).slice(0, 3).map(String)
+      : [],
     poster: m.poster ? String(m.poster) : null,
     plot: m.description ? String(m.description) : null,
     // Kept whole — the detail page lists them, the search card takes the first

@@ -1,6 +1,6 @@
 // node --experimental-strip-types src/lib/search.test.ts
 import assert from 'node:assert';
-import { health, kindOf, quality, rank, toHits, type Hit } from './search.ts';
+import { episodeTag, health, kindOf, quality, rank, scopeOf, toHits, type Hit } from './search.ts';
 
 const row = (over: Record<string, string | number> = {}) => ({
   id: '1',
@@ -58,6 +58,7 @@ const hit = (over: Partial<Hit>): Hit => ({
   leechers: 0,
   size: 0,
   quality: null,
+  scope: 'episode',
   kind: 'movie',
   imdb: null,
   ...over,
@@ -80,5 +81,19 @@ assert.deepEqual(
   ).map((h) => h.id),
   ['exact', 'partial']
 );
+
+
+assert.equal(episodeTag(1, 2), 'S01E02');
+assert.equal(episodeTag(10, 11), 'S10E11');
+
+// What a release contains, from its name alone.
+assert.equal(scopeOf('Ted Lasso S01E02 1080p WEB-DL'), 'episode');
+assert.equal(scopeOf('Ted.Lasso.S01.COMPLETE.720p.WEBRip'), 'season');
+assert.equal(scopeOf('Ted Lasso (2020) Season 1 S01 1080p'), 'season');
+assert.equal(scopeOf('Ted Lasso Seasons 1-3 COMPLETE 1080p'), 'complete');
+assert.equal(scopeOf('Ted Lasso Complete Series 1080p'), 'complete');
+assert.equal(scopeOf('Some.Film.2024.1080p.BluRay'), 'episode');
+// An episode marker wins over anything else in the name.
+assert.equal(scopeOf('Show Complete Series S02E05'), 'episode');
 
 console.log('ok');

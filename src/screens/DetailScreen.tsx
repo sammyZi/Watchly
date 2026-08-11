@@ -16,15 +16,9 @@ import { Icon } from '../components/Icon';
 import { ProgressBar } from '../components/ProgressBar';
 import { bytes } from '../lib/format';
 import { hueOf } from '../lib/title';
-import {
-  episodeTag,
-  loadTitle,
-  reviewLinks,
-  type Episode,
-  type Title,
-} from '../lib/meta';
+import { loadTitle, reviewLinks, type Episode, type Title } from '../lib/meta';
 import { WATCHED } from '../lib/watched';
-import { health, searchTorrents, type Hit } from '../lib/search';
+import { episodeTag, health, searchEpisode, searchTorrents, type Hit } from '../lib/search';
 import { colors, fadeToBg, font, radius, space, TAB_INSET, type } from '../theme';
 
 /**
@@ -145,14 +139,16 @@ export function DetailScreen({
   useEffect(() => {
     const ctrl = new AbortController();
     abort.current = ctrl;
-    const query = [
-      title.title,
-      picked ? episodeTag(picked.season, picked.episode) : title.kind === 'movie' && title.year,
-    ]
-      .filter(Boolean)
-      .join(' ');
     setSources(null);
-    searchTorrents(query, ctrl.signal)
+    // An episode also looks for the packs that contain it — they routinely
+    // carry twenty times the seeders, and only the one file inside is fetched.
+    const wanted = picked
+      ? searchEpisode(title.title, picked.season, picked.episode, ctrl.signal)
+      : searchTorrents(
+          [title.title, title.kind === 'movie' && title.year].filter(Boolean).join(' '),
+          ctrl.signal
+        );
+    wanted
       .then((hits) => !ctrl.signal.aborted && setSources(hits))
       .catch((e) => {
         if (ctrl.signal.aborted) return;
@@ -453,6 +449,9 @@ export function DetailScreen({
                   <Text style={styles.sourceMeta}>
                     {bytes(hit.size)}
                     {hit.quality ? ` · ${hit.quality}` : ''}
+                    {picked && hit.scope !== 'episode'
+                      ? ` · ${hit.scope === 'season' ? 'season pack' : 'complete series'}`
+                      : ''}
                   </Text>
                 </View>
                 <View style={[styles.pill, { backgroundColor: tone.bg }]}>
