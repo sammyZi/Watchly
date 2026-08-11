@@ -30,6 +30,42 @@ export function parseEpisode(name: string): { season: number; episode: number } 
  * says. Unmarked names are treated as one episode — for a film that is true,
  * and for a series it is the safe assumption.
  */
+/**
+ * Which seasons a release name claims to hold. Empty when it names none.
+ *
+ * Written as plain regex literals on purpose: the same expressions inside a
+ * template literal silently become backspace characters, because `\b` is a
+ * valid string escape. That is exactly how the wrong-season filter this
+ * replaces came to match nothing at all.
+ */
+export function seasonsIn(name: string): number[] {
+  const out = new Set<number>();
+
+  // Ranges first — "Seasons 1-3", "S01-S03". A range makes the single-token
+  // pass below redundant, and reading "1" out of "1-3" would be wrong.
+  const RANGES = [
+    /\bs(\d{1,2})\s*[-–]\s*s?(\d{1,2})\b/gi,
+    /\bseasons?[ ._-]*(\d{1,2})\s*[-–]\s*s?(\d{1,2})\b/gi,
+  ];
+  for (const pattern of RANGES) {
+    for (const found of name.matchAll(pattern)) {
+      const from = Number(found[1]);
+      const to = Number(found[2]);
+      for (let i = Math.min(from, to); i <= Math.max(from, to); i++) out.add(i);
+    }
+  }
+  if (out.size) return [...out].sort((a, b) => a - b);
+
+  // Two forms, deliberately kept apart. The bare token allows no separator, so
+  // "Ocean's 8" cannot read as season 8; the spelled-out one allows dots and
+  // spaces, because "Season.5" is how half of them are written.
+  const ONES = [/\bs(\d{1,2})(?=e\d{1,2}\b|\b)/gi, /\bseasons?[ ._-]*(\d{1,2})\b/gi];
+  for (const pattern of ONES) {
+    for (const found of name.matchAll(pattern)) out.add(Number(found[1]));
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
 export function scopeOf(name: string): Scope {
   if (/\bs\d{1,2}\s?e\d{1,2}\b|\b\d{1,2}x\d{2}\b/i.test(name)) return 'episode';
   if (/\bseasons?\s*\d{1,2}\s*[-–]\s*\d{1,2}\b|\ball seasons\b|\bcomplete series\b/i.test(name))
@@ -172,11 +208,13 @@ export async function searchEpisode(
   for (const hit of found.flat()) if (!seen.has(hit.id)) seen.set(hit.id, hit);
 
   // A pack for a different season is worse than useless — it cannot contain
-  // this episode at all, and it would outrank everything on seeders.
-  const wrongSeason = new RegExp(`\bs(?!${season2}\b)\d{2}\b`, 'i');
-  const usable = [...seen.values()].filter(
-    (h) => h.scope === 'complete' || !wrongSeason.test(h.name)
-  );
+  // this episode at all, and with a season's worth of seeders behind it, it
+  // would outrank every release that can. A name claiming no season is kept:
+  // that is what a complete-series pack looks like.
+  const usable = [...seen.values()].filter((h) => {
+    const claims = seasonsIn(h.name);
+    return claims.length === 0 || claims.includes(season);
+  });
 
   return rank(usable, show);
 }

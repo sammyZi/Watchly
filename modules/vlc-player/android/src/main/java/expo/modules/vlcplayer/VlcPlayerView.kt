@@ -159,6 +159,13 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
         m.addSlave(IMedia.Slave(IMedia.Slave.Type.Subtitle, 4, Uri.fromFile(subFile).toString()))
       }
     }
+    // Adding a slave makes libVLC display it immediately. Fetching a file is
+    // not the same as asking for it to be shown, so put the chosen state back.
+    p.setSpuTrack(wantedSpu ?: -1)
+    // The slave is not parsed yet, so it is not in spuTracks() on this pass —
+    // re-send once it is, or a subtitle just downloaded would never appear in
+    // the picker.
+    postDelayed({ player?.let { sendTracks(it) } }, 800)
   }
 
   /* ---------------------------------------------------------------- control */
@@ -355,7 +362,11 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     val length = p.length
     if (length <= 0) return
     announced = true
-    wantedSpu?.let { p.setSpuTrack(it) }
+    // `?: -1` and not `?.let`, which is what this was: with no track chosen the
+    // old form applied nothing, and libVLC turns the first subtitle track on by
+    // itself. Subtitles appeared while the picker still said Off, and choosing
+    // Off did nothing because that was already the state it thought it was in.
+    p.setSpuTrack(wantedSpu ?: -1)
     onLoaded(mapOf("duration" to length / 1000.0))
     sendTracks(p)
   }
