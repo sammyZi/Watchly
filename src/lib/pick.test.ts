@@ -29,8 +29,10 @@ const pack = [
 assert.equal(pickFile(pack, 'S01E02'), 1);
 // Releases that drop the leading zeros still match.
 assert.equal(pickFile([f(0, 'Show.1x02.mkv', 5), f(1, 'Show.S1E2.mkv', 9)], 'S01E02'), 1);
-// A tag with no match falls back to the biggest, rather than refusing to play.
-assert.equal(pickFile(pack, 'S09E09'), 2);
+// A tag that matches nothing inside a pack: refuse rather than play the wrong
+// episode. One video is unambiguous, so that still plays.
+assert.equal(pickFile(pack, 'S09E09'), null);
+assert.equal(pickFile([f(0, 'episode.mkv', 500)], 'S09E09'), 0);
 
 // Nothing playable at all — the caller has to ask.
 assert.equal(pickFile([f(0, 'readme.txt', 10, false)]), null);

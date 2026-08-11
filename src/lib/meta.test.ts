@@ -1,6 +1,6 @@
 // node --experimental-strip-types src/lib/meta.test.ts
 import assert from 'node:assert';
-import { episodeTag, reviewLinks, toEpisodes, toMeta, toTitles } from './meta.ts';
+import { reviewLinks, toEpisodes, toMeta, toTitles } from './meta.ts';
 
 assert.deepEqual(
   toMeta({
@@ -79,7 +79,17 @@ assert.equal(eps[1].overview, 'from description');
 assert.equal(eps[0].thumbnail, null);
 assert.deepEqual(toEpisodes(undefined), []);
 
-assert.equal(episodeTag(1, 2), 'S01E02');
-assert.equal(episodeTag(10, 11), 'S10E11');
+console.log('ok');
+
+// A search result is thinner than a catalog row: name, poster, releaseInfo.
+const thin = toTitles(
+  [{ id: 'tt0133093', name: 'The Matrix', poster: 'p', releaseInfo: '1999' }],
+  'movie'
+);
+assert.equal(thin.length, 1);
+assert.equal(thin[0].year, '1999');
+assert.deepEqual(thin[0].genres, []);
+// A series' releaseInfo is a range, and is kept as one.
+assert.equal(toMeta({ name: 'x', releaseInfo: '2020–2023' }).year, '2020–2023');
 
 console.log('ok');

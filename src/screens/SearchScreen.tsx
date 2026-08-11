@@ -16,8 +16,9 @@ import { colors, font, radius, space, type } from '../theme';
 
 const DEBOUNCE = 400;
 
-/** Narrows what is already on screen. Genre is Cinemeta's own vocabulary, and
- *  every title carries its own list, so filtering costs no extra request. */
+/** Browsing only — see the note by the chips. Genre is Cinemeta's own
+ *  vocabulary, and a catalog row carries its own list, so this costs no
+ *  extra request. */
 const GENRES = ['Action', 'Comedy', 'Drama', 'Thriller', 'Horror', 'Sci-Fi', 'Animation'];
 
 /**
@@ -61,6 +62,9 @@ function SearchScreenView({ onOpenTitle }: { onOpenTitle: (title: Title) => void
 
   useEffect(() => {
     const q = query.trim();
+    // A genre chosen while browsing must not survive into a search, where it
+    // would filter against data the results do not carry.
+    if (q) setGenre(null);
     const t = setTimeout(() => load(q), q ? DEBOUNCE : 0);
     return () => clearTimeout(t);
   }, [query, load]);
@@ -113,15 +117,22 @@ function SearchScreenView({ onOpenTitle }: { onOpenTitle: (title: Title) => void
           on={kind === 'tv'}
           onPress={() => setKind(kind === 'tv' ? null : 'tv')}
         />
-        <View style={styles.rule} />
-        {GENRES.map((g) => (
-          <Chip
-            key={g}
-            label={g}
-            on={genre === g}
-            onPress={() => setGenre(genre === g ? null : g)}
-          />
-        ))}
+        {/* Search results come back without genres — the endpoint returns names
+            and posters only — so a genre chip could only ever empty the grid.
+            They belong to browsing, which is what an empty box shows. */}
+        {!query.trim() && (
+          <>
+            <View style={styles.rule} />
+            {GENRES.map((g) => (
+              <Chip
+                key={g}
+                label={g}
+                on={genre === g}
+                onPress={() => setGenre(genre === g ? null : g)}
+              />
+            ))}
+          </>
+        )}
       </ScrollView>
 
       <PosterGrid
