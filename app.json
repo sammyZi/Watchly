@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "Torrent Viewer",
-    "slug": "torrent_viewer",
+    "name": "Watchly",
+    "slug": "watchly",
     "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "backgroundColor": "#ffffff",
     "ios": {
       "supportsTablet": true
@@ -13,7 +13,7 @@
     "android": {
       "package": "com.torrentviewer.app",
       "adaptiveIcon": {
-        "backgroundColor": "#3b6fe0",
+        "backgroundColor": "#E50914",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -97,7 +97,11 @@
         {
           "backgroundColor": "#ffffff",
           "image": "./assets/splash-icon.png",
-          "imageWidth": 120
+          "imageWidth": 180,
+          "dark": {
+            "image": "./assets/splash-icon-dark.png",
+            "backgroundColor": "#000000"
+          }
         }
       ]
     ]

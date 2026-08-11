@@ -34,6 +34,18 @@ export type PlayOptions = {
   /** Where playback begins, 0-1 through the file. Buffering the start of a file
    *  the viewer is about to seek away from is pure dead time. */
   startRatio?: number;
+  /**
+   * Fetch all of `fileIndex` rather than a window around the read position.
+   *
+   * Streaming wants a narrow sliding window: only what the viewer is about to
+   * watch, everything else deprioritised. A download has no reader to follow,
+   * so that window stays pinned at the head — the swarm saturates the link on
+   * a few MB and the file never finishes. Set this for downloads.
+   *
+   * This never widens to the rest of the torrent: only `fileIndex` and any
+   * subtitles beside it are ever fetched, in both modes.
+   */
+  fullFile?: boolean;
 };
 
 type TorrentStream = {

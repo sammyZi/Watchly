@@ -1,4 +1,6 @@
-# Torrent Viewer
+# Watchly
+
+Movies and series player for Android (Expo).
 
 Paste a magnet link or open a `.torrent`, watch the video while it downloads.
 Android only.
