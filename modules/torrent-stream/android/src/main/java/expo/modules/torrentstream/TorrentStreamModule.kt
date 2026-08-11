@@ -1259,6 +1259,9 @@ class TorrentStreamModule : Module() {
       )
       sendEvent("ready", mapOf(
         "url" to srv.url,
+        // Same stream, addressed for the network — a Cast receiver fetches it
+        // itself and cannot reach loopback. Null off Wi-Fi.
+        "lanUrl" to srv.lanUrl,
         "name" to ti.files().fileName(fileIndex),
         "subtitleFiles" to subtitleFiles.also {
           if (it.isNotEmpty()) log("ready: including ${it.size} subtitle file(s)")

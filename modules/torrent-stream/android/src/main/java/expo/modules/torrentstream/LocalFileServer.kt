@@ -32,7 +32,17 @@ class LocalFileServer(
   private val request: (Long, Long) -> Unit,
   private val release: (Long) -> Unit
 ) {
-  private val server = ServerSocket(0, 4, InetAddress.getByName("127.0.0.1"))
+  /**
+   * Bound to every interface, not just loopback, because a Cast receiver
+   * fetches the video itself — "127.0.0.1" is the phone talking to itself and
+   * no TV can ever reach it.
+   *
+   * That does put the file on the local network, so the path carries a random
+   * token and requests without it are refused. It is not authentication; it
+   * means the stream cannot be found by anyone who did not receive the URL.
+   */
+  private val server = ServerSocket(0, 4)
+  private val token = java.util.UUID.randomUUID().toString().take(12)
   @Volatile private var running = true
 
   /**
@@ -51,7 +61,28 @@ class LocalFileServer(
   private val generation = AtomicLong()
 
   val port: Int get() = server.localPort
-  val url: String get() = "http://127.0.0.1:$port/${file.name.urlEncoded()}"
+  private val path: String get() = "/$token/${file.name.urlEncoded()}"
+
+  /** For the player in this app — loopback stays the shortest path. */
+  val url: String get() = "http://127.0.0.1:$port$path"
+
+  /**
+   * The same stream, addressed so another device on the network can fetch it.
+   * Null when there is no local address to offer — no Wi-Fi, no cast.
+   */
+  val lanUrl: String? get() = lanAddress()?.let { "http://$it:$port$path" }
+
+  /** First non-loopback IPv4 address. Cast receivers are IPv4-only in practice,
+   *  and a link-local IPv6 address would not route to one anyway. */
+  private fun lanAddress(): String? =
+    runCatching {
+      java.net.NetworkInterface.getNetworkInterfaces()
+        .toList()
+        .filter { it.isUp && !it.isLoopback }
+        .flatMap { it.inetAddresses.toList() }
+        .firstOrNull { !it.isLoopbackAddress && it is java.net.Inet4Address }
+        ?.hostAddress
+    }.getOrNull()
 
   fun start() {
     thread(name = "torrent-http") {
@@ -78,6 +109,15 @@ class LocalFileServer(
 
       val requestLine = reader.readLine() ?: return
       val method = requestLine.substringBefore(' ')
+      val target = requestLine.substringAfter(' ').substringBeforeLast(' ')
+
+      // Anything not carrying this session's token is not a client of ours.
+      if (!target.startsWith("/$token/")) {
+        val out = socket.getOutputStream()
+        out.write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
+        out.flush()
+        return
+      }
 
       var rangeHeader: String? = null
       while (true) {

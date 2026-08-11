@@ -37,6 +37,8 @@ export function useTorrent(settings: Settings) {
   const [item, setItem] = useState<Item | null>(null);
   const [meta, setMeta] = useState<TorrentMeta | null>(null);
   const [url, setUrl] = useState<string | null>(null);
+  /** The same stream on a network-reachable address, for casting. */
+  const [lanUrl, setLanUrl] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [subtitleFiles, setSubtitleFiles] = useState<string[]>([]);
   const [progress, setProgress] = useState<Progress | null>(null);
@@ -65,10 +67,11 @@ export function useTorrent(settings: Settings) {
         }
         if (!streaming.current || keepProgress.current) setProgress(p);
       }),
-      TorrentStream.addListener('ready', ({ url, name, subtitleFiles: subs }) => {
-        console.log('[torrent] ready', name);
+      TorrentStream.addListener('ready', ({ url, lanUrl: lan, name, subtitleFiles: subs }) => {
+        console.log('[torrent] ready', name, 'lan:', lan ?? 'none');
         streaming.current = true;
         setUrl(url);
+        setLanUrl(lan ?? null);
         setFileName(name);
         setSubtitleFiles(subs ?? []);
       }),
@@ -93,6 +96,7 @@ export function useTorrent(settings: Settings) {
     setItem(null);
     setMeta(null);
     setUrl(null);
+    setLanUrl(null);
     setFileName(null);
     setSubtitleFiles([]);
     setProgress(null);
@@ -111,6 +115,7 @@ export function useTorrent(settings: Settings) {
       setError(null);
       setProgress(null);
       setUrl(null);
+      setLanUrl(null);
       setMeta(null);
       streaming.current = false;
       setItem(next);
@@ -149,6 +154,7 @@ export function useTorrent(settings: Settings) {
 
       setProgress(null);
       setUrl(null);
+      setLanUrl(null);
       setSubtitleFiles([]);
       streaming.current = false;
       keepProgress.current = !!opts?.keepProgress;
@@ -211,6 +217,7 @@ export function useTorrent(settings: Settings) {
     item,
     meta,
     url,
+    lanUrl,
     fileName,
     subtitleFiles,
     playingIndex,

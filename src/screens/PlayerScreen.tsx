@@ -19,6 +19,11 @@ import * as FileSystem from 'expo-file-system';
 // Feather has no closed-caption glyph, and "type" reads as a bare T. The badge
 // is the one subtitle symbol everyone recognises, so borrow it from Material.
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import {
+  CastButton,
+  useMediaStatus,
+  useRemoteMediaClient,
+} from 'react-native-google-cast';
 import { VlcPlayer, type VlcPlayerRef, type VlcTrack } from '../../modules/vlc-player';
 import TorrentStream, { type Progress } from '../../modules/torrent-stream';
 import { Icon, type IconName } from '../components/Icon';
@@ -54,6 +59,7 @@ export function PlayerScreen({
   title,
   resumeAt,
   url,
+  lanUrl,
   subtitleFiles,
   openSubtitlesKey,
   fileIndex,
@@ -67,6 +73,9 @@ export function PlayerScreen({
   resumeAt?: number;
   /** null until the first piece lands — the player mounts before that. */
   url: string | null;
+  /** The stream on a network address. A Cast receiver fetches the video itself,
+   *  so loopback is no use to it — no LAN address, no casting. */
+  lanUrl?: string | null;
   subtitleFiles?: string[];
   openSubtitlesKey?: string;
   fileIndex: number;
@@ -137,6 +146,22 @@ export function PlayerScreen({
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
+  /**
+   * Casting.
+   *
+   * The receiver pulls the video off the phone over the network, so this needs
+   * `lanUrl`; loopback is unreachable from a TV.
+   *
+   * The visible control has to be the library's own `CastButton` — see the note
+   * where it is rendered. Everything else here is plain modules.
+   */
+  const castClient = useRemoteMediaClient();
+  const castStatus = useMediaStatus();
+  const casting = !!castClient;
+  /** The media has been handed over; without this the load effect would fire
+   *  again on every status tick. */
+  const castLoaded = useRef<string | null>(null);
+
   // The parent re-renders while the torrent downloads, so these arrive as fresh
   // closures constantly. Read through refs: an effect that depends on them would
   // otherwise resubscribe the back/AppState listeners several times a second.
@@ -158,6 +183,44 @@ export function PlayerScreen({
     save.current(at);
     leave.current();
   }, []);
+
+  // Hand the stream to the receiver as soon as a device is connected, and
+  // silence the local player — two copies playing at once is the one thing
+  // nobody wants.
+  useEffect(() => {
+    if (!castClient || !lanUrl || castLoaded.current === lanUrl) return;
+    console.log('[cast] connected — handing over', lanUrl, 'at', position.current);
+    castLoaded.current = lanUrl;
+    setPaused(true);
+    videoRef.current?.pause().catch(() => {});
+    castClient
+      .loadMedia({
+        mediaInfo: { contentUrl: lanUrl, metadata: { type: 'movie', title: title ?? '' } },
+        startTime: position.current,
+      })
+      .then(() => console.log('[cast] receiver accepted the stream'))
+      .catch((e: any) => {
+        console.warn('[cast] loadMedia failed', e?.message ?? e);
+        castLoaded.current = null;
+        setFailure({ text: `Cast failed: ${e?.message ?? e}`, fatal: false });
+      });
+  }, [castClient, lanUrl, title]);
+
+  // Session ended: pick up locally where the TV got to.
+  useEffect(() => {
+    if (castClient) return;
+    if (castLoaded.current === null) return;
+    console.log('[cast] session ended — resuming locally');
+    castLoaded.current = null;
+    setPaused(false);
+  }, [castClient]);
+
+  // While casting, the receiver is the source of truth for the clock.
+  useEffect(() => {
+    if (!casting || castStatus?.streamPosition == null) return;
+    position.current = castStatus.streamPosition;
+    setCurrent(castStatus.streamPosition);
+  }, [casting, castStatus?.streamPosition]);
 
   /** Transient banner — says what happened without ending playback. */
   const warn = useCallback((message: string) => {
@@ -257,11 +320,13 @@ export function PlayerScreen({
       if (!duration) return;
       const next = Math.max(0, Math.min(duration, seconds));
       seekAt.current = Date.now();
-      videoRef.current?.seekTo(next);
+      // Whoever is holding the stream is the one that has to move.
+      if (castClient) castClient.seek({ position: next }).catch(() => {});
+      else videoRef.current?.seekTo(next);
       position.current = next;
       setCurrent(next);
     },
-    [duration]
+    [duration, castClient]
   );
 
   /**
@@ -598,21 +663,42 @@ export function PlayerScreen({
                     </Text>
                   )}
 
-                  {/* Fixed-width, tabular figures — the numbers change every
-                      second and must not shove the buttons around. */}
-                  {fileIndex >= 0 && (
-                    <View style={styles.stats}>
-                      <Icon name="users" size={12} color="#ffffff90" />
-                      <Text style={styles.statsText}>
-                        {(stats?.seeds ?? 0).toString().padStart(2, ' ')}/
-                        {(stats?.peers ?? 0).toString().padStart(2, ' ')}
-                      </Text>
-                      <Icon name="download" size={12} color="#ffffff90" />
-                      <Text style={[styles.statsText, styles.statsSpeed]}>
-                        {speed(stats?.speed ?? 0)}
-                      </Text>
-                    </View>
-                  )}
+                  <View style={styles.topRight}>
+                    {/* Fixed-width, tabular figures — the numbers change every
+                        second and must not shove the buttons around. */}
+                    {fileIndex >= 0 && (
+                      <View style={styles.stats}>
+                        <Icon name="users" size={12} color="#ffffff90" />
+                        <Text style={styles.statsText}>
+                          {(stats?.seeds ?? 0).toString().padStart(2, ' ')}/
+                          {(stats?.peers ?? 0).toString().padStart(2, ' ')}
+                        </Text>
+                        <Icon name="download" size={12} color="#ffffff90" />
+                        <Text style={[styles.statsText, styles.statsSpeed]}>
+                          {speed(stats?.speed ?? 0)}
+                        </Text>
+                      </View>
+                    )}
+
+                    {/*
+                      The library's own button, not one of ours.
+
+                      On Android `showCastDialog()` is implemented as
+                      `RNGoogleCastButtonManager.getCurrent().performClick()` —
+                      it does nothing at all unless this native view is mounted,
+                      which is why a hand-rolled button could only ever resolve
+                      false. Wrapped in the stats pill so it still matches the
+                      row above it.
+                    */}
+                    {!!lanUrl && (
+                      <View style={[styles.stats, casting && styles.castOn]}>
+                        <CastButton
+                          style={styles.castButton}
+                          tintColor={casting ? '#7aa2ff' : '#fff'}
+                        />
+                      </View>
+                    )}
+                  </View>
 
                 </View>
 
@@ -633,6 +719,9 @@ export function PlayerScreen({
                   ) : (
                     <Pressable
                       onPress={() => {
+                        if (castClient) {
+                          (paused ? castClient.play() : castClient.pause()).catch(() => {});
+                        }
                         setPaused((p) => !p);
                         bumpUi();
                       }}
@@ -1165,6 +1254,12 @@ const styles = StyleSheet.create({
   },
   actionLabel: { ...type.meta, color: '#ffffffa0', fontSize: 10, lineHeight: 13 },
   actionLabelOn: { color: '#7aa2ff' },
+  /** Stats pill and the cast button, stacked at the right of the top bar. */
+  topRight: { alignItems: 'flex-end', gap: 8 },
+  castOn: { backgroundColor: '#7aa2ff26' },
+  castOnText: { color: '#7aa2ff' },
+  /** Fills the pill, so the whole thing is the tap target. */
+  castButton: { width: 24, height: 24 },
   stats: {
     flexDirection: 'row',
     alignItems: 'center',

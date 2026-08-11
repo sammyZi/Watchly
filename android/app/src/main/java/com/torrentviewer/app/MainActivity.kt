@@ -9,6 +9,10 @@ import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
 import com.facebook.react.defaults.DefaultReactActivityDelegate
 
+import androidx.mediarouter.media.MediaRouter
+
+import com.reactnative.googlecast.api.RNGCCastContext
+
 import expo.modules.ReactActivityDelegateWrapper
 
 class MainActivity : ReactActivity() {
@@ -21,12 +25,46 @@ class MainActivity : ReactActivity() {
     SplashScreenManager.registerOnActivity(this)
     // @generated end expo-splashscreen
     super.onCreate(null)
+    // Cast has to be initialised on the main activity before any of its APIs
+    // answer — without this the cast dialog has no context to open against.
+    RNGCCastContext.getSharedInstance(this)
     preferHighRefreshRate()
   }
 
+  /**
+   * Nothing to handle — registering it is the point.
+   *
+   * MediaRouter only scans the network while some callback has asked it to.
+   * Normally that is Cast's own MediaRouteButton; this app draws its own cast
+   * control, so without this the router stays passive, finds no receivers, and
+   * the cast dialog opens onto an empty list.
+   */
+  private val routeCallback = object : MediaRouter.Callback() {}
+
   override fun onResume() {
     super.onResume()
+    startCastDiscovery()
     preferHighRefreshRate()
+  }
+
+  override fun onPause() {
+    // Active scanning is expensive; it belongs to the foreground only.
+    runCatching { MediaRouter.getInstance(this).removeCallback(routeCallback) }
+    super.onPause()
+  }
+
+  private fun startCastDiscovery() {
+    runCatching {
+      val castContext = RNGCCastContext.getSharedInstance(this) ?: return
+      // Null until the cast context finishes initialising — nothing to scan for
+      // yet, and onResume runs again on the way back from anywhere.
+      val selector = castContext.mergedSelector ?: return
+      MediaRouter.getInstance(this).addCallback(
+        selector,
+        routeCallback,
+        MediaRouter.CALLBACK_FLAG_REQUEST_DISCOVERY
+      )
+    }
   }
 
   /** Prefer the panel's highest mode up to 120Hz when the device offers it. */
