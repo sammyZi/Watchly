@@ -32,7 +32,11 @@ export async function searchSubtitles(
   const res = await fetch(url, { headers: { 'Api-Key': apiKey } });
   if (!res.ok) throw new Error(`OpenSubtitles search returned ${res.status}`);
   const body: SearchResponse = await res.json();
-  return body.data;
+  // SubRip only, to match what the player loads from a torrent. A result with
+  // no files at all is a listing for something that cannot be downloaded.
+  return body.data.filter((r) =>
+    r.attributes.files?.some((f) => !f.file_name || /\.srt$/i.test(f.file_name))
+  );
 }
 
 /** Get the download URL for a subtitle file. */

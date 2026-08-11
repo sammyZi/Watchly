@@ -51,7 +51,7 @@ export function ResumeCard({ item, onResume }: { item: Item; onResume: () => voi
     >
       <Thumb
         name={item.torrentName ?? item.title}
-        poster={item.posters?.[index]}
+        poster={item.poster}
         progress={percent}
         width={96}
         height={60}

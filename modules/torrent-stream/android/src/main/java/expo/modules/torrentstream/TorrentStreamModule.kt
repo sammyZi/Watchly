@@ -70,9 +70,15 @@ private val VIDEO = setOf(
   "mp4", "mkv", "avi", "mov", "m4v", "webm", "flv", "wmv", "mpg", "mpeg", "ts", "m2ts"
 )
 
-private val SUBTITLE = setOf(
-  "srt", "vtt", "sub", "ass", "ssa", "idx"
-)
+/**
+ * SubRip only.
+ *
+ * The others are all renderable by libVLC, but ass/ssa carry their own styling
+ * and positioning that fights the player's own overlay, and sub/idx is a pair
+ * of files that is useless if only one of them is fetched. Loading just .srt
+ * keeps what appears on screen predictable.
+ */
+private val SUBTITLE = setOf("srt")
 
 /** Trackers hand back ~200 at a time and most are stale by the next session;
  *  keeping a wide list is what makes a warm start find a swarm immediately. */

@@ -31,7 +31,6 @@ import {
   patch,
   put,
   setDuration,
-  setPoster,
   setPosition,
   type Item,
 } from './lib/history';
@@ -39,8 +38,9 @@ import { DEFAULTS, loadSettings, saveSettings, type Settings } from './lib/setti
 import { linkEpisode, loadEpisodeLinks, type EpisodeLinks } from './lib/watched';
 import { isTorrentSource } from './lib/magnet';
 import { pickFile } from './lib/pick';
+import { parseEpisode } from './lib/search';
 import { titleOf } from './lib/title';
-import type { Title } from './lib/meta';
+import { loadTitle, resolveTitle, type Title } from './lib/meta';
 import { CatalogScreen } from './screens/CatalogScreen';
 import { DetailScreen } from './screens/DetailScreen';
 import { FilesScreen } from './screens/FilesScreen';
@@ -388,16 +388,93 @@ function ShellApp({
    */
   const episodeProgress = useMemo(() => {
     const out: Record<string, number> = {};
+    const record = (id: string, position = 0, duration?: number) => {
+      if (!duration) return;
+      out[id] = Math.max(out[id] ?? 0, Math.min(100, (position / duration) * 100));
+    };
+
+    // Anything watched from a title page: the episode it was opened for is
+    // recorded against the torrent it came from.
     for (const [id, uri] of Object.entries(episodeLinks)) {
       const entry = history.find((h) => h.uri === uri);
       const index = entry?.lastFileIndex;
       if (!entry || index == null) continue;
-      const duration = entry.durations?.[index];
-      if (!duration) continue;
-      out[id] = Math.min(100, ((entry.positions?.[index] ?? 0) / duration) * 100);
+      record(id, entry.positions?.[index], entry.durations?.[index]);
+    }
+
+    // Everything else, read back out of the file names. A season pack watched
+    // straight from the library has no link recorded, but "S01E02" in the file
+    // name says exactly which episode a resume point belongs to — and Cinemeta
+    // ids episodes as "imdb:season:episode", so it lines up directly.
+    for (const entry of history) {
+      if (entry.kind !== 'tv' || !entry.imdb) continue;
+      for (const file of entry.files ?? []) {
+        const at = parseEpisode(file.name);
+        if (!at) continue;
+        record(
+          `${entry.imdb}:${at.season}:${at.episode}`,
+          entry.positions?.[file.index],
+          entry.durations?.[file.index]
+        );
+      }
     }
     return out;
   }, [episodeLinks, history]);
+
+  /**
+   * How far into a film you are, by IMDb id.
+   *
+   * The episode map above covers series; this is the same idea for the single
+   * file a film's torrent holds, and it is what puts "Continue" on its title
+   * page.
+   */
+  const filmProgress = useMemo(() => {
+    const out: Record<string, { position: number; duration: number }> = {};
+    for (const entry of history) {
+      const index = entry.lastFileIndex;
+      if (!entry.imdb || index == null) continue;
+      const duration = entry.durations?.[index];
+      if (!duration) continue;
+      out[entry.imdb] = { position: entry.positions?.[index] ?? 0, duration };
+    }
+    return out;
+  }, [history]);
+
+  /**
+   * Fill in artwork for library rows nothing has identified yet.
+   *
+   * Rows used to show a frame grabbed while watching, which meant every tile
+   * was a dark still of wherever you stopped. The real poster has to be looked
+   * up once per torrent; after that it is stored on the entry.
+   */
+  const tried = useRef(new Set<string>());
+  useEffect(() => {
+    const pending = history
+      .filter((h) => !h.poster && !h.imdb && !tried.current.has(h.uri))
+      .slice(0, 12);
+    if (!pending.length) return;
+
+    let live = true;
+    (async () => {
+      for (const target of pending) {
+        // Marked before the await: a failed lookup must not be retried on
+        // every history change for the rest of the session.
+        tried.current.add(target.uri);
+        const found = await resolveTitle(target.torrentName ?? target.title);
+        if (!live || !found) continue;
+        const items = await patch(target.uri, {
+          imdb: found.imdb,
+          kind: found.kind,
+          poster: found.poster ?? undefined,
+          titleName: found.title,
+        });
+        if (live) setHistory(items);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [history]);
 
   const openUri = useCallback(
     async (
@@ -456,8 +533,37 @@ function ShellApp({
    * A row in the library: carry on with whatever it was playing. The file it
    * last opened is stored, so this resumes rather than asking anything.
    */
+  /**
+   * A row in the library goes to its title page — artwork, episodes, other
+   * releases — rather than straight into the swarm.
+   *
+   * History only stores release names, so the title has to be looked up, and
+   * `resolveTitle` returns nothing rather than guessing. When it finds nothing
+   * the row falls back to playing what it last played, which is never wrong.
+   */
   const openItem = useCallback(
-    (target: Item) => {
+    async (target: Item) => {
+      // Already identified: fetch the full record by id rather than searching
+      // by name again — that one is disk-cached and exact.
+      const found = target.imdb
+        ? ((await loadTitle(target.imdb, target.kind ?? 'movie')) ??
+          (await resolveTitle(target.torrentName ?? target.title)))
+        : await resolveTitle(target.torrentName ?? target.title);
+      if (found) {
+        setDetail(found);
+        // Store what it turned out to be. Without this the title page has no
+        // way back to this entry's resume point, so it offers Play instead of
+        // Continue.
+        if (target.imdb !== found.imdb) {
+          patch(target.uri, {
+            imdb: found.imdb,
+            kind: found.kind,
+            poster: found.poster ?? undefined,
+            titleName: found.title,
+          }).then(setHistory);
+        }
+        return;
+      }
       setTorrentMode('stream');
       open(target, target.lastFileIndex, { auto: true });
     },
@@ -591,7 +697,6 @@ function ShellApp({
         progress={null}
         onSavePosition={() => {}}
         onDuration={() => {}}
-        onPoster={() => {}}
         onExit={() => setLocalPlay(null)}
       />
     );
@@ -623,7 +728,6 @@ function ShellApp({
         onDuration={(seconds) =>
           setDuration(stored, playingIndex, seconds).then(setHistory)
         }
-        onPoster={(uri) => setPoster(stored, playingIndex, uri).then(setHistory)}
         onExit={reset}
       />
     );
@@ -703,11 +807,17 @@ function ShellApp({
         busy={phase === 'inspecting'}
         error={torrent.error}
         progress={episodeProgress}
+        resume={filmProgress[detail.imdb]}
         // `tag` is the SxxEyy to look for inside a season pack; true just means
         // "pick the feature". Either way, no file list.
-        onPlay={async (magnet, episodeId, tag) => {
+        onPlay={async (magnet, episodeId, tag, startOver) => {
           setTorrentMode('stream');
-          const local = await openUri(magnet, { auto: tag ?? true });
+          // `keepProgress` is what tells open() to ignore the stored resume
+          // point and start from zero.
+          const local = await openUri(magnet, {
+            auto: tag ?? true,
+            keepProgress: startOver,
+          });
           if (episodeId && local) linkEpisode(episodeId, local).then(setEpisodeLinks);
         }}
         onDownload={(magnet, tag) => {

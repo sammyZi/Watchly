@@ -13,6 +13,18 @@ export const episodeTag = (season: number, episode: number) =>
   `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
 
 /**
+ * The reverse: which episode a file name belongs to, or null.
+ *
+ * This is how a torrent already in the library maps onto a title page —
+ * "Show.S01E02.mkv" is the only record that a stored file is episode two.
+ */
+export function parseEpisode(name: string): { season: number; episode: number } | null {
+  const found =
+    /\bs(\d{1,2})[ ._-]*e(\d{1,2})\b/i.exec(name) ?? /\b(\d{1,2})x(\d{1,2})\b/i.exec(name);
+  return found ? { season: Number(found[1]), episode: Number(found[2]) } : null;
+}
+
+/**
  * Order matters: "S01.COMPLETE" is a season, "Seasons 1-3" is the lot, and
  * anything carrying an episode marker is a single episode whatever else it
  * says. Unmarked names are treated as one episode — for a film that is true,

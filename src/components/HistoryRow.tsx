@@ -5,6 +5,7 @@ import { ProgressBar } from './ProgressBar';
 import { Thumb } from './Thumb';
 import { ago, bytes, clock } from '../lib/format';
 import type { Item } from '../lib/history';
+import { WATCHED } from '../lib/watched';
 import { font, radius, space, type, useColors, useThemedStyles } from '../theme';
 
 /**
@@ -33,28 +34,28 @@ export function HistoryRow({
   const [expanded, setExpanded] = useState(false);
   const colors = useColors();
   const styles = useThemedStyles((c) => ({
-    // A card per torrent, artwork-led: the captured frame is the only thing that
-    // says what this is at a glance.
+    // A card per torrent, artwork-led: the poster is what identifies it at a
+    // glance, so it gets the room and the title gets the weight.
     card: {
       backgroundColor: c.surface,
       borderRadius: radius.lg,
-      padding: space.sm,
+      padding: space.md,
       overflow: 'hidden' as const,
     },
     row: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: space.md },
     pressed: { opacity: 0.6 },
     body: { flex: 1, gap: space.xs, paddingRight: space.xs },
-    title: { ...type.title, fontFamily: font.medium, color: c.text },
-    meta: { ...type.meta, color: c.faint },
-    bar: { marginTop: space.xs },
-    action: {
-      width: 34,
-      height: 34,
-      borderRadius: radius.pill,
-      backgroundColor: c.accentSoft,
-      alignItems: 'center' as const,
-      justifyContent: 'center' as const,
+    title: {
+      ...type.title,
+      fontFamily: font.semibold,
+      fontSize: 15,
+      color: c.text,
+      lineHeight: 20,
     },
+    release: { ...type.meta, fontSize: 11, color: c.faint },
+    progress: { gap: 4, marginTop: space.xs },
+    progressText: { ...type.meta, fontSize: 11, fontFamily: font.medium, color: c.accent },
+    meta: { ...type.meta, fontSize: 11, color: c.faint, marginTop: space.xs },
     more: {
       flexDirection: 'row' as const,
       alignItems: 'center' as const,
@@ -94,10 +95,39 @@ export function HistoryRow({
   const lastPosition = lastIndex != null ? item.positions?.[lastIndex] : undefined;
   const lastDuration = lastIndex != null ? item.durations?.[lastIndex] : undefined;
 
+  const percent =
+    lastDuration && lastPosition ? Math.round((lastPosition / lastDuration) * 100) : 0;
+
+  /**
+   * How far through this is. A season pack counts episodes finished, since a
+   * percentage of whichever one was open last says nothing about the show; a
+   * film reports its own percentage.
+   */
+  const watched = videos.filter((f) => {
+    const seen = item.positions?.[f.index];
+    const runs = item.durations?.[f.index];
+    return !!runs && !!seen && (seen / runs) * 100 >= WATCHED;
+  }).length;
+
+  const progressLabel =
+    videos.length > 1
+      ? watched >= videos.length
+        ? 'All watched'
+        : watched > 0
+          ? `${watched}/${videos.length} watched`
+          : percent > 0
+            ? `${percent}% into ep. 1`
+            : null
+      : percent >= WATCHED
+        ? 'Watched'
+        : percent > 0
+          ? `${percent}% watched`
+          : null;
+
   const meta = [
-    ago(item.at),
-    videos.length ? `${videos.length} episodes` : null,
+    videos.length > 1 ? `${videos.length} episodes` : null,
     lastPosition ? `at ${clock(lastPosition)}` : null,
+    ago(item.at),
   ]
     .filter(Boolean)
     .join(' · ');
@@ -109,39 +139,43 @@ export function HistoryRow({
         onLongPress={onRemove}
         style={({ pressed }) => [styles.row, pressed && styles.pressed]}
       >
+        {/* Portrait, because that is the shape a poster is. The old landscape
+            tile held a frame grabbed while watching; cropping real artwork into
+            it cut the top and bottom off every one. */}
         <Thumb
           name={item.torrentName ?? item.title}
-          poster={lastIndex != null ? item.posters?.[lastIndex] : undefined}
-          icon="play"
-          width={124}
-          height={70}
-          progress={
-            lastDuration && lastPosition ? (lastPosition / lastDuration) * 100 : undefined
-          }
+          poster={item.poster}
+          icon={item.poster ? undefined : 'film'}
+          width={66}
+          height={99}
         />
 
         <View style={styles.body}>
           <Text numberOfLines={2} style={styles.title}>
-            {item.torrentName ?? item.title}
+            {item.titleName ?? item.torrentName ?? item.title}
           </Text>
+
+          {/* The release name is still how two rips of the same film differ,
+              but it stops being the headline once the real title is known. */}
+          {!!item.titleName && (
+            <Text numberOfLines={1} style={styles.release}>
+              {item.torrentName ?? item.title}
+            </Text>
+          )}
+
+          {!!progressLabel && (
+            <View style={styles.progress}>
+              <Text style={styles.progressText}>{progressLabel}</Text>
+              {!!lastDuration && !!lastPosition && (
+                <ProgressBar value={percent} height={4} />
+              )}
+            </View>
+          )}
+
           <Text style={styles.meta} numberOfLines={1}>
             {meta}
           </Text>
-          {!!lastDuration && !!lastPosition && (
-            <ProgressBar value={(lastPosition / lastDuration) * 100} style={styles.bar} />
-          )}
         </View>
-
-        <Pressable
-          onPress={() =>
-            videos.length === 1 ? onDownloadFile(videos[0].index) : setExpanded((e) => !e)
-          }
-          hitSlop={8}
-          accessibilityLabel={videos.length === 1 ? 'Download' : 'Show files'}
-          style={styles.action}
-        >
-          <Icon name="download" size={15} color={colors.accent} />
-        </Pressable>
       </Pressable>
 
       {/* A season pack: the row plays what you were last on, this reaches the
