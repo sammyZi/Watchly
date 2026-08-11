@@ -146,3 +146,8 @@ export function SourceInput({
           disabled={!ready}
           onPress={() => submit(value)}
           style={styles.actionFull}
+        />
+      </View>
+    </View>
+  );
+}
