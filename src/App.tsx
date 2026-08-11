@@ -184,7 +184,7 @@ function Shell() {
     async (
       next: Item,
       fileIndex?: number,
-      opts?: { keepProgress?: boolean; auto?: string | boolean }
+      opts?: { keepProgress?: boolean; auto?: string | boolean; fullFile?: boolean }
     ) => {
       const items = await put({ ...next, at: Date.now() });
       setHistory(items);
@@ -248,7 +248,10 @@ function Shell() {
   }, [episodeLinks, history]);
 
   const openUri = useCallback(
-    async (uri: string, opts?: { auto?: string | boolean; keepProgress?: boolean }) => {
+    async (
+      uri: string,
+      opts?: { auto?: string | boolean; keepProgress?: boolean; fullFile?: boolean }
+    ) => {
       // A shared file arrives as a content:// grant that expires — take our own
       // copy before doing anything else, and store *that* path, so the history
       // entry is still openable tomorrow.
@@ -392,7 +395,7 @@ function Shell() {
       setTorrentMode('download');
       setTab('downloads');
       enableDownloadNotify();
-      open(target, index, { keepProgress: true });
+      open(target, index, { keepProgress: true, fullFile: true });
     },
     [open, enableDownloadNotify]
   );
@@ -534,7 +537,7 @@ function Shell() {
           setTorrentMode('download');
           setTab('downloads');
           enableDownloadNotify();
-          play(file.index, 0, { keepProgress: true });
+          play(file.index, 0, { keepProgress: true, fullFile: true });
         }}
         onBack={() => {
           setTorrentMode(null);
@@ -565,7 +568,7 @@ function Shell() {
           setTab('downloads');
           setDetail(null);
           enableDownloadNotify();
-          openUri(magnet, { auto: tag ?? true, keepProgress: true });
+          openUri(magnet, { auto: tag ?? true, keepProgress: true, fullFile: true });
         }}
         onBack={() => setDetail(null)}
       />

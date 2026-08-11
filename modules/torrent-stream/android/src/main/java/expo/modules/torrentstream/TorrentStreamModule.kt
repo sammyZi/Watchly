@@ -159,6 +159,10 @@ class PlayOptions : Record {
   /** Where playback will actually begin, 0-1 through the file. Buffering the
    *  head of a file the viewer is going to skip past is pure dead time. */
   @Field val startRatio: Double = 0.0
+
+  /** Fetch all of the selected file instead of a window around the reader.
+   *  See `fullFile` in the JS PlayOptions. */
+  @Field val fullFile: Boolean = false
 }
 
 class TorrentStreamModule : Module() {
@@ -172,6 +176,10 @@ class TorrentStreamModule : Module() {
   private var handle: TorrentHandle? = null
   private var infoHashHex: String? = null
   private var fileIndex = -1
+  /** Fetch the selected file end to end rather than follow a reader. Never the
+   *  whole torrent: the file priorities set in play() exclude every other file
+   *  in it, download or not. */
+  private var fullFile = false
   private var firstPiece = 0
   private var lastPiece = 0
   /** Where the player is going to start reading — the resume point, not the
@@ -935,6 +943,7 @@ class TorrentStreamModule : Module() {
     info = ti
     infoHashHex = ti.infoHash().toHex()
     fileIndex = index
+    fullFile = options.fullFile
     announcedReady = false
     peerSaveTick = 0
     ticks = 0
@@ -993,7 +1002,11 @@ class TorrentStreamModule : Module() {
     // everything below drives them. Left on, sequential also makes the picker
     // treat any non-zero priority as equally eligible, so a piece near the start
     // of the file outranks the one the viewer is waiting on.
-    h.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
+    // Sequential is right for a download, though: nobody is waiting on a
+    // particular piece, and writing the file front to back keeps it playable
+    // before it finishes.
+    if (fullFile) h.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
+    else h.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
     handle = h
     warm = null
 
@@ -1082,6 +1095,18 @@ class TorrentStreamModule : Module() {
       )
       teardown()
       wipeStreamCache()
+      return
+    }
+
+    // A download wants every piece of the selected file, so none of the
+    // windowing below applies: there is no reader to follow, the zone would
+    // stay pinned at the head, and the swarm would saturate the link fetching a
+    // few MB and then sit there while the file never finishes — high speed,
+    // motionless progress. The file priorities set in play() already exclude
+    // every other file in the torrent, so this stays one file either way.
+    if (fullFile) {
+      session.postSessionStats()
+      if (ticks % 2 == 0) reportProgress(h, 100)
       return
     }
 
@@ -1189,20 +1214,7 @@ class TorrentStreamModule : Module() {
 
     val status = h.status()
     if (ticks % 2 == 0) {
-      sendEvent(
-        "progress",
-        mapOf(
-          "buffer" to ((buffered * 100 / maxOf(1L, startNeed)).coerceAtMost(100L)).toInt(),
-          "progress" to (status.progress() * 100f),
-          "speed" to if (userPaused) 0 else status.downloadRate(),
-          "seeds" to status.numSeeds(),
-          "peers" to status.numPeers(),
-          "dhtNodes" to session.stats().dhtNodes().toInt(),
-          "state" to status.state().name,
-          "paused" to userPaused
-        )
-      )
-      updateDownloadNotification()
+      reportProgress(h, ((buffered * 100 / maxOf(1L, startNeed)).coerceAtMost(100L)).toInt())
     }
 
     // Refresh the peer cache every ~15s once anyone is connected.
@@ -1314,6 +1326,29 @@ class TorrentStreamModule : Module() {
       p++
     }
     return have
+  }
+
+  /**
+   * The one progress event. `buffer` is how much of the pre-roll has landed —
+   * meaningless for a download, which reports it full so the UI never shows a
+   * transfer waiting on a buffer nobody is reading.
+   */
+  private fun reportProgress(h: TorrentHandle, buffer: Int) {
+    val status = h.status()
+    sendEvent(
+      "progress",
+      mapOf(
+        "buffer" to buffer,
+        "progress" to (status.progress() * 100f),
+        "speed" to if (userPaused) 0 else status.downloadRate(),
+        "seeds" to status.numSeeds(),
+        "peers" to status.numPeers(),
+        "dhtNodes" to session.stats().dhtNodes().toInt(),
+        "state" to status.state().name,
+        "paused" to userPaused
+      )
+    )
+    updateDownloadNotification()
   }
 
   /** Piece holding the given byte offset *within the selected file*. */

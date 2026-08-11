@@ -155,8 +155,8 @@ function SettingsScreenView({
         </Group>
 
         <Text style={styles.footer}>
-          Torrent Viewer · streams over BitTorrent while downloading. You are
-          responsible for what you download.
+          Watchly · movies and series, ready when you are. You are responsible
+          for what you watch and download.
         </Text>
       </ScrollView>
     </Screen>

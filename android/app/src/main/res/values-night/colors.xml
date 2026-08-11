@@ -1,1 +1,4 @@
-<resources/>
+<resources>
+  <color name="splashscreen_background">#000000</color>
+  <color name="activityBackground">#0b0e14</color>
+</resources>

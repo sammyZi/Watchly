@@ -139,7 +139,11 @@ export function useTorrent(settings: Settings) {
    * the head of the file and the player immediately jumps somewhere else.
    */
   const play = useCallback(
-    (fileIndex: number, startRatio = 0, opts?: { keepProgress?: boolean }) => {
+    (
+      fileIndex: number,
+      startRatio = 0,
+      opts?: { keepProgress?: boolean; fullFile?: boolean }
+    ) => {
       const uri = source.current;
       if (!uri) return;
 
@@ -155,6 +159,8 @@ export function useTorrent(settings: Settings) {
         prepareMb: settings.prepareMb,
         removeFilesAfterStop: settings.removeFilesAfterStop,
         startRatio,
+        // No reader to follow: fetch the file end to end instead of a window.
+        fullFile: !!opts?.fullFile,
       }).catch((e: any) => {
         console.warn('[torrent] play failed', e?.message ?? e);
         setError(String(e?.message ?? e));
@@ -169,7 +175,11 @@ export function useTorrent(settings: Settings) {
    * Metadata/peers are still pulled from the on-disk cache inside play().
    */
   const playKnown = useCallback(
-    (next: Item, fileIndex: number, opts?: { keepProgress?: boolean }) => {
+    (
+      next: Item,
+      fileIndex: number,
+      opts?: { keepProgress?: boolean; fullFile?: boolean }
+    ) => {
       const uri = settings.addTrackers ? withTrackers(next.uri) : next.uri;
       source.current = uri;
       setError(null);
