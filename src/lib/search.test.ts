@@ -1,6 +1,6 @@
 // node --experimental-strip-types src/lib/search.test.ts
 import assert from 'node:assert';
-import { episodeTag, parseEpisode, health, kindOf, quality, rank, scopeOf, toHits, type Hit } from './search.ts';
+import { episodeTag, parseEpisode, seasonsIn, health, kindOf, quality, rank, scopeOf, toHits, type Hit } from './search.ts';
 
 const row = (over: Record<string, string | number> = {}) => ({
   id: '1',
@@ -95,12 +95,30 @@ assert.equal(scopeOf('Some.Film.2024.1080p.BluRay'), 'episode');
 // An episode marker wins over anything else in the name.
 assert.equal(scopeOf('Show Complete Series S02E05'), 'episode');
 
-
 // File name -> which episode it is, for progress read back out of the library.
 assert.deepEqual(parseEpisode('Ted.Lasso.S01E02.1080p.mkv'), { season: 1, episode: 2 });
 assert.deepEqual(parseEpisode('Show S1 E2.mkv'), { season: 1, episode: 2 });
 assert.deepEqual(parseEpisode('Show 1x02.mkv'), { season: 1, episode: 2 });
 assert.deepEqual(parseEpisode('Show.S10E11.mkv'), { season: 10, episode: 11 });
 assert.equal(parseEpisode('Some.Film.2024.1080p.mkv'), null);
+
+
+// Which seasons a name claims. This is what keeps a 700-seeder pack for the
+// wrong season out of an episode's release list.
+assert.deepEqual(seasonsIn('Stranger.Things.S04.COMPLETE.1080p'), [4]);
+assert.deepEqual(seasonsIn('Stranger Things - Season 5 Complete'), [5]);
+assert.deepEqual(seasonsIn('Stranger.Things.Season.5.Complete.2025.720p'), [5]);
+assert.deepEqual(seasonsIn('Stranger Things S04E01 Chapter One'), [4]);
+assert.deepEqual(seasonsIn('Show S01-S03 COMPLETE'), [1, 2, 3]);
+assert.deepEqual(seasonsIn('Show Seasons 1-3 COMPLETE'), [1, 2, 3]);
+assert.deepEqual(seasonsIn('Stranger Things Season 4 S04 Complete'), [4]);
+// A name claiming nothing is kept — that is what a complete-series pack and a
+// film both look like.
+assert.deepEqual(seasonsIn('Show Complete Series 1080p'), []);
+assert.deepEqual(seasonsIn('The.Matrix.1999.1080p.BluRay.x264'), []);
+// Codecs and channel counts are not seasons.
+assert.deepEqual(seasonsIn('Show.S04.DDP5.1.Atmos.x265.10bit'), [4]);
+// A separator is required for the spelled-out form only, so this is not S8.
+assert.deepEqual(seasonsIn("Ocean's 8 2018 1080p"), []);
 
 console.log('ok');

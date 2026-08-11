@@ -407,6 +407,25 @@ export function DetailScreen({
     };
   }, [seed]);
 
+  /** First episode of a season that has not been finished, else its first. */
+  const nextIn = (which: number | null) => {
+    const inSeason = episodes.filter((e) => e.season === which);
+    return inSeason.find((e) => (progress?.[e.id] ?? 0) < WATCHED) ?? inSeason[0] ?? null;
+  };
+
+  /**
+   * Changing season changes what is selected, not just what is listed.
+   *
+   * Tapping "Season 4" used to leave `picked` on the season 1 episode chosen at
+   * open: the list below changed, but the Play button and every release under
+   * it still referred to S01 — which reads as the season never having changed.
+   */
+  const chooseSeason = (which: number) => {
+    setSeason(which);
+    const next = nextIn(which);
+    if (next) setPicked(next);
+  };
+
   // Open on the first episode not yet finished — carrying on is the common
   // case, and it gives the Play button something to mean on a series.
   useEffect(() => {
@@ -619,11 +638,12 @@ export function DetailScreen({
                 horizontal
                 data={seasons}
                 keyExtractor={(s) => String(s)}
+                extraData={season}
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.seasonChips}
                 renderItem={({ item: s }) => (
                   <Pressable
-                    onPress={() => setSeason(s)}
+                    onPress={() => chooseSeason(s)}
                     style={[styles.seasonChip, s === season && styles.seasonChipOn]}
                   >
                     <Text
