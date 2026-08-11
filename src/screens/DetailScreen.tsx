@@ -14,7 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../components/Icon';
 import { ProgressBar } from '../components/ProgressBar';
-import { bytes } from '../lib/format';
+import { bytes, clock, left } from '../lib/format';
 import { hueOf } from '../lib/title';
 import { loadTitle, reviewLinks, type Episode, type Title } from '../lib/meta';
 import { WATCHED } from '../lib/watched';
@@ -115,6 +115,12 @@ function useDetailStyles() {
       fontFamily: font.semibold,
       color: c.onAccent,
     },
+    resume: {
+      marginHorizontal: space.xl,
+      marginTop: space.md,
+      gap: space.xs,
+    },
+    resumeText: { ...type.meta, fontSize: 11, color: c.faint },
     plot: {
       ...type.body,
       color: c.muted,
@@ -321,6 +327,7 @@ export function DetailScreen({
   busy,
   error: opening,
   progress,
+  resume,
   onPlay,
   onDownload,
   onBack,
@@ -331,8 +338,16 @@ export function DetailScreen({
   error?: string | null;
   /** Episode id -> how much of it has been watched, 0-100. */
   progress?: Record<string, number>;
-  /** `tag` is the SxxEyy the torrent's own file list should be matched against. */
-  onPlay: (magnet: string, episodeId?: string, tag?: string) => void;
+  /** Where the film was left, in seconds. Series use `progress`. */
+  resume?: { position: number; duration: number };
+  /** `tag` is the SxxEyy the torrent's own file list should be matched against;
+   *  `startOver` ignores the stored resume point. */
+  onPlay: (
+    magnet: string,
+    episodeId?: string,
+    tag?: string,
+    startOver?: boolean
+  ) => void;
   /** Same source, kept to storage instead of streamed. */
   onDownload: (magnet: string, tag?: string) => void;
   onBack: () => void;
@@ -364,8 +379,21 @@ export function DetailScreen({
   const [picked, setPicked] = useState<Episode | null>(null);
 
   const tag = picked ? episodeTag(picked.season, picked.episode) : undefined;
+
+  /**
+   * How far into whatever the buttons refer to — the selected episode on a
+   * series, the film itself otherwise. Anything past `WATCHED` counts as
+   * finished, so it offers a fresh start rather than the last 30 seconds.
+   */
+  const seen = picked
+    ? (progress?.[picked.id] ?? 0)
+    : resume
+      ? Math.min(100, (resume.position / resume.duration) * 100)
+      : 0;
+  const canResume = seen >= 1 && seen < WATCHED;
   /** Hands the caller everything it needs to open the right file straight away. */
-  const start = (magnet: string) => onPlay(magnet, picked?.id, tag);
+  const start = (magnet: string, startOver = false) =>
+    onPlay(magnet, picked?.id, tag, startOver);
   const save = (magnet: string) => onDownload(magnet, tag);
 
   // A catalog row carries no episode list, so a series always needs the full
@@ -491,11 +519,29 @@ export function DetailScreen({
                 ? 'Opening…'
                 : !sources?.length
                   ? 'Finding releases…'
-                  : tag
-                    ? `Play ${tag}`
-                    : `Play ${sources[0].quality ?? 'best release'}`}
+                  : canResume
+                    ? `Continue${tag ? ` ${tag}` : ''} · ${Math.round(seen)}%`
+                    : tag
+                      ? `Play ${tag}`
+                      : `Play ${sources[0].quality ?? 'best release'}`}
             </Text>
           </Pressable>
+
+          {/* Only worth offering once there is a resume point to ignore. */}
+          {canResume && (
+            <Pressable
+              disabled={!sources?.length || busy}
+              onPress={() => sources?.[0] && start(sources[0].magnet, true)}
+              accessibilityLabel="Start over"
+              style={({ pressed }) => [
+                styles.download,
+                (!sources?.length || busy) && styles.downloadOff,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Icon name="rotate-ccw" size={17} color={colors.text} />
+            </Pressable>
+          )}
 
           {/* Same release, kept rather than streamed — the Downloads tab takes
               over from here. */}
@@ -512,6 +558,23 @@ export function DetailScreen({
             <Icon name="download" size={18} color={colors.text} />
           </Pressable>
         </View>
+
+        {/* A film has no episode list to carry its progress, so it gets its own
+            bar. Series show theirs against each episode below. */}
+        {!picked && seen >= 1 && (
+          <View style={styles.resume}>
+            <ProgressBar value={seen} />
+            {/* Minutes, not a percentage — the button already carries that. */}
+            <Text style={styles.resumeText}>
+              {resume
+                ? `${clock(resume.position)} of ${clock(resume.duration)}` +
+                  (seen >= WATCHED
+                    ? ' · finished'
+                    : ` · ${left(resume.duration - resume.position)}`)
+                : ''}
+            </Text>
+          </View>
+        )}
 
         {!!title.plot && (
           <Pressable onPress={() => setOpen((o) => !o)}>

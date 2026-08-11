@@ -24,9 +24,17 @@ export type Item = {
 
   subtitle?: string; // attached .srt/.vtt uri
 
-  /** Frame the viewer stopped on, per file index. Cache-directory uris, so
-   *  treat every one as possibly gone. */
-  posters?: Record<string, string>;
+  /**
+   * What this torrent turned out to be, once resolved against the metadata
+   * service. Stored so the library shows real artwork on the next launch
+   * instead of looking it up again.
+   */
+  imdb?: string;
+  kind?: 'movie' | 'tv';
+  poster?: string;
+  /** The real title, so the library reads "The Matrix" rather than
+   *  "The.Matrix.1999.1080p.BluRay.x264-GRP". */
+  titleName?: string;
 };
 
 const KEY = 'torrent-history';
@@ -64,9 +72,6 @@ export const setPosition = (item: Item, index: number, seconds: number) =>
     lastFileIndex: index,
     positions: { ...item.positions, [index]: seconds },
   });
-
-export const setPoster = (item: Item, index: number, uri: string) =>
-  patch(item.uri, { posters: { ...item.posters, [index]: uri } });
 
 export const setDuration = (item: Item, index: number, seconds: number) =>
   patch(item.uri, { durations: { ...item.durations, [index]: seconds } });

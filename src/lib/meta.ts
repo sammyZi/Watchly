@@ -6,6 +6,7 @@
  * rating would be worse than showing no rating at all.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { isSeries, searchableName, yearOf } from './title.ts';
 
 const BASE = 'https://v3-cinemeta.strem.io/meta';
 /** Where a popularity shelf redirects to — asked for directly to save every
@@ -184,6 +185,76 @@ export function searchTitles(query: string, kind: 'movie' | 'tv'): Promise<Title
     });
   cache.set(key, pending);
   return pending;
+}
+
+const norm = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+/**
+ * The candidate that is actually the thing asked for, or nothing.
+ *
+ * Cinemeta's search ranks by popularity and answers *something* for any query,
+ * so taking the first result lands on a confidently wrong title — the reason
+ * the library used to open somebody else's film. Every candidate has to earn
+ * its place:
+ *
+ *  - the same name wins outright;
+ *  - a name that merely starts with the query is a sequel or a spin-off, good
+ *    enough only when nothing better turned up;
+ *  - a name missing any word of the query is not a match at all.
+ *
+ * The year, when the release name carries one, settles the rest — there are two
+ * films called Dune. It is only applied to films: a series' `year` is when it
+ * first aired, which rarely matches the season being watched.
+ */
+export function bestMatch(
+  titles: Title[],
+  query: string,
+  year?: string | null
+): Title | null {
+  const want = norm(query);
+  if (!want) return null;
+  const words = want.split(' ');
+
+  let best: { title: Title; score: number } | null = null;
+  for (const title of titles) {
+    const got = norm(title.title);
+    let score = 0;
+    if (got === want) score = 100;
+    else if (got.startsWith(want)) score = 60;
+    else if (words.every((w) => got.split(' ').includes(w))) score = 45;
+    else continue;
+
+    if (year && title.kind === 'movie' && title.year) {
+      score += title.year.slice(0, 4) === year ? 25 : -30;
+    }
+    if (!best || score > best.score) best = { title, score };
+  }
+
+  // Below the weakest positive rule the "match" is a guess, and a guess opens
+  // the wrong page with no sign that anything went wrong.
+  return best && best.score >= 45 ? best.title : null;
+}
+
+/**
+ * What a torrent actually is, from its name alone.
+ *
+ * History only ever stored release names, so this is the bridge from a stored
+ * torrent back to its title page. Returns null rather than guessing.
+ */
+export async function resolveTitle(releaseName: string): Promise<Title | null> {
+  const query = searchableName(releaseName);
+  if (query.length < 2) return null;
+  const year = yearOf(releaseName);
+  const kind = isSeries(releaseName) ? 'tv' : 'movie';
+  const [likely, other] = await Promise.all([
+    searchTitles(query, kind),
+    searchTitles(query, kind === 'tv' ? 'movie' : 'tv'),
+  ]);
+  return bestMatch(likely, query, year) ?? bestMatch(other, query, year);
 }
 
 /** Catalog rows without art are unusable on a poster shelf, so they are dropped. */

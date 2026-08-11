@@ -234,7 +234,7 @@ function HomeScreenView({
                       >
                         <Thumb
                           name={item.torrentName ?? item.title}
-                          poster={item.posters?.[index]}
+                          poster={item.poster}
                           icon="play"
                           progress={duration ? (position / duration) * 100 : 0}
                           width={168}

@@ -1,6 +1,6 @@
 // node --experimental-strip-types src/lib/meta.test.ts
 import assert from 'node:assert';
-import { reviewLinks, toEpisodes, toMeta, toTitles } from './meta.ts';
+import { bestMatch, reviewLinks, toEpisodes, toMeta, toTitles } from './meta.ts';
 
 assert.deepEqual(
   toMeta({
@@ -59,13 +59,11 @@ assert.deepEqual(
 );
 assert.equal(titles[0].runtime, '136 min');
 
-
 // Review links: IMDb is exact, the rest are searches carrying title and year.
 const links = reviewLinks({ ...toMeta({ name: 'The Matrix', year: '1999' }), imdb: 'tt0133093', kind: 'movie', backdrop: null, runtime: null });
 assert.deepEqual(links.map((l) => l.label), ['IMDb', 'Rotten Tomatoes', 'Metacritic', 'Letterboxd']);
 assert.equal(links[0].url, 'https://www.imdb.com/title/tt0133093/reviews');
 assert.ok(links[1].url.endsWith('search?search=The%20Matrix%201999'));
-
 
 // Episodes: ordered by season then number, specials (season 0) kept.
 const eps = toEpisodes([
@@ -79,7 +77,6 @@ assert.equal(eps[1].overview, 'from description');
 assert.equal(eps[0].thumbnail, null);
 assert.deepEqual(toEpisodes(undefined), []);
 
-console.log('ok');
 
 // A search result is thinner than a catalog row: name, poster, releaseInfo.
 const thin = toTitles(
@@ -91,5 +88,37 @@ assert.equal(thin[0].year, '1999');
 assert.deepEqual(thin[0].genres, []);
 // A series' releaseInfo is a range, and is kept as one.
 assert.equal(toMeta({ name: 'x', releaseInfo: '2020–2023' }).year, '2020–2023');
+
+// Matching: the search endpoint answers something for any query, so a
+// candidate has to actually be the thing asked for.
+const cand = (name: string, kind: 'movie' | 'tv' = 'movie', year: string | null = null) =>
+  ({
+    ...toMeta({ name, year }),
+    imdb: 'tt' + name.length,
+    kind,
+    backdrop: null,
+    runtime: null,
+    episodes: [],
+  }) as any;
+
+const pool = [cand('House of the Dragon', 'tv'), cand('Ted Lasso', 'tv')];
+assert.equal(bestMatch(pool, 'Ted Lasso')?.title, 'Ted Lasso');
+// Nothing related: better to return nothing than the most popular result.
+assert.equal(bestMatch(pool, 'Breaking Bad'), null);
+// A sequel is a weaker match than the exact title.
+assert.equal(bestMatch([cand('Dune Part Two'), cand('Dune')], 'Dune')?.title, 'Dune');
+// Two films of the same name: the release year decides.
+assert.equal(
+  bestMatch([cand('Dune', 'movie', '1984'), cand('Dune', 'movie', '2021')], 'Dune', '2021')
+    ?.year,
+  '2021'
+);
+// A year matching nothing must not force a wrong pick, only a weaker one.
+assert.equal(bestMatch([cand('Dune', 'movie', '1984')], 'Dune', '2021')?.title, 'Dune');
+// Punctuation is noise.
+assert.equal(
+  bestMatch([cand('Spider-Man: No Way Home')], 'Spider Man No Way Home')?.title,
+  'Spider-Man: No Way Home'
+);
 
 console.log('ok');

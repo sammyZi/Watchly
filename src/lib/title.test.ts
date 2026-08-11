@@ -1,6 +1,6 @@
 // node --experimental-strip-types src/lib/title.test.ts
 import assert from 'node:assert';
-import { hueOf, titleOf } from './title.ts';
+import { hueOf, isSeries, searchableName, titleOf, yearOf } from './title.ts';
 
 assert.equal(
   titleOf('magnet:?xt=urn:btih:ABC123&dn=Big+Buck+Bunny%202008'),
@@ -21,3 +21,17 @@ for (const name of ['a', 'zzzz', 'The.Matrix.1999.1080p']) {
 }
 
 console.log('ok');
+
+// Release name -> something a metadata service will match.
+assert.equal(searchableName('The.Matrix.1999.1080p.BluRay.x264-GRP'), 'The Matrix');
+assert.equal(searchableName('Ted Lasso S01E02 1080p WEB-DL'), 'Ted Lasso');
+assert.equal(searchableName('Some Show Season 2 Complete'), 'Some Show');
+assert.equal(searchableName('Dune Part Two (2024) 2160p.mkv'), 'Dune Part Two');
+assert.equal(searchableName('Arrival'), 'Arrival');
+
+assert.equal(yearOf('The.Matrix.1999.1080p'), '1999');
+assert.equal(yearOf('Ted Lasso S01E02'), null);
+
+assert.equal(isSeries('Ted Lasso S01E02 1080p'), true);
+assert.equal(isSeries('Show Season 2 Complete'), true);
+assert.equal(isSeries('The.Matrix.1999.1080p'), false);

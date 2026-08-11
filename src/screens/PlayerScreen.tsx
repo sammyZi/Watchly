@@ -27,23 +27,20 @@ import { searchSubtitles, downloadSubtitle, type SubtitleResult } from '../lib/o
 import { recordDownload } from './DownloadsScreen';
 import { font, radius, space, type } from '../theme';
 
-/** How often to refresh the library tile while watching. Cheap now: it copies
- *  the frame already on screen, so it never touches the stream. */
-const POSTER_EVERY_MS = 30_000;
-
 const SKIP_SECONDS = 10;
 const RATES = [0.75, 1, 1.25, 1.5, 2];
 
 /**
  * libVLC's fit modes, in the order the button cycles them.
  *
- * Fill crops to the screen and keeps the shape; stretch distorts to it. Both
- * are here because they are the two different things people mean by "fill".
+ * Stretch distorts the picture to the screen; crop keeps its shape and cuts
+ * the overhang. Both are here because they are the two different things people
+ * mean by "fill", and stretch is the one reached for first.
  */
 const SCALES = [
   { type: 'SURFACE_BEST_FIT', label: 'Best fit' },
-  { type: 'SURFACE_FIT_SCREEN', label: 'Fill (crop)' },
   { type: 'SURFACE_FILL', label: 'Stretch' },
+  { type: 'SURFACE_FIT_SCREEN', label: 'Crop' },
   { type: 'SURFACE_16_9', label: '16:9' },
   { type: 'SURFACE_4_3', label: '4:3' },
   { type: 'SURFACE_ORIGINAL', label: 'Original' },
@@ -63,7 +60,6 @@ export function PlayerScreen({
   progress,
   onSavePosition,
   onDuration,
-  onPoster,
   onExit,
 }: {
   /** What is playing — the file inside the torrent, not the torrent. */
@@ -77,7 +73,6 @@ export function PlayerScreen({
   progress: Progress | null;
   onSavePosition: (seconds: number) => void;
   onDuration: (seconds: number) => void;
-  onPoster: (uri: string) => void;
   onExit: () => void;
 }) {
   const [failure, setFailure] = useState<{ text: string; fatal: boolean } | null>(null);
@@ -89,6 +84,9 @@ export function PlayerScreen({
   const [buffering, setBuffering] = useState(false);
   /** Every subtitle track libVLC found inside the media. */
   const [tracks, setTracks] = useState<VlcTrack[]>([]);
+  /** Audio tracks, for the dubs and commentaries a release often carries. */
+  const [audioTracks, setAudioTracks] = useState<VlcTrack[]>([]);
+  const [audioTrack, setAudioTrack] = useState<number | null>(null);
   /** Index of the chosen track, null for off. */
   const [subTrack, setSubTrack] = useState<number | null>(null);
   const [picking, setPicking] = useState(false);
@@ -127,7 +125,6 @@ export function PlayerScreen({
   /** Consecutive recoveries from a dropped stream, so a genuinely dead source
    *  cannot put the player in a reload loop. Reset once playback gets going. */
   const reloads = useRef(0);
-  const posterAt = useRef(0);
   /** Whether the app has been away since playback last ran. */
   const left = useRef(false);
   const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -145,10 +142,8 @@ export function PlayerScreen({
   // otherwise resubscribe the back/AppState listeners several times a second.
   const save = useRef(onSavePosition);
   const leave = useRef(onExit);
-  const poster = useRef(onPoster);
   save.current = onSavePosition;
   leave.current = onExit;
-  poster.current = onPoster;
   /** Same trick for bumpUi: it changes with `picking`, and the AppState effect
    *  must not resubscribe every time that flips. Assigned below its definition. */
   const bump = useRef<() => void>(() => {});
@@ -479,9 +474,13 @@ export function PlayerScreen({
             paused={paused}
             rate={rate}
             subtitleTrack={subTrack}
+            audioTrack={audioTrack}
             subtitleFiles={[...(subtitleFiles ?? []), ...externalSubs]}
             scaleType={SCALES[scaleIdx].type}
-            onTracks={({ nativeEvent }) => setTracks(nativeEvent.subtitles)}
+            onTracks={({ nativeEvent }) => {
+              setTracks(nativeEvent.subtitles);
+              setAudioTracks(nativeEvent.audio);
+            }}
             onProgress={({ nativeEvent: { currentTime } }) => {
               // Between asking for a seek and it landing, this still reports
               // where playback was — over a torrent that can be several seconds.
@@ -498,21 +497,6 @@ export function PlayerScreen({
               // Playing steadily again — allow the drop recovery to arm afresh.
               if (currentTime > 5) reloads.current = 0;
 
-              // Only while actually showing a frame: a copy taken mid-rebuffer
-              // is whatever was last drawn, which may be nothing at all.
-              if (
-                !buffering &&
-                currentTime > 5 &&
-                Date.now() - posterAt.current > POSTER_EVERY_MS
-              ) {
-                posterAt.current = Date.now();
-                videoRef.current
-                  ?.snapshot()
-                  .then((uri) => {
-                    if (uri) poster.current(uri);
-                  })
-                  .catch(() => {});
-              }
             }}
             onLoaded={({ nativeEvent: { duration: d } }) => {
               // A seek is only honoured once the media is open, so the window
@@ -772,30 +756,26 @@ export function PlayerScreen({
                   }}
                 />
               ))}
-              {(subtitleFiles ?? []).map((path, i) => (
-                <TrackOption
-                  key={`ext-${i}`}
-                  label={`${fileBaseName(path)} (file)`}
-                  active={false}
-                  sublabel="loaded from torrent"
-                  onPress={() => {
-                    setPicking(false);
-                    bumpUi();
-                  }}
-                />
-              ))}
-              {externalSubs.map((path, i) => (
-                <TrackOption
-                  key={`os-${i}`}
-                  label={`${fileBaseName(path)} (opensubtitles)`}
-                  active={false}
-                  sublabel="downloaded"
-                  onPress={() => {
-                    setPicking(false);
-                    bumpUi();
-                  }}
-                />
-              ))}
+
+              {/* Audio only earns a place when there is a choice to make — a
+                  single track is not a decision. */}
+              {audioTracks.length > 1 && (
+                <>
+                  <Text style={styles.sheetHeading}>Audio</Text>
+                  {audioTracks.map((t) => (
+                    <TrackOption
+                      key={`audio-${t.id}`}
+                      label={t.name}
+                      active={audioTrack === t.id}
+                      onPress={() => {
+                        setAudioTrack(t.id);
+                        setPicking(false);
+                        bumpUi();
+                      }}
+                    />
+                  ))}
+                </>
+              )}
             </View>
           )}
 
@@ -1001,7 +981,6 @@ function TrackOption({
   );
 }
 
-const fileBaseName = (path: string) => path.split(/[/\\]/).pop() ?? path;
 
 /**
  * Thin scrubber — tap anywhere on the track, or drag the head, to seek.
@@ -1102,6 +1081,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingTop: 6,
     paddingBottom: 4,
+  },
+  /** Second section in the same sheet — a rule above it, so it reads as its
+   *  own group rather than more subtitles. */
+  sheetHeading: {
+    ...type.overline,
+    color: '#ffffff70',
+    paddingHorizontal: 10,
+    paddingTop: 10,
+    paddingBottom: 4,
+    marginTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#ffffff1f',
   },
   option: {
     flexDirection: 'row',

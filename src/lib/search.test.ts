@@ -1,6 +1,6 @@
 // node --experimental-strip-types src/lib/search.test.ts
 import assert from 'node:assert';
-import { episodeTag, health, kindOf, quality, rank, scopeOf, toHits, type Hit } from './search.ts';
+import { episodeTag, parseEpisode, health, kindOf, quality, rank, scopeOf, toHits, type Hit } from './search.ts';
 
 const row = (over: Record<string, string | number> = {}) => ({
   id: '1',
@@ -82,7 +82,6 @@ assert.deepEqual(
   ['exact', 'partial']
 );
 
-
 assert.equal(episodeTag(1, 2), 'S01E02');
 assert.equal(episodeTag(10, 11), 'S10E11');
 
@@ -95,5 +94,13 @@ assert.equal(scopeOf('Ted Lasso Complete Series 1080p'), 'complete');
 assert.equal(scopeOf('Some.Film.2024.1080p.BluRay'), 'episode');
 // An episode marker wins over anything else in the name.
 assert.equal(scopeOf('Show Complete Series S02E05'), 'episode');
+
+
+// File name -> which episode it is, for progress read back out of the library.
+assert.deepEqual(parseEpisode('Ted.Lasso.S01E02.1080p.mkv'), { season: 1, episode: 2 });
+assert.deepEqual(parseEpisode('Show S1 E2.mkv'), { season: 1, episode: 2 });
+assert.deepEqual(parseEpisode('Show 1x02.mkv'), { season: 1, episode: 2 });
+assert.deepEqual(parseEpisode('Show.S10E11.mkv'), { season: 10, episode: 11 });
+assert.equal(parseEpisode('Some.Film.2024.1080p.mkv'), null);
 
 console.log('ok');
