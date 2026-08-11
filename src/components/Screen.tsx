@@ -21,7 +21,7 @@ export function Screen({
 
   return (
     <View style={styles.screen}>
-      <StatusBar barStyle="dark-content" backgroundColor={colors.control} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
       <View style={[styles.header, { paddingTop: insets.top + space.md }]}>
         {!!icon && (
           <View style={styles.mark}>
@@ -45,7 +45,9 @@ const styles = StyleSheet.create({
     gap: space.md,
     paddingBottom: space.md,
     paddingHorizontal: space.xl,
-    backgroundColor: colors.control,
+    // Same tone as the page: a tinted bar on top read as a separate strip, and
+    // the gutter below already tells you where the header ends.
+    backgroundColor: colors.bg,
   },
   mark: {
     width: 34,

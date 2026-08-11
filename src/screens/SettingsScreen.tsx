@@ -1,13 +1,13 @@
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
-import { useRef, useState } from 'react';
+import { memo, useRef, useState } from 'react';
 import { Icon, type IconName } from '../components/Icon';
 import { Screen } from '../components/Screen';
 import type { Settings } from '../lib/settings';
-import { colors, font, radius, space, type } from '../theme';
+import { colors, font, radius, space, TAB_INSET, type } from '../theme';
 
 const BUFFER_CHOICES = [2, 3, 6];
 
-export function SettingsScreen({
+function SettingsScreenView({
   settings,
   onChange,
   onClearHistory,
@@ -218,7 +218,7 @@ const Toggle = ({
 const Divider = () => <View style={styles.divider} />;
 
 const styles = StyleSheet.create({
-  body: { padding: space.xl, gap: space.xl, paddingBottom: space.xxl },
+  body: { padding: space.xl, gap: space.xl, paddingBottom: TAB_INSET },
   note: {
     gap: space.sm,
     padding: space.lg,
@@ -309,3 +309,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 });
+
+/** Kept mounted behind the other tabs — see TabPage in App. */
+export const SettingsScreen = memo(SettingsScreenView);

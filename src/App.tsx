@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppState,
   BackHandler,
@@ -36,14 +36,20 @@ import {
   type Item,
 } from './lib/history';
 import { DEFAULTS, loadSettings, saveSettings, type Settings } from './lib/settings';
+import { linkEpisode, loadEpisodeLinks, type EpisodeLinks } from './lib/watched';
 import { isTorrentSource } from './lib/magnet';
+import { pickFile } from './lib/pick';
 import { titleOf } from './lib/title';
+import type { Title } from './lib/meta';
+import { CatalogScreen } from './screens/CatalogScreen';
+import { DetailScreen } from './screens/DetailScreen';
 import { FilesScreen } from './screens/FilesScreen';
 import { HistoryScreen } from './screens/HistoryScreen';
 import { DownloadsScreen, recordDownload } from './screens/DownloadsScreen';
+import { HomeScreen, type Shelf } from './screens/HomeScreen';
 import { PlayerScreen } from './screens/PlayerScreen';
+import { SearchScreen } from './screens/SearchScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
-import { StreamScreen } from './screens/StreamScreen';
 import { colors } from './theme';
 
 SplashScreen.preventAutoHideAsync();
@@ -58,8 +64,35 @@ export default function App() {
   );
 }
 
+/**
+ * A tab body: mounted on first visit, then kept mounted and merely hidden.
+ *
+ * Rebuilding a whole screen on every tab tap is what made switching feel slow —
+ * and it threw away scroll position with it. Nothing is mounted before it has
+ * been asked for, so startup still only pays for the home page.
+ */
+function TabPage({
+  show,
+  mounted,
+  children,
+}: {
+  show: boolean;
+  mounted: boolean;
+  children: React.ReactNode;
+}) {
+  if (!mounted) return null;
+  return (
+    <View
+      style={[styles.page, !show && styles.hidden]}
+      pointerEvents={show ? 'auto' : 'none'}
+    >
+      {children}
+    </View>
+  );
+}
+
 function Shell() {
-  const [tab, setTab] = useState<TabKey>('stream');
+  const [tab, setTab] = useState<TabKey>('home');
   const [history, setHistory] = useState<Item[]>([]);
   const [settings, setSettings] = useState<Settings>(DEFAULTS);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
@@ -82,6 +115,13 @@ function Shell() {
   } = torrent;
 
   const [torrentMode, setTorrentMode] = useState<'stream' | 'download' | null>(null);
+  /** Title being browsed. Sits above the tabs, like a pushed route would. */
+  const [detail, setDetail] = useState<Title | null>(null);
+  /** Shelf opened from a "See all" — under `detail`, so a title picked from the
+   *  grid comes back to the grid rather than to the home page. */
+  const [shelf, setShelf] = useState<Shelf | null>(null);
+  /** Episode id -> the torrent uri it was opened with. */
+  const [episodeLinks, setEpisodeLinks] = useState<EpisodeLinks>({});
   /** Playing a finished file from Completed — no torrent session involved. */
   const [localPlay, setLocalPlay] = useState<{ url: string; title: string } | null>(
     null
@@ -97,6 +137,7 @@ function Shell() {
   useEffect(() => {
     loadHistory().then(setHistory);
     loadSettings().then(setSettings);
+    loadEpisodeLinks().then(setEpisodeLinks);
     // Drop leftover stream pieces from a previous kill (can be multi‑GB).
     TorrentStream.clearCache().catch(() => {});
   }, []);
@@ -143,7 +184,7 @@ function Shell() {
     async (
       next: Item,
       fileIndex?: number,
-      opts?: { keepProgress?: boolean }
+      opts?: { keepProgress?: boolean; auto?: string | boolean }
     ) => {
       const items = await put({ ...next, at: Date.now() });
       setHistory(items);
@@ -168,12 +209,46 @@ function Shell() {
         );
         return;
       }
+
+      // Started from a title page: the file was already decided by picking that
+      // episode or that release, so the file list is a screen with one sensible
+      // answer on it. Take the answer.
+      if (opts?.auto) {
+        const chosen = pickFile(
+          found.files,
+          typeof opts.auto === 'string' ? opts.auto : undefined
+        );
+        if (chosen != null) {
+          play(chosen, resumeRatio(fresh, chosen), opts);
+        }
+        // Null means no video inside — the picker is then the only useful thing
+        // to show, and `inspect` has already left us on it.
+      }
     },
     [inspect, play, playKnown]
   );
 
+  /**
+   * How far through each episode you are.
+   *
+   * The player records position against a torrent uri, so this is the join:
+   * episode -> uri -> the history entry the player has been writing to.
+   */
+  const episodeProgress = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const [id, uri] of Object.entries(episodeLinks)) {
+      const entry = history.find((h) => h.uri === uri);
+      const index = entry?.lastFileIndex;
+      if (!entry || index == null) continue;
+      const duration = entry.durations?.[index];
+      if (!duration) continue;
+      out[id] = Math.min(100, ((entry.positions?.[index] ?? 0) / duration) * 100);
+    }
+    return out;
+  }, [episodeLinks, history]);
+
   const openUri = useCallback(
-    async (uri: string) => {
+    async (uri: string, opts?: { auto?: string | boolean; keepProgress?: boolean }) => {
       // A shared file arrives as a content:// grant that expires — take our own
       // copy before doing anything else, and store *that* path, so the history
       // entry is still openable tomorrow.
@@ -184,7 +259,9 @@ function Shell() {
         fail(String(e?.message ?? e));
         return;
       }
-      open({ uri: local, title: titleOf(uri), at: Date.now() });
+      open({ uri: local, title: titleOf(uri), at: Date.now() }, undefined, opts);
+      // Whatever history files this under is what episode progress reads back.
+      return local;
     },
     [open, fail]
   );
@@ -202,12 +279,62 @@ function Shell() {
     return () => sub.remove();
   }, [openUri]);
 
+  // Recorded during render, not in an effect: a tab has to mount in the same
+  // commit as the tap, or the first visit shows one blank frame.
+  const visited = useRef(new Set<TabKey>(['home'])).current;
+  visited.add(tab);
+
+  // Stable identities for the two screens heavy enough to care — with these the
+  // hidden tabs re-render on a switch instead of rebuilding.
+  const playFile = useCallback((target: Item, index: number) => open(target, index), [open]);
+  const showHistory = useCallback(() => setTab('history'), []);
+  const streamUri = useCallback(
+    (uri: string) => {
+      setTorrentMode('stream');
+      // Straight into the feature — a result tapped in Search is a film, not a
+      // folder to go rummaging through.
+      openUri(uri, { auto: true });
+    },
+    [openUri]
+  );
+  /**
+   * A row in the library: carry on with whatever it was playing. The file it
+   * last opened is stored, so this resumes rather than asking anything.
+   */
+  const openItem = useCallback(
+    (target: Item) => {
+      setTorrentMode('stream');
+      open(target, target.lastFileIndex, { auto: true });
+    },
+    [open]
+  );
+  const downloadUri = useCallback(
+    (uri: string) => {
+      setTorrentMode('download');
+      openUri(uri);
+    },
+    [openUri]
+  );
+  const playCompleted = useCallback(
+    async (entry: { name: string; path?: string }) => {
+      try {
+        const uri = entry.path ?? (await TorrentStream.downloadUri(entry.name));
+        setLocalPlay({ url: uri, title: entry.name });
+      } catch (e: any) {
+        fail(String(e?.message ?? e));
+      }
+    },
+    [fail]
+  );
+
   const changeSettings = useCallback((next: Settings) => {
     setSettings(next);
     saveSettings(next);
   }, []);
 
-  const askRemove = (target: Item) =>
+  // These reach memoised screens, so they have to keep the same identity across
+  // a render — an inline arrow would defeat the memo on every progress tick.
+  const askRemove = useCallback((target: Item) =>
     setConfirm({
       title: 'Remove from history?',
       message: target.torrentName ?? target.title,
@@ -215,28 +342,38 @@ function Shell() {
       confirmLabel: 'Remove',
       destructive: true,
       onConfirm: () => drop(target.uri).then(setHistory),
-    });
+    }), []);
 
-  const askClear = () =>
-    setConfirm({
-      title: 'Clear watch history?',
-      message: `${history.length} item(s) and their resume points will be deleted.`,
-      icon: 'trash-2',
-      confirmLabel: 'Clear all',
-      destructive: true,
-      onConfirm: () => clearHistory().then(setHistory),
-    });
+  const askClear = useCallback(
+    () =>
+      setConfirm({
+        title: 'Clear watch history?',
+        message: `${history.length} item(s) and their resume points will be deleted.`,
+        icon: 'trash-2',
+        confirmLabel: 'Clear all',
+        destructive: true,
+        onConfirm: () => clearHistory().then(setHistory),
+      }),
+    [history.length]
+  );
 
   // Back key unwinds the streaming flow; the player handles its own.
   useEffect(() => {
-    if (phase === 'idle' || phase === 'playing') return;
+    if (phase === 'playing') return;
+    if (phase === 'idle' && !detail && !shelf) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      // Idle means the browsing stack is all there is to unwind, innermost first.
+      if (phase === 'idle') {
+        if (detail) setDetail(null);
+        else setShelf(null);
+        return true;
+      }
       setTorrentMode(null);
       reset();
       return true;
     });
     return () => sub.remove();
-  }, [phase, reset]);
+  }, [phase, detail, shelf, reset]);
 
   /** Ask for notification permission (Android 13+) then show the download notif. */
   const enableDownloadNotify = useCallback(async () => {
@@ -247,6 +384,18 @@ function Shell() {
     }
     TorrentStream.setNotify(true).catch(() => {});
   }, []);
+
+  /** Declared here rather than with the other stable callbacks — it needs
+   *  `enableDownloadNotify`, which is defined just above. */
+  const downloadFile = useCallback(
+    (target: Item, index: number) => {
+      setTorrentMode('download');
+      setTab('downloads');
+      enableDownloadNotify();
+      open(target, index, { keepProgress: true });
+    },
+    [open, enableDownloadNotify]
+  );
 
   // Auto-save when a Downloads-tab transfer hits 100%, then keep it in Completed.
   const downloadDoneRef = useRef(false);
@@ -395,55 +544,75 @@ function Shell() {
     );
   }
 
+  // Sits above the tabs but below the streaming flow: once a source is picked,
+  // the file picker and the player take the screen from here.
+  if (detail) {
+    return (
+      <DetailScreen
+        seed={detail}
+        busy={phase === 'inspecting'}
+        error={torrent.error}
+        progress={episodeProgress}
+        // `tag` is the SxxEyy to look for inside a season pack; true just means
+        // "pick the feature". Either way, no file list.
+        onPlay={async (magnet, episodeId, tag) => {
+          setTorrentMode('stream');
+          const local = await openUri(magnet, { auto: tag ?? true });
+          if (episodeId && local) linkEpisode(episodeId, local).then(setEpisodeLinks);
+        }}
+        onDownload={(magnet, tag) => {
+          setTorrentMode('download');
+          setTab('downloads');
+          setDetail(null);
+          enableDownloadNotify();
+          openUri(magnet, { auto: tag ?? true, keepProgress: true });
+        }}
+        onBack={() => setDetail(null)}
+      />
+    );
+  }
+
+  if (shelf) {
+    return (
+      <CatalogScreen
+        heading={shelf.title}
+        kind={shelf.kind}
+        genre={shelf.genre}
+        onOpenTitle={setDetail}
+        onBack={() => setShelf(null)}
+      />
+    );
+  }
+
   return (
     <View style={styles.app}>
       <View style={styles.body}>
-        {tab === 'stream' && (
-          <StreamScreen
+        <TabPage show={tab === 'home'} mounted>
+          <HomeScreen
             recent={history}
-            error={torrent.error}
-            busy={phase === 'inspecting'}
-            onOpenUri={(uri) => {
-              setTorrentMode('stream');
-              openUri(uri);
-            }}
-            onPlayFile={(target, index) => open(target, index)}
-            onSeeAll={() => setTab('history')}
+            onOpenTitle={setDetail}
+            onOpenShelf={setShelf}
+            onPlayFile={playFile}
+            onSeeAll={showHistory}
           />
-        )}
-        {tab === 'history' && (
+        </TabPage>
+        <TabPage show={tab === 'search'} mounted={visited.has('search')}>
+          <SearchScreen onOpenTitle={setDetail} />
+        </TabPage>
+        <TabPage show={tab === 'history'} mounted={visited.has('history')}>
           <HistoryScreen
             history={history}
-            onOpenItem={(target) => {
-              setTorrentMode('stream');
-              open(target);
-            }}
-            onPlayFile={(target, index) => open(target, index)}
-            onDownloadFile={(target, index) => {
-              setTorrentMode('download');
-              setTab('downloads');
-              enableDownloadNotify();
-              open(target, index, { keepProgress: true });
-            }}
+            onOpenItem={openItem}
+            onPlayFile={playFile}
+            onDownloadFile={downloadFile}
             onRemove={askRemove}
             onClear={askClear}
           />
-        )}
-        {tab === 'downloads' && (
+        </TabPage>
+        <TabPage show={tab === 'downloads'} mounted={visited.has('downloads')}>
           <DownloadsScreen
-            onOpenUri={(uri) => {
-              setTorrentMode('download');
-              openUri(uri);
-            }}
-            onPlayFile={async (entry) => {
-              try {
-                const uri =
-                  entry.path ?? (await TorrentStream.downloadUri(entry.name));
-                setLocalPlay({ url: uri, title: entry.name });
-              } catch (e: any) {
-                fail(String(e?.message ?? e));
-              }
-            }}
+            onOpenUri={downloadUri}
+            onPlayFile={playCompleted}
             active={
               torrentMode === 'download' && phase === 'playing'
                 ? {
@@ -472,15 +641,15 @@ function Shell() {
                 : null
             }
           />
-        )}
-        {tab === 'settings' && (
+        </TabPage>
+        <TabPage show={tab === 'settings'} mounted={visited.has('settings')}>
           <SettingsScreen
             settings={settings}
             onChange={changeSettings}
             onClearHistory={askClear}
             historyCount={history.length}
           />
-        )}
+        </TabPage>
       </View>
 
       <TabBar active={tab} onChange={setTab} />
@@ -492,6 +661,8 @@ function Shell() {
 const styles = StyleSheet.create({
   app: { flex: 1, backgroundColor: colors.bg },
   body: { flex: 1 },
+  page: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  hidden: { display: 'none' },
   modePicker: {
     flex: 1,
     backgroundColor: colors.bg,

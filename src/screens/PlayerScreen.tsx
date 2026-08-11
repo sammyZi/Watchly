@@ -434,6 +434,11 @@ export function PlayerScreen({
       // libVLC keeps decoding in the background on its own. react-native-video
       // had playInBackground={false} doing this; without it, leaving the app
       // leaves the audio running.
+      //
+      // Stopped imperatively first, for the reason handOff gives: the `paused`
+      // prop is a round trip through React and does not reliably land before
+      // Android suspends us, so the sound carries on into the home screen.
+      videoRef.current?.pause().catch(() => {});
       setPaused(true);
     });
     return () => {
@@ -1297,7 +1302,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 2,
-    backgroundColor: '#ffffff1f',
+    // Darkens the picture rather than washing it out — a white veil disappears
+    // over a bright scene, the white arrows on top of it do not.
+    backgroundColor: '#00000073',
   },
   rippleLeft: {
     left: 0,

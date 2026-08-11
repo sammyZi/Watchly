@@ -45,18 +45,18 @@ export function HistoryRow({
     .join(' · ');
 
   return (
-    <View>
+    <View style={styles.card}>
       <Pressable
-        onPress={videos.length > 1 ? () => setExpanded((e) => !e) : onOpen}
+        onPress={onOpen}
         onLongPress={onRemove}
         style={({ pressed }) => [styles.row, pressed && styles.pressed]}
       >
         <Thumb
           name={item.torrentName ?? item.title}
           poster={lastIndex != null ? item.posters?.[lastIndex] : undefined}
-          icon={videos.length > 1 ? 'folder' : 'play'}
-          width={64}
-          height={48}
+          icon="play"
+          width={124}
+          height={70}
           progress={
             lastDuration && lastPosition ? (lastPosition / lastDuration) * 100 : undefined
           }
@@ -66,34 +66,36 @@ export function HistoryRow({
           <Text numberOfLines={2} style={styles.title}>
             {item.torrentName ?? item.title}
           </Text>
-          <Text style={styles.meta}>{meta}</Text>
+          <Text style={styles.meta} numberOfLines={1}>
+            {meta}
+          </Text>
           {!!lastDuration && !!lastPosition && (
-            <ProgressBar
-              value={(lastPosition / lastDuration) * 100}
-              style={styles.bar}
-            />
+            <ProgressBar value={(lastPosition / lastDuration) * 100} style={styles.bar} />
           )}
         </View>
 
-        <Icon
-          name={videos.length > 1 ? (expanded ? 'chevron-up' : 'chevron-down') : 'chevron-right'}
-          size={18}
-          color={colors.faint}
-        />
         <Pressable
-          onPress={() => {
-            if (videos.length === 1) {
-              onDownloadFile(videos[0].index);
-            } else {
-              setExpanded((e) => !e);
-            }
-          }}
+          onPress={() =>
+            videos.length === 1 ? onDownloadFile(videos[0].index) : setExpanded((e) => !e)
+          }
           hitSlop={8}
-          style={styles.rowBtn}
+          accessibilityLabel={videos.length === 1 ? 'Download' : 'Show files'}
+          style={styles.action}
         >
           <Icon name="download" size={15} color={colors.accent} />
         </Pressable>
       </Pressable>
+
+      {/* A season pack: the row plays what you were last on, this reaches the
+          rest. Only worth a control when there is more than one thing inside. */}
+      {videos.length > 1 && (
+        <Pressable onPress={() => setExpanded((e) => !e)} style={styles.more}>
+          <Text style={styles.moreText}>
+            {expanded ? 'Hide' : `All ${videos.length} files`}
+          </Text>
+          <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={15} color={colors.muted} />
+        </Pressable>
+      )}
 
       {expanded && (
         <View style={styles.files}>
@@ -136,23 +138,42 @@ export function HistoryRow({
 }
 
 const styles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-    paddingVertical: space.md,
+  // A card per torrent, artwork-led: the captured frame is the only thing that
+  // says what this is at a glance.
+  card: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: space.sm,
+    overflow: 'hidden',
   },
+  row: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   pressed: { opacity: 0.6 },
-  body: { flex: 1, gap: space.xs },
-  title: { ...type.title, color: colors.text },
+  body: { flex: 1, gap: space.xs, paddingRight: space.xs },
+  title: { ...type.title, fontFamily: font.medium, color: colors.text },
   meta: { ...type.meta, color: colors.faint },
   bar: { marginTop: space.xs },
+  action: {
+    width: 34,
+    height: 34,
+    borderRadius: radius.pill,
+    backgroundColor: colors.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  more: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.xs,
+    paddingTop: space.sm,
+    paddingBottom: space.xs,
+  },
+  moreText: { ...type.meta, fontFamily: font.medium, color: colors.muted },
 
   files: {
     borderTopWidth: 1,
     borderTopColor: colors.line,
     paddingTop: space.sm,
-    marginBottom: space.sm,
   },
   file: {
     flexDirection: 'row',

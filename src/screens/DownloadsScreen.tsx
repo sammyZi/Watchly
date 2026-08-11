@@ -1,13 +1,14 @@
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Progress } from '../../modules/torrent-stream';
 import { Icon } from '../components/Icon';
+import { Thumb } from '../components/Thumb';
 import { ProgressBar } from '../components/ProgressBar';
 import { Screen } from '../components/Screen';
 import { SourceInput } from '../components/SourceInput';
 import { ago, bytes, speed } from '../lib/format';
-import { colors, font, radius, space, type } from '../theme';
+import { colors, font, radius, space, TAB_INSET, type } from '../theme';
 
 type DownloadEntry = {
   name: string;
@@ -65,7 +66,7 @@ function stageLabel(state?: string, paused?: boolean): string {
   return 'Finding peers';
 }
 
-export function DownloadsScreen({
+function DownloadsScreenView({
   onOpenUri,
   onPlayFile,
   active,
@@ -199,9 +200,9 @@ export function DownloadsScreen({
             onPress={() => onPlayFile(item)}
             style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
           >
-            <View style={styles.rowIcon}>
-              <Icon name="play" size={16} color={colors.accent} />
-            </View>
+            {/* No frame is ever captured for a download, so the tile falls back
+                to its name colour — still enough to tell rows apart. */}
+            <Thumb name={item.name} icon="play" width={124} height={70} />
             <View style={styles.rowBody}>
               <Text numberOfLines={2} style={styles.rowName}>
                 {item.name}
@@ -210,8 +211,8 @@ export function DownloadsScreen({
                 {item.size > 0 ? `${bytes(item.size)} · ` : ''}
                 {ago(item.at)}
               </Text>
+              <Text style={styles.rowSaved}>Saved to Downloads</Text>
             </View>
-            <Icon name="chevron-right" size={16} color={colors.faint} />
           </Pressable>
         )}
       />
@@ -220,7 +221,7 @@ export function DownloadsScreen({
 }
 
 const styles = StyleSheet.create({
-  body: { padding: space.xl, gap: space.sm, paddingBottom: space.xxl },
+  body: { padding: space.xl, gap: space.md, paddingBottom: TAB_INSET },
   head: { gap: space.lg, marginBottom: space.sm },
   active: {
     gap: space.md,
@@ -317,20 +318,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.md,
-    padding: space.md,
+    padding: space.sm,
     borderRadius: radius.lg,
     backgroundColor: colors.surface,
   },
   rowPressed: { opacity: 0.7 },
-  rowIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: radius.md,
-    backgroundColor: colors.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rowBody: { flex: 1, gap: 2 },
+  rowBody: { flex: 1, gap: 2, paddingRight: space.xs },
+  rowSaved: { ...type.meta, fontSize: 11, color: colors.good },
   rowName: {
     ...type.body,
     fontFamily: font.medium,
@@ -339,3 +333,6 @@ const styles = StyleSheet.create({
   },
   rowMeta: { ...type.meta, color: colors.muted },
 });
+
+/** Kept mounted behind the other tabs — see TabPage in App. */
+export const DownloadsScreen = memo(DownloadsScreenView);
