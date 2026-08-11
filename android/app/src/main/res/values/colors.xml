@@ -2,5 +2,6 @@
   <color name="splashscreen_background">#ffffff</color>
   <color name="iconBackground">#E50914</color>
   <color name="colorPrimary">#E50914</color>
-  <color name="activityBackground">#0b0e14</color>
+  <!-- Same as light app bg — never flash a third color under the splash. -->
+  <color name="activityBackground">#ffffff</color>
 </resources>

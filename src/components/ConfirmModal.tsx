@@ -1,7 +1,7 @@
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, Text, View } from 'react-native';
 import { Button } from './Button';
 import { Icon, type IconName } from './Icon';
-import { colors, radius, shadow, space, type } from '../theme';
+import { radius, shadow, space, type, useColors, useThemedStyles } from '../theme';
 
 export type Confirm = {
   title: string;
@@ -20,6 +20,51 @@ export function ConfirmModal({
   request: Confirm | null;
   onClose: () => void;
 }) {
+  const colors = useColors();
+  const styles = useThemedStyles((c) => ({
+    backdrop: {
+      flex: 1,
+      backgroundColor: c.scrim,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+      padding: space.xl,
+    },
+    sheet: {
+      width: '100%' as const,
+      maxWidth: 360,
+      // The one genuinely floating surface, so the one that keeps a shadow.
+      backgroundColor: c.control,
+      borderRadius: radius.lg,
+      padding: space.xl,
+      alignItems: 'center' as const,
+      ...shadow,
+    },
+    badge: {
+      width: 46,
+      height: 46,
+      borderRadius: radius.pill,
+      backgroundColor: c.accentSoft,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+      marginBottom: space.lg,
+    },
+    badgeDanger: { backgroundColor: c.dangerSoft },
+    title: { ...type.title, fontSize: 17, color: c.text, textAlign: 'center' as const },
+    message: {
+      ...type.body,
+      color: c.muted,
+      textAlign: 'center' as const,
+      marginTop: space.sm,
+    },
+    actions: {
+      flexDirection: 'row' as const,
+      gap: space.md,
+      marginTop: space.xl,
+      alignSelf: 'stretch' as const,
+    },
+    action: { flex: 1, justifyContent: 'center' as const },
+  }));
+
   return (
     <Modal
       visible={!!request}
@@ -60,47 +105,3 @@ export function ConfirmModal({
     </Modal>
   );
 }
-
-const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: '#0b102055',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: space.xl,
-  },
-  sheet: {
-    width: '100%',
-    maxWidth: 360,
-    // The one genuinely floating surface, so the one that keeps a shadow.
-    backgroundColor: colors.control,
-    borderRadius: radius.lg,
-    padding: space.xl,
-    alignItems: 'center',
-    ...shadow,
-  },
-  badge: {
-    width: 46,
-    height: 46,
-    borderRadius: radius.pill,
-    backgroundColor: colors.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: space.lg,
-  },
-  badgeDanger: { backgroundColor: colors.dangerSoft },
-  title: { ...type.title, fontSize: 17, color: colors.text, textAlign: 'center' },
-  message: {
-    ...type.body,
-    color: colors.muted,
-    textAlign: 'center',
-    marginTop: space.sm,
-  },
-  actions: {
-    flexDirection: 'row',
-    gap: space.md,
-    marginTop: space.xl,
-    alignSelf: 'stretch',
-  },
-  action: { flex: 1, justifyContent: 'center' },
-});

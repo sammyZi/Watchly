@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Image, StyleSheet, View } from 'react-native';
 import { Icon, type IconName } from './Icon';
 import { hueOf } from '../lib/title';
-import { colors, radius } from '../theme';
+import { radius, useThemedStyles } from '../theme';
 
 /**
  * Poster tile for a torrent.
@@ -32,6 +32,33 @@ export function Thumb({
 }) {
   const [broken, setBroken] = useState(false);
   const showPoster = !!poster && !broken;
+  const styles = useThemedStyles((c) => ({
+    tile: {
+      borderRadius: radius.md,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+      overflow: 'hidden' as const,
+    },
+    glyph: {
+      width: 30,
+      height: 30,
+      borderRadius: radius.pill,
+      backgroundColor: '#0000003d',
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+    },
+    // A real frame can be any colour, so the glyph needs its own contrast.
+    glyphOnPhoto: { backgroundColor: '#00000080' },
+    track: {
+      position: 'absolute' as const,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      height: 3,
+      backgroundColor: '#ffffff59',
+    },
+    fill: { height: 3, backgroundColor: c.accent },
+  }));
 
   return (
     <View
@@ -75,31 +102,3 @@ export function Thumb({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  tile: {
-    borderRadius: radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  glyph: {
-    width: 30,
-    height: 30,
-    borderRadius: radius.pill,
-    backgroundColor: '#0000003d',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  // A real frame can be any colour, so the glyph needs its own contrast.
-  glyphOnPhoto: { backgroundColor: '#00000080' },
-  track: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 3,
-    backgroundColor: '#ffffff59',
-  },
-  fill: { height: 3, backgroundColor: colors.accent },
-});

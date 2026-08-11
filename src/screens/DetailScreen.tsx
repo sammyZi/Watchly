@@ -19,7 +19,266 @@ import { hueOf } from '../lib/title';
 import { loadTitle, reviewLinks, type Episode, type Title } from '../lib/meta';
 import { WATCHED } from '../lib/watched';
 import { episodeTag, health, searchEpisode, searchTorrents, type Hit } from '../lib/search';
-import { colors, fadeToBg, font, radius, space, TAB_INSET, type } from '../theme';
+import {
+  fadeToBg,
+  font,
+  radius,
+  space,
+  TAB_INSET,
+  type,
+  useColors,
+  useThemedStyles,
+  type Colors,
+} from '../theme';
+
+const ART = 360;
+
+function useDetailStyles() {
+  return useThemedStyles((c) => ({
+    page: { flex: 1, backgroundColor: c.bg },
+    body: { paddingBottom: TAB_INSET },
+    art: { height: ART, backgroundColor: c.surface },
+    fade: {
+      position: 'absolute' as const,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      height: ART,
+      experimental_backgroundImage: fadeToBg(c.bg, 0.3),
+    },
+    back: {
+      position: 'absolute' as const,
+      left: space.lg,
+      width: 38,
+      height: 38,
+      borderRadius: radius.pill,
+      backgroundColor: c.accentSoft,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+    },
+    head: {
+      flexDirection: 'row' as const,
+      gap: space.lg,
+      paddingHorizontal: space.xl,
+      marginTop: -70,
+    },
+    poster: {
+      width: 108,
+      height: 158,
+      borderRadius: radius.md,
+      backgroundColor: c.surface,
+    },
+    headText: { flex: 1, gap: space.sm, paddingTop: 74 },
+    name: { ...type.display, fontSize: 22, color: c.text, lineHeight: 28 },
+    facts: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: space.md },
+    rating: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 3 },
+    ratingText: { ...type.label, fontFamily: font.semibold, color: c.warn },
+    factsText: { ...type.meta, color: c.accent, flex: 1 },
+    genres: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: space.xs },
+    genre: {
+      paddingHorizontal: space.sm,
+      paddingVertical: 3,
+      borderRadius: radius.sm,
+      backgroundColor: c.surfaceAlt,
+    },
+    genreText: { ...type.meta, fontSize: 11, color: c.accent },
+    actions: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: space.md,
+      marginHorizontal: space.xl,
+      marginTop: space.xl,
+    },
+    download: {
+      width: 50,
+      height: 50,
+      borderRadius: radius.pill,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+      backgroundColor: c.surfaceAlt,
+    },
+    downloadOff: { opacity: 0.4 },
+    play: {
+      flex: 1,
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+      gap: space.sm,
+      paddingVertical: space.md + 2,
+      borderRadius: radius.pill,
+      backgroundColor: c.accent,
+    },
+    playOff: { backgroundColor: c.surfaceAlt },
+    playText: {
+      ...type.label,
+      fontSize: 15,
+      fontFamily: font.semibold,
+      color: c.onAccent,
+    },
+    plot: {
+      ...type.body,
+      color: c.muted,
+      paddingHorizontal: space.xl,
+      marginTop: space.lg,
+    },
+    seasonRow: {
+      flexDirection: 'row' as const,
+      alignItems: 'baseline' as const,
+      justifyContent: 'space-between' as const,
+    },
+    seasonCount: { ...type.meta, fontSize: 11, color: c.faint },
+    seasonChips: { gap: space.sm, paddingVertical: space.xs },
+    seasonChip: {
+      paddingHorizontal: space.md,
+      paddingVertical: 6,
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+    },
+    seasonChipOn: { backgroundColor: c.accent },
+    seasonText: { ...type.meta, fontFamily: font.medium, color: c.muted },
+    seasonTextOn: { color: c.onAccent },
+    episode: {
+      flexDirection: 'row' as const,
+      gap: space.md,
+      padding: space.sm,
+      borderRadius: radius.md,
+      backgroundColor: c.surface,
+    },
+    // The selected one is what the Play button and the release list refer to.
+    episodeOn: { backgroundColor: c.surfaceAlt },
+    still: {
+      width: 116,
+      height: 66,
+      borderRadius: radius.sm,
+      backgroundColor: c.surfaceAlt,
+    },
+    stillEmpty: { alignItems: 'center' as const, justifyContent: 'center' as const },
+    stillBar: {
+      position: 'absolute' as const,
+      left: space.sm,
+      right: space.sm,
+      bottom: space.sm,
+    },
+    seen: {
+      position: 'absolute' as const,
+      top: 4,
+      right: 4,
+      width: 18,
+      height: 18,
+      borderRadius: 9,
+      backgroundColor: c.accent,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+    },
+    episodeText: { flex: 1, gap: 2, paddingVertical: 2 },
+    episodeName: { ...type.label, color: c.text },
+    episodeMeta: { ...type.meta, fontSize: 11, color: c.faint },
+    episodePlot: { ...type.meta, fontSize: 11, color: c.muted, lineHeight: 15 },
+    crew: {
+      ...type.meta,
+      color: c.muted,
+      paddingHorizontal: space.xl,
+      marginTop: space.md,
+    },
+    crewLabel: { color: c.faint },
+    block: { paddingHorizontal: space.xl, marginTop: space.xl, gap: space.sm },
+    // The rail bleeds to the screen edge, so its heading holds the gutter alone.
+    castBlock: { marginTop: space.xl, gap: space.md },
+    castHeading: { paddingHorizontal: space.xl },
+    castRail: { paddingHorizontal: space.xl, gap: space.md },
+    castCard: { width: 78, alignItems: 'center' as const, gap: space.sm },
+    face: {
+      width: 68,
+      height: 68,
+      borderRadius: radius.pill,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+    },
+    initials: {
+      ...type.label,
+      fontSize: 20,
+      fontFamily: font.semibold,
+      color: '#fff',
+    },
+    castName: { ...type.meta, fontSize: 11, color: c.muted, textAlign: 'center' as const },
+    chips: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: space.sm },
+    link: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: space.sm,
+      paddingHorizontal: space.md,
+      paddingVertical: 8,
+      borderRadius: radius.pill,
+      backgroundColor: c.surfaceAlt,
+    },
+    linkText: { ...type.meta, fontFamily: font.medium, color: c.text },
+    awards: {
+      flexDirection: 'row' as const,
+      alignItems: 'flex-start' as const,
+      gap: space.sm,
+      marginHorizontal: space.xl,
+      marginTop: space.lg,
+      padding: space.md,
+      borderRadius: radius.md,
+      backgroundColor: c.warnSoft,
+    },
+    awardsText: { ...type.meta, color: c.warn, flex: 1, lineHeight: 17 },
+    sources: { paddingHorizontal: space.xl, marginTop: space.xl, gap: space.sm },
+    heading: { ...type.overline, color: c.faint, marginBottom: space.xs },
+    spin: { marginTop: space.lg },
+    opening: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: space.md,
+      padding: space.md,
+      borderRadius: radius.md,
+      backgroundColor: c.accentSoft,
+    },
+    openingText: { ...type.label, color: c.accent },
+    error: { ...type.meta, color: c.danger },
+    none: { ...type.meta, color: c.faint, lineHeight: 18 },
+    source: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: space.md,
+      padding: space.md,
+      borderRadius: radius.md,
+      backgroundColor: c.surface,
+    },
+    pressed: { opacity: 0.6 },
+    mark: {
+      width: 34,
+      height: 34,
+      borderRadius: radius.pill,
+      backgroundColor: c.surfaceAlt,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+    },
+    markBest: { backgroundColor: c.accent },
+    sourceText: { flex: 1, gap: 2 },
+    sourceName: { ...type.label, color: c.text },
+    sourceMeta: { ...type.meta, fontSize: 11, color: c.faint },
+    pill: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: space.xs,
+      paddingHorizontal: space.sm,
+      paddingVertical: 4,
+      borderRadius: radius.pill,
+    },
+    dot: { width: 6, height: 6, borderRadius: 3 },
+    pillText: { ...type.meta, fontSize: 11, fontFamily: font.medium },
+  }));
+}
+
+function healthTone(c: Colors) {
+  return {
+    fast: { label: 'Fast', fg: c.good, bg: c.goodSoft },
+    good: { label: 'Good', fg: c.good, bg: c.goodSoft },
+    weak: { label: 'Weak', fg: c.warn, bg: c.warnSoft },
+    dead: { label: 'Dead', fg: c.danger, bg: c.dangerSoft },
+  };
+}
 
 /**
  * One actor.
@@ -30,6 +289,7 @@ import { colors, fadeToBg, font, radius, space, TAB_INSET, type } from '../theme
  * at least makes the same actor look the same everywhere in the app.
  */
 function CastCard({ name }: { name: string }) {
+  const styles = useDetailStyles();
   const initials = name
     .split(/\s+/)
     .slice(0, 2)
@@ -47,13 +307,6 @@ function CastCard({ name }: { name: string }) {
     </View>
   );
 }
-
-const HEALTH = {
-  fast: { label: 'Fast', fg: colors.good, bg: colors.goodSoft },
-  good: { label: 'Good', fg: colors.good, bg: colors.goodSoft },
-  weak: { label: 'Weak', fg: colors.warn, bg: colors.warnSoft },
-  dead: { label: 'Dead', fg: colors.danger, bg: colors.dangerSoft },
-};
 
 /**
  * One title: the artwork and the facts up top, the releases that can actually
@@ -85,6 +338,9 @@ export function DetailScreen({
   onBack: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const colors = useColors();
+  const styles = useDetailStyles();
+  const HEALTH = healthTone(colors);
   const [title, setTitle] = useState<Title>(seed);
   const [sources, setSources] = useState<Hit[] | null>(null);
   /** Plot expanded. Three lines is enough to decide; the rest is on request. */
@@ -185,7 +441,7 @@ export function DetailScreen({
           style={[styles.back, { top: insets.top + space.md }]}
           accessibilityLabel="Back"
         >
-          <Icon name="arrow-left" size={20} color={colors.text} />
+          <Icon name="arrow-left" size={20} color={colors.accent} />
         </Pressable>
 
         <View style={styles.head}>
@@ -466,212 +722,3 @@ export function DetailScreen({
     </View>
   );
 }
-
-const ART = 300;
-
-const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: colors.bg },
-  body: { paddingBottom: TAB_INSET },
-  art: { height: ART, backgroundColor: colors.surface },
-  fade: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: ART,
-    experimental_backgroundImage: fadeToBg(0.3),
-  },
-  back: {
-    position: 'absolute',
-    left: space.lg,
-    width: 38,
-    height: 38,
-    borderRadius: radius.pill,
-    backgroundColor: '#0b0e14aa',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  head: { flexDirection: 'row', gap: space.lg, paddingHorizontal: space.xl, marginTop: -70 },
-  poster: {
-    width: 108,
-    height: 158,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-  },
-  headText: { flex: 1, gap: space.sm, paddingTop: 74 },
-  name: { ...type.display, fontSize: 22, color: colors.text, lineHeight: 28 },
-  facts: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  rating: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  ratingText: { ...type.label, fontFamily: font.semibold, color: colors.warn },
-  factsText: { ...type.meta, color: colors.muted, flex: 1 },
-  genres: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
-  genre: {
-    paddingHorizontal: space.sm,
-    paddingVertical: 3,
-    borderRadius: radius.sm,
-    backgroundColor: colors.surfaceAlt,
-  },
-  genreText: { ...type.meta, fontSize: 11, color: colors.muted },
-  actions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-    marginHorizontal: space.xl,
-    marginTop: space.xl,
-  },
-  download: {
-    width: 50,
-    height: 50,
-    borderRadius: radius.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surfaceAlt,
-  },
-  downloadOff: { opacity: 0.4 },
-  play: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: space.sm,
-    paddingVertical: space.md + 2,
-    borderRadius: radius.pill,
-    backgroundColor: colors.accent,
-  },
-  playOff: { backgroundColor: colors.surfaceAlt },
-  playText: { ...type.label, fontSize: 15, fontFamily: font.semibold, color: colors.onAccent },
-  plot: {
-    ...type.body,
-    color: colors.muted,
-    paddingHorizontal: space.xl,
-    marginTop: space.lg,
-  },
-  seasonRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
-  seasonCount: { ...type.meta, fontSize: 11, color: colors.faint },
-  seasonChips: { gap: space.sm, paddingVertical: space.xs },
-  seasonChip: {
-    paddingHorizontal: space.md,
-    paddingVertical: 6,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surface,
-  },
-  seasonChipOn: { backgroundColor: colors.accent },
-  seasonText: { ...type.meta, fontFamily: font.medium, color: colors.muted },
-  seasonTextOn: { color: colors.onAccent },
-  episode: {
-    flexDirection: 'row',
-    gap: space.md,
-    padding: space.sm,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-  },
-  // The selected one is what the Play button and the release list refer to.
-  episodeOn: { backgroundColor: colors.surfaceAlt },
-  still: {
-    width: 116,
-    height: 66,
-    borderRadius: radius.sm,
-    backgroundColor: colors.surfaceAlt,
-  },
-  stillEmpty: { alignItems: 'center', justifyContent: 'center' },
-  stillBar: { position: 'absolute', left: space.sm, right: space.sm, bottom: space.sm },
-  seen: {
-    position: 'absolute',
-    top: 4,
-    right: 4,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  episodeText: { flex: 1, gap: 2, paddingVertical: 2 },
-  episodeName: { ...type.label, color: colors.text },
-  episodeMeta: { ...type.meta, fontSize: 11, color: colors.faint },
-  episodePlot: { ...type.meta, fontSize: 11, color: colors.muted, lineHeight: 15 },
-  crew: { ...type.meta, color: colors.muted, paddingHorizontal: space.xl, marginTop: space.md },
-  crewLabel: { color: colors.faint },
-  block: { paddingHorizontal: space.xl, marginTop: space.xl, gap: space.sm },
-  // The rail bleeds to the screen edge, so its heading holds the gutter alone.
-  castBlock: { marginTop: space.xl, gap: space.md },
-  castHeading: { paddingHorizontal: space.xl },
-  castRail: { paddingHorizontal: space.xl, gap: space.md },
-  castCard: { width: 78, alignItems: 'center', gap: space.sm },
-  face: {
-    width: 68,
-    height: 68,
-    borderRadius: radius.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  initials: { ...type.label, fontSize: 20, fontFamily: font.semibold, color: '#fff' },
-  castName: { ...type.meta, fontSize: 11, color: colors.muted, textAlign: 'center' },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
-  link: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.sm,
-    paddingHorizontal: space.md,
-    paddingVertical: 8,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surfaceAlt,
-  },
-  linkText: { ...type.meta, fontFamily: font.medium, color: colors.text },
-  awards: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: space.sm,
-    marginHorizontal: space.xl,
-    marginTop: space.lg,
-    padding: space.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.warnSoft,
-  },
-  awardsText: { ...type.meta, color: colors.warn, flex: 1, lineHeight: 17 },
-  sources: { paddingHorizontal: space.xl, marginTop: space.xl, gap: space.sm },
-  heading: { ...type.overline, color: colors.faint, marginBottom: space.xs },
-  spin: { marginTop: space.lg },
-  opening: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-    padding: space.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.accentSoft,
-  },
-  openingText: { ...type.label, color: colors.accent },
-  error: { ...type.meta, color: colors.danger },
-  none: { ...type.meta, color: colors.faint, lineHeight: 18 },
-  source: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-    padding: space.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-  },
-  pressed: { opacity: 0.6 },
-  mark: {
-    width: 34,
-    height: 34,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surfaceAlt,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  markBest: { backgroundColor: colors.accent },
-  sourceText: { flex: 1, gap: 2 },
-  sourceName: { ...type.label, color: colors.text },
-  sourceMeta: { ...type.meta, fontSize: 11, color: colors.faint },
-  pill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.xs,
-    paddingHorizontal: space.sm,
-    paddingVertical: 4,
-    borderRadius: radius.pill,
-  },
-  dot: { width: 6, height: 6, borderRadius: 3 },
-  pillText: { ...type.meta, fontSize: 11, fontFamily: font.medium },
-});

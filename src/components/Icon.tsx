@@ -1,5 +1,5 @@
 import Feather from '@expo/vector-icons/Feather';
-import { colors } from '../theme';
+import { useColors } from '../theme';
 
 export type IconName = keyof typeof Feather.glyphMap;
 
@@ -7,11 +7,12 @@ export type IconName = keyof typeof Feather.glyphMap;
 export function Icon({
   name,
   size = 18,
-  color = colors.muted,
+  color,
 }: {
   name: IconName;
   size?: number;
   color?: string;
 }) {
-  return <Feather name={name} size={size} color={color} />;
+  const colors = useColors();
+  return <Feather name={name} size={size} color={color ?? colors.muted} />;
 }

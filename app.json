@@ -97,7 +97,7 @@
         {
           "backgroundColor": "#ffffff",
           "image": "./assets/splash-icon.png",
-          "imageWidth": 180,
+          "imageWidth": 220,
           "dark": {
             "image": "./assets/splash-icon-dark.png",
             "backgroundColor": "#000000"

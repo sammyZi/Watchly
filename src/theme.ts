@@ -1,53 +1,93 @@
-// Cinema dark: the page is near-black, cards lift off it by tone alone — no
-// borders, no shadows — and the artwork supplies the colour. Every screen reads
-// these names, so the whole app changes tone from this one block.
-export const colors = {
-  /** Header, tab bar, and controls that sit on a card. */
+import {
+  createContext,
+  createElement,
+  useContext,
+  useMemo,
+  type ReactNode,
+} from 'react';
+import {
+  StyleSheet,
+  useColorScheme,
+  type ImageStyle,
+  type TextStyle,
+  type ViewStyle,
+} from 'react-native';
+
+export type ThemeMode = 'system' | 'light' | 'dark';
+export type ColorScheme = 'light' | 'dark';
+
+export type Colors = {
+  control: string;
+  bg: string;
+  surface: string;
+  surfaceAlt: string;
+  line: string;
+  text: string;
+  muted: string;
+  faint: string;
+  accent: string;
+  accentSoft: string;
+  onAccent: string;
+  danger: string;
+  dangerSoft: string;
+  good: string;
+  goodSoft: string;
+  warn: string;
+  warnSoft: string;
+  scrim: string;
+  /** Floating tab capsule fill (with alpha). */
+  tabBar: string;
+};
+
+export const darkColors: Colors = {
   control: '#151922',
-  bg: '#0b0e14',
+  bg: '#000000',
   surface: '#181d28',
   surfaceAlt: '#232936',
-  // Kept for the few real dividers (inside cards, the progress track).
   line: '#2d3444',
   text: '#f3f5fa',
   muted: '#9aa4b8',
   faint: '#66718a',
-  // Pulled back from #e50914: same red, a touch deeper and less saturated, so
-  // it stops vibrating against the near-black page without going dull.
   accent: '#d42f37',
   accentSoft: '#2a1216',
   onAccent: '#ffffff',
   danger: '#ff6b5e',
   dangerSoft: '#2c1512',
-  // Swarm health only — green/amber read as "will this play", which no other
-  // colour in here says.
   good: '#46d17f',
   goodSoft: '#10281b',
   warn: '#ffb340',
   warnSoft: '#2b2011',
   scrim: '#000000cc',
+  tabBar: '#181d28d9',
 };
 
-/**
- * Rail tints. Artwork carries most of the colour, but a shelf with nothing but
- * posters in it reads flat — each rail heading gets its own accent so the page
- * has some life before a single image loads.
- */
+export const lightColors: Colors = {
+  control: '#ffffff',
+  bg: '#ffffff',
+  surface: '#f2f3f7',
+  surfaceAlt: '#e6e8ef',
+  line: '#d5d9e2',
+  text: '#12141a',
+  muted: '#5c6578',
+  faint: '#8b93a7',
+  accent: '#d42f37',
+  accentSoft: '#fde8ea',
+  onAccent: '#ffffff',
+  danger: '#d94040',
+  dangerSoft: '#fdecea',
+  good: '#1a9f55',
+  goodSoft: '#e6f7ed',
+  warn: '#c47d00',
+  warnSoft: '#fff4e0',
+  scrim: '#00000099',
+  tabBar: '#fde8eaeb',
+};
+
+/** @deprecated Prefer useColors() — static snapshot for rare non-React helpers. */
+export let colors: Colors = darkColors;
+
 export const hues = ['#d42f37', '#7c5cff', '#00b8d4', '#f5a623', '#38c172'];
 
-/** `colors.bg` as rgb, for gradient stops that need a transparent end. */
-const BG = '11, 14, 20';
-
-/** Artwork -> page, with no visible seam. Stacked flat washes left a hard edge
- *  across the middle of every backdrop; this is one real gradient instead. */
-export const fadeToBg = (from = 0.35) =>
-  `linear-gradient(to bottom, rgba(${BG},0) 0%, rgba(${BG},${from}) 45%, rgba(${BG},0.92) 82%, rgb(${BG}) 100%)`;
-
-/** Page -> nothing, under the floating tab bar. */
-export const fadeUp = `linear-gradient(to top, rgb(${BG}) 20%, rgba(${BG},0))`;
-
-/** The tab bar floats over the content, so every scrolling screen has to end
- *  this far above its own bottom edge. */
 export const TAB_INSET = 96;
 
 export const font = {
@@ -57,7 +97,6 @@ export const font = {
   bold: 'NotoSans_700Bold',
 };
 
-/** 4pt rhythm — every margin in the app is one of these. */
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 };
 
 export const radius = { sm: 8, md: 12, lg: 18, pill: 999 };
@@ -77,7 +116,6 @@ export const type = {
   numeric: { fontFamily: font.bold, fontSize: 40, letterSpacing: -1 },
 };
 
-/** Only the modal is genuinely floating; everything else separates by tone. */
 export const shadow = {
   shadowColor: '#0b1020',
   shadowOpacity: 0.18,
@@ -85,3 +123,82 @@ export const shadow = {
   shadowOffset: { width: 0, height: 8 },
   elevation: 12,
 };
+
+function hexToRgb(hex: string): string {
+  const h = hex.replace('#', '').slice(0, 6);
+  const n = parseInt(h, 16);
+  return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
+}
+
+export function fadeToBg(bg: string, from = 0.35) {
+  const rgb = hexToRgb(bg);
+  return `linear-gradient(to bottom, rgba(${rgb},0) 0%, rgba(${rgb},${from}) 45%, rgba(${rgb},0.92) 82%, rgb(${rgb}) 100%)`;
+}
+
+export function fadeUp(bg: string) {
+  const rgb = hexToRgb(bg);
+  return `linear-gradient(to top, rgb(${rgb}) 20%, rgba(${rgb},0))`;
+}
+
+type ThemeCtx = {
+  mode: ThemeMode;
+  scheme: ColorScheme;
+  colors: Colors;
+  setMode: (mode: ThemeMode) => void;
+};
+
+const ThemeContext = createContext<ThemeCtx>({
+  mode: 'system',
+  scheme: 'dark',
+  colors: darkColors,
+  setMode: () => {},
+});
+
+export function ThemeProvider({
+  mode,
+  onChangeMode,
+  children,
+}: {
+  mode: ThemeMode;
+  onChangeMode: (mode: ThemeMode) => void;
+  children: ReactNode;
+}) {
+  const system = useColorScheme();
+  const scheme: ColorScheme =
+    mode === 'system' ? (system === 'light' ? 'light' : 'dark') : mode;
+  const palette = scheme === 'light' ? lightColors : darkColors;
+
+  const value = useMemo<ThemeCtx>(
+    () => ({
+      mode,
+      scheme,
+      colors: palette,
+      setMode: onChangeMode,
+    }),
+    [mode, scheme, palette, onChangeMode]
+  );
+
+  // Keep the legacy export in sync for any stray non-hook reads during render.
+  colors = palette;
+
+  return createElement(ThemeContext.Provider, { value }, children);
+}
+
+export function useTheme() {
+  return useContext(ThemeContext);
+}
+
+export function useColors() {
+  return useContext(ThemeContext).colors;
+}
+
+type NamedStyles = {
+  [key: string]: ViewStyle | TextStyle | ImageStyle;
+};
+
+/** Recreate StyleSheets when the palette changes. */
+export function useThemedStyles<T extends NamedStyles>(factory: (c: Colors) => T): T {
+  const c = useColors();
+  // factory is expected to be an inline lambda; only re-run when palette changes.
+  return useMemo(() => StyleSheet.create(factory(c)) as T, [c]);
+}

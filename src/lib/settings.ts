@@ -9,6 +9,8 @@ export type Settings = {
   removeFilesAfterStop: boolean;
   /** API key for opensubtitles.com (free signup). */
   openSubtitlesKey: string;
+  /** App appearance. */
+  themeMode: 'system' | 'light' | 'dark';
 };
 
 export const DEFAULTS: Settings = {
@@ -19,6 +21,7 @@ export const DEFAULTS: Settings = {
   addTrackers: true,
   removeFilesAfterStop: true,
   openSubtitlesKey: process.env.EXPO_PUBLIC_OPENSUBTITLES_KEY ?? '',
+  themeMode: 'system',
 };
 
 const KEY = 'settings';

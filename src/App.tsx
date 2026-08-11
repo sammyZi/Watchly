@@ -50,7 +50,7 @@ import { HomeScreen, type Shelf } from './screens/HomeScreen';
 import { PlayerScreen } from './screens/PlayerScreen';
 import { SearchScreen } from './screens/SearchScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
-import { colors } from './theme';
+import { ThemeProvider, useColors, useThemedStyles } from './theme';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -71,6 +71,11 @@ export default function App() {
  * and it threw away scroll position with it. Nothing is mounted before it has
  * been asked for, so startup still only pays for the home page.
  */
+const tabPageStyles = StyleSheet.create({
+  page: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  hidden: { display: 'none' },
+});
+
 function TabPage({
   show,
   mounted,
@@ -83,7 +88,7 @@ function TabPage({
   if (!mounted) return null;
   return (
     <View
-      style={[styles.page, !show && styles.hidden]}
+      style={[tabPageStyles.page, !show && tabPageStyles.hidden]}
       pointerEvents={show ? 'auto' : 'none'}
     >
       {children}
@@ -92,9 +97,146 @@ function TabPage({
 }
 
 function Shell() {
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [fontsLoaded] = useFonts({
+    NotoSans_400Regular,
+    NotoSans_500Medium,
+    NotoSans_600SemiBold,
+    NotoSans_700Bold,
+  });
+  const splashHidden = useRef(false);
+
+  useEffect(() => {
+    loadSettings().then(setSettings);
+  }, []);
+
+  const changeSettings = useCallback((next: Settings) => {
+    setSettings(next);
+    saveSettings(next);
+  }, []);
+
+  /** Keep the native splash until fonts, settings, and the first layout are ready
+   *  — otherwise the window color flashes between splash and the app. */
+  const reveal = useCallback(() => {
+    if (splashHidden.current) return;
+    splashHidden.current = true;
+    SplashScreen.hideAsync().catch(() => {});
+  }, []);
+
+  if (!fontsLoaded || !settings) return null;
+
+  return (
+    <ThemeProvider
+      mode={settings.themeMode}
+      onChangeMode={(themeMode) => changeSettings({ ...settings, themeMode })}
+    >
+      <ShellApp
+        settings={settings}
+        onChangeSettings={changeSettings}
+        onReady={reveal}
+      />
+    </ThemeProvider>
+  );
+}
+
+function ShellApp({
+  settings,
+  onChangeSettings,
+  onReady,
+}: {
+  settings: Settings;
+  onChangeSettings: (next: Settings) => void;
+  onReady: () => void;
+}) {
+  const colors = useColors();
+  const styles = useThemedStyles((c) => ({
+    app: { flex: 1, backgroundColor: c.bg },
+    body: { flex: 1 },
+    modePicker: {
+      flex: 1,
+      backgroundColor: c.bg,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+      padding: 24,
+    },
+    modeCard: {
+      width: '100%' as const,
+      maxWidth: 360,
+      alignItems: 'center' as const,
+      gap: 14,
+    },
+    modeMark: {
+      width: 52,
+      height: 52,
+      borderRadius: 14,
+      backgroundColor: c.accentSoft,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+      marginBottom: 4,
+    },
+    modeTitle: {
+      fontFamily: 'NotoSans_600SemiBold',
+      fontSize: 18,
+      color: c.text,
+      textAlign: 'center' as const,
+      lineHeight: 26,
+    },
+    modeSub: {
+      fontFamily: 'NotoSans_400Regular',
+      fontSize: 13,
+      color: c.muted,
+      textAlign: 'center' as const,
+      lineHeight: 19,
+      marginBottom: 4,
+    },
+    modeButtons: {
+      flexDirection: 'row' as const,
+      gap: 12,
+      width: '100%' as const,
+    },
+    modeBtn: {
+      flex: 1,
+      alignItems: 'center' as const,
+      gap: 8,
+      paddingVertical: 22,
+      paddingHorizontal: 14,
+      borderRadius: 18,
+      backgroundColor: c.surface,
+    },
+    modeBtnPressed: { opacity: 0.7 },
+    modeBtnIcon: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: c.control,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+    },
+    modeBtnLabel: {
+      fontFamily: 'NotoSans_600SemiBold',
+      fontSize: 16,
+      color: c.text,
+    },
+    modeBtnSub: {
+      fontFamily: 'NotoSans_400Regular',
+      fontSize: 11,
+      color: c.faint,
+      textAlign: 'center' as const,
+      lineHeight: 15,
+    },
+    modeCancel: {
+      paddingVertical: 12,
+      paddingHorizontal: 24,
+    },
+    modeCancelText: {
+      fontFamily: 'NotoSans_500Medium',
+      fontSize: 14,
+      color: c.muted,
+    },
+  }));
+
   const [tab, setTab] = useState<TabKey>('home');
   const [history, setHistory] = useState<Item[]>([]);
-  const [settings, setSettings] = useState<Settings>(DEFAULTS);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
 
   const torrent = useTorrent(settings);
@@ -127,24 +269,21 @@ function Shell() {
     null
   );
 
-  const [fontsLoaded] = useFonts({
-    NotoSans_400Regular,
-    NotoSans_500Medium,
-    NotoSans_600SemiBold,
-    NotoSans_700Bold,
-  });
+  useEffect(() => {
+    // After the first paint with the real theme bg, drop the splash — never
+    // earlier, or the native window color shows through.
+    const t = requestAnimationFrame(() => {
+      requestAnimationFrame(onReady);
+    });
+    return () => cancelAnimationFrame(t);
+  }, [onReady]);
 
   useEffect(() => {
     loadHistory().then(setHistory);
-    loadSettings().then(setSettings);
     loadEpisodeLinks().then(setEpisodeLinks);
     // Drop leftover stream pieces from a previous kill (can be multi‑GB).
     TorrentStream.clearCache().catch(() => {});
   }, []);
-
-  useEffect(() => {
-    if (fontsLoaded) SplashScreen.hideAsync();
-  }, [fontsLoaded]);
 
   // Leaving the app while idle: clear stream cache. Active downloads keep data
   // until finish/cancel; public Downloads/ copies are never touched.
@@ -330,10 +469,7 @@ function Shell() {
     [fail]
   );
 
-  const changeSettings = useCallback((next: Settings) => {
-    setSettings(next);
-    saveSettings(next);
-  }, []);
+  const changeSettings = onChangeSettings;
 
   // These reach memoised screens, so they have to keep the same identity across
   // a render — an inline arrow would defeat the memo on every progress tick.
@@ -432,8 +568,6 @@ function Shell() {
     item,
     reset,
   ]);
-
-  if (!fontsLoaded) return null;
 
   if (localPlay) {
     return (
@@ -588,7 +722,7 @@ function Shell() {
   }
 
   return (
-    <View style={styles.app}>
+    <View style={styles.app} onLayout={onReady}>
       <View style={styles.body}>
         <TabPage show={tab === 'home'} mounted>
           <HomeScreen
@@ -660,91 +794,3 @@ function Shell() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  app: { flex: 1, backgroundColor: colors.bg },
-  body: { flex: 1 },
-  page: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  hidden: { display: 'none' },
-  modePicker: {
-    flex: 1,
-    backgroundColor: colors.bg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  modeCard: {
-    width: '100%',
-    maxWidth: 360,
-    alignItems: 'center',
-    gap: 14,
-  },
-  modeMark: {
-    width: 52,
-    height: 52,
-    borderRadius: 14,
-    backgroundColor: colors.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 4,
-  },
-  modeTitle: {
-    fontFamily: 'NotoSans_600SemiBold',
-    fontSize: 18,
-    color: colors.text,
-    textAlign: 'center',
-    lineHeight: 26,
-  },
-  modeSub: {
-    fontFamily: 'NotoSans_400Regular',
-    fontSize: 13,
-    color: colors.muted,
-    textAlign: 'center',
-    lineHeight: 19,
-    marginBottom: 4,
-  },
-  modeButtons: {
-    flexDirection: 'row',
-    gap: 12,
-    width: '100%',
-  },
-  modeBtn: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 22,
-    paddingHorizontal: 14,
-    borderRadius: 18,
-    backgroundColor: colors.surface,
-  },
-  modeBtnPressed: { opacity: 0.7 },
-  modeBtnIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: colors.control,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modeBtnLabel: {
-    fontFamily: 'NotoSans_600SemiBold',
-    fontSize: 16,
-    color: colors.text,
-  },
-  modeBtnSub: {
-    fontFamily: 'NotoSans_400Regular',
-    fontSize: 11,
-    color: colors.faint,
-    textAlign: 'center',
-    lineHeight: 15,
-  },
-  modeCancel: {
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-  },
-  modeCancelText: {
-    fontFamily: 'NotoSans_500Medium',
-    fontSize: 14,
-    color: colors.muted,
-  },
-});
