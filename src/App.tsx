@@ -718,6 +718,7 @@ function ShellApp({
         }
         resumeAt={stored.positions?.[playingIndex]}
         url={url}
+        lanUrl={torrent.lanUrl}
         subtitleFiles={subtitleFiles}
         openSubtitlesKey={settings.openSubtitlesKey}
         fileIndex={playingIndex}
