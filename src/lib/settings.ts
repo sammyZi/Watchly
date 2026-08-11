@@ -28,7 +28,11 @@ const KEY = 'settings';
 
 export async function loadSettings(): Promise<Settings> {
   try {
-    return { ...DEFAULTS, ...JSON.parse((await AsyncStorage.getItem(KEY)) ?? '{}') };
+    const raw = { ...DEFAULTS, ...JSON.parse((await AsyncStorage.getItem(KEY)) ?? '{}') };
+    if (raw.themeMode !== 'system' && raw.themeMode !== 'light' && raw.themeMode !== 'dark') {
+      raw.themeMode = DEFAULTS.themeMode;
+    }
+    return raw;
   } catch {
     return DEFAULTS;
   }

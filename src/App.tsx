@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from 'react';
 import {
   AppState,
   BackHandler,
@@ -97,7 +97,8 @@ function TabPage({
 }
 
 function Shell() {
-  const [settings, setSettings] = useState<Settings | null>(null);
+  const [settings, setSettings] = useState<Settings>(DEFAULTS);
+  const [settingsReady, setSettingsReady] = useState(false);
   const [fontsLoaded] = useFonts({
     NotoSans_400Regular,
     NotoSans_500Medium,
@@ -107,12 +108,27 @@ function Shell() {
   const splashHidden = useRef(false);
 
   useEffect(() => {
-    loadSettings().then(setSettings);
+    loadSettings()
+      .then((s) => {
+        setSettings(s);
+        setSettingsReady(true);
+      })
+      .catch(() => setSettingsReady(true));
   }, []);
 
   const changeSettings = useCallback((next: Settings) => {
     setSettings(next);
     saveSettings(next);
+  }, []);
+
+  const changeThemeMode = useCallback((themeMode: Settings['themeMode']) => {
+    startTransition(() => {
+      setSettings((prev) => {
+        const next = { ...prev, themeMode };
+        saveSettings(next);
+        return next;
+      });
+    });
   }, []);
 
   /** Keep the native splash until fonts, settings, and the first layout are ready
@@ -123,13 +139,10 @@ function Shell() {
     SplashScreen.hideAsync().catch(() => {});
   }, []);
 
-  if (!fontsLoaded || !settings) return null;
+  if (!fontsLoaded || !settingsReady) return null;
 
   return (
-    <ThemeProvider
-      mode={settings.themeMode}
-      onChangeMode={(themeMode) => changeSettings({ ...settings, themeMode })}
-    >
+    <ThemeProvider mode={settings.themeMode} onChangeMode={changeThemeMode}>
       <ShellApp
         settings={settings}
         onChangeSettings={changeSettings}

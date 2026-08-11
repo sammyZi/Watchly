@@ -1,8 +1,10 @@
 import {
   createContext,
   createElement,
+  useCallback,
   useContext,
   useMemo,
+  useRef,
   type ReactNode,
 } from 'react';
 import {
@@ -168,14 +170,21 @@ export function ThemeProvider({
     mode === 'system' ? (system === 'light' ? 'light' : 'dark') : mode;
   const palette = scheme === 'light' ? lightColors : darkColors;
 
+  // Keep setMode stable so context consumers don't all re-render on parent updates.
+  const onChangeRef = useRef(onChangeMode);
+  onChangeRef.current = onChangeMode;
+  const setMode = useCallback((next: ThemeMode) => {
+    onChangeRef.current(next);
+  }, []);
+
   const value = useMemo<ThemeCtx>(
     () => ({
       mode,
       scheme,
       colors: palette,
-      setMode: onChangeMode,
+      setMode,
     }),
-    [mode, scheme, palette, onChangeMode]
+    [mode, scheme, palette, setMode]
   );
 
   // Keep the legacy export in sync for any stray non-hook reads during render.
@@ -196,9 +205,25 @@ type NamedStyles = {
   [key: string]: ViewStyle | TextStyle | ImageStyle;
 };
 
-/** Recreate StyleSheets when the palette changes. */
+/**
+ * Cache StyleSheets per scheme. Build the active one on first use (and the
+ * other on first toggle) — creating both for every screen at launch OOM'd.
+ */
 export function useThemedStyles<T extends NamedStyles>(factory: (c: Colors) => T): T {
-  const c = useColors();
-  // factory is expected to be an inline lambda; only re-run when palette changes.
-  return useMemo(() => StyleSheet.create(factory(c)) as T, [c]);
+  const { scheme } = useTheme();
+  const factoryRef = useRef(factory);
+  factoryRef.current = factory;
+  const cache = useRef<{ light?: T; dark?: T }>({});
+
+  if (scheme === 'light') {
+    if (!cache.current.light) {
+      cache.current.light = StyleSheet.create(factoryRef.current(lightColors)) as T;
+    }
+    return cache.current.light;
+  }
+
+  if (!cache.current.dark) {
+    cache.current.dark = StyleSheet.create(factoryRef.current(darkColors)) as T;
+  }
+  return cache.current.dark;
 }

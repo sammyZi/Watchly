@@ -10,6 +10,7 @@ import {
   TAB_INSET,
   type,
   useColors,
+  useTheme,
   useThemedStyles,
   type ThemeMode,
 } from '../theme';
@@ -35,6 +36,7 @@ function SettingsScreenView({
   const [showKey, setShowKey] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const colors = useColors();
+  const { mode: themeMode, setMode } = useTheme();
   const styles = useSettingsStyles();
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) =>
     onChange({ ...settings, [key]: value });
@@ -60,11 +62,11 @@ function SettingsScreenView({
             />
             <View style={styles.choices}>
               {APPEARANCE.map(({ mode, label }) => {
-                const on = settings.themeMode === mode;
+                const on = themeMode === mode;
                 return (
                   <Pressable
                     key={mode}
-                    onPress={() => set('themeMode', mode)}
+                    onPress={() => setMode(mode)}
                     style={[styles.choice, on && styles.choiceOn]}
                   >
                     <Text style={[styles.choiceText, on && styles.choiceTextOn]}>
