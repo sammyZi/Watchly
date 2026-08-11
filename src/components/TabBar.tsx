@@ -1,12 +1,13 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from './Icon';
-import { colors, font, radius, space, type } from '../theme';
+import { colors, fadeUp, font, radius, space, type } from '../theme';
 
-export type TabKey = 'stream' | 'history' | 'downloads' | 'settings';
+export type TabKey = 'home' | 'search' | 'history' | 'downloads' | 'settings';
 
 const TABS: { key: TabKey; label: string; icon: IconName }[] = [
-  { key: 'stream', label: 'Stream', icon: 'play-circle' },
+  { key: 'home', label: 'Home', icon: 'home' },
+  { key: 'search', label: 'Search', icon: 'search' },
   { key: 'history', label: 'Library', icon: 'clock' },
   { key: 'downloads', label: 'Downloads', icon: 'download' },
   { key: 'settings', label: 'Settings', icon: 'sliders' },
@@ -30,7 +31,13 @@ export function TabBar({
   const insets = useSafeAreaInsets();
 
   return (
-    <View style={[styles.dock, { paddingBottom: Math.max(insets.bottom, space.md) }]}>
+    <View
+      style={[styles.dock, { paddingBottom: Math.max(insets.bottom, space.md) }]}
+      pointerEvents="box-none"
+    >
+      {/* The page dissolves into the bar instead of sliding under a hard edge.
+          A true frosted blur needs expo-blur — a native module for one strip. */}
+      <View style={styles.veil} pointerEvents="none" />
       <View style={styles.bar}>
         {TABS.map((tab) => {
           const on = tab.key === active;
@@ -54,16 +61,31 @@ export function TabBar({
 }
 
 const styles = StyleSheet.create({
-  // Holds the inset, so the capsule itself stays a fixed shape on every device.
-  dock: { paddingHorizontal: space.lg, paddingTop: space.sm },
+  // Floats over the content — every scrolling screen ends TAB_INSET above its
+  // own bottom edge to leave room.
+  dock: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: space.lg,
+    paddingTop: space.xxl,
+  },
+  veil: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    top: 0,
+    experimental_backgroundImage: fadeUp,
+  },
   bar: {
     flexDirection: 'row',
     alignItems: 'center',
     height: 62,
     borderRadius: radius.pill,
-    // Tinted, not white: with no shadow this is the only thing separating the
-    // capsule from the page, and it is the same step cards use.
-    backgroundColor: colors.surface,
+    // Translucent, so the artwork scrolling past shows through the capsule.
+    backgroundColor: '#181d28d9',
     paddingHorizontal: space.sm,
   },
   tab: { flex: 1, alignItems: 'center', gap: 3 },

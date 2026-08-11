@@ -59,7 +59,7 @@ export function FilesScreen({
 
   return (
     <View style={styles.screen}>
-      <StatusBar barStyle="dark-content" backgroundColor={colors.control} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
 
       <View style={[styles.header, { paddingTop: insets.top + space.sm }]}>
         <IconButton name="chevron-left" onPress={onBack} background="transparent" />
@@ -189,8 +189,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: space.sm,
     paddingBottom: space.md,
-    paddingHorizontal: space.md,
-    backgroundColor: colors.control,
+    // Same gutter and tone as every other screen's header — see Screen.tsx.
+    paddingHorizontal: space.xl,
+    backgroundColor: colors.bg,
   },
   headerText: { flex: 1, gap: 2 },
   title: { ...type.title, fontFamily: font.semibold, fontSize: 16, color: colors.text },

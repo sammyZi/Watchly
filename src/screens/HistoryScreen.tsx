@@ -1,11 +1,11 @@
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { IconButton } from '../components/Button';
 import { HistoryRow } from '../components/HistoryRow';
 import { Icon } from '../components/Icon';
 import { Screen } from '../components/Screen';
 import type { Item } from '../lib/history';
-import { colors, radius, space, type } from '../theme';
+import { colors, radius, space, TAB_INSET, type } from '../theme';
 
 /** Torrent name, the label we stored, and every file inside it. Searching only
  *  the title would miss the episode you actually remember. */
@@ -14,7 +14,7 @@ const haystack = (item: Item) =>
     .join(' ')
     .toLowerCase();
 
-export function HistoryScreen({
+function HistoryScreenView({
   history,
   onOpenItem,
   onPlayFile,
@@ -133,15 +133,13 @@ export function HistoryScreen({
           )
         }
         renderItem={({ item }) => (
-          <View style={styles.card}>
-            <HistoryRow
-              item={item}
-              onOpen={() => onOpenItem(item)}
-              onPlayFile={(index) => onPlayFile(item, index)}
-              onDownloadFile={(index) => onDownloadFile(item, index)}
-              onRemove={() => onRemove(item)}
-            />
-          </View>
+          <HistoryRow
+            item={item}
+            onOpen={() => onOpenItem(item)}
+            onPlayFile={(index) => onPlayFile(item, index)}
+            onDownloadFile={(index) => onDownloadFile(item, index)}
+            onRemove={() => onRemove(item)}
+          />
         )}
       />
     </Screen>
@@ -166,14 +164,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   searchInput: { ...type.body, color: colors.text, flex: 1, padding: 0 },
-  list: { padding: space.xl, paddingTop: space.lg },
-  count: { ...type.meta, color: colors.faint, marginBottom: space.md },
-  card: {
-    backgroundColor: colors.surface,
-    paddingHorizontal: space.lg,
-    borderRadius: radius.lg,
-    marginBottom: space.md,
+  list: {
+    padding: space.xl,
+    paddingTop: space.lg,
+    paddingBottom: TAB_INSET,
+    gap: space.md,
   },
+  count: { ...type.meta, color: colors.faint, marginBottom: space.md },
   empty: { alignItems: 'center', gap: space.md, paddingVertical: space.xxl },
   emptyBadge: {
     width: 64,
@@ -192,3 +189,6 @@ const styles = StyleSheet.create({
     maxWidth: 280,
   },
 });
+
+/** Kept mounted behind the other tabs — see TabPage in App. */
+export const HistoryScreen = memo(HistoryScreenView);

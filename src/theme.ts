@@ -1,24 +1,54 @@
-// Cards separate from the page by tone alone — no borders, no shadows. The page
-// and the chrome are white; a card is the only thing that carries a tint, and
-// anything sitting *on* a card goes back to white.
+// Cinema dark: the page is near-black, cards lift off it by tone alone — no
+// borders, no shadows — and the artwork supplies the colour. Every screen reads
+// these names, so the whole app changes tone from this one block.
 export const colors = {
   /** Header, tab bar, and controls that sit on a card. */
-  control: '#ffffff',
-  bg: '#ffffff',
-  surface: '#eef1f7',
-  surfaceAlt: '#e1e7f1',
+  control: '#151922',
+  bg: '#0b0e14',
+  surface: '#181d28',
+  surfaceAlt: '#232936',
   // Kept for the few real dividers (inside cards, the progress track).
-  line: '#dbe2ed',
-  text: '#232833',
-  muted: '#616a7a',
-  faint: '#98a0ae',
-  accent: '#3b6fe0',
-  accentSoft: '#edf2fe',
+  line: '#2d3444',
+  text: '#f3f5fa',
+  muted: '#9aa4b8',
+  faint: '#66718a',
+  // Pulled back from #e50914: same red, a touch deeper and less saturated, so
+  // it stops vibrating against the near-black page without going dull.
+  accent: '#d42f37',
+  accentSoft: '#2a1216',
   onAccent: '#ffffff',
-  danger: '#d0483c',
-  dangerSoft: '#fceeed',
-  scrim: '#0009',
+  danger: '#ff6b5e',
+  dangerSoft: '#2c1512',
+  // Swarm health only — green/amber read as "will this play", which no other
+  // colour in here says.
+  good: '#46d17f',
+  goodSoft: '#10281b',
+  warn: '#ffb340',
+  warnSoft: '#2b2011',
+  scrim: '#000000cc',
 };
+
+/**
+ * Rail tints. Artwork carries most of the colour, but a shelf with nothing but
+ * posters in it reads flat — each rail heading gets its own accent so the page
+ * has some life before a single image loads.
+ */
+export const hues = ['#d42f37', '#7c5cff', '#00b8d4', '#f5a623', '#38c172'];
+
+/** `colors.bg` as rgb, for gradient stops that need a transparent end. */
+const BG = '11, 14, 20';
+
+/** Artwork -> page, with no visible seam. Stacked flat washes left a hard edge
+ *  across the middle of every backdrop; this is one real gradient instead. */
+export const fadeToBg = (from = 0.35) =>
+  `linear-gradient(to bottom, rgba(${BG},0) 0%, rgba(${BG},${from}) 45%, rgba(${BG},0.92) 82%, rgb(${BG}) 100%)`;
+
+/** Page -> nothing, under the floating tab bar. */
+export const fadeUp = `linear-gradient(to top, rgb(${BG}) 20%, rgba(${BG},0))`;
+
+/** The tab bar floats over the content, so every scrolling screen has to end
+ *  this far above its own bottom edge. */
+export const TAB_INSET = 96;
 
 export const font = {
   regular: 'NotoSans_400Regular',
