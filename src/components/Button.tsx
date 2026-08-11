@@ -1,6 +1,6 @@
-import { Pressable, StyleSheet, Text, type ViewStyle } from 'react-native';
+import { Pressable, Text, type ViewStyle } from 'react-native';
 import { Icon, type IconName } from './Icon';
-import { colors, font, radius, space, type } from '../theme';
+import { font, radius, space, type, useColors, useThemedStyles } from '../theme';
 
 type Variant = 'solid' | 'ghost' | 'danger';
 
@@ -19,6 +19,26 @@ export function Button({
   disabled?: boolean;
   style?: ViewStyle;
 }) {
+  const colors = useColors();
+  const styles = useThemedStyles((c) => ({
+    base: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+      gap: space.sm,
+      borderRadius: radius.pill,
+      paddingHorizontal: space.lg,
+      height: 40,
+    },
+    ghost: { backgroundColor: c.control },
+    solid: { backgroundColor: c.accent },
+    danger: { backgroundColor: c.danger },
+    pressed: { opacity: 0.65 },
+    disabled: { opacity: 0.4 },
+    label: { ...type.label },
+    labelFilled: { fontFamily: font.semibold },
+  }));
+
   const filled = variant !== 'ghost';
   const fg = filled ? colors.onAccent : colors.muted;
 
@@ -48,8 +68,8 @@ export function Button({
 export function IconButton({
   name,
   onPress,
-  color = colors.text,
-  background = colors.surfaceAlt,
+  color,
+  background,
   size = 18,
 }: {
   name: IconName;
@@ -58,44 +78,29 @@ export function IconButton({
   background?: string;
   size?: number;
 }) {
+  const colors = useColors();
+  const styles = useThemedStyles((c) => ({
+    iconBtn: {
+      width: 40,
+      height: 40,
+      borderRadius: radius.pill,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+    },
+    pressed: { opacity: 0.65 },
+  }));
+
   return (
     <Pressable
       onPress={onPress}
       hitSlop={10}
       style={({ pressed }) => [
         styles.iconBtn,
-        { backgroundColor: background },
+        { backgroundColor: background ?? colors.surfaceAlt },
         pressed && styles.pressed,
       ]}
     >
-      <Icon name={name} size={size} color={color} />
+      <Icon name={name} size={size} color={color ?? colors.text} />
     </Pressable>
   );
 }
-
-const styles = StyleSheet.create({
-  base: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: space.sm,
-    borderRadius: radius.pill,
-    paddingHorizontal: space.lg,
-    height: 40,
-  },
-  // White on a tinted card — no border needed to read as a button.
-  ghost: { backgroundColor: colors.control },
-  solid: { backgroundColor: colors.accent },
-  danger: { backgroundColor: colors.danger },
-  pressed: { opacity: 0.65 },
-  disabled: { opacity: 0.4 },
-  label: { ...type.label },
-  labelFilled: { fontFamily: font.semibold },
-  iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});

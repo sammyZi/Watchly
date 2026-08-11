@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { Icon } from './Icon';
 import { ProgressBar } from './ProgressBar';
 import { Thumb } from './Thumb';
 import { ago, bytes, clock } from '../lib/format';
 import type { Item } from '../lib/history';
-import { colors, font, radius, space, type } from '../theme';
+import { font, radius, space, type, useColors, useThemedStyles } from '../theme';
 
 /**
  * One torrent. Expands to the files it contains so a season pack can be
@@ -31,6 +31,64 @@ export function HistoryRow({
     .slice()
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
   const [expanded, setExpanded] = useState(false);
+  const colors = useColors();
+  const styles = useThemedStyles((c) => ({
+    // A card per torrent, artwork-led: the captured frame is the only thing that
+    // says what this is at a glance.
+    card: {
+      backgroundColor: c.surface,
+      borderRadius: radius.lg,
+      padding: space.sm,
+      overflow: 'hidden' as const,
+    },
+    row: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: space.md },
+    pressed: { opacity: 0.6 },
+    body: { flex: 1, gap: space.xs, paddingRight: space.xs },
+    title: { ...type.title, fontFamily: font.medium, color: c.text },
+    meta: { ...type.meta, color: c.faint },
+    bar: { marginTop: space.xs },
+    action: {
+      width: 34,
+      height: 34,
+      borderRadius: radius.pill,
+      backgroundColor: c.accentSoft,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+    },
+    more: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+      gap: space.xs,
+      paddingTop: space.sm,
+      paddingBottom: space.xs,
+    },
+    moreText: { ...type.meta, fontFamily: font.medium, color: c.muted },
+
+    files: {
+      borderTopWidth: 1,
+      borderTopColor: c.line,
+      paddingTop: space.sm,
+    },
+    file: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: space.md,
+      paddingVertical: space.sm,
+      paddingLeft: space.sm,
+    },
+    fileBody: { flex: 1, gap: 3 },
+    fileName: { ...type.body, fontFamily: font.medium, color: c.text },
+    fileMeta: { ...type.meta, color: c.faint },
+    downloadBtn: {
+      width: 30,
+      height: 30,
+      borderRadius: radius.pill,
+      backgroundColor: c.accentSoft,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+    },
+  }));
 
   const lastIndex = item.lastFileIndex;
   const lastPosition = lastIndex != null ? item.positions?.[lastIndex] : undefined;
@@ -136,61 +194,3 @@ export function HistoryRow({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  // A card per torrent, artwork-led: the captured frame is the only thing that
-  // says what this is at a glance.
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    padding: space.sm,
-    overflow: 'hidden',
-  },
-  row: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  pressed: { opacity: 0.6 },
-  body: { flex: 1, gap: space.xs, paddingRight: space.xs },
-  title: { ...type.title, fontFamily: font.medium, color: colors.text },
-  meta: { ...type.meta, color: colors.faint },
-  bar: { marginTop: space.xs },
-  action: {
-    width: 34,
-    height: 34,
-    borderRadius: radius.pill,
-    backgroundColor: colors.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  more: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: space.xs,
-    paddingTop: space.sm,
-    paddingBottom: space.xs,
-  },
-  moreText: { ...type.meta, fontFamily: font.medium, color: colors.muted },
-
-  files: {
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
-    paddingTop: space.sm,
-  },
-  file: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-    paddingVertical: space.sm,
-    paddingLeft: space.sm,
-  },
-  fileBody: { flex: 1, gap: 3 },
-  fileName: { ...type.body, fontFamily: font.medium, color: colors.text },
-  fileMeta: { ...type.meta, color: colors.faint },
-  downloadBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: radius.pill,
-    backgroundColor: colors.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});

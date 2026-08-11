@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Text, TextInput, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
 import { Button } from './Button';
 import { Icon } from './Icon';
-import { colors, font, radius, space, type } from '../theme';
+import { font, radius, space, type, useColors, useThemedStyles } from '../theme';
 
 /** Magnet / .torrent box with paste and file-picker shortcuts. */
 export function SourceInput({
@@ -22,6 +22,52 @@ export function SourceInput({
   const [focused, setFocused] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
   const ready = value.trim().length > 0;
+  const colors = useColors();
+  const styles = useThemedStyles((c) => ({
+    card: {
+      backgroundColor: c.surface,
+      borderRadius: radius.lg,
+      padding: space.lg,
+      gap: space.md,
+    },
+    head: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: space.md },
+    mark: {
+      width: 36,
+      height: 36,
+      borderRadius: radius.md,
+      backgroundColor: c.accentSoft,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+    },
+    headText: { flex: 1, gap: 1 },
+    title: { ...type.label, fontFamily: font.semibold, color: c.text, fontSize: 15 },
+    sub: { ...type.meta, color: c.muted },
+    well: {
+      backgroundColor: c.control,
+      borderRadius: radius.md,
+      paddingHorizontal: space.md,
+      paddingVertical: space.sm,
+      borderWidth: 1.5,
+      borderColor: 'transparent',
+    },
+    wellOn: { borderColor: c.accent },
+    input: {
+      ...type.body,
+      color: c.text,
+      height: 68,
+      padding: 0,
+      textAlignVertical: 'top' as const,
+    },
+    hint: { ...type.meta, color: c.danger, marginTop: -space.xs },
+    actions: { gap: space.sm },
+    actionRow: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: space.sm,
+    },
+    actionGrow: { flex: 1 },
+    actionFull: { alignSelf: 'stretch' as const },
+  }));
 
   const submit = (uri: string) => {
     const clean = uri.trim();
@@ -89,57 +135,14 @@ export function SourceInput({
       {!!hint && <Text style={styles.hint}>{hint}</Text>}
 
       <View style={styles.actions}>
-        <Button label="Paste" icon="clipboard" onPress={paste} />
-        <Button label="File" icon="folder" onPress={pickTorrent} />
-        <View style={styles.spacer} />
+        <View style={styles.actionRow}>
+          <Button label="Paste" icon="clipboard" onPress={paste} style={styles.actionGrow} />
+          <Button label="File" icon="folder" onPress={pickTorrent} style={styles.actionGrow} />
+        </View>
         <Button
           label={actionLabel}
           icon="play"
           variant="solid"
           disabled={!ready}
           onPress={() => submit(value)}
-        />
-      </View>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    padding: space.lg,
-    gap: space.md,
-  },
-  head: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  mark: {
-    width: 36,
-    height: 36,
-    borderRadius: radius.md,
-    backgroundColor: colors.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headText: { flex: 1, gap: 1 },
-  title: { ...type.label, fontFamily: font.semibold, color: colors.text, fontSize: 15 },
-  sub: { ...type.meta, color: colors.muted },
-  well: {
-    backgroundColor: colors.control,
-    borderRadius: radius.md,
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
-    borderWidth: 1.5,
-    borderColor: 'transparent',
-  },
-  wellOn: { borderColor: colors.accent },
-  input: {
-    ...type.body,
-    color: colors.text,
-    height: 68,
-    padding: 0,
-    textAlignVertical: 'top',
-  },
-  hint: { ...type.meta, color: colors.danger, marginTop: -space.xs },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  spacer: { flex: 1 },
-});
+          style={styles.actionFull}

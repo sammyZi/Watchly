@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Pressable,
   ScrollView,
-  StyleSheet,
   Text,
   TextInput,
   View,
@@ -12,7 +11,7 @@ import { Icon } from '../components/Icon';
 import { PosterGrid } from '../components/PosterGrid';
 import { Screen } from '../components/Screen';
 import { loadCatalog, searchTitles, type Title } from '../lib/meta';
-import { colors, font, radius, space, type } from '../theme';
+import { font, radius, space, type, useColors, useThemedStyles } from '../theme';
 
 const DEBOUNCE = 400;
 
@@ -20,6 +19,41 @@ const DEBOUNCE = 400;
  *  vocabulary, and a catalog row carries its own list, so this costs no
  *  extra request. */
 const GENRES = ['Action', 'Comedy', 'Drama', 'Thriller', 'Horror', 'Sci-Fi', 'Animation'];
+
+function useSearchStyles() {
+  return useThemedStyles((c) => ({
+    bar: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: space.md,
+      margin: space.xl,
+      marginBottom: space.md,
+      paddingHorizontal: space.md,
+      borderRadius: radius.md,
+      backgroundColor: c.surface,
+    },
+    input: { ...type.body, flex: 1, color: c.text, height: 46, padding: 0 },
+    // flexGrow:0 or the row claims the whole page — a horizontal ScrollView in a
+    // column has no natural height.
+    chipRow: { flexGrow: 0 },
+    chips: { paddingHorizontal: space.xl, gap: space.sm, alignItems: 'center' as const },
+    rule: { width: 1, height: 16, backgroundColor: c.line },
+    chip: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: 5,
+      paddingHorizontal: space.md,
+      paddingVertical: 7,
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+    },
+    chipOn: { backgroundColor: c.accent },
+    chipText: { ...type.meta, fontFamily: font.medium, color: c.muted },
+    chipTextOn: { color: c.onAccent },
+    heading: { ...type.overline, color: c.faint, marginBottom: space.sm },
+    empty: { ...type.meta, color: c.faint, textAlign: 'center' as const, marginTop: space.xl },
+  }));
+}
 
 /**
  * Titles first, releases later.
@@ -37,6 +71,8 @@ function SearchScreenView({ onOpenTitle }: { onOpenTitle: (title: Title) => void
   const [genre, setGenre] = useState<string | null>(null);
   /** Only the newest query may write results — searches finish out of order. */
   const latest = useRef(0);
+  const colors = useColors();
+  const styles = useSearchStyles();
 
   const load = useCallback(async (q: string) => {
     const mine = ++latest.current;
@@ -168,6 +204,8 @@ function Chip({
   on: boolean;
   onPress: () => void;
 }) {
+  const colors = useColors();
+  const styles = useSearchStyles();
   return (
     <Pressable onPress={onPress} style={[styles.chip, on && styles.chipOn]}>
       {!!icon && <Icon name={icon} size={13} color={on ? colors.onAccent : colors.faint} />}
@@ -175,39 +213,6 @@ function Chip({
     </Pressable>
   );
 }
-
-const styles = StyleSheet.create({
-  bar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-    margin: space.xl,
-    marginBottom: space.md,
-    paddingHorizontal: space.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-  },
-  input: { ...type.body, flex: 1, color: colors.text, height: 46, padding: 0 },
-  // flexGrow:0 or the row claims the whole page — a horizontal ScrollView in a
-  // column has no natural height.
-  chipRow: { flexGrow: 0 },
-  chips: { paddingHorizontal: space.xl, gap: space.sm, alignItems: 'center' },
-  rule: { width: 1, height: 16, backgroundColor: colors.line },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: space.md,
-    paddingVertical: 7,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surface,
-  },
-  chipOn: { backgroundColor: colors.accent },
-  chipText: { ...type.meta, fontFamily: font.medium, color: colors.muted },
-  chipTextOn: { color: colors.onAccent },
-  heading: { ...type.overline, color: colors.faint, marginBottom: space.sm },
-  empty: { ...type.meta, color: colors.faint, textAlign: 'center', marginTop: space.xl },
-});
 
 /** Kept mounted behind the other tabs — see TabPage in App. */
 export const SearchScreen = memo(SearchScreenView);

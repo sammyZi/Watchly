@@ -5,7 +5,6 @@ import {
   Image,
   Pressable,
   StatusBar,
-  StyleSheet,
   Text,
   useWindowDimensions,
   View,
@@ -15,7 +14,18 @@ import { Icon } from '../components/Icon';
 import { Thumb } from '../components/Thumb';
 import type { Item } from '../lib/history';
 import { loadCatalog, peekCatalog, type Title } from '../lib/meta';
-import { colors, fadeToBg, font, hues, radius, space, TAB_INSET, type } from '../theme';
+import {
+  fadeToBg,
+  font,
+  hues,
+  radius,
+  space,
+  TAB_INSET,
+  type,
+  useColors,
+  useTheme,
+  useThemedStyles,
+} from '../theme';
 
 /** The shelves, in the order they appear. Genre rails are the recommendations:
  *  Cinemeta ranks each by popularity, which is as close to "for you" as a
@@ -32,6 +42,114 @@ const SHELVES: Shelf[] = [
   { title: 'Drama series', kind: 'tv', genre: 'Drama' },
 ];
 
+const HERO = 480;
+const CARD = 116;
+
+function useHomeStyles() {
+  return useThemedStyles((c) => ({
+    page: { flex: 1, backgroundColor: c.bg },
+    body: { paddingBottom: TAB_INSET },
+    hero: { height: HERO },
+    heroPage: { height: HERO, justifyContent: 'flex-end' as const },
+    heroArt: { position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0 },
+    heroEmpty: { height: 220, alignItems: 'center' as const, justifyContent: 'center' as const },
+    heroFade: {
+      position: 'absolute' as const,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      height: HERO,
+      experimental_backgroundImage: fadeToBg(c.bg, 0.25),
+    },
+    dots: {
+      position: 'absolute' as const,
+      bottom: space.md,
+      left: 0,
+      right: 0,
+      flexDirection: 'row' as const,
+      justifyContent: 'center' as const,
+      gap: 6,
+    },
+    dot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: c.faint,
+      opacity: 0.5,
+    },
+    dotOn: { width: 18, backgroundColor: c.accent, opacity: 1 },
+    heroBody: { padding: space.xl, gap: space.sm },
+    heroEyebrow: {
+      ...type.overline,
+      color: c.accent,
+      fontFamily: font.bold,
+    },
+    heroName: { ...type.display, fontSize: 30, lineHeight: 36, color: c.text },
+    heroFacts: { ...type.meta, color: c.accent },
+    heroPlay: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      alignSelf: 'flex-start' as const,
+      gap: space.sm,
+      marginTop: space.sm,
+      paddingHorizontal: space.xl,
+      paddingVertical: space.md,
+      borderRadius: radius.pill,
+      backgroundColor: c.accent,
+    },
+    heroPlayText: { ...type.label, fontFamily: font.semibold, color: c.onAccent },
+    shelf: { marginTop: space.xl, gap: space.md },
+    head: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: space.sm,
+      paddingHorizontal: space.xl,
+    },
+    // The one bit of colour that is not artwork — enough to tell shelves apart
+    // while they are still loading.
+    tick: { width: 3, height: 15, borderRadius: 2 },
+    headText: {
+      ...type.label,
+      fontFamily: font.semibold,
+      fontSize: 15,
+      color: c.text,
+      flex: 1,
+    },
+    headLinkBox: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 2 },
+    headLink: { ...type.meta, color: c.accent, fontFamily: font.medium },
+    rail: { paddingHorizontal: space.xl, gap: space.md },
+    railPlaceholder: {
+      height: CARD * 1.5,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+    },
+    card: { width: CARD, gap: space.sm },
+    pressed: { opacity: 0.6 },
+    poster: {
+      width: CARD,
+      height: CARD * 1.5,
+      borderRadius: radius.md,
+      backgroundColor: c.surface,
+    },
+    score: {
+      position: 'absolute' as const,
+      top: space.sm,
+      left: space.sm,
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: 2,
+      paddingHorizontal: 5,
+      paddingVertical: 2,
+      borderRadius: radius.sm,
+      backgroundColor: '#0b0e14cc',
+    },
+    scoreText: { ...type.meta, fontSize: 10, fontFamily: font.medium, color: '#fff' },
+    cardName: { ...type.meta, fontSize: 11, color: c.muted },
+    resume: { width: 168, gap: space.sm },
+    resumeName: { ...type.meta, fontSize: 11, color: c.muted },
+  }));
+}
+
 function HomeScreenView({
   recent,
   onOpenTitle,
@@ -47,6 +165,8 @@ function HomeScreenView({
   onSeeAll: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const colors = useColors();
+  const styles = useHomeStyles();
   // Seeded from whatever has already resolved this session, so switching tabs
   // and coming back paints the shelves on the first render — no spinner, no
   // second pass.
@@ -170,6 +290,7 @@ function Rail<T>({
   keyOf: (item: T) => string;
   render: (item: T) => React.ReactElement;
 }) {
+  const styles = useHomeStyles();
   return (
     <FlatList
       horizontal
@@ -203,6 +324,8 @@ function Hero({
 }) {
   const { width } = useWindowDimensions();
   const [page, setPage] = useState(0);
+  const colors = useColors();
+  const styles = useHomeStyles();
 
   return (
     <View style={styles.hero}>
@@ -268,6 +391,8 @@ function Head({
   hue: string;
   onSeeAll?: () => void;
 }) {
+  const colors = useColors();
+  const styles = useHomeStyles();
   return (
     <View style={styles.head}>
       <View style={[styles.tick, { backgroundColor: hue }]} />
@@ -283,6 +408,8 @@ function Head({
 }
 
 function Poster({ title, onPress }: { title: Title; onPress: () => void }) {
+  const colors = useColors();
+  const styles = useHomeStyles();
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
       <Image source={{ uri: title.poster! }} style={styles.poster} resizeMode="cover" />
@@ -298,106 +425,6 @@ function Poster({ title, onPress }: { title: Title; onPress: () => void }) {
     </Pressable>
   );
 }
-
-const HERO = 420;
-const CARD = 116;
-
-const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: colors.bg },
-  body: { paddingBottom: TAB_INSET },
-  hero: { height: HERO },
-  heroPage: { height: HERO, justifyContent: 'flex-end' },
-  heroArt: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  heroEmpty: { height: 220, alignItems: 'center', justifyContent: 'center' },
-  heroFade: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: HERO,
-    experimental_backgroundImage: fadeToBg(0.25),
-  },
-  dots: {
-    position: 'absolute',
-    bottom: space.md,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.faint,
-    opacity: 0.5,
-  },
-  dotOn: { width: 18, backgroundColor: colors.accent, opacity: 1 },
-  heroBody: { padding: space.xl, gap: space.sm },
-  heroEyebrow: {
-    ...type.overline,
-    color: colors.accent,
-    fontFamily: font.bold,
-  },
-  heroName: { ...type.display, fontSize: 30, lineHeight: 36, color: colors.text },
-  heroFacts: { ...type.meta, color: colors.muted },
-  heroPlay: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: space.sm,
-    marginTop: space.sm,
-    paddingHorizontal: space.xl,
-    paddingVertical: space.md,
-    borderRadius: radius.pill,
-    backgroundColor: colors.accent,
-  },
-  heroPlayText: { ...type.label, fontFamily: font.semibold, color: colors.onAccent },
-  shelf: { marginTop: space.xl, gap: space.md },
-  head: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.sm,
-    paddingHorizontal: space.xl,
-  },
-  // The one bit of colour that is not artwork — enough to tell shelves apart
-  // while they are still loading.
-  tick: { width: 3, height: 15, borderRadius: 2 },
-  headText: { ...type.label, fontFamily: font.semibold, fontSize: 15, color: colors.text, flex: 1 },
-  headLinkBox: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  headLink: { ...type.meta, color: colors.accent, fontFamily: font.medium },
-  rail: { paddingHorizontal: space.xl, gap: space.md },
-  railPlaceholder: {
-    height: CARD * 1.5,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  card: { width: CARD, gap: space.sm },
-  pressed: { opacity: 0.6 },
-  poster: {
-    width: CARD,
-    height: CARD * 1.5,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-  },
-  score: {
-    position: 'absolute',
-    top: space.sm,
-    left: space.sm,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-    backgroundColor: '#0b0e14cc',
-  },
-  scoreText: { ...type.meta, fontSize: 10, fontFamily: font.medium, color: colors.text },
-  cardName: { ...type.meta, fontSize: 11, color: colors.muted },
-  resume: { width: 168, gap: space.sm },
-  resumeName: { ...type.meta, fontSize: 11, color: colors.muted },
-});
 
 /** Memoised: it stays mounted behind the other tabs, and every prop it takes is
  *  stable, so a tab switch must not rebuild seven shelves of posters. */

@@ -1,15 +1,40 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { Icon } from './Icon';
 import { Thumb } from './Thumb';
 import { clock, left } from '../lib/format';
 import type { Item } from '../lib/history';
-import { colors, font, radius, space, type } from '../theme';
+import { font, radius, space, type, useColors, useThemedStyles } from '../theme';
 
 /**
  * A one-tap way back into whatever was last playing. Deliberately not the
  * expandable history row: here the only useful action is "carry on".
  */
 export function ResumeCard({ item, onResume }: { item: Item; onResume: () => void }) {
+  const colors = useColors();
+  const styles = useThemedStyles((c) => ({
+    card: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: space.md,
+      padding: space.md,
+      borderRadius: radius.lg,
+      backgroundColor: c.surface,
+    },
+    pressed: { opacity: 0.7 },
+    body: { flex: 1, gap: 2 },
+    eyebrow: { ...type.overline, color: c.faint, fontSize: 10, letterSpacing: 0.4 },
+    title: { ...type.body, fontFamily: font.medium, color: c.text, lineHeight: 20 },
+    meta: { ...type.meta, color: c.muted, marginTop: 2 },
+    play: {
+      width: 34,
+      height: 34,
+      borderRadius: radius.pill,
+      backgroundColor: c.accentSoft,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+    },
+  }));
+
   const index = item.lastFileIndex;
   if (index == null) return null;
 
@@ -54,27 +79,3 @@ export function ResumeCard({ item, onResume }: { item: Item; onResume: () => voi
     </Pressable>
   );
 }
-
-const styles = StyleSheet.create({
-  card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-    padding: space.md,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
-  },
-  pressed: { opacity: 0.7 },
-  body: { flex: 1, gap: 2 },
-  eyebrow: { ...type.overline, color: colors.faint, fontSize: 10, letterSpacing: 0.4 },
-  title: { ...type.body, fontFamily: font.medium, color: colors.text, lineHeight: 20 },
-  meta: { ...type.meta, color: colors.muted, marginTop: 2 },
-  play: {
-    width: 34,
-    height: 34,
-    borderRadius: radius.pill,
-    backgroundColor: colors.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});

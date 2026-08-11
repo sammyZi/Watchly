@@ -1,5 +1,5 @@
 import { memo, useEffect, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Pressable, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Progress } from '../../modules/torrent-stream';
 import { Icon } from '../components/Icon';
@@ -8,7 +8,7 @@ import { ProgressBar } from '../components/ProgressBar';
 import { Screen } from '../components/Screen';
 import { SourceInput } from '../components/SourceInput';
 import { ago, bytes, speed } from '../lib/format';
-import { colors, font, radius, space, TAB_INSET, type } from '../theme';
+import { font, radius, space, TAB_INSET, type, useColors, useThemedStyles } from '../theme';
 
 type DownloadEntry = {
   name: string;
@@ -76,6 +76,120 @@ function DownloadsScreenView({
   active?: ActiveDownload | null;
 }) {
   const [items, setItems] = useState<DownloadEntry[]>([]);
+  const colors = useColors();
+  const styles = useThemedStyles((c) => ({
+    body: { padding: space.xl, gap: space.md, paddingBottom: TAB_INSET },
+    head: { gap: space.lg, marginBottom: space.sm },
+    active: {
+      gap: space.md,
+      padding: space.lg,
+      borderRadius: radius.lg,
+      backgroundColor: c.surface,
+    },
+    activeTop: { flexDirection: 'row' as const, alignItems: 'flex-start' as const, gap: space.md },
+    activeIcon: {
+      width: 42,
+      height: 42,
+      borderRadius: radius.md,
+      backgroundColor: c.accentSoft,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+    },
+    activeIconPaused: { backgroundColor: c.control },
+    activeBody: { flex: 1, gap: 2 },
+    activeName: {
+      ...type.body,
+      fontFamily: font.semibold,
+      color: c.text,
+      lineHeight: 20,
+    },
+    activeStage: { ...type.meta, color: c.accent },
+    activeStagePaused: { color: c.muted },
+    bar: { marginTop: space.xs },
+    stats: {
+      flexDirection: 'row' as const,
+      justifyContent: 'space-between' as const,
+      gap: space.sm,
+    },
+    stat: { ...type.meta, fontFamily: font.medium, color: c.text },
+    statMuted: { ...type.meta, color: c.faint },
+    actions: { flexDirection: 'row' as const, gap: space.sm, marginTop: space.xs },
+    actionBtn: {
+      flex: 1,
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+      gap: space.sm,
+      height: 40,
+      borderRadius: radius.pill,
+      backgroundColor: c.control,
+    },
+    actionLabel: { ...type.label, color: c.accent },
+    cancelBtn: {
+      flex: 1,
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+      gap: space.sm,
+      height: 40,
+      borderRadius: radius.pill,
+      backgroundColor: c.dangerSoft,
+    },
+    cancelLabel: { ...type.label, color: c.danger },
+    sectionHead: {
+      flexDirection: 'row' as const,
+      alignItems: 'baseline' as const,
+      justifyContent: 'space-between' as const,
+    },
+    heading: { ...type.overline, color: c.faint },
+    headingMeta: { ...type.meta, fontSize: 11, color: c.faint },
+    empty: {
+      alignItems: 'center' as const,
+      gap: space.md,
+      paddingVertical: space.xxl,
+      paddingHorizontal: space.lg,
+      borderRadius: radius.lg,
+      backgroundColor: c.surface,
+    },
+    emptyMark: {
+      width: 52,
+      height: 52,
+      borderRadius: radius.lg,
+      backgroundColor: c.control,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+    },
+    emptyTitle: {
+      ...type.label,
+      fontFamily: font.semibold,
+      fontSize: 15,
+      color: c.text,
+    },
+    emptyText: {
+      ...type.meta,
+      color: c.muted,
+      textAlign: 'center' as const,
+      lineHeight: 18,
+    },
+    row: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: space.md,
+      padding: space.sm,
+      borderRadius: radius.lg,
+      backgroundColor: c.surface,
+    },
+    rowPressed: { opacity: 0.7 },
+    rowBody: { flex: 1, gap: 2, paddingRight: space.xs },
+    rowSaved: { ...type.meta, fontSize: 11, color: c.good },
+    rowName: {
+      ...type.body,
+      fontFamily: font.medium,
+      color: c.text,
+      lineHeight: 20,
+    },
+    rowMeta: { ...type.meta, color: c.muted },
+  }));
 
   useEffect(() => {
     loadDownloads().then(setItems);
@@ -219,120 +333,6 @@ function DownloadsScreenView({
     </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  body: { padding: space.xl, gap: space.md, paddingBottom: TAB_INSET },
-  head: { gap: space.lg, marginBottom: space.sm },
-  active: {
-    gap: space.md,
-    padding: space.lg,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
-  },
-  activeTop: { flexDirection: 'row', alignItems: 'flex-start', gap: space.md },
-  activeIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: radius.md,
-    backgroundColor: colors.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  activeIconPaused: { backgroundColor: colors.control },
-  activeBody: { flex: 1, gap: 2 },
-  activeName: {
-    ...type.body,
-    fontFamily: font.semibold,
-    color: colors.text,
-    lineHeight: 20,
-  },
-  activeStage: { ...type.meta, color: colors.accent },
-  activeStagePaused: { color: colors.muted },
-  bar: { marginTop: space.xs },
-  stats: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: space.sm,
-  },
-  stat: { ...type.meta, fontFamily: font.medium, color: colors.text },
-  statMuted: { ...type.meta, color: colors.faint },
-  actions: { flexDirection: 'row', gap: space.sm, marginTop: space.xs },
-  actionBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: space.sm,
-    height: 40,
-    borderRadius: radius.pill,
-    backgroundColor: colors.control,
-  },
-  actionLabel: { ...type.label, color: colors.accent },
-  cancelBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: space.sm,
-    height: 40,
-    borderRadius: radius.pill,
-    backgroundColor: colors.dangerSoft,
-  },
-  cancelLabel: { ...type.label, color: colors.danger },
-  sectionHead: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-  },
-  heading: { ...type.overline, color: colors.faint },
-  headingMeta: { ...type.meta, fontSize: 11, color: colors.faint },
-  empty: {
-    alignItems: 'center',
-    gap: space.md,
-    paddingVertical: space.xxl,
-    paddingHorizontal: space.lg,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
-  },
-  emptyMark: {
-    width: 52,
-    height: 52,
-    borderRadius: radius.lg,
-    backgroundColor: colors.control,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyTitle: {
-    ...type.label,
-    fontFamily: font.semibold,
-    fontSize: 15,
-    color: colors.text,
-  },
-  emptyText: {
-    ...type.meta,
-    color: colors.muted,
-    textAlign: 'center',
-    lineHeight: 18,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-    padding: space.sm,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
-  },
-  rowPressed: { opacity: 0.7 },
-  rowBody: { flex: 1, gap: 2, paddingRight: space.xs },
-  rowSaved: { ...type.meta, fontSize: 11, color: colors.good },
-  rowName: {
-    ...type.body,
-    fontFamily: font.medium,
-    color: colors.text,
-    lineHeight: 20,
-  },
-  rowMeta: { ...type.meta, color: colors.muted },
-});
 
 /** Kept mounted behind the other tabs — see TabPage in App. */
 export const DownloadsScreen = memo(DownloadsScreenView);

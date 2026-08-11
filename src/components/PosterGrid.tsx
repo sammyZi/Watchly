@@ -1,7 +1,7 @@
-import { FlatList, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Image, Pressable, Text, View } from 'react-native';
 import { Icon } from './Icon';
 import type { Title } from '../lib/meta';
-import { colors, font, radius, space, TAB_INSET, type } from '../theme';
+import { font, radius, space, TAB_INSET, type, useColors, useThemedStyles } from '../theme';
 
 /** Three across, poster-first — the shape both browsing screens want. */
 export function PosterGrid({
@@ -15,6 +15,37 @@ export function PosterGrid({
   empty?: React.ReactElement | null;
   onOpen: (title: Title) => void;
 }) {
+  const colors = useColors();
+  const styles = useThemedStyles((c) => ({
+    flex: { flex: 1 },
+    grid: { padding: space.xl, paddingTop: space.md, paddingBottom: TAB_INSET, gap: space.lg },
+    column: { gap: space.md },
+    card: { flex: 1 / 3, gap: space.xs },
+    pressed: { opacity: 0.6 },
+    poster: {
+      width: '100%' as const,
+      aspectRatio: 2 / 3,
+      borderRadius: radius.md,
+      backgroundColor: c.surface,
+      marginBottom: space.xs,
+    },
+    score: {
+      position: 'absolute' as const,
+      top: space.sm,
+      left: space.sm,
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: 2,
+      paddingHorizontal: 5,
+      paddingVertical: 2,
+      borderRadius: radius.sm,
+      backgroundColor: '#0b0e14cc',
+    },
+    scoreText: { ...type.meta, fontSize: 10, fontFamily: font.medium, color: '#fff' },
+    name: { ...type.meta, fontSize: 12, color: c.text },
+    year: { ...type.meta, fontSize: 11, color: c.faint },
+  }));
+
   return (
     <FlatList
       data={titles}
@@ -54,33 +85,3 @@ export function PosterGrid({
     />
   );
 }
-
-const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  grid: { padding: space.xl, paddingTop: space.md, paddingBottom: TAB_INSET, gap: space.lg },
-  column: { gap: space.md },
-  card: { flex: 1 / 3, gap: space.xs },
-  pressed: { opacity: 0.6 },
-  poster: {
-    width: '100%',
-    aspectRatio: 2 / 3,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    marginBottom: space.xs,
-  },
-  score: {
-    position: 'absolute',
-    top: space.sm,
-    left: space.sm,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-    backgroundColor: '#0b0e14cc',
-  },
-  scoreText: { ...type.meta, fontSize: 10, fontFamily: font.medium, color: colors.text },
-  name: { ...type.meta, fontSize: 12, color: colors.text },
-  year: { ...type.meta, fontSize: 11, color: colors.faint },
-});

@@ -1,11 +1,11 @@
 import { memo, useMemo, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
 import { IconButton } from '../components/Button';
 import { HistoryRow } from '../components/HistoryRow';
 import { Icon } from '../components/Icon';
 import { Screen } from '../components/Screen';
 import type { Item } from '../lib/history';
-import { colors, radius, space, TAB_INSET, type } from '../theme';
+import { radius, space, TAB_INSET, type, useColors, useThemedStyles } from '../theme';
 
 /** Torrent name, the label we stored, and every file inside it. Searching only
  *  the title would miss the episode you actually remember. */
@@ -31,6 +31,50 @@ function HistoryScreenView({
 }) {
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState('');
+  const colors = useColors();
+  const styles = useThemedStyles((c) => ({
+    flex: { flex: 1 },
+    actions: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: space.sm },
+    searchWrap: {
+      paddingHorizontal: space.xl,
+      paddingTop: space.lg,
+      backgroundColor: c.bg,
+    },
+    search: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: space.md,
+      paddingHorizontal: space.lg,
+      height: 44,
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+    },
+    searchInput: { ...type.body, color: c.text, flex: 1, padding: 0 },
+    list: {
+      padding: space.xl,
+      paddingTop: space.lg,
+      paddingBottom: TAB_INSET,
+      gap: space.md,
+    },
+    count: { ...type.meta, color: c.faint, marginBottom: space.md },
+    empty: { alignItems: 'center' as const, gap: space.md, paddingVertical: space.xxl },
+    emptyBadge: {
+      width: 64,
+      height: 64,
+      borderRadius: radius.pill,
+      backgroundColor: c.surfaceAlt,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+      marginBottom: space.xs,
+    },
+    emptyTitle: { ...type.title, fontSize: 16, color: c.text },
+    emptyText: {
+      ...type.body,
+      color: c.faint,
+      textAlign: 'center' as const,
+      maxWidth: 280,
+    },
+  }));
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -145,50 +189,6 @@ function HistoryScreenView({
     </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  searchWrap: {
-    paddingHorizontal: space.xl,
-    paddingTop: space.lg,
-    backgroundColor: colors.bg,
-  },
-  search: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-    paddingHorizontal: space.lg,
-    height: 44,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surface,
-  },
-  searchInput: { ...type.body, color: colors.text, flex: 1, padding: 0 },
-  list: {
-    padding: space.xl,
-    paddingTop: space.lg,
-    paddingBottom: TAB_INSET,
-    gap: space.md,
-  },
-  count: { ...type.meta, color: colors.faint, marginBottom: space.md },
-  empty: { alignItems: 'center', gap: space.md, paddingVertical: space.xxl },
-  emptyBadge: {
-    width: 64,
-    height: 64,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surfaceAlt,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: space.xs,
-  },
-  emptyTitle: { ...type.title, fontSize: 16, color: colors.text },
-  emptyText: {
-    ...type.body,
-    color: colors.faint,
-    textAlign: 'center',
-    maxWidth: 280,
-  },
-});
 
 /** Kept mounted behind the other tabs — see TabPage in App. */
 export const HistoryScreen = memo(HistoryScreenView);

@@ -3,7 +3,6 @@ import {
   Pressable,
   SectionList,
   StatusBar,
-  StyleSheet,
   Text,
   View,
 } from 'react-native';
@@ -12,7 +11,7 @@ import { IconButton } from '../components/Button';
 import { Icon } from '../components/Icon';
 import { bytes } from '../lib/format';
 import type { TorrentFile, TorrentMeta } from '../../modules/torrent-stream';
-import { colors, font, radius, space, type } from '../theme';
+import { font, radius, space, type, useColors, useTheme, useThemedStyles } from '../theme';
 
 /** Files inside the torrent, grouped by folder and in natural order. */
 export function FilesScreen({
@@ -56,13 +55,120 @@ export function FilesScreen({
   const videos = meta.files.filter((f) => f.isVideo).length;
   const insets = useSafeAreaInsets();
   const downloading = mode === 'download';
+  const colors = useColors();
+  const { scheme } = useTheme();
+  const styles = useThemedStyles((c) => ({
+    screen: { flex: 1, backgroundColor: c.bg },
+    header: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: space.sm,
+      paddingBottom: space.md,
+      // Same gutter and tone as every other screen's header — see Screen.tsx.
+      paddingHorizontal: space.xl,
+      backgroundColor: c.bg,
+    },
+    headerText: { flex: 1, gap: 2 },
+    title: { ...type.title, fontFamily: font.semibold, fontSize: 16, color: c.text },
+    subtitle: { ...type.meta, color: c.faint },
+    modeChip: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: 4,
+      paddingHorizontal: space.sm,
+      paddingVertical: 5,
+      borderRadius: radius.pill,
+      backgroundColor: c.accentSoft,
+    },
+    modeChipDownload: { backgroundColor: c.accent },
+    modeChipText: {
+      ...type.meta,
+      fontSize: 11,
+      fontFamily: font.semibold,
+      color: c.accent,
+    },
+    modeChipTextOn: { color: c.onAccent },
+
+    hintBar: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: space.sm,
+      paddingHorizontal: space.xl,
+      paddingVertical: space.md,
+      backgroundColor: c.surface,
+    },
+    hintText: { ...type.meta, color: c.muted, flex: 1 },
+
+    list: { padding: space.lg, paddingBottom: space.xxl },
+    folder: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: space.sm,
+      marginTop: space.lg,
+      marginBottom: space.sm,
+      paddingHorizontal: space.xs,
+    },
+    folderName: { ...type.overline, color: c.faint, flex: 1 },
+    folderCount: { ...type.meta, fontSize: 11, color: c.faint },
+
+    row: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: space.md,
+      padding: space.md,
+      marginBottom: space.sm,
+      borderRadius: radius.lg,
+    },
+    playable: { backgroundColor: c.surface },
+    muted: { backgroundColor: 'transparent', opacity: 0.65 },
+    pressed: { opacity: 0.65 },
+    mark: {
+      width: 38,
+      height: 38,
+      borderRadius: radius.md,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+    },
+    markVideo: { backgroundColor: c.accentSoft },
+    markSub: { backgroundColor: c.surface },
+    body: { flex: 1, gap: 2 },
+    name: { ...type.body, fontFamily: font.medium, color: c.text },
+    nameMuted: { fontFamily: font.regular, color: c.muted },
+    size: { ...type.meta, color: c.faint },
+    actions: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: space.xs },
+    sideBtn: {
+      width: 32,
+      height: 32,
+      borderRadius: radius.pill,
+      backgroundColor: c.control,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+    },
+    goBtn: {
+      width: 32,
+      height: 32,
+      borderRadius: radius.pill,
+      backgroundColor: c.accentSoft,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+    },
+    goBtnFill: { backgroundColor: c.accent },
+  }));
 
   return (
     <View style={styles.screen}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
+      <StatusBar
+        barStyle={scheme === 'light' ? 'dark-content' : 'light-content'}
+        backgroundColor={colors.bg}
+      />
 
       <View style={[styles.header, { paddingTop: insets.top + space.sm }]}>
-        <IconButton name="chevron-left" onPress={onBack} background="transparent" />
+        <IconButton
+          name="chevron-left"
+          onPress={onBack}
+          color={colors.accent}
+          background={colors.accentSoft}
+        />
         <View style={styles.headerText}>
           <Text numberOfLines={1} style={styles.title}>
             {meta.name}
@@ -181,96 +287,3 @@ export function FilesScreen({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.sm,
-    paddingBottom: space.md,
-    // Same gutter and tone as every other screen's header — see Screen.tsx.
-    paddingHorizontal: space.xl,
-    backgroundColor: colors.bg,
-  },
-  headerText: { flex: 1, gap: 2 },
-  title: { ...type.title, fontFamily: font.semibold, fontSize: 16, color: colors.text },
-  subtitle: { ...type.meta, color: colors.faint },
-  modeChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: space.sm,
-    paddingVertical: 5,
-    borderRadius: radius.pill,
-    backgroundColor: colors.accentSoft,
-  },
-  modeChipDownload: { backgroundColor: colors.accent },
-  modeChipText: { ...type.meta, fontSize: 11, fontFamily: font.semibold, color: colors.accent },
-  modeChipTextOn: { color: colors.onAccent },
-
-  hintBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.sm,
-    paddingHorizontal: space.xl,
-    paddingVertical: space.md,
-    backgroundColor: colors.surface,
-  },
-  hintText: { ...type.meta, color: colors.muted, flex: 1 },
-
-  list: { padding: space.lg, paddingBottom: space.xxl },
-  folder: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.sm,
-    marginTop: space.lg,
-    marginBottom: space.sm,
-    paddingHorizontal: space.xs,
-  },
-  folderName: { ...type.overline, color: colors.faint, flex: 1 },
-  folderCount: { ...type.meta, fontSize: 11, color: colors.faint },
-
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-    padding: space.md,
-    marginBottom: space.sm,
-    borderRadius: radius.lg,
-  },
-  playable: { backgroundColor: colors.surface },
-  muted: { backgroundColor: 'transparent', opacity: 0.65 },
-  pressed: { opacity: 0.65 },
-  mark: {
-    width: 38,
-    height: 38,
-    borderRadius: radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  markVideo: { backgroundColor: colors.accentSoft },
-  markSub: { backgroundColor: colors.surface },
-  body: { flex: 1, gap: 2 },
-  name: { ...type.body, fontFamily: font.medium, color: colors.text },
-  nameMuted: { fontFamily: font.regular, color: colors.muted },
-  size: { ...type.meta, color: colors.faint },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
-  sideBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: radius.pill,
-    backgroundColor: colors.control,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  goBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: radius.pill,
-    backgroundColor: colors.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  goBtnFill: { backgroundColor: colors.accent },
-});
