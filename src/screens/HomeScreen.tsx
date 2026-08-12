@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -13,7 +13,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../components/Icon';
 import { Thumb } from '../components/Thumb';
 import type { Item } from '../lib/history';
-import { loadCatalog, peekCatalog, type Title } from '../lib/meta';
+import {
+  ANIME_GENRE,
+  loadCatalog,
+  peekCatalog,
+  watchedGenres,
+  type Title,
+} from '../lib/meta';
+import { useOnline } from '../lib/net';
+import { asTitle, inList, type Saved } from '../lib/saved';
 import {
   fadeToBg,
   font,
@@ -40,7 +48,13 @@ const SHELVES: Shelf[] = [
   { title: 'Thriller', kind: 'movie', genre: 'Thriller' },
   { title: 'Animation', kind: 'movie', genre: 'Animation' },
   { title: 'Drama series', kind: 'tv', genre: 'Drama' },
+  // Its own catalog rather than a Cinemeta genre — see ANIME_GENRE.
+  { title: 'Anime', kind: 'tv', genre: ANIME_GENRE },
 ];
+
+/** What identifies a shelf's contents — two shelves with the same kind and
+ *  genre are the same catalog however they are labelled. */
+const shelfKey = (s: Shelf) => `${s.kind}:${s.genre ?? ''}`;
 
 const HERO = 480;
 const CARD = 116;
@@ -152,12 +166,14 @@ function useHomeStyles() {
 
 function HomeScreenView({
   recent,
+  saved,
   onOpenTitle,
   onOpenShelf,
   onPlayFile,
   onSeeAll,
 }: {
   recent: Item[];
+  saved: Saved[];
   onOpenTitle: (title: Title) => void;
   /** The whole shelf as a grid — a rail only ever shows the first handful. */
   onOpenShelf: (shelf: Shelf) => void;
@@ -170,27 +186,91 @@ function HomeScreenView({
   // Seeded from whatever has already resolved this session, so switching tabs
   // and coming back paints the shelves on the first render — no spinner, no
   // second pass.
-  const [shelves, setShelves] = useState<(Title[] | null)[]>(() =>
-    SHELVES.map((s) => peekCatalog(s.kind, s.genre))
+  const [loaded, setLoaded] = useState<Record<string, Title[]>>(() =>
+    Object.fromEntries(
+      SHELVES.map((s) => [shelfKey(s), peekCatalog(s.kind, s.genre)]).filter(
+        ([, titles]) => titles
+      ) as [string, Title[]][]
+    )
   );
+
+  // Re-runs when the connection comes back. A shelf that already loaded is a
+  // memory-cache hit, so only the ones that failed actually go out again.
+  const online = useOnline();
+
+  /**
+   * Shelves built from what has actually been watched.
+   *
+   * Empty until there is enough history to mean anything — see `topGenres` —
+   * so a fresh install just gets the popularity charts, which is the only
+   * honest thing to show someone nothing is known about yet.
+   */
+  const [picks, setPicks] = useState<Shelf[]>([]);
+  useEffect(() => {
+    // Order is the weighting — `topGenres` breaks ties on it. What is being
+    // watched right now leads, then the rest of the library, then the saved
+    // lists, which are an intention rather than a habit.
+    const identified = (items: Item[]) =>
+      items
+        .filter((h): h is Item & { imdb: string } => !!h.imdb)
+        .map((h) => ({ imdb: h.imdb, kind: h.kind ?? ('movie' as const) }));
+
+    const continuing = recent.filter((h) => h.lastFileIndex != null);
+    const seen = [
+      ...identified(continuing),
+      ...identified(recent.filter((h) => !continuing.includes(h))),
+      ...saved.map((s) => ({ imdb: s.imdb, kind: s.kind })),
+    ].slice(0, 30);
+    if (!seen.length) return;
+    let live = true;
+    watchedGenres(seen).then((genres) => {
+      if (!live) return;
+      setPicks(
+        genres.map(({ genre, kind }) => ({
+          title: `More ${genre}`,
+          kind,
+          genre,
+        }))
+      );
+    });
+    return () => {
+      live = false;
+    };
+  }, [recent, saved, online]);
+
+  // Recommendations first, then the fixed charts — minus any the picks already
+  // cover, so the same catalog is never on the page twice.
+  const shelves = useMemo(() => {
+    const taken = new Set(picks.map(shelfKey));
+    return [...picks, ...SHELVES.filter((s) => !taken.has(shelfKey(s)))];
+  }, [picks]);
 
   useEffect(() => {
     let live = true;
     // All at once: they are independent, cached after the first visit, and a
     // shelf that arrives late just fills in where its heading already is.
-    SHELVES.forEach((shelf, i) => {
+    for (const shelf of shelves) {
       loadCatalog(shelf.kind, shelf.genre).then((titles) => {
-        if (!live) return;
-        setShelves((all) => all.map((s, j) => (j === i ? titles : s)));
+        if (!live || !titles.length) return;
+        setLoaded((all) => ({ ...all, [shelfKey(shelf)]: titles }));
       });
-    });
+    }
     return () => {
       live = false;
     };
-  }, []);
+  }, [shelves, online]);
 
-  const featured = (shelves[0] ?? []).slice(0, 5);
+  // Once there is a taste to go on the hero follows it, and says so — the
+  // popularity chart is what to show someone nothing is known about yet.
+  const heroShelf = picks[0] ?? SHELVES[0];
+  const featured = (
+    loaded[shelfKey(heroShelf)] ??
+    loaded[shelfKey(SHELVES[0])] ??
+    []
+  ).slice(0, 5);
   const resumable = recent.filter((i) => i.lastFileIndex != null);
+  const later = inList(saved, 'later');
+  const favorites = inList(saved, 'favorite');
 
   return (
     <View style={styles.page}>
@@ -199,8 +279,8 @@ function HomeScreenView({
           front, so all seven rails and their posters were being built — and
           held — whether or not you ever scrolled to them. */}
       <FlatList
-        data={SHELVES}
-        keyExtractor={(shelf) => shelf.title}
+        data={shelves}
+        keyExtractor={(shelf) => shelfKey(shelf)}
         contentContainerStyle={styles.body}
         showsVerticalScrollIndicator={false}
         initialNumToRender={2}
@@ -210,7 +290,18 @@ function HomeScreenView({
         ListHeaderComponent={
           <>
             {featured.length > 0 ? (
-              <Hero titles={featured} top={insets.top} onOpen={onOpenTitle} />
+              <Hero
+                titles={featured}
+                // The genre only holds while its shelf is the one on screen —
+                // the fallback above can leave the chart showing instead.
+                eyebrow={
+                  picks[0] && loaded[shelfKey(picks[0])]
+                    ? `in ${picks[0].genre}`
+                    : 'today'
+                }
+                top={insets.top}
+                onOpen={onOpenTitle}
+              />
             ) : (
               <View style={[styles.heroEmpty, { paddingTop: insets.top }]}>
                 <ActivityIndicator color={colors.accent} />
@@ -249,6 +340,40 @@ function HomeScreenView({
                 />
               </View>
             )}
+
+            {/* The two saved lists, above the recommendations: something put
+                here was chosen deliberately, which beats anything guessed. */}
+            {later.length > 0 && (
+              <View style={styles.shelf}>
+                <Head title="Watch later" hue={hues[1]} />
+                <Rail
+                  data={later}
+                  keyOf={(s) => s.imdb}
+                  render={(item) => (
+                    <Poster
+                      title={asTitle(item)}
+                      onPress={() => onOpenTitle(asTitle(item))}
+                    />
+                  )}
+                />
+              </View>
+            )}
+
+            {favorites.length > 0 && (
+              <View style={styles.shelf}>
+                <Head title="Favourites" hue={hues[2]} />
+                <Rail
+                  data={favorites}
+                  keyOf={(s) => s.imdb}
+                  render={(item) => (
+                    <Poster
+                      title={asTitle(item)}
+                      onPress={() => onOpenTitle(asTitle(item))}
+                    />
+                  )}
+                />
+              </View>
+            )}
           </>
         }
         renderItem={({ item: shelf, index: i }) => (
@@ -256,11 +381,11 @@ function HomeScreenView({
             <Head
               title={shelf.title}
               hue={hues[(i + 1) % hues.length]}
-              onSeeAll={shelves[i]?.length ? () => onOpenShelf(shelf) : undefined}
+              onSeeAll={loaded[shelfKey(shelf)]?.length ? () => onOpenShelf(shelf) : undefined}
             />
-            {shelves[i] ? (
+            {loaded[shelfKey(shelf)] ? (
               <Rail
-                data={shelves[i]!}
+                data={loaded[shelfKey(shelf)]!}
                 keyOf={(t) => t.imdb}
                 render={(item) => (
                   <Poster title={item} onPress={() => onOpenTitle(item)} />
@@ -315,10 +440,13 @@ function Rail<T>({
  */
 function Hero({
   titles,
+  eyebrow,
   top,
   onOpen,
 }: {
   titles: Title[];
+  /** What the ranking is of — "today", or the genre it was built from. */
+  eyebrow: string;
   top: number;
   onOpen: (title: Title) => void;
 }) {
@@ -354,7 +482,7 @@ function Hero({
             <View style={styles.heroFade} />
             <View style={[styles.heroBody, { paddingTop: top + space.xl }]}>
               <Text style={styles.heroEyebrow}>
-                {index === 0 ? '#1 today' : `#${index + 1} today`}
+                #{index + 1} {eyebrow}
               </Text>
               <Text style={styles.heroName} numberOfLines={2}>
                 {item.title}

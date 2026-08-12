@@ -37,6 +37,7 @@ import expo.modules.kotlin.records.Record
 import java.io.File
 import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
+import java.util.zip.ZipInputStream
 
 private const val TAG = "TorrentStream"
 private const val NOTIF_CHANNEL = "torrent_downloads"
@@ -79,6 +80,29 @@ private val VIDEO = setOf(
  * keeps what appears on screen predictable.
  */
 private val SUBTITLE = setOf("srt")
+
+/**
+ * Limits on anything fetched from a subtitle host.
+ *
+ * A dialogue track for a three-hour film is well under 200KB, and an archive
+ * holding one is smaller still. Everything past that is either a mistake or an
+ * attempt to fill the disk, and neither is worth unpacking.
+ */
+private const val MAX_SUBTITLE_BYTES = 2 * 1024 * 1024
+private const val MAX_SUBTITLE_DOWNLOAD = 8 * 1024 * 1024
+private const val MAX_ZIP_ENTRIES = 100
+
+/** Read the whole stream, or nothing if it runs past `limit`. */
+private fun java.io.InputStream.readCapped(limit: Int): ByteArray? {
+  val out = java.io.ByteArrayOutputStream()
+  val buf = ByteArray(16 * 1024)
+  while (true) {
+    val n = read(buf)
+    if (n < 0) return out.toByteArray()
+    if (out.size() + n > limit) return null
+    out.write(buf, 0, n)
+  }
+}
 
 /** Trackers hand back ~200 at a time and most are stale by the next session;
  *  keeping a wide list is what makes a warm start find a swarm immediately. */
@@ -330,6 +354,60 @@ class TorrentStreamModule : Module() {
       notifyComplete(name)
       // file:// so the in-app player can open Completed downloads later.
       "file://${dest.absolutePath}"
+    }
+
+    /**
+     * Fetch an external subtitle and return a path the player can open.
+     *
+     * SubDL only ever serves zip archives and the JS side has no way to unpack
+     * one, but `java.util.zip` has shipped with Android since the beginning —
+     * so the download, the extract and the write all happen here. A plain
+     * subtitle body is written straight out, so this works for any source.
+     */
+    AsyncFunction("saveSubtitle") { url: String, name: String ->
+      val safe = name.replace(Regex("[^A-Za-z0-9._-]"), "_").take(60).ifBlank { "sub" }
+      val dir = File(cacheRoot, "subs").apply { mkdirs() }
+      val bytes = URL(url).openStream().use { it.readCapped(MAX_SUBTITLE_DOWNLOAD) }
+        ?: throw CodedException("That subtitle download is far too large to be one")
+      if (bytes.size < 4) throw CodedException("Subtitle download was empty")
+
+      // "PK": a zip. Anything else is the subtitle itself.
+      if (bytes[0] != 0x50.toByte() || bytes[1] != 0x4B.toByte()) {
+        val dest = File(dir, "$safe.srt")
+        dest.writeBytes(bytes)
+        return@AsyncFunction "file://${dest.absolutePath}"
+      }
+
+      ZipInputStream(bytes.inputStream()).use { zip ->
+        var entry = zip.nextEntry
+        var scanned = 0
+        while (entry != null && scanned < MAX_ZIP_ENTRIES) {
+          scanned++
+          val current = entry!!
+          val ext = current.name.substringAfterLast('.', "").lowercase()
+          // Archives routinely carry a readme, an ad, and whatever else the
+          // uploader felt like shipping. Only .srt is ever written out — same
+          // rule as the torrent side, and for the same reason.
+          //
+          // Nothing from the archive reaches the filesystem but its bytes: the
+          // destination is built from our own `safe` name, so an entry called
+          // "../../databases/x" cannot escape the cache directory. Note this
+          // is not a malware scan — it is a guarantee that what lands is a
+          // text file, in app-private storage, that nothing ever executes.
+          if (!current.isDirectory && ext in SUBTITLE) {
+            // Read before writing, and capped: a zip bomb declares a few KB in
+            // its header and unpacks to gigabytes.
+            val body = zip.readCapped(MAX_SUBTITLE_BYTES)
+              ?: throw CodedException("That subtitle unpacks to something far too big")
+            val dest = File(dir, "$safe.$ext")
+            dest.writeBytes(body)
+            log("subtitle: ${current.name} → ${dest.name} (${body.size}B)")
+            return@AsyncFunction "file://${dest.absolutePath}"
+          }
+          entry = zip.nextEntry
+        }
+      }
+      throw CodedException("No subtitle file inside the archive")
     }
 
     /** Resolve a finished download in public Downloads/ for local playback. */

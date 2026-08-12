@@ -1,6 +1,6 @@
 // node --experimental-strip-types src/lib/search.test.ts
 import assert from 'node:assert';
-import { episodeTag, parseEpisode, seasonsIn, health, kindOf, quality, rank, scopeOf, toHits, type Hit } from './search.ts';
+import { aliasOf, episodeTag, merge, parseEpisode, seasonsIn, health, kindOf, quality, rank, scopeOf, toHits, toTorrentioHits, type Hit } from './search.ts';
 
 const row = (over: Record<string, string | number> = {}) => ({
   id: '1',
@@ -24,7 +24,9 @@ assert.deepEqual(
 
 // The top-100 feed hands back numbers where search hands back strings.
 const [numeric] = toHits([row({ id: 42, seeders: 7, leechers: 2, size: 9, category: 207 })]);
-assert.equal(numeric.id, '42');
+// Keyed by info hash, not the index's own row id — that is what lets a hit
+// from another index merge with this one.
+assert.equal(numeric.id, 'c39fe3eefbdb62da9c27eb6398ff4a7d2e26e7ab');
 assert.equal(numeric.seeders, 7);
 assert.ok(
   numeric.magnet.startsWith('magnet:?xt=urn:btih:c39fe3eefbdb62da9c27eb6398ff4a7d2e26e7ab&dn=')
@@ -120,5 +122,46 @@ assert.deepEqual(seasonsIn('The.Matrix.1999.1080p.BluRay.x264'), []);
 assert.deepEqual(seasonsIn('Show.S04.DDP5.1.Atmos.x265.10bit'), [4]);
 // A separator is required for the spelled-out form only, so this is not S8.
 assert.deepEqual(seasonsIn("Ocean's 8 2018 1080p"), []);
+
+// Torrentio packs the numbers into a display string; the first line is the
+// release name and the rest is the stats row.
+const stream = (over: Record<string, unknown> = {}) => ({
+  name: 'Torrentio\n4k HDR',
+  title: 'The.Matrix.1999.2160p.BluRay.x265\n\u{1F464} 84 \u{1F4BE} 51.3 GB \u2699\uFE0F 1337x',
+  infoHash: 'aa0fd381c944a72cabb3e962d5f727c8694d7dd6',
+  ...over,
+});
+
+const [one] = toTorrentioHits([stream()], 'movie');
+assert.equal(one.name, 'The.Matrix.1999.2160p.BluRay.x265');
+assert.equal(one.seeders, 84);
+assert.equal(one.size, Math.round(51.3 * 1024 ** 3));
+assert.equal(one.quality, '4K');
+assert.equal(one.id, 'aa0fd381c944a72cabb3e962d5f727c8694d7dd6');
+assert.ok(one.magnet.startsWith('magnet:?xt=urn:btih:aa0fd381'));
+
+// No stats at all is still a usable release, just an unranked one.
+assert.equal(toTorrentioHits([stream({ title: 'Some.Release.720p' })], 'movie')[0].seeders, 0);
+// Anything without a real info hash cannot be played.
+assert.equal(toTorrentioHits([stream({ infoHash: 'nope' })], 'movie').length, 0);
+
+// Merging two indexes: the same hash is one row, and the better-informed copy
+// wins rather than whichever arrived first.
+const swarm = (id: string, seeders: number, size = 0) =>
+  ({ id, seeders, size, name: 'x' }) as Hit;
+const merged = merge([[swarm('a', 5, 100), swarm('b', 1)], [swarm('a', 900)]]);
+assert.equal(merged.length, 2);
+assert.equal(merged.find((h) => h.id === 'a')?.seeders, 900);
+// The size the other index knew is not thrown away with it.
+assert.equal(merged.find((h) => h.id === 'a')?.size, 100);
+
+// The renamed-title case: an index knows "Dune 2021", never "Dune: Part One".
+assert.equal(aliasOf('Dune: Part One'), 'Dune');
+assert.equal(aliasOf('Star Wars - A New Hope'), 'Star Wars');
+// A title that is already its own shortest form has no second name to try.
+assert.equal(aliasOf('The Matrix'), null);
+// Hyphens inside a word are part of it.
+assert.equal(aliasOf('Spider-Man'), null);
+assert.equal(aliasOf('Spider-Man: No Way Home'), 'Spider-Man');
 
 console.log('ok');

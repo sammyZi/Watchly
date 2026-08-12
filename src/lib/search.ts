@@ -1,7 +1,20 @@
 // Extension included so `node --experimental-strip-types` can run the test.
 import { withTrackers } from './magnet.ts';
+import { net } from './net.ts';
 
 const API = 'https://apibay.org/q.php';
+
+/**
+ * The second index, and the reason a release with thousands of seeders is not
+ * missing any more.
+ *
+ * apibay is one site, capped at 100 rows, and blocked outright by a lot of
+ * ISPs — when it is, the app used to have nothing at all to show. Torrentio
+ * answers for 1337x, YTS, EZTV, RARBG, ThePirateBay and Nyaa in a single
+ * request, so it is one more source to add rather than six. It is keyed by
+ * IMDb id, which every title page already has.
+ */
+const TORRENTIO = 'https://torrentio.strem.fun/stream';
 
 export type Kind = 'movie' | 'tv' | 'other';
 
@@ -75,6 +88,8 @@ export function scopeOf(name: string): Scope {
 }
 
 export type Hit = {
+  /** The info hash — the one id every index agrees on, which is what makes
+   *  merging two of them a matter of dropping duplicate keys. */
   id: string;
   name: string;
   magnet: string;
@@ -106,7 +121,7 @@ export function toHits(rows: Row[]): Hit[] {
     .map((r) => {
       const name = String(r.name);
       return {
-        id: String(r.id),
+        id: String(r.info_hash).toLowerCase(),
         name,
         magnet: withTrackers(
           `magnet:?xt=urn:btih:${String(r.info_hash).toLowerCase()}&dn=${encodeURIComponent(name)}`
@@ -163,19 +178,144 @@ export function rank(hits: Hit[], query = ''): Hit[] {
   return [...hits].sort((a, b) => score(b) - score(a));
 }
 
+/**
+ * Torrentio's streams, which carry their numbers inside a display string:
+ *
+ *   "The Matrix 1999 2160p BluRay x265\n👤 84 💾 51.3 GB ⚙️ 1337x"
+ *
+ * The emoji are the field markers, so the two below are load-bearing: a broken
+ * byte there silently zeroes every seeder count rather than failing.
+ */
+/** 👤 */
+const SEEDERS = /👤\s*(\d+)/;
+/** 💾 */
+const SIZE = /💾\s*([\d.]+)\s*(TB|GB|MB|KB)/i;
+const UNIT: Record<string, number> = {
+  kb: 1024,
+  mb: 1024 ** 2,
+  gb: 1024 ** 3,
+  tb: 1024 ** 4,
+};
+
+export function toTorrentioHits(streams: Record<string, any>[], kind: Kind): Hit[] {
+  return streams
+    .filter((s) => /^[0-9a-f]{40}$/i.test(String(s?.infoHash)))
+    .map((s) => {
+      const lines = String(s.title ?? '').split('\n');
+      // The release name is the first line; a stream with none is unusable,
+      // since the name is what picks the file inside the torrent.
+      const name = lines[0]?.trim() || String(s.name ?? '').replace('\n', ' ');
+      const stats = lines.slice(1).join(' ');
+      const size = SIZE.exec(stats);
+      return {
+        id: String(s.infoHash).toLowerCase(),
+        name,
+        magnet: withTrackers(
+          `magnet:?xt=urn:btih:${String(s.infoHash).toLowerCase()}&dn=${encodeURIComponent(name)}`
+        ),
+        seeders: Number(SEEDERS.exec(stats)?.[1] ?? 0),
+        // Torrentio reports no leecher count at all; ranking already treats
+        // them as a quarter of a seeder, so zero is the honest answer.
+        leechers: 0,
+        size: size ? Math.round(Number(size[1]) * (UNIT[size[2].toLowerCase()] ?? 0)) : 0,
+        quality: quality(name),
+        scope: scopeOf(name),
+        kind,
+        imdb: null,
+      };
+    })
+    .filter((h) => !!h.name);
+}
+
+/** Same torrent from two indexes is one row — keep whichever knew more. */
+export function merge(lists: Hit[][]): Hit[] {
+  const best = new Map<string, Hit>();
+  for (const hit of lists.flat()) {
+    const seen = best.get(hit.id);
+    if (!seen) {
+      best.set(hit.id, hit);
+      continue;
+    }
+    // One index reports a swarm the other cannot see, and one reports a size
+    // the other left at zero. Neither number is worth throwing away.
+    best.set(hit.id, {
+      ...(hit.seeders > seen.seeders ? hit : seen),
+      seeders: Math.max(hit.seeders, seen.seeders),
+      size: Math.max(hit.size, seen.size),
+    });
+  }
+  return [...best.values()];
+}
+
+async function fromTorrentio(
+  path: string,
+  kind: Kind,
+  signal?: AbortSignal
+): Promise<Hit[]> {
+  const res = await net(`${TORRENTIO}/${path}.json`, { signal });
+  if (!res.ok) throw new Error(`Torrentio returned ${res.status}`);
+  return toTorrentioHits((await res.json())?.streams ?? [], kind);
+}
+
 async function get(url: string, signal?: AbortSignal): Promise<Row[]> {
-  const res = await fetch(url, { signal });
+  const res = await net(url, { signal });
   if (!res.ok) throw new Error(`Search returned ${res.status}`);
   return res.json();
 }
 
-/** Search public indexes for video torrents matching `query`. */
+/**
+ * The other name a title is released under.
+ *
+ * Metadata services rename films as their franchise grows: the page for
+ * tt1160419 says "Dune: Part One", while every index on earth files it as
+ * "Dune 2021". Searching the canonical name finds nine obscure rips and misses
+ * the release with the entire swarm behind it, because the words "part one"
+ * appear in neither its name nor its files. What comes before the subtitle is
+ * what the scene actually uses.
+ */
+export function aliasOf(title: string): string | null {
+  const short = title.split(/:| - /)[0].trim();
+  return short && short.toLowerCase() !== title.trim().toLowerCase() ? short : null;
+}
+
+/**
+ * Search public indexes for video torrents.
+ *
+ * `suffix` is appended to every name variant — an episode tag, or "complete".
+ * The title is asked for under both its own name and its alias, and both
+ * indexes are asked at once, with neither allowed to sink the other: one of
+ * them being blocked, rate-limited or simply down is the normal case rather
+ * than the exception, and half a list beats an error message.
+ */
 export async function searchTorrents(
-  query: string,
-  signal?: AbortSignal
+  title: string,
+  signal?: AbortSignal,
+  opts?: { imdb?: string | null; year?: string | null; suffix?: string }
 ): Promise<Hit[]> {
-  const rows = await get(`${API}?q=${encodeURIComponent(query)}&cat=200`, signal);
-  return rank(toHits(rows), query);
+  const year = opts?.year ?? null;
+  const tail = [opts?.suffix, year].filter(Boolean).join(' ');
+  const full = [title, tail].filter(Boolean).join(' ');
+  const alias = aliasOf(title);
+
+  const bay = (q: string) =>
+    get(`${API}?q=${encodeURIComponent(q)}&cat=200`, signal)
+      .then(toHits)
+      .catch(() => [] as Hit[]);
+
+  const [primary, aliased, torrentio] = await Promise.all([
+    bay(full),
+    alias ? bay([alias, tail].filter(Boolean).join(' ')) : Promise.resolve([] as Hit[]),
+    opts?.imdb && !opts.suffix
+      ? fromTorrentio(`movie/${opts.imdb}`, 'movie', signal).catch(() => [] as Hit[])
+      : Promise.resolve([] as Hit[]),
+  ]);
+
+  // The alias is a looser question — "Dune 2021" also matches Dune Prophecy's
+  // 2021 rips — so its answers have to carry the year to count. The primary
+  // query named the film outright and needs no such proof.
+  const checked = year ? aliased.filter((h) => h.name.includes(year)) : aliased;
+
+  return rank(merge([primary, checked, torrentio]), full);
 }
 
 /**
@@ -190,28 +330,32 @@ export async function searchEpisode(
   show: string,
   season: number,
   episode: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  imdb?: string | null
 ): Promise<Hit[]> {
   const season2 = String(season).padStart(2, '0');
-  const queries = [
-    `${show} ${episodeTag(season, episode)}`,
-    `${show} S${season2}`,
-    `${show} complete`,
-  ];
+  // Each of these is asked under the show's own name and its alias — see
+  // `aliasOf`; a renamed series misses its own season packs otherwise.
+  const suffixes = [episodeTag(season, episode), `S${season2}`, 'complete'];
 
-  const found = await Promise.all(
-    queries.map((q) => searchTorrents(q, signal).catch(() => [] as Hit[]))
-  );
-
-  // The same torrent comes back from more than one query.
-  const seen = new Map<string, Hit>();
-  for (const hit of found.flat()) if (!seen.has(hit.id)) seen.set(hit.id, hit);
+  const found = await Promise.all([
+    ...suffixes.map((suffix) =>
+      searchTorrents(show, signal, { suffix }).catch(() => [] as Hit[])
+    ),
+    // Torrentio takes the episode directly, and answers with the packs that
+    // contain it as well as the loose file.
+    imdb
+      ? fromTorrentio(`series/${imdb}:${season}:${episode}`, 'tv', signal).catch(
+          () => [] as Hit[]
+        )
+      : Promise.resolve([] as Hit[]),
+  ]);
 
   // A pack for a different season is worse than useless — it cannot contain
   // this episode at all, and with a season's worth of seeders behind it, it
   // would outrank every release that can. A name claiming no season is kept:
   // that is what a complete-series pack looks like.
-  const usable = [...seen.values()].filter((h) => {
+  const usable = merge(found).filter((h) => {
     const claims = seasonsIn(h.name);
     return claims.length === 0 || claims.includes(season);
   });

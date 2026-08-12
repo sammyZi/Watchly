@@ -10,7 +10,9 @@ import {
 import { Icon } from '../components/Icon';
 import { PosterGrid } from '../components/PosterGrid';
 import { Screen } from '../components/Screen';
-import { loadCatalog, searchTitles, type Title } from '../lib/meta';
+import { ANIME_GENRE, loadCatalog, searchTitles, type Title } from '../lib/meta';
+import { useOnline } from '../lib/net';
+import { clearSearches, loadSearches, rememberSearch } from '../lib/searches';
 import { font, radius, space, type, useColors, useThemedStyles } from '../theme';
 
 const DEBOUNCE = 400;
@@ -18,7 +20,16 @@ const DEBOUNCE = 400;
 /** Browsing only — see the note by the chips. Genre is Cinemeta's own
  *  vocabulary, and a catalog row carries its own list, so this costs no
  *  extra request. */
-const GENRES = ['Action', 'Comedy', 'Drama', 'Thriller', 'Horror', 'Sci-Fi', 'Animation'];
+const GENRES = [
+  ANIME_GENRE,
+  'Action',
+  'Comedy',
+  'Drama',
+  'Thriller',
+  'Horror',
+  'Sci-Fi',
+  'Animation',
+];
 
 function useSearchStyles() {
   return useThemedStyles((c) => ({
@@ -35,9 +46,10 @@ function useSearchStyles() {
     input: { ...type.body, flex: 1, color: c.text, height: 46, padding: 0 },
     // flexGrow:0 or the row claims the whole page — a horizontal ScrollView in a
     // column has no natural height.
-    chipRow: { flexGrow: 0 },
+    chipRow: { flexGrow: 0, marginBottom: space.md },
     chips: { paddingHorizontal: space.xl, gap: space.sm, alignItems: 'center' as const },
     rule: { width: 1, height: 16, backgroundColor: c.line },
+    clearRecent: { paddingHorizontal: space.xs, paddingVertical: space.xs },
     chip: {
       flexDirection: 'row' as const,
       alignItems: 'center' as const,
@@ -71,12 +83,28 @@ function SearchScreenView({ onOpenTitle }: { onOpenTitle: (title: Title) => void
   const [genre, setGenre] = useState<string | null>(null);
   /** Only the newest query may write results — searches finish out of order. */
   const latest = useRef(0);
+  /** A search that failed offline runs again when the connection returns. */
+  const online = useOnline();
+  /** Submitted queries, newest first. */
+  const [recent, setRecent] = useState<string[]>([]);
+  useEffect(() => {
+    loadSearches().then(setRecent);
+  }, []);
   const colors = useColors();
   const styles = useSearchStyles();
 
-  const load = useCallback(async (q: string) => {
+  const load = useCallback(async (q: string, browsing: string | null) => {
     const mine = ++latest.current;
     setBusy(true);
+    // Anime is not a genre anything here carries — it is a different catalog,
+    // so it has to be fetched rather than filtered for.
+    if (!q && browsing === ANIME_GENRE) {
+      const anime = await loadCatalog('tv', ANIME_GENRE);
+      if (mine !== latest.current) return;
+      setResults(anime);
+      setBusy(false);
+      return;
+    }
     // Films and series are separate catalogs; an empty box shows what is
     // popular rather than an empty page.
     const [films, series] = await Promise.all(
@@ -101,12 +129,15 @@ function SearchScreenView({ onOpenTitle }: { onOpenTitle: (title: Title) => void
     // A genre chosen while browsing must not survive into a search, where it
     // would filter against data the results do not carry.
     if (q) setGenre(null);
-    const t = setTimeout(() => load(q), q ? DEBOUNCE : 0);
+    const t = setTimeout(() => load(q, genre), q ? DEBOUNCE : 0);
     return () => clearTimeout(t);
-  }, [query, load]);
+  }, [query, genre, load, online]);
 
   const shown = (results ?? []).filter(
-    (t) => (!kind || t.kind === kind) && (!genre || t.genres?.includes(genre))
+    (t) =>
+      (!kind || t.kind === kind) &&
+      // Anime came back as its own catalog — every row already qualifies.
+      (!genre || genre === ANIME_GENRE || t.genres?.includes(genre))
   );
 
   return (
@@ -122,6 +153,7 @@ function SearchScreenView({ onOpenTitle }: { onOpenTitle: (title: Title) => void
           autoCapitalize="none"
           autoCorrect={false}
           returnKeyType="search"
+          onSubmitEditing={() => rememberSearch(query).then(setRecent)}
         />
         {busy ? (
           <ActivityIndicator color={colors.accent} size="small" />
@@ -133,6 +165,30 @@ function SearchScreenView({ onOpenTitle }: { onOpenTitle: (title: Title) => void
           )
         )}
       </View>
+
+      {/* Only while browsing: once something is typed the box itself is the
+          history, and a row of old queries under it is just noise. */}
+      {!query.trim() && recent.length > 0 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.chips}
+          style={styles.chipRow}
+        >
+          <Icon name="clock" size={13} color={colors.faint} />
+          {recent.map((q) => (
+            <Chip key={q} label={q} on={false} onPress={() => setQuery(q)} />
+          ))}
+          <Pressable
+            onPress={() => clearSearches().then(setRecent)}
+            hitSlop={8}
+            style={styles.clearRecent}
+          >
+            <Icon name="x" size={13} color={colors.faint} />
+          </Pressable>
+        </ScrollView>
+      )}
 
       <ScrollView
         horizontal
@@ -173,7 +229,15 @@ function SearchScreenView({ onOpenTitle }: { onOpenTitle: (title: Title) => void
 
       <PosterGrid
         titles={shown}
-        onOpen={onOpenTitle}
+        // Recorded here rather than only on the keyboard's search key: most
+        // searches are never submitted at all, they are typed until the right
+        // poster appears and then tapped. A query that led somewhere is
+        // exactly the one worth keeping, and it keeps every half-typed prefix
+        // the debounce fired on out of the list.
+        onOpen={(title) => {
+          if (query.trim()) rememberSearch(query).then(setRecent);
+          onOpenTitle(title);
+        }}
         header={
           shown.length ? (
             <Text style={styles.heading}>

@@ -3,9 +3,12 @@ import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
 import { IconButton } from '../components/Button';
 import { HistoryRow } from '../components/HistoryRow';
 import { Icon } from '../components/Icon';
+import { PosterGrid } from '../components/PosterGrid';
 import { Screen } from '../components/Screen';
 import type { Item } from '../lib/history';
-import { radius, space, TAB_INSET, type, useColors, useThemedStyles } from '../theme';
+import type { Title } from '../lib/meta';
+import { asTitle, inList, type List, type Saved } from '../lib/saved';
+import { font, radius, space, TAB_INSET, type, useColors, useThemedStyles } from '../theme';
 
 /** Torrent name, the label we stored, and every file inside it. Searching only
  *  the title would miss the episode you actually remember. */
@@ -16,14 +19,18 @@ const haystack = (item: Item) =>
 
 function HistoryScreenView({
   history,
+  saved,
   onOpenItem,
+  onOpenTitle,
   onPlayFile,
   onDownloadFile,
   onRemove,
   onClear,
 }: {
   history: Item[];
+  saved: Saved[];
   onOpenItem: (item: Item) => void;
+  onOpenTitle: (title: Title) => void;
   onPlayFile: (item: Item, index: number) => void;
   onDownloadFile: (item: Item, index: number) => void;
   onRemove: (item: Item) => void;
@@ -31,6 +38,10 @@ function HistoryScreenView({
 }) {
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState('');
+  /** Which of the three the tab is showing. The saved lists live here because
+   *  this is already the "your stuff" tab — a home rail disappears when it is
+   *  empty, so it is no use as the place you go looking. */
+  const [view, setView] = useState<'history' | List>('history');
   const colors = useColors();
   const styles = useThemedStyles((c) => ({
     flex: { flex: 1 },
@@ -50,6 +61,25 @@ function HistoryScreenView({
       backgroundColor: c.surface,
     },
     searchInput: { ...type.body, color: c.text, flex: 1, padding: 0 },
+    tabs: {
+      flexDirection: 'row' as const,
+      gap: space.sm,
+      paddingHorizontal: space.xl,
+      paddingTop: space.lg,
+      paddingBottom: space.sm,
+    },
+    tab: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: 5,
+      paddingHorizontal: space.md,
+      paddingVertical: 7,
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+    },
+    tabOn: { backgroundColor: c.accent },
+    tabText: { ...type.meta, fontFamily: font.medium, color: c.muted },
+    tabTextOn: { color: c.onAccent },
     list: {
       padding: space.xl,
       paddingTop: space.lg,
@@ -92,7 +122,7 @@ function HistoryScreenView({
       title="Library"
       icon="clock"
       action={
-        history.length > 0 ? (
+        history.length > 0 && view === 'history' ? (
           <View style={styles.actions}>
             <IconButton
               name={searching ? 'x' : 'search'}
@@ -112,6 +142,69 @@ function HistoryScreenView({
         ) : null
       }
     >
+      <View style={styles.tabs}>
+        {(
+          [
+            { key: 'history', label: 'History', icon: 'clock', count: history.length },
+            {
+              key: 'later',
+              label: 'Watch later',
+              icon: 'bookmark',
+              count: inList(saved, 'later').length,
+            },
+            {
+              key: 'favorite',
+              label: 'Favourites',
+              icon: 'heart',
+              count: inList(saved, 'favorite').length,
+            },
+          ] as const
+        ).map(({ key, label, icon, count }) => {
+          const on = view === key;
+          return (
+            <Pressable
+              key={key}
+              onPress={() => {
+                setView(key);
+                closeSearch();
+              }}
+              style={[styles.tab, on && styles.tabOn]}
+            >
+              <Icon name={icon} size={13} color={on ? colors.onAccent : colors.faint} />
+              <Text style={[styles.tabText, on && styles.tabTextOn]}>
+                {label}
+                {count > 0 ? ` ${count}` : ''}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {view !== 'history' ? (
+        <PosterGrid
+          titles={inList(saved, view).map(asTitle)}
+          onOpen={onOpenTitle}
+          empty={
+            <View style={styles.empty}>
+              <View style={styles.emptyBadge}>
+                <Icon
+                  name={view === 'later' ? 'bookmark' : 'heart'}
+                  size={24}
+                  color={colors.faint}
+                />
+              </View>
+              <Text style={styles.emptyTitle}>
+                {view === 'later' ? 'Nothing saved for later' : 'No favourites yet'}
+              </Text>
+              <Text style={styles.emptyText}>
+                Open any title and use the {view === 'later' ? 'bookmark' : 'heart'} in
+                the top corner to put it here.
+              </Text>
+            </View>
+          }
+        />
+      ) : (
+        <>
       {searching && (
         <View style={styles.searchWrap}>
           <View style={styles.search}>
@@ -186,6 +279,8 @@ function HistoryScreenView({
           />
         )}
       />
+        </>
+      )}
     </Screen>
   );
 }

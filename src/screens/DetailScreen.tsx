@@ -12,11 +12,15 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Icon } from '../components/Icon';
+import { Marquee } from '../components/Marquee';
 import { ProgressBar } from '../components/ProgressBar';
 import { bytes, clock, left } from '../lib/format';
 import { hueOf } from '../lib/title';
 import { loadTitle, reviewLinks, type Episode, type Title } from '../lib/meta';
+import { useOnline } from '../lib/net';
+import { onList, type List, type Saved } from '../lib/saved';
 import { WATCHED } from '../lib/watched';
 import { episodeTag, health, searchEpisode, searchTorrents, type Hit } from '../lib/search';
 import {
@@ -32,6 +36,16 @@ import {
 } from '../theme';
 
 const ART = 360;
+
+/** The same red in both themes: this one marks a state, and a saved title has
+ *  to look saved over artwork as much as over the page. */
+const SAVED_RED = '#e50914';
+
+/** Best first — the same order `quality()` reads them out of a release name. */
+const QUALITIES = ['4K', '1080p', '720p', 'CAM'];
+
+/** Episodes shown before the list has to be asked for in full. */
+const EPISODE_PAGE = 10;
 
 function useDetailStyles() {
   return useThemedStyles((c) => ({
@@ -56,6 +70,23 @@ function useDetailStyles() {
       alignItems: 'center' as const,
       justifyContent: 'center' as const,
     },
+    // Opposite the back button rather than down with Play: these are about the
+    // title, not about starting it.
+    saveRow: {
+      position: 'absolute' as const,
+      right: space.lg,
+      flexDirection: 'row' as const,
+      gap: space.sm,
+    },
+    saveBtn: {
+      width: 38,
+      height: 38,
+      borderRadius: radius.pill,
+      backgroundColor: c.accentSoft,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+    },
+    saveBtnOn: { backgroundColor: '#e5091426' },
     head: {
       flexDirection: 'row' as const,
       gap: space.lg,
@@ -115,6 +146,36 @@ function useDetailStyles() {
       fontFamily: font.semibold,
       color: c.onAccent,
     },
+    // One track holding four segments, so it reads as a single control the
+    // way a chip row never can.
+    qualityBar: {
+      flexDirection: 'row' as const,
+      marginHorizontal: space.xl,
+      marginTop: space.md,
+      padding: 3,
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+    },
+    quality: {
+      flex: 1,
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+      gap: 5,
+      paddingVertical: 9,
+      borderRadius: radius.pill,
+    },
+    qualityOn: { backgroundColor: c.surfaceAlt },
+    qualityText: { ...type.meta, fontFamily: font.medium, color: c.faint },
+    qualityTextOn: { color: c.text, fontFamily: font.semibold },
+    qualityCount: {
+      ...type.meta,
+      fontSize: 10,
+      color: c.faint,
+      opacity: 0.7,
+      fontVariant: ['tabular-nums'] as const,
+    },
+    qualityCountOn: { color: c.accent, opacity: 1 },
     resume: {
       marginHorizontal: space.xl,
       marginTop: space.md,
@@ -178,6 +239,16 @@ function useDetailStyles() {
     },
     episodeText: { flex: 1, gap: 2, paddingVertical: 2 },
     episodeName: { ...type.label, color: c.text },
+    more: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+      gap: space.xs,
+      paddingVertical: space.md,
+      borderRadius: radius.md,
+      backgroundColor: c.surface,
+    },
+    moreText: { ...type.label, fontFamily: font.medium, color: c.accent },
     episodeMeta: { ...type.meta, fontSize: 11, color: c.faint },
     episodePlot: { ...type.meta, fontSize: 11, color: c.muted, lineHeight: 15 },
     crew: {
@@ -328,6 +399,8 @@ export function DetailScreen({
   error: opening,
   progress,
   resume,
+  saved,
+  onToggleSaved,
   onPlay,
   onDownload,
   onBack,
@@ -340,6 +413,9 @@ export function DetailScreen({
   progress?: Record<string, number>;
   /** Where the film was left, in seconds. Series use `progress`. */
   resume?: { position: number; duration: number };
+  /** Both saved lists, so the two toggles can show their state. */
+  saved: Saved[];
+  onToggleSaved: (title: Title, list: List) => void;
   /** `tag` is the SxxEyy the torrent's own file list should be matched against;
    *  `startOver` ignores the stored resume point. */
   onPlay: (
@@ -361,6 +437,8 @@ export function DetailScreen({
   /** Plot expanded. Three lines is enough to decide; the rest is on request. */
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Both loads below re-run when the connection comes back. */
+  const online = useOnline();
   const abort = useRef<AbortController | null>(null);
   const scroller = useRef<ScrollView>(null);
   /** Where the release list starts, so tapping an episode can bring it up. */
@@ -377,8 +455,39 @@ export function DetailScreen({
   const [season, setSeason] = useState<number | null>(null);
   /** Which episode the releases below are for. Null on a film. */
   const [picked, setPicked] = useState<Episode | null>(null);
+  /** The whole season, rather than the first page of it. */
+  const [wholeSeason, setWholeSeason] = useState(false);
+
+  const inSeason = episodes.filter((e) => e.season === season);
+  // A season of 100 anime episodes buries everything under it — the rest of
+  // the page becomes unreachable by thumb. The first ten and a way down is
+  // enough to pick from; the selected episode is always among them, or the
+  // list opens itself rather than hiding where you are.
+  const showsWhole =
+    wholeSeason ||
+    (picked ? inSeason.findIndex((e) => e.id === picked.id) >= EPISODE_PAGE : false);
+  const listed = showsWhole ? inSeason : inSeason.slice(0, EPISODE_PAGE);
 
   const tag = picked ? episodeTag(picked.season, picked.episode) : undefined;
+
+  /**
+   * Which quality the buttons mean.
+   *
+   * Null is "whatever streams best", which is the right default — the top of
+   * the list is already sorted by swarm health. Choosing one narrows both the
+   * Play button and the list under it, so the two never disagree.
+   */
+  const [wanted, setWanted] = useState<string | null>(null);
+  /** In the order they are worth offering, and only the ones actually found. */
+  const qualities = QUALITIES.filter((q) => sources?.some((h) => h.quality === q));
+  const shown = wanted ? (sources ?? []).filter((h) => h.quality === wanted) : sources;
+  const best = shown?.[0] ?? null;
+
+  // A pick that the new release list cannot honour — a different episode, or a
+  // title nobody ripped in 4K — would otherwise disable Play with no way back.
+  useEffect(() => {
+    if (wanted && sources && !sources.some((h) => h.quality === wanted)) setWanted(null);
+  }, [sources, wanted]);
 
   /**
    * How far into whatever the buttons refer to — the selected episode on a
@@ -405,7 +514,7 @@ export function DetailScreen({
     return () => {
       live = false;
     };
-  }, [seed]);
+  }, [seed, online]);
 
   /** First episode of a season that has not been finished, else its first. */
   const nextIn = (which: number | null) => {
@@ -422,6 +531,8 @@ export function DetailScreen({
    */
   const chooseSeason = (which: number) => {
     setSeason(which);
+    // A new season starts folded again, whatever the last one was left as.
+    setWholeSeason(false);
     const next = nextIn(which);
     if (next) setPicked(next);
   };
@@ -443,14 +554,17 @@ export function DetailScreen({
     const ctrl = new AbortController();
     abort.current = ctrl;
     setSources(null);
+    setError(null);
     // An episode also looks for the packs that contain it — they routinely
     // carry twenty times the seeders, and only the one file inside is fetched.
     const wanted = picked
-      ? searchEpisode(title.title, picked.season, picked.episode, ctrl.signal)
-      : searchTorrents(
-          [title.title, title.kind === 'movie' && title.year].filter(Boolean).join(' '),
-          ctrl.signal
-        );
+      ? searchEpisode(title.title, picked.season, picked.episode, ctrl.signal, title.imdb)
+      : searchTorrents(title.title, ctrl.signal, {
+          imdb: title.imdb,
+          // Series only ever carry their first-aired year, which is not what
+          // the season being watched is labelled with.
+          year: title.kind === 'movie' ? title.year : null,
+        });
     wanted
       .then((hits) => !ctrl.signal.aborted && setSources(hits))
       .catch((e) => {
@@ -459,7 +573,7 @@ export function DetailScreen({
         setError(String(e?.message ?? e));
       });
     return () => ctrl.abort();
-  }, [title.title, title.year, title.kind, picked]);
+  }, [title.title, title.year, title.kind, title.imdb, picked, online]);
 
   return (
     <View style={styles.page}>
@@ -490,6 +604,39 @@ export function DetailScreen({
         >
           <Icon name="arrow-left" size={20} color={colors.accent} />
         </Pressable>
+
+        <View style={[styles.saveRow, { top: insets.top + space.md }]}>
+          {(
+            [
+              { list: 'later', glyph: 'bookmark', label: 'Watch later' },
+              { list: 'favorite', glyph: 'favorite', label: 'Favourite' },
+            ] as const
+          ).map(({ list, glyph, label }) => {
+            const active = onList(saved, title.imdb, list);
+            return (
+              <Pressable
+                key={list}
+                onPress={() => onToggleSaved(title, list)}
+                hitSlop={8}
+                accessibilityLabel={active ? `Remove from ${label}` : label}
+                style={({ pressed }) => [
+                  styles.saveBtn,
+                  active && styles.saveBtnOn,
+                  pressed && styles.pressed,
+                ]}
+              >
+                {/* Material rather than Feather: saved has to read at a glance,
+                    and a solid heart does that where a red outline does not.
+                    The outline is the same shape, so nothing moves on toggle. */}
+                <MaterialIcons
+                  name={active ? glyph : (`${glyph}-border` as const)}
+                  size={20}
+                  color={active ? SAVED_RED : colors.muted}
+                />
+              </Pressable>
+            );
+          })}
+        </View>
 
         <View style={styles.head}>
           {!!title.poster && (
@@ -524,11 +671,11 @@ export function DetailScreen({
             list below is for when that is not the one you wanted. */}
         <View style={styles.actions}>
           <Pressable
-            disabled={!sources?.length || busy}
-            onPress={() => sources?.[0] && start(sources[0].magnet)}
+            disabled={!best || busy}
+            onPress={() => best && start(best.magnet)}
             style={({ pressed }) => [
               styles.play,
-              (!sources?.length || busy) && styles.playOff,
+              (!best || busy) && styles.playOff,
               pressed && styles.pressed,
             ]}
           >
@@ -536,25 +683,25 @@ export function DetailScreen({
             <Text style={styles.playText}>
               {busy
                 ? 'Opening…'
-                : !sources?.length
+                : !best
                   ? 'Finding releases…'
                   : canResume
                     ? `Continue${tag ? ` ${tag}` : ''} · ${Math.round(seen)}%`
                     : tag
                       ? `Play ${tag}`
-                      : `Play ${sources[0].quality ?? 'best release'}`}
+                      : 'Play'}
             </Text>
           </Pressable>
 
           {/* Only worth offering once there is a resume point to ignore. */}
           {canResume && (
             <Pressable
-              disabled={!sources?.length || busy}
-              onPress={() => sources?.[0] && start(sources[0].magnet, true)}
+              disabled={!best || busy}
+              onPress={() => best && start(best.magnet, true)}
               accessibilityLabel="Start over"
               style={({ pressed }) => [
                 styles.download,
-                (!sources?.length || busy) && styles.downloadOff,
+                (!best || busy) && styles.downloadOff,
                 pressed && styles.pressed,
               ]}
             >
@@ -565,18 +712,47 @@ export function DetailScreen({
           {/* Same release, kept rather than streamed — the Downloads tab takes
               over from here. */}
           <Pressable
-            disabled={!sources?.length || busy}
-            onPress={() => sources?.[0] && save(sources[0].magnet)}
+            disabled={!best || busy}
+            onPress={() => best && save(best.magnet)}
             accessibilityLabel="Download"
             style={({ pressed }) => [
               styles.download,
-              (!sources?.length || busy) && styles.downloadOff,
+              (!best || busy) && styles.downloadOff,
               pressed && styles.pressed,
             ]}
           >
             <Icon name="download" size={18} color={colors.text} />
           </Pressable>
         </View>
+
+        {/* Directly under the button it governs, and only once there is a
+            choice to make. One track rather than loose chips: these are four
+            settings of the same dial, not four separate things to tap. */}
+        {qualities.length > 1 && (
+          <View style={styles.qualityBar}>
+            {[null, ...qualities].map((q) => {
+              const on = wanted === q;
+              const count = q ? sources!.filter((h) => h.quality === q).length : sources!.length;
+              return (
+                <Pressable
+                  key={q ?? 'best'}
+                  onPress={() => setWanted(q)}
+                  style={[styles.quality, on && styles.qualityOn]}
+                >
+                  <Text style={[styles.qualityText, on && styles.qualityTextOn]}>
+                    {q ?? 'Best'}
+                  </Text>
+                  {/* What choosing it would leave you with — a 4K tab that
+                      turns out to hold one dead release is worth knowing
+                      before tapping it. */}
+                  <Text style={[styles.qualityCount, on && styles.qualityCountOn]}>
+                    {count}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
 
         {/* A film has no episode list to carry its progress, so it gets its own
             bar. Series show theirs against each episode below. */}
@@ -628,9 +804,7 @@ export function DetailScreen({
           <View style={styles.block}>
             <View style={styles.seasonRow}>
               <Text style={styles.heading}>Episodes</Text>
-              <Text style={styles.seasonCount}>
-                {episodes.filter((e) => e.season === season).length} in season
-              </Text>
+              <Text style={styles.seasonCount}>{inSeason.length} in season</Text>
             </View>
 
             {seasons.length > 1 && (
@@ -656,9 +830,7 @@ export function DetailScreen({
               />
             )}
 
-            {episodes
-              .filter((e) => e.season === season)
-              .map((ep) => {
+            {listed.map((ep) => {
                 const seen = progress?.[ep.id] ?? 0;
                 const done = seen >= WATCHED;
                 const on = picked?.id === ep.id;
@@ -715,6 +887,28 @@ export function DetailScreen({
                   </Pressable>
                 );
               })}
+
+            {inSeason.length > listed.length && (
+              <Pressable
+                onPress={() => setWholeSeason(true)}
+                style={({ pressed }) => [styles.more, pressed && styles.pressed]}
+              >
+                <Text style={styles.moreText}>
+                  Show all {inSeason.length} episodes
+                </Text>
+                <Icon name="chevron-down" size={16} color={colors.accent} />
+              </Pressable>
+            )}
+
+            {wholeSeason && inSeason.length > EPISODE_PAGE && (
+              <Pressable
+                onPress={() => setWholeSeason(false)}
+                style={({ pressed }) => [styles.more, pressed && styles.pressed]}
+              >
+                <Text style={styles.moreText}>Show less</Text>
+                <Icon name="chevron-up" size={16} color={colors.accent} />
+              </Pressable>
+            )}
           </View>
         )}
 
@@ -748,7 +942,9 @@ export function DetailScreen({
           onLayout={(e) => (sourcesY.current = e.nativeEvent.layout.y)}
         >
           <Text style={styles.heading}>
-            {sources ? `${sources.length} release${sources.length === 1 ? '' : 's'}` : 'Finding releases…'}
+            {shown
+              ? `${shown.length} release${shown.length === 1 ? '' : 's'}`
+              : 'Finding releases…'}
           </Text>
 
           {!sources && <ActivityIndicator color={colors.accent} style={styles.spin} />}
@@ -769,7 +965,7 @@ export function DetailScreen({
             </Text>
           )}
 
-          {sources?.map((hit, i) => {
+          {shown?.map((hit, i) => {
             const tone = HEALTH[health(hit.seeders)];
             return (
               <Pressable
@@ -782,9 +978,9 @@ export function DetailScreen({
                   <Icon name="play" size={14} color={i === 0 ? colors.onAccent : colors.muted} />
                 </View>
                 <View style={styles.sourceText}>
-                  <Text style={styles.sourceName} numberOfLines={1}>
-                    {hit.name}
-                  </Text>
+                  {/* The bit that gets cut off — group, codec, audio — is the
+                      bit you are choosing between, so it comes to you. */}
+                  <Marquee style={styles.sourceName}>{hit.name}</Marquee>
                   <Text style={styles.sourceMeta}>
                     {bytes(hit.size)}
                     {hit.quality ? ` · ${hit.quality}` : ''}
