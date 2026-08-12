@@ -1,6 +1,6 @@
 // node --experimental-strip-types src/lib/search.test.ts
 import assert from 'node:assert';
-import { aliasOf, episodeTag, merge, parseEpisode, seasonsIn, health, kindOf, quality, rank, scopeOf, toHits, toTorrentioHits, type Hit } from './search.ts';
+import { aliasOf, episodeTag, merge, namesTitle, parseEpisode, seasonsIn, health, kindOf, quality, rank, scopeOf, toHits, toTorrentioHits, type Hit } from './search.ts';
 
 const row = (over: Record<string, string | number> = {}) => ({
   id: '1',
@@ -163,5 +163,19 @@ assert.equal(aliasOf('The Matrix'), null);
 // Hyphens inside a word are part of it.
 assert.equal(aliasOf('Spider-Man'), null);
 assert.equal(aliasOf('Spider-Man: No Way Home'), 'Spider-Man');
+
+// Collection packs: the film is in there somewhere, but the release does not
+// name it, carries a catalogue's worth of seeders, and cannot be played by
+// picking the biggest file inside it.
+assert.ok(namesTitle('Interstellar.2014.PROPER.IMAX.2160p', 'Interstellar'));
+assert.ok(namesTitle('Interstellar (2014) [1080p] [WEBRip]', 'Interstellar'));
+assert.ok(!namesTitle('Imdb top 263 movies hindi english dual audio', 'Interstellar'));
+assert.ok(!namesTitle('IMDB Top 250 - 2024 Edition', 'Interstellar'));
+assert.ok(!namesTitle('Dual Japanese dubbed English subbed pack', 'Interstellar'));
+// Matched on the short name, so a renamed film keeps its real releases.
+assert.ok(namesTitle('Dune (2021) [1080p] [WEBRip]', aliasOf('Dune: Part One')!));
+// Every word has to be there, and as a word.
+assert.ok(!namesTitle('The Matrix Reloaded 2003', 'The Matrix Revolutions'));
+assert.ok(namesTitle('The.Matrix.1999.1080p', 'The Matrix'));
 
 console.log('ok');

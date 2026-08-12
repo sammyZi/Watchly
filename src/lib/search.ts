@@ -279,6 +279,27 @@ export function aliasOf(title: string): string | null {
 }
 
 /**
+ * Does this release actually name the thing that was searched for?
+ *
+ * Both indexes answer with collection packs — "IMDb Top 250 - 2024 Edition",
+ * "263 movies hindi dubbed" — because the film really is somewhere inside one.
+ * They arrive carrying a whole catalogue's worth of seeders, so they outrank
+ * every honest release, and the app cannot even play them: it picks the largest
+ * video in a torrent, which in a 250-film pack is somebody else's film.
+ *
+ * Matched against the short name rather than the full one, or "Dune: Part One"
+ * would throw away every release actually called "Dune 2021".
+ */
+export function namesTitle(release: string, title: string): boolean {
+  const words = (s: string) =>
+    s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+  const want = words(title);
+  if (!want.length) return true;
+  const got = new Set(words(release));
+  return want.every((w) => got.has(w));
+}
+
+/**
  * Search public indexes for video torrents.
  *
  * `suffix` is appended to every name variant — an episode tag, or "complete".
@@ -315,7 +336,12 @@ export async function searchTorrents(
   // query named the film outright and needs no such proof.
   const checked = year ? aliased.filter((h) => h.name.includes(year)) : aliased;
 
-  return rank(merge([primary, checked, torrentio]), full);
+  const found = rank(merge([primary, checked, torrentio]), full);
+  // Everything that does not name the title is a collection pack riding in on
+  // a catalogue's worth of seeders. Falling back to the unfiltered list keeps
+  // an unusually-named release reachable rather than showing an empty page.
+  const named = found.filter((h) => namesTitle(h.name, alias ?? title));
+  return named.length ? named : found;
 }
 
 /**

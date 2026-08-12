@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import org.libtorrent4j.AddTorrentParams
 import org.libtorrent4j.AlertListener
 import org.libtorrent4j.AnnounceEntry
 import org.libtorrent4j.PeerInfo
@@ -23,8 +24,10 @@ import org.libtorrent4j.TcpEndpoint
 import org.libtorrent4j.TorrentFlags
 import org.libtorrent4j.TorrentHandle
 import org.libtorrent4j.TorrentInfo
+import org.libtorrent4j.Vectors
 import org.libtorrent4j.alerts.Alert
 import org.libtorrent4j.alerts.AlertType
+import org.libtorrent4j.swig.add_torrent_params
 import org.libtorrent4j.swig.alert
 import org.libtorrent4j.swig.error_code
 import org.libtorrent4j.swig.libtorrent
@@ -145,18 +148,24 @@ private const val WINDOW_BYTES = 32L * 1024 * 1024
  * The zone: how far past each reader the torrent may fetch *at all*. Everything
  * outside is IGNORE.
  *
- * Bytes first, with a piece floor. Bytes because piece size varies by two orders
- * of magnitude between torrents, so a fixed count is a 3MB window on one and a
- * 700MB window on another — the old 240-piece floor was 686MB of readahead on a
- * feature film, and every byte of it stays on disk for the session. The floor
- * survives because too small a wanted set leaves every peer holding the same few
- * blocks, which puts libtorrent in permanent end-game: a swarm full of seeds
- * delivering duplicates and almost no unique bytes.
+ * Bytes, not pieces. Piece size varies by two orders of magnitude between
+ * torrents, so a fixed count is a 3MB window on one and a 700MB window on
+ * another — the old 240-piece floor was 686MB of readahead on a feature film,
+ * and every byte of it stays on disk for the session.
+ *
+ * The piece floor that used to sit under this is gone, and it is worth saying
+ * why: it only ever bound on torrents with *large* pieces, which is precisely
+ * where it hurt. A complete-series pack has 8MB pieces, so a 48-piece floor
+ * meant 384MB of the file was wanted while the player was still waiting on its
+ * first 8MB — the swarm spread itself over all of it and the opening piece took
+ * over a minute to land. The floor existed to keep the wanted set big enough
+ * that peers are not all holding the same few blocks (permanent end-game), and
+ * that is a question of blocks, not pieces: 128MB is 8192 blocks however they
+ * are grouped.
  *
  * 128MB is roughly six minutes of a 1080p release, one minute of 4K.
  */
 private const val READAHEAD_BYTES = 128L * 1024 * 1024
-private const val READAHEAD_MIN_PIECES = 48
 
 /** Refuse to start below this much free space rather than dying on a write. */
 private const val FREE_SPACE_MIN = 512L * 1024 * 1024
@@ -182,8 +191,9 @@ class PlayOptions : Record {
    *  player's own buffering covers the rest. */
   @Field val prepareMb: Int = 1
 
-  /** Pieces kept hot ahead of the playback head. */
-  @Field val windowPieces: Int = 12
+  /** Pieces kept hot ahead of the playback head. Zero derives it from
+   *  WINDOW_BYTES, which is what every caller wants. */
+  @Field val windowPieces: Int = 0
   @Field val removeFilesAfterStop: Boolean = true
 
   /** Where playback will actually begin, 0-1 through the file. Buffering the
@@ -224,7 +234,8 @@ class TorrentStreamModule : Module() {
   /** Starts of the currently applied readahead zones; empty until first apply. */
   private var zoneStarts = emptyList<Int>()
   private var zoneWidth = -1
-  private var windowPieces = 12
+  /** Replaced by play() before anything reads it; see WINDOW_BYTES. */
+  private var windowPieces = 4
   private var prepareBytes = 3L * 1024 * 1024
   private var removeFilesAfterStop = true
   private var announcedReady = false
@@ -732,9 +743,14 @@ class TorrentStreamModule : Module() {
     val (ti, bytes) = when {
       clean.startsWith("magnet:", true) -> {
         awaitDht(15)
-        // No bytes to persist: this path never holds the raw .torrent. Worth it
-        // — see addMagnet.
-        addMagnet(clean, timeoutSec) to ByteArray(0)
+        val fetched = addMagnet(clean, timeoutSec)
+        // This is the path that costs five to ten seconds of DHT and peer
+        // chatter, and it used to pay that on every single open: metadata from
+        // a magnet lives in memory the torrent owns, so stopping playback threw
+        // it away with the torrent (see forgetMeta) and re-opening the same
+        // release started from nothing again. Writing it back out as a .torrent
+        // is what makes the second open a disk read.
+        fetched to asTorrentFile(fetched)
       }
 
       // Anything still holding a content:// URI at this point never went through
@@ -754,7 +770,11 @@ class TorrentStreamModule : Module() {
       }
     }
 
-    if (bytes.isNotEmpty()) persistMeta(ti.infoHash().toHex(), bytes)
+    // Keyed by the same function `loadMeta` looks it up with, not by the
+    // torrent's own hash: on a hybrid v1+v2 torrent a magnet resolves to the v2
+    // hash and `ti.infoHash()` is the v1 one, so the file would be written
+    // where the reader never looks and the cache would silently never hit.
+    if (bytes.isNotEmpty()) persistMeta(infoHashOf(clean) ?: ti.infoHash().toHex(), bytes)
     cachedUri = uri
     cached = ti
     return ti
@@ -903,6 +923,23 @@ class TorrentStreamModule : Module() {
     }
   }
 
+  /**
+   * Metadata that arrived over the wire, back in `.torrent` form.
+   *
+   * Empty on any failure — a v2 torrent whose piece layers never arrived cannot
+   * be written out, and that is fine. This is a cache, so the cost of not
+   * having it is the fetch we would have paid anyway.
+   */
+  private fun asTorrentFile(ti: TorrentInfo): ByteArray =
+    runCatching {
+      val params = AddTorrentParams(add_torrent_params())
+      params.setTorrentInfo(ti)
+      Vectors.byte_vector2bytes(libtorrent.write_torrent_file_buf_ex(params.swig()))
+    }.getOrElse {
+      log("metadata: not cacheable (${it.message})")
+      ByteArray(0)
+    }
+
   private fun persistMeta(hash: String, bytes: ByteArray) {
     try {
       val dest = File(metaDir, "$hash.torrent")
@@ -1022,7 +1059,17 @@ class TorrentStreamModule : Module() {
 
     // Never less than a piece: nothing is readable until one completes.
     prepareBytes = maxOf(options.prepareMb.toLong() * 1024 * 1024, ti.pieceLength().toLong())
-    windowPieces = maxOf(options.windowPieces, (WINDOW_BYTES / ti.pieceLength()).toInt())
+    // Bytes, with the option as an override rather than a floor.
+    //
+    // As a floor it was the reason playback stalled on a fast connection: a
+    // complete-series pack has 8MB pieces, so a floor of 12 made the "32MB"
+    // deadline window 96MB. Twelve pieces were rushed at once, the swarm split
+    // itself across all of them, and the one piece the viewer was actually
+    // waiting on arrived at a twelfth of the line rate — 2.5MB/s of traffic
+    // moving the contiguous head forward at 0.8MB/s.
+    windowPieces =
+      if (options.windowPieces > 0) options.windowPieces
+      else maxOf(2, (WINDOW_BYTES / ti.pieceLength()).toInt())
     removeFilesAfterStop = options.removeFilesAfterStop
     info = ti
     infoHashHex = ti.infoHash().toHex()
@@ -1207,8 +1254,16 @@ class TorrentStreamModule : Module() {
       if (startPiece - firstPiece <= windowPieces) listOf(firstPiece)
       else listOf(firstPiece, startPiece)
 
-    val targets = readers.values.map { pieceAt(it) }.distinct().sorted()
-      .ifEmpty { preroll }
+    // A reader parked in the tail is the player reading the container index
+    // (Matroska Cues, a non-faststart moov) the moment it opens the file, not
+    // playback. Treating it as a target re-aims the whole zone at the end of
+    // the file, throws away the pre-roll that was nearly complete, and costs a
+    // second full reprioritise a breath later when it seeks back to byte zero.
+    // The tail is already fetched and kept below, so nothing is lost by
+    // ignoring it — unless the tail is genuinely all anyone is reading, which
+    // is what watching the last minutes looks like.
+    val live = readers.values.map { pieceAt(it) }.distinct().sorted()
+    val targets = live.filter { it < tailPiece }.ifEmpty { live }.ifEmpty { preroll }
     headPiece = targets.first()
 
     // Two widths, and the difference matters.
@@ -1228,10 +1283,9 @@ class TorrentStreamModule : Module() {
     // blocks — permanent end-game, a swarm full of seeds, and almost no unique
     // bytes arriving. Priority still puts the urgent pieces first; the rest of
     // the zone just keeps the peers doing something useful.
-    val width = maxOf(
-      READAHEAD_MIN_PIECES,
-      (READAHEAD_BYTES / ti.pieceLength()).toInt()
-    )
+    // Two pieces is the floor purely so the arithmetic cannot produce a zone
+    // narrower than the reader plus its next step.
+    val width = maxOf(2, (READAHEAD_BYTES / ti.pieceLength()).toInt())
 
     /** How far behind each reader stays wanted. See REWIND_BYTES. */
     val back = maxOf(8, (REWIND_BYTES / ti.pieceLength()).toInt())

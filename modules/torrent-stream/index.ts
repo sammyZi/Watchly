@@ -28,7 +28,8 @@ export type Progress = {
 export type PlayOptions = {
   /** MB of the file head buffered before playback starts. */
   prepareMb?: number;
-  /** Pieces kept hot ahead of the playback head. */
+  /** Pieces kept hot ahead of the playback head. Omit — the native side sizes
+   *  it in bytes, which is the only way that holds across piece sizes. */
   windowPieces?: number;
   removeFilesAfterStop?: boolean;
   /** Where playback begins, 0-1 through the file. Buffering the start of a file
