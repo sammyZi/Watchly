@@ -14,6 +14,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Brightness from 'expo-brightness';
 import * as ScreenOrientation from 'expo-screen-orientation';
 // Feather has no closed-caption glyph, and "type" reads as a bare T. The badge
 // is the one subtitle symbol everyone recognises, so borrow it from Material.
@@ -157,6 +158,9 @@ export function PlayerScreen({
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const warnTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Screen brightness 0–1; left-edge vertical swipe adjusts it like VLC. */
+  const brightness = useRef(0.5);
+  const brightDrag = useRef<{ y: number; start: number } | null>(null);
   /** When a subtitle track was last chosen, so onError can blame the right thing. */
   const pickedAt = useRef(0);
   const pickedTrack = useRef<number | null>(null);
@@ -175,7 +179,7 @@ export function PlayerScreen({
   /** The back handler is subscribed once and would hold the first render's
    *  value otherwise — same reason as `bump`. */
   const lockRef = useRef(false);
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
   /**
@@ -481,6 +485,46 @@ export function PlayerScreen({
     []
   );
 
+  /**
+   * Left half, vertical drag — same gesture VLC uses for brightness. A tap or
+   * double-tap still falls through when the finger barely moved.
+   */
+  const onPictureTouch = useCallback(
+    (phase: 'start' | 'move' | 'end', x: number, y: number) => {
+      if (locked) {
+        if (phase === 'end') bumpUi();
+        return;
+      }
+      if (phase === 'start') {
+        brightDrag.current =
+          x < width * 0.4 ? { y, start: brightness.current } : null;
+        return;
+      }
+      if (phase === 'move') {
+        const drag = brightDrag.current;
+        if (!drag) return;
+        const dy = y - drag.y;
+        if (Math.abs(dy) < 14) return;
+        if (tapTimer.current) {
+          clearTimeout(tapTimer.current);
+          tapTimer.current = null;
+        }
+        const next = Math.max(0.01, Math.min(1, drag.start - dy / (height * 0.7)));
+        brightness.current = next;
+        Brightness.setBrightnessAsync(next).catch(() => {});
+        showHud({ icon: 'sun', label: `${Math.round(next * 100)}%` });
+        return;
+      }
+      if (brightDrag.current) {
+        const moved = Math.abs(y - brightDrag.current.y) >= 14;
+        brightDrag.current = null;
+        if (moved) return;
+      }
+      tapPicture(x);
+    },
+    [locked, bumpUi, width, height, showHud, tapPicture]
+  );
+
   const lock = useCallback(
     (next: boolean) => {
       setLocked(next);
@@ -504,8 +548,14 @@ export function PlayerScreen({
   // Video is a landscape medium; go there on open and hand the phone back on exit.
   useEffect(() => {
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+    Brightness.getBrightnessAsync()
+      .then((v) => {
+        brightness.current = v;
+      })
+      .catch(() => {});
     return () => {
       ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+      Brightness.restoreSystemBrightnessAsync().catch(() => {});
     };
   }, []);
 
@@ -730,9 +780,22 @@ export function PlayerScreen({
               The controls are *siblings* on top of it, not children: a child
               that wants the touch responder (the scrubber) cannot win it from
               an ancestor Pressable, which is why dragging the bar did nothing. */}
-          <Pressable
+          <View
             style={[StyleSheet.absoluteFill, showUi && !locked && styles.dim]}
-            onPress={(e) => tapPicture(e.nativeEvent.locationX)}
+            onStartShouldSetResponder={() => true}
+            onMoveShouldSetResponder={() => !!brightDrag.current}
+            onResponderGrant={(e) =>
+              onPictureTouch('start', e.nativeEvent.locationX, e.nativeEvent.locationY)
+            }
+            onResponderMove={(e) =>
+              onPictureTouch('move', e.nativeEvent.locationX, e.nativeEvent.locationY)
+            }
+            onResponderRelease={(e) =>
+              onPictureTouch('end', e.nativeEvent.locationX, e.nativeEvent.locationY)
+            }
+            onResponderTerminate={(e) =>
+              onPictureTouch('end', e.nativeEvent.locationX, e.nativeEvent.locationY)
+            }
           />
 
           {/* Locked: one button, and nothing else responds. A tap on the picture

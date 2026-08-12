@@ -1,12 +1,12 @@
 import { memo, useEffect, useState } from 'react';
 import { FlatList, Pressable, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Progress } from '../../modules/torrent-stream';
+import TorrentStream, { type Progress } from '../../modules/torrent-stream';
+import { ConfirmModal, type Confirm } from '../components/ConfirmModal';
 import { Icon } from '../components/Icon';
 import { Thumb } from '../components/Thumb';
 import { ProgressBar } from '../components/ProgressBar';
 import { Screen } from '../components/Screen';
-import { SourceInput } from '../components/SourceInput';
 import { ago, bytes, speed } from '../lib/format';
 import { font, radius, space, TAB_INSET, type, useColors, useThemedStyles } from '../theme';
 
@@ -48,6 +48,14 @@ export async function recordDownload(name: string, size: number, path?: string) 
   );
 }
 
+/** Drop a Completed row and delete the file in public Downloads/. */
+async function removeDownload(name: string): Promise<DownloadEntry[]> {
+  const items = (await loadDownloads()).filter((d) => d.name !== name);
+  await AsyncStorage.setItem(KEY, JSON.stringify(items));
+  await TorrentStream.deleteDownload(name).catch(() => {});
+  return items;
+}
+
 function eta(remainingBytes: number, bytesPerSec: number): string {
   if (bytesPerSec <= 0 || remainingBytes <= 0) return '—';
   const secs = Math.round(remainingBytes / bytesPerSec);
@@ -67,15 +75,14 @@ function stageLabel(state?: string, paused?: boolean): string {
 }
 
 function DownloadsScreenView({
-  onOpenUri,
   onPlayFile,
   active,
 }: {
-  onOpenUri: (uri: string) => void;
   onPlayFile: (item: { name: string; path?: string }) => void;
   active?: ActiveDownload | null;
 }) {
   const [items, setItems] = useState<DownloadEntry[]>([]);
+  const [confirm, setConfirm] = useState<Confirm | null>(null);
   const colors = useColors();
   const styles = useThemedStyles((c) => ({
     body: { padding: space.xl, gap: space.md, paddingBottom: TAB_INSET },
@@ -189,6 +196,14 @@ function DownloadsScreenView({
       lineHeight: 20,
     },
     rowMeta: { ...type.meta, color: c.muted },
+    deleteBtn: {
+      width: 40,
+      height: 40,
+      borderRadius: radius.pill,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+      backgroundColor: c.dangerSoft,
+    },
   }));
 
   useEffect(() => {
@@ -199,6 +214,16 @@ function DownloadsScreenView({
     const id = setInterval(() => loadDownloads().then(setItems), 2000);
     return () => clearInterval(id);
   }, []);
+
+  const askDelete = (item: DownloadEntry) =>
+    setConfirm({
+      title: 'Delete download?',
+      message: `${item.name} will be removed from this list and from Downloads.`,
+      icon: 'trash-2',
+      confirmLabel: 'Delete',
+      destructive: true,
+      onConfirm: () => removeDownload(item.name).then(setItems),
+    });
 
   const pct = Math.min(100, active?.progress?.progress ?? 0);
   const paused = !!active?.progress?.paused;
@@ -215,13 +240,6 @@ function DownloadsScreenView({
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
           <View style={styles.head}>
-            <SourceInput
-              onSubmit={onOpenUri}
-              actionLabel="Download"
-              title="Add download"
-              subtitle="Magnet link or .torrent file"
-            />
-
             {!!active && (
               <View style={styles.active}>
                 <View style={styles.activeTop}>
@@ -303,8 +321,8 @@ function DownloadsScreenView({
               </View>
               <Text style={styles.emptyTitle}>No downloads yet</Text>
               <Text style={styles.emptyText}>
-                Add a magnet above. Progress shows here and in a notification —
-                finished files stay in Completed.
+                Use Download on a title or in the library. Progress shows here
+                and in a notification — finished files stay in Completed.
               </Text>
             </View>
           )
@@ -325,11 +343,20 @@ function DownloadsScreenView({
                 {item.size > 0 ? `${bytes(item.size)} · ` : ''}
                 {ago(item.at)}
               </Text>
-              <Text style={styles.rowSaved}>Saved to Downloads</Text>
+              <Text style={styles.rowSaved}>Saved · tap to play</Text>
             </View>
+            <Pressable
+              onPress={() => askDelete(item)}
+              hitSlop={8}
+              style={styles.deleteBtn}
+              accessibilityLabel={`Delete ${item.name}`}
+            >
+              <Icon name="trash-2" size={16} color={colors.danger} />
+            </Pressable>
           </Pressable>
         )}
       />
+      <ConfirmModal request={confirm} onClose={() => setConfirm(null)} />
     </Screen>
   );
 }

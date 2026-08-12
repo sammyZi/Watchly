@@ -383,7 +383,11 @@ function ShellApp({
           typeof opts.auto === 'string' ? opts.auto : undefined
         );
         if (chosen != null) {
-          play(chosen, resumeRatio(fresh, chosen), opts);
+          play(
+            chosen,
+            opts.keepProgress ? 0 : resumeRatio(fresh, chosen),
+            opts
+          );
         }
         // Null means no video inside — the picker is then the only useful thing
         // to show, and `inspect` has already left us on it.
@@ -466,7 +470,7 @@ function ShellApp({
     // which is how a row ends up with no art for the rest of the session.
     if (!online) return;
     const pending = history
-      .filter((h) => !h.poster && !h.imdb && !tried.current.has(h.uri))
+      .filter((h) => !h.poster && !tried.current.has(h.uri))
       .slice(0, 12);
     if (!pending.length) return;
 
@@ -476,17 +480,19 @@ function ShellApp({
         // Marked before the await: a failed lookup must not be retried on
         // every history change for the rest of the session.
         tried.current.add(target.uri);
-        const found = await resolveTitle(target.torrentName ?? target.title);
+        const found = target.imdb
+          ? await loadTitle(target.imdb, target.kind ?? 'movie')
+          : await resolveTitle(target.torrentName ?? target.title);
         // Dropped mid-run: unmark this one and leave the rest for the retry.
         if (!isOnline()) {
           tried.current.delete(target.uri);
           return;
         }
-        if (!live || !found) continue;
+        if (!live || !found?.poster) continue;
         const items = await patch(target.uri, {
           imdb: found.imdb,
           kind: found.kind,
-          poster: found.poster ?? undefined,
+          poster: found.poster,
           titleName: found.title,
         });
         if (live) setHistory(items);
@@ -500,7 +506,15 @@ function ShellApp({
   const openUri = useCallback(
     async (
       uri: string,
-      opts?: { auto?: string | boolean; keepProgress?: boolean; fullFile?: boolean }
+      opts?: {
+        auto?: string | boolean;
+        keepProgress?: boolean;
+        fullFile?: boolean;
+        imdb?: string;
+        kind?: 'movie' | 'tv';
+        poster?: string | null;
+        titleName?: string;
+      }
     ) => {
       // A shared file arrives as a content:// grant that expires — take our own
       // copy before doing anything else, and store *that* path, so the history
@@ -512,7 +526,19 @@ function ShellApp({
         fail(String(e?.message ?? e));
         return;
       }
-      open({ uri: local, title: titleOf(uri), at: Date.now() }, undefined, opts);
+      open(
+        {
+          uri: local,
+          title: titleOf(uri),
+          at: Date.now(),
+          imdb: opts?.imdb,
+          kind: opts?.kind,
+          poster: opts?.poster ?? undefined,
+          titleName: opts?.titleName,
+        },
+        undefined,
+        opts
+      );
       // Whatever history files this under is what episode progress reads back.
       return local;
     },
@@ -578,8 +604,8 @@ function ShellApp({
         setDetail(found);
         // Store what it turned out to be. Without this the title page has no
         // way back to this entry's resume point, so it offers Play instead of
-        // Continue.
-        if (target.imdb !== found.imdb) {
+        // Continue. Also fill a missing poster when the id was already known.
+        if (target.imdb !== found.imdb || !target.poster) {
           patch(target.uri, {
             imdb: found.imdb,
             kind: found.kind,
@@ -593,13 +619,6 @@ function ShellApp({
       open(target, target.lastFileIndex, { auto: true });
     },
     [open]
-  );
-  const downloadUri = useCallback(
-    (uri: string) => {
-      setTorrentMode('download');
-      openUri(uri);
-    },
-    [openUri]
   );
   const playCompleted = useCallback(
     async (entry: { name: string; path?: string }) => {
@@ -661,9 +680,10 @@ function ShellApp({
   /** Ask for notification permission (Android 13+) then show the download notif. */
   const enableDownloadNotify = useCallback(async () => {
     if (Platform.OS === 'android' && Platform.Version >= 33) {
-      await PermissionsAndroid.request(
+      const status = await PermissionsAndroid.request(
         PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
       );
+      if (status !== PermissionsAndroid.RESULTS.GRANTED) return;
     }
     TorrentStream.setNotify(true).catch(() => {});
   }, []);
@@ -674,6 +694,8 @@ function ShellApp({
     (target: Item, index: number) => {
       setTorrentMode('download');
       setTab('downloads');
+      setDetail(null);
+      setShelf(null);
       enableDownloadNotify();
       open(target, index, { keepProgress: true, fullFile: true });
     },
@@ -688,7 +710,7 @@ function ShellApp({
       return;
     }
     const pct = progress?.progress ?? 0;
-    if (pct < 100 || downloadDoneRef.current) return;
+    if (pct < 99.5 || downloadDoneRef.current) return;
     downloadDoneRef.current = true;
     const size =
       meta?.files.find((f) => f.index === playingIndex)?.size ??
@@ -696,11 +718,18 @@ function ShellApp({
       0;
     TorrentStream.copyTo(playingIndex, fileName)
       .then((path) => recordDownload(fileName, size, path))
-      .catch(() => {})
-      .finally(() => {
+      .then(() => {
+        // Native copyTo already tore the torrent down (no more seeding).
         TorrentStream.setNotify(false).catch(() => {});
         reset();
         setTorrentMode(null);
+        setTab('downloads');
+      })
+      .catch((e: any) => {
+        // Keep the active card and the torrent — silent finally{} used to wipe
+        // both without ever writing the Completed row.
+        downloadDoneRef.current = false;
+        console.warn('[download] save failed', e?.message ?? e);
       });
   }, [
     progress?.progress,
@@ -862,7 +891,9 @@ function ShellApp({
     );
   }
 
-  if (phase === 'choosing' && meta) {
+  // File picker for multi-file torrents. While a download is already running,
+  // stay on the Downloads tab — do not cover the progress card with this list.
+  if (phase === 'choosing' && meta && torrentMode !== 'download') {
     return (
       <FilesScreen
         meta={meta}
@@ -871,6 +902,37 @@ function ShellApp({
         onDownload={(file) => {
           setTorrentMode('download');
           setTab('downloads');
+          setDetail(null);
+          setShelf(null);
+          enableDownloadNotify();
+          play(file.index, 0, { keepProgress: true, fullFile: true });
+        }}
+        onBack={() => {
+          setTorrentMode(null);
+          reset();
+        }}
+      />
+    );
+  }
+
+  // Need a file pick for a download (auto could not decide): show the list, then
+  // return to Downloads once a file is chosen.
+  if (phase === 'choosing' && meta && torrentMode === 'download') {
+    return (
+      <FilesScreen
+        meta={meta}
+        mode="download"
+        onPlay={(file) => {
+          setTab('downloads');
+          setDetail(null);
+          setShelf(null);
+          enableDownloadNotify();
+          play(file.index, 0, { keepProgress: true, fullFile: true });
+        }}
+        onDownload={(file) => {
+          setTab('downloads');
+          setDetail(null);
+          setShelf(null);
           enableDownloadNotify();
           play(file.index, 0, { keepProgress: true, fullFile: true });
         }}
@@ -884,7 +946,8 @@ function ShellApp({
 
   // Sits above the tabs but below the streaming flow: once a source is picked,
   // the file picker and the player take the screen from here.
-  if (detail) {
+  // An active download owns the Downloads tab — do not bury it under a title page.
+  if (detail && torrentMode !== 'download') {
     return (
       <DetailScreen
         seed={detail}
@@ -903,6 +966,12 @@ function ShellApp({
           const local = await openUri(magnet, {
             auto: tag ?? true,
             keepProgress: startOver,
+            // Title page already has the artwork — stamp it on the library
+            // row or the card stays a blank colour tile.
+            imdb: detail.imdb,
+            kind: detail.kind,
+            poster: detail.poster,
+            titleName: detail.title,
           });
           if (episodeId && local) linkEpisode(episodeId, local).then(setEpisodeLinks);
         }}
@@ -910,15 +979,24 @@ function ShellApp({
           setTorrentMode('download');
           setTab('downloads');
           setDetail(null);
+          setShelf(null);
           enableDownloadNotify();
-          openUri(magnet, { auto: tag ?? true, keepProgress: true, fullFile: true });
+          openUri(magnet, {
+            auto: tag ?? true,
+            keepProgress: true,
+            fullFile: true,
+            imdb: detail.imdb,
+            kind: detail.kind,
+            poster: detail.poster,
+            titleName: detail.title,
+          });
         }}
         onBack={() => setDetail(null)}
       />
     );
   }
 
-  if (shelf) {
+  if (shelf && torrentMode !== 'download') {
     return (
       <CatalogScreen
         heading={shelf.title}
@@ -961,16 +1039,16 @@ function ShellApp({
         </TabPage>
         <TabPage show={tab === 'downloads'} mounted={visited.has('downloads')}>
           <DownloadsScreen
-            onOpenUri={downloadUri}
             onPlayFile={playCompleted}
             active={
-              torrentMode === 'download' && phase === 'playing'
+              torrentMode === 'download' && phase !== 'idle'
                 ? {
                     name:
                       fileName ??
                       meta?.files.find((f) => f.index === playingIndex)?.name ??
+                      item?.torrentName ??
                       item?.title ??
-                      'Downloading…',
+                      (phase === 'inspecting' ? 'Fetching metadata…' : 'Downloading…'),
                     size:
                       meta?.files.find((f) => f.index === playingIndex)?.size ??
                       item?.files?.find((f) => f.index === playingIndex)?.size ??
