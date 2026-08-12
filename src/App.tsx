@@ -702,37 +702,87 @@ function ShellApp({
     [open, enableDownloadNotify]
   );
 
-  // Auto-save when a Downloads-tab transfer hits 100%, then keep it in Completed.
+  // Auto-save when a download hits 100%. Logs every step — if it sticks on
+  // "Saving to Downloads…", Metro will show where it died.
+  //
+  // Name usually arrives on native `ready`. Full-file downloads used to skip
+  // that event, so fileName stayed null and this never ran — fall back to meta.
   const downloadDoneRef = useRef(false);
   useEffect(() => {
-    if (torrentMode !== 'download' || phase !== 'playing' || !fileName) {
+    if (torrentMode !== 'download') {
       downloadDoneRef.current = false;
       return;
     }
+    if (phase !== 'playing') return;
+    const name =
+      fileName ??
+      meta?.files.find((f) => f.index === playingIndex)?.name ??
+      item?.files?.find((f) => f.index === playingIndex)?.name ??
+      null;
+    if (!name || playingIndex == null) return;
     const pct = progress?.progress ?? 0;
-    if (pct < 99.5 || downloadDoneRef.current) return;
-    downloadDoneRef.current = true;
+    const done =
+      pct >= 99.5 ||
+      progress?.state === 'FINISHED' ||
+      progress?.state === 'SEEDING';
+    if (!done) return;
+
+    let alive = true;
     const size =
       meta?.files.find((f) => f.index === playingIndex)?.size ??
       item?.files?.find((f) => f.index === playingIndex)?.size ??
       0;
-    TorrentStream.copyTo(playingIndex, fileName)
-      .then((path) => recordDownload(fileName, size, path))
-      .then(() => {
-        // Native copyTo already tore the torrent down (no more seeding).
-        TorrentStream.setNotify(false).catch(() => {});
-        reset();
-        setTorrentMode(null);
-        setTab('downloads');
-      })
-      .catch((e: any) => {
-        // Keep the active card and the torrent — silent finally{} used to wipe
-        // both without ever writing the Completed row.
-        downloadDoneRef.current = false;
-        console.warn('[download] save failed', e?.message ?? e);
+
+    const save = () => {
+      if (!alive || downloadDoneRef.current) return;
+      downloadDoneRef.current = true;
+      const started = Date.now();
+      console.log('[download] copyTo…', {
+        fileName: name,
+        playingIndex,
+        pct,
+        state: progress?.state,
+        size,
       });
+      TorrentStream.copyTo(playingIndex, name)
+        .then((path) => {
+          console.log('[download] copyTo ok', { path, ms: Date.now() - started });
+          return recordDownload(name, size, path);
+        })
+        .then(() => {
+          console.log('[download] done — stop torrent');
+          TorrentStream.setNotify(false).catch(() => {});
+          reset();
+          setTorrentMode(null);
+          setTab('downloads');
+        })
+        .catch((e: any) => {
+          downloadDoneRef.current = false;
+          console.warn('[download] save failed', {
+            message: String(e?.message ?? e),
+            code: e?.code,
+            ms: Date.now() - started,
+          });
+        });
+    };
+
+    save();
+    // Keep retrying while stuck at 100% — a single failed attempt used to
+    // leave the card on "Saving…" forever because progress never changes.
+    const retry = setInterval(() => {
+      if (!alive) return;
+      if (downloadDoneRef.current) return;
+      console.log('[download] retry');
+      save();
+    }, 3000);
+
+    return () => {
+      alive = false;
+      clearInterval(retry);
+    };
   }, [
     progress?.progress,
+    progress?.state,
     torrentMode,
     phase,
     fileName,

@@ -343,29 +343,53 @@ class TorrentStreamModule : Module() {
     }
 
     /**
-     * Copy the already-downloaded file into the device Downloads folder.
-     * Call after the selected file is fully present. Returns a uri the player
-     * can open later (`file://` or `content://`).
+     * Move the finished file into app Downloads and stop the torrent.
+     * The local HTTP server must be stopped first or the file stays locked and
+     * rename/copy hangs forever on "Saving to Downloads…".
      */
     AsyncFunction("copyTo") { fileIndex: Int, fileName: String ->
+      log("copyTo: begin index=$fileIndex name=$fileName")
       val ti = info ?: throw CodedException("No torrent is running")
-      val src = File(saveDir, ti.files().filePath(fileIndex))
-      if (!src.exists()) throw CodedException("File not found — it may not be downloaded yet")
       val expected = ti.files().fileSize(fileIndex)
-      if (src.length() < expected) {
+      val rel = ti.files().filePath(fileIndex)
+      val src = File(saveDir, rel)
+      log(
+        "copyTo: src=${src.absolutePath} exists=${src.exists()} " +
+          "len=${src.length()} expected=$expected"
+      )
+
+      // Drop every reader that might hold the file open.
+      server?.stop()
+      server = null
+      val h = handle
+      if (h != null && h.isValid) {
+        runCatching { h.pause() }
+        userPaused = true
+      }
+      log("copyTo: server stopped, torrent paused")
+
+      var waits = 0
+      while (src.length() < expected && waits < 20) {
+        Thread.sleep(200)
+        waits++
+      }
+      val have = src.length()
+      log("copyTo: after wait len=$have expected=$expected waits=$waits")
+      // Accept a tiny shortfall (filesystem rounding); refuse a real gap.
+      if (have < expected * 99 / 100) {
         throw CodedException(
-          "Only ${(src.length() * 100 / expected)}% downloaded — wait until it finishes"
+          "Only ${(have * 100 / expected.coerceAtLeast(1))}% on disk — not ready to save"
         )
       }
+
       val name = fileName.ifBlank { ti.files().fileName(fileIndex) }
       val uri = saveToDownloads(src, name)
-      log("copied ${src.name} → $uri")
+      log("copyTo: saved → $uri")
       notifyComplete(name)
-      // Stop seeding the moment the file is safe — JS also resets, but that is
-      // a round trip later and leaves upload running until then.
       showNotify = false
       clearDownloadNotification()
       teardown()
+      log("copyTo: torn down")
       uri
     }
 
@@ -1249,7 +1273,24 @@ class TorrentStreamModule : Module() {
     // few MB and then sit there while the file never finishes — high speed,
     // motionless progress. The file priorities set in play() already exclude
     // every other file in the torrent, so this stays one file either way.
+    //
+    // Still fire `ready` once so JS has the file name — downloads never open
+    // the HTTP server, but the finish→copyTo path keys off that event.
     if (fullFile) {
+      if (!announcedReady) {
+        announcedReady = true
+        val name = ti.files().fileName(fileIndex)
+        log("download ready: $name")
+        sendEvent(
+          "ready",
+          mapOf(
+            "url" to "",
+            "lanUrl" to null,
+            "name" to name,
+            "subtitleFiles" to emptyList<Map<String, Any>>()
+          )
+        )
+      }
       session.postSessionStats()
       if (ticks % 2 == 0) reportProgress(h, 100)
       return
@@ -1745,13 +1786,43 @@ class TorrentStreamModule : Module() {
   }
 
   /**
-   * App Downloads folder — always writable. Public MediaStore copies of multi-GB
-   * files would double storage, so the Completed list opens this path.
+   * App Downloads folder. Rename when the torrent cache lives on the same
+   * volume (the normal case) so a 500MB+ finish is instant; copy otherwise.
    */
   private fun saveToDownloads(src: File, name: String): String {
     val safe = name.replace(Regex("[\\\\/]+"), "_").ifBlank { "download" }
     val dest = File(appDownloadsDir(), safe)
-    src.copyTo(dest, overwrite = true)
+    log("copyTo: dest=${dest.absolutePath}")
+    if (dest.exists()) {
+      val removed = dest.delete()
+      log("copyTo: removed existing dest=$removed")
+    }
+    dest.parentFile?.mkdirs()
+    if (src.renameTo(dest)) {
+      log("copyTo: renamed in place")
+      return "file://${dest.absolutePath}"
+    }
+    log("copyTo: rename failed — streaming copy ${src.length()}B")
+    src.inputStream().use { input ->
+      dest.outputStream().use { output ->
+        val buf = ByteArray(1024 * 256)
+        var total = 0L
+        var n: Int
+        var lastLog = 0L
+        while (input.read(buf).also { n = it } >= 0) {
+          if (n == 0) continue
+          output.write(buf, 0, n)
+          total += n
+          if (total - lastLog > 50L * 1024 * 1024) {
+            log("copyTo: copied ${total / (1024 * 1024)}MB…")
+            lastLog = total
+          }
+        }
+        output.flush()
+      }
+    }
+    val deleted = src.delete()
+    log("copyTo: copy done, srcDeleted=$deleted destLen=${dest.length()}")
     return "file://${dest.absolutePath}"
   }
 
