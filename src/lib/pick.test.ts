@@ -1,6 +1,6 @@
 // node --experimental-strip-types src/lib/pick.test.ts
 import assert from 'node:assert';
-import { pickFile } from './pick.ts';
+import { nextEpisode, pickFile } from './pick.ts';
 
 const f = (index: number, name: string, size: number, isVideo = true) => ({
   index,
@@ -36,5 +36,20 @@ assert.equal(pickFile([f(0, 'episode.mkv', 500)], 'S09E09'), 0);
 
 // Nothing playable at all — the caller has to ask.
 assert.equal(pickFile([f(0, 'readme.txt', 10, false)]), null);
+
+// Up next inside a season pack, in broadcast order rather than file order.
+const season = [
+  f(0, 'Show.S01E10.mkv', 100),
+  f(1, 'Show.S01E02.mkv', 100),
+  f(2, 'Show.S01E01.mkv', 100),
+  f(3, 'Show.S02E01.mkv', 100),
+  f(4, 'sample.mkv', 5),
+];
+assert.equal(nextEpisode(season, 2)?.name, 'Show.S01E02.mkv');
+// Across a season boundary, and off the end of the pack.
+assert.equal(nextEpisode(season, 0)?.name, 'Show.S02E01.mkv');
+assert.equal(nextEpisode(season, 3), null);
+// A film has nothing to follow it.
+assert.equal(nextEpisode([f(0, 'Dune.2021.1080p.mkv', 100)], 0), null);
 
 console.log('ok');

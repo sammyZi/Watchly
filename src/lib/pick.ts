@@ -1,3 +1,5 @@
+import { parseEpisode } from './search.ts';
+
 /** Just what picking needs — `TorrentFile` from the native module fits this. */
 type Filed = { index: number; name: string; size: number; isVideo: boolean };
 
@@ -47,4 +49,29 @@ export function pickFile(files: Filed[], tag?: string): number | null {
   }
 
   return videos.reduce((a, b) => (b.size > a.size ? b : a)).index;
+}
+
+/**
+ * The episode that follows the one playing, inside the same torrent.
+ *
+ * Only ever the same download: a season pack already holds the next episode and
+ * playing it is instant, whereas a loose episode would mean another search,
+ * another swarm and a wait — nothing worth auto-starting on someone.
+ *
+ * Ordering is by what the names say, not by file order, because packs are
+ * routinely laid out alphabetically ("E10" before "E2") and a season boundary
+ * then falls in the wrong place.
+ */
+export function nextEpisode(files: Filed[], index: number): Filed | null {
+  const playing = files.find((f) => f.index === index);
+  if (!playing || !parseEpisode(playing.name)) return null;
+
+  const ordered = files
+    .filter((f) => f.isVideo && !JUNK.test(f.name))
+    .map((file) => ({ file, at: parseEpisode(file.name) }))
+    .filter((e): e is { file: Filed; at: { season: number; episode: number } } => !!e.at)
+    .sort((a, b) => a.at.season - b.at.season || a.at.episode - b.at.episode);
+
+  const at = ordered.findIndex((e) => e.file.index === index);
+  return at < 0 ? null : (ordered[at + 1]?.file ?? null);
 }

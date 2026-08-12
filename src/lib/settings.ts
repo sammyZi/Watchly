@@ -7,8 +7,6 @@ export type Settings = {
   addTrackers: boolean;
   /** Delete the downloaded pieces when the stream stops. */
   removeFilesAfterStop: boolean;
-  /** API key for opensubtitles.com (free signup). */
-  openSubtitlesKey: string;
   /** App appearance. */
   themeMode: 'system' | 'light' | 'dark';
 };
@@ -20,7 +18,6 @@ export const DEFAULTS: Settings = {
   prepareMb: 1,
   addTrackers: true,
   removeFilesAfterStop: true,
-  openSubtitlesKey: process.env.EXPO_PUBLIC_OPENSUBTITLES_KEY ?? '',
   themeMode: 'system',
 };
 

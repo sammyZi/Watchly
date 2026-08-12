@@ -15,7 +15,6 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ScreenOrientation from 'expo-screen-orientation';
-import * as FileSystem from 'expo-file-system';
 // Feather has no closed-caption glyph, and "type" reads as a bare T. The badge
 // is the one subtitle symbol everyone recognises, so borrow it from Material.
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -28,11 +27,20 @@ import { VlcPlayer, type VlcPlayerRef, type VlcTrack } from '../../modules/vlc-p
 import TorrentStream, { type Progress } from '../../modules/torrent-stream';
 import { Icon, type IconName } from '../components/Icon';
 import { clock, speed } from '../lib/format';
-import { searchSubtitles, downloadSubtitle, type SubtitleResult } from '../lib/opensubtitles';
+import { searchSubtitles, type Sub } from '../lib/subdl';
+import { parseEpisode } from '../lib/search';
+import { searchableName } from '../lib/title';
 import { recordDownload } from './DownloadsScreen';
 import { font, radius, space, type } from '../theme';
 
+/** Ships with the app — see .env. Nothing to type in, and nothing to store:
+ *  it is the same key for every install. */
+const SUBDL_KEY = process.env.EXPO_PUBLIC_SUBDL_KEY;
+
 const SKIP_SECONDS = 10;
+/** How long before the end the "up next" card appears. Long enough to cancel
+ *  before the credits, short enough not to sit over the last scene. */
+const UP_NEXT_SECONDS = 30;
 const RATES = [0.75, 1, 1.25, 1.5, 2];
 
 /**
@@ -61,8 +69,9 @@ export function PlayerScreen({
   url,
   lanUrl,
   subtitleFiles,
-  openSubtitlesKey,
   fileIndex,
+  next,
+  onNext,
   progress,
   onSavePosition,
   onDuration,
@@ -77,8 +86,10 @@ export function PlayerScreen({
    *  so loopback is no use to it — no LAN address, no casting. */
   lanUrl?: string | null;
   subtitleFiles?: string[];
-  openSubtitlesKey?: string;
   fileIndex: number;
+  /** The episode after this one — from this torrent or the next one. */
+  next?: { name: string } | null;
+  onNext?: () => void;
   progress: Progress | null;
   onSavePosition: (seconds: number) => void;
   onDuration: (seconds: number) => void;
@@ -114,12 +125,14 @@ export function PlayerScreen({
   const [locked, setLocked] = useState(false);
   /** Transient readout for the fit mode, which has no control of its own. */
   const [hud, setHud] = useState<{ icon: IconName; label: string } | null>(null);
-  /** OpenSubtitles search state. */
+  /** SubDL search state. */
   const [searching, setSearching] = useState(false);
-  const [subResults, setSubResults] = useState<SubtitleResult[]>([]);
+  const [subResults, setSubResults] = useState<Sub[]>([]);
   const [subLoading, setSubLoading] = useState(false);
   const [subQuery, setSubQuery] = useState('');
   const [externalSubs, setExternalSubs] = useState<string[]>([]);
+  /** "Cancel" on the up-next card — only for the episode playing now. */
+  const [dismissedNext, setDismissedNext] = useState(false);
 
   const position = useRef(resumeAt ?? 0);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -183,6 +196,29 @@ export function PlayerScreen({
     save.current(at);
     leave.current();
   }, []);
+
+  /**
+   * Up next.
+   *
+   * The card comes up over the last stretch of the episode and starts the one
+   * after it when the file ends — the same bargain every streaming app makes:
+   * carry on unless told otherwise. Cancelling holds until the next file, so
+   * the credits can be watched in peace.
+   */
+  const remaining = duration > 0 ? duration - current : Infinity;
+  const upNext = !!next && !!onNext && !dismissedNext && remaining <= UP_NEXT_SECONDS;
+  const countdown = Math.max(0, Math.ceil(remaining));
+
+  const playNext = useCallback(() => {
+    if (!onNext) return;
+    // Recorded before the switch, or the episode just finished loses its place.
+    save.current(position.current);
+    setDismissedNext(true);
+    onNext();
+  }, [onNext]);
+
+  // A different file is playing: the card is owed a fresh chance.
+  useEffect(() => setDismissedNext(false), [fileIndex]);
 
   // Hand the stream to the receiver as soon as a device is connected, and
   // silence the local player — two copies playing at once is the one thing
@@ -258,13 +294,18 @@ export function PlayerScreen({
 
   const searchSubs = useCallback(async () => {
     const q = subQuery.trim() || title;
-    const key = openSubtitlesKey || process.env.EXPO_PUBLIC_OPENSUBTITLES_KEY;
+    const key = SUBDL_KEY;
     if (!q) return;
-    if (!key) { warn('Set your OpenSubtitles API key in Settings'); setSearching(false); return; }
+    if (!key) { warn('This build has no SubDL key'); setSearching(false); return; }
     setSubLoading(true);
     setSubResults([]);
     try {
-      const results = await searchSubtitles(q, key);
+      // SubDL matches on a title, so the release name has to come off first —
+      // "Show.S01E02.1080p.WEB-DL.mkv" as a `film_name` matches nothing. The
+      // episode markers it carries are the useful part, and they go in the
+      // query separately.
+      const at = parseEpisode(q);
+      const results = await searchSubtitles(searchableName(q) || q, key, { ...at });
       setSubResults(results.slice(0, 20));
     } catch (e: any) {
       const msg = String(e?.message ?? e);
@@ -277,31 +318,23 @@ export function PlayerScreen({
     } finally {
       setSubLoading(false);
     }
-  }, [subQuery, title, openSubtitlesKey, warn]);
+  }, [subQuery, title, warn]);
 
-  const applySubtitle = useCallback(async (result: SubtitleResult) => {
-    const file = result.attributes.files[0];
-    const key = openSubtitlesKey || process.env.EXPO_PUBLIC_OPENSUBTITLES_KEY;
-    if (!file || !key) return;
+  const applySubtitle = useCallback(async (result: Sub) => {
     try {
-      const content = await downloadSubtitle(file.file_id, key);
-      const dest = `${FileSystem.cacheDirectory}sub_${file.file_id}.srt`;
-      await FileSystem.writeAsStringAsync(dest, content);
+      // Native: SubDL serves zips, and unpacking one in JS would need a
+      // dependency the app does not have.
+      const dest = await TorrentStream.saveSubtitle(result.url, result.release || result.name);
       setExternalSubs((prev) => [...prev, dest]);
       setSearching(false);
       // Through the ref: bumpUi is declared below this callback, so naming it
       // here read it inside its own temporal dead zone.
       bump.current();
     } catch (e: any) {
-      const msg = String(e?.message ?? e);
-      if (msg.includes('403') || msg.includes('401')) {
-        warn('Invalid API key — check Settings');
-      } else {
-        warn(msg);
-      }
+      warn(String(e?.message ?? e));
       setSearching(false);
     }
-  }, [openSubtitlesKey, warn]);
+  }, [warn]);
 
   // No setCurrent here: every caller either seeks (which sets it) or is only
   // reachable while the overlay is already up and the clock already live. The
@@ -557,7 +590,13 @@ export function PlayerScreen({
               // Only the clock and scrubber read this. Re-rendering twice a
               // second behind a hidden overlay is what makes the first tap on
               // the picture feel dead.
-              if (showUi) setCurrent(currentTime);
+              //
+              // The exception is the run-up to the end: the up-next card has to
+              // appear on its own, and with the overlay down nothing was moving
+              // the clock it watches — so it never appeared at all.
+              const ending =
+                !!next && duration > 0 && duration - currentTime <= UP_NEXT_SECONDS;
+              if (showUi || ending) setCurrent(currentTime);
 
               // Playing steadily again — allow the drop recovery to arm afresh.
               if (currentTime > 5) reloads.current = 0;
@@ -577,6 +616,12 @@ export function PlayerScreen({
               // twenty minutes into a three-hour film. Only treat it as the end
               // if we are actually near the end.
               const at = position.current;
+              // A real end with another episode behind it: carry on rather
+              // than dropping back to the library.
+              if (duration > 0 && at >= duration - 10 && next && onNext && !dismissedNext) {
+                playNext();
+                return;
+              }
               if (duration > 0 && at < duration - 10) {
                 if (reloads.current > 2) {
                   setFailure({ text: 'The stream keeps dropping', fatal: true });
@@ -761,6 +806,12 @@ export function PlayerScreen({
                       label and the top bar is just context again. */}
                   <View style={styles.actions}>
                     <Action icon="lock" label="Lock" onPress={() => lock(true)} />
+                    {/* The card at the end of an episode is easy to miss, and
+                        impossible to reach on purpose. This is the same thing,
+                        available whenever the controls are up. */}
+                    {!!next && !!onNext && (
+                      <Action icon="skip-forward" label="Next" onPress={playNext} />
+                    )}
                     <Action
                       icon="maximize"
                       label={SCALES[scaleIdx].label}
@@ -825,9 +876,9 @@ export function PlayerScreen({
                 externalSubs.length === 0 && (
                   <Text style={styles.noSubs}>
                     No subtitles found.{' '}
-                    {openSubtitlesKey
+                    {SUBDL_KEY
                       ? 'Use the search icon to find subtitles online.'
-                      : 'Set an OpenSubtitles API key in Settings to search online.'}
+                      : 'No SubDL key is built into this app, so online search is off.'}
                   </Text>
                 )}
               {tracks.map((t) => (
@@ -891,35 +942,32 @@ export function PlayerScreen({
               </View>
               {subResults.length > 0 ? (
                 <ScrollView style={styles.resultList}>
-                  {subResults.map((r) => {
-                    const a = r.attributes;
-                    const d = a.feature_details;
-                    const label = [
-                      d?.title ?? a.release,
-                      d?.season_number != null ? `S${d.season_number}` : null,
-                      d?.episode_number != null ? `E${d.episode_number}` : null,
-                      a.language.toUpperCase(),
-                    ]
-                      .filter(Boolean)
-                      .join(' ');
-                    return (
-                      <Pressable
-                        key={r.id}
-                        onPress={() => applySubtitle(r)}
-                        style={styles.subResult}
-                      >
-                        <View style={styles.subResultBody}>
-                          <Text numberOfLines={1} style={styles.subResultTitle}>
-                            {label}
-                          </Text>
-                          <Text style={styles.subResultMeta}>
-                            {a.files[0]?.file_name} · {a.download_count} downloads
-                          </Text>
-                        </View>
-                        <Icon name="download" size={14} color="#ffffff80" />
-                      </Pressable>
-                    );
-                  })}
+                  {subResults.map((r) => (
+                    <Pressable
+                      key={r.url}
+                      onPress={() => applySubtitle(r)}
+                      style={styles.subResult}
+                    >
+                      <View style={styles.subResultBody}>
+                        <Text numberOfLines={1} style={styles.subResultTitle}>
+                          {[
+                            r.name || r.release,
+                            r.season != null ? `S${r.season}` : null,
+                            r.episode != null ? `E${r.episode}` : null,
+                            r.language,
+                          ]
+                            .filter(Boolean)
+                            .join(' ')}
+                        </Text>
+                        {/* What it was timed against — the one thing that says
+                            whether it will actually line up with this rip. */}
+                        <Text numberOfLines={1} style={styles.subResultMeta}>
+                          {r.release}
+                        </Text>
+                      </View>
+                      <Icon name="download" size={14} color="#ffffff80" />
+                    </Pressable>
+                  ))}
                 </ScrollView>
               ) : subLoading ? (
                 <ActivityIndicator
@@ -986,6 +1034,33 @@ export function PlayerScreen({
               )}
             </View>
           )}
+        </View>
+      )}
+
+      {/* Outside the overlay: the card is the one thing that has to be there
+          whether or not the controls are up, same as every streaming app. */}
+      {upNext && (
+        <View style={[styles.upNext, { bottom: insets.bottom + 90 }]}>
+          <View style={styles.upNextText}>
+            <Text style={styles.upNextLabel}>Up next in {countdown}s</Text>
+            <Text style={styles.upNextName} numberOfLines={1}>
+              {next!.name}
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => {
+              setDismissedNext(true);
+              bumpUi();
+            }}
+            hitSlop={8}
+            style={styles.upNextCancel}
+          >
+            <Text style={styles.upNextCancelText}>Cancel</Text>
+          </Pressable>
+          <Pressable onPress={playNext} style={styles.upNextPlay}>
+            <Icon name="play" size={14} color="#0b0e14" />
+            <Text style={styles.upNextPlayText}>Play</Text>
+          </Pressable>
         </View>
       )}
 
@@ -1357,6 +1432,36 @@ const styles = StyleSheet.create({
     marginLeft: -6,
     backgroundColor: '#3b6fe0',
   },
+  // Bottom right, clear of the controls: the same corner every streaming app
+  // puts it in, and the one place a thumb is not already resting.
+  upNext: {
+    position: 'absolute',
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    maxWidth: 420,
+    paddingLeft: 14,
+    paddingRight: 8,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: '#0b0e14e6',
+  },
+  upNextText: { flexShrink: 1, gap: 2 },
+  upNextLabel: { ...type.meta, fontSize: 11, color: '#ffffffa0' },
+  upNextName: { ...type.label, color: '#fff', fontFamily: font.medium },
+  upNextCancel: { paddingHorizontal: 8, paddingVertical: 8 },
+  upNextCancelText: { ...type.meta, color: '#ffffffa0', fontFamily: font.medium },
+  upNextPlay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#fff',
+  },
+  upNextPlayText: { ...type.label, color: '#0b0e14', fontFamily: font.semibold },
   // Under the title rather than mid-screen: at 38% it landed straight on the
   // play button, which is the one thing that must never be covered.
   hud: {

@@ -71,6 +71,12 @@ type TorrentStream = {
   copyTo(fileIndex: number, fileName: string): Promise<string>;
   /** `file://` URI for a finished file in public Downloads/. */
   downloadUri(fileName: string): Promise<string>;
+  /**
+   * Download an external subtitle — a bare .srt or a zip holding one — into
+   * app cache and return a `file://` URI the player can load. `name` is only
+   * used to name the file on disk.
+   */
+  saveSubtitle(url: string, name: string): Promise<string>;
   /** Pause the active transfer (Download Manager). */
   pause(): Promise<void>;
   /** Resume a paused transfer. */

@@ -1,6 +1,6 @@
 // node --experimental-strip-types src/lib/meta.test.ts
 import assert from 'node:assert';
-import { bestMatch, reviewLinks, toEpisodes, toMeta, toTitles } from './meta.ts';
+import { bestMatch, reviewLinks, toEpisodes, toMeta, toTitles, topGenres } from './meta.ts';
 
 assert.deepEqual(
   toMeta({
@@ -77,6 +77,13 @@ assert.equal(eps[1].overview, 'from description');
 assert.equal(eps[0].thumbnail, null);
 assert.deepEqual(toEpisodes(undefined), []);
 
+// A catalog row's `videos` is only its twenty most recent episodes, so a Title
+// built from one carries none at all — half a season list is worse than an
+// empty one, because the page stops asking for the rest.
+const partial = [{ id: 'tt3', name: 'Show', poster: 'p', videos: [{ id: 'tt3:6:4', season: 6, episode: 4 }] }];
+assert.deepEqual(toTitles(partial, 'tv')[0].episodes, []);
+assert.equal(toTitles(partial, 'tv', true)[0].episodes.length, 1);
+
 
 // A search result is thinner than a catalog row: name, poster, releaseInfo.
 const thin = toTitles(
@@ -119,6 +126,38 @@ assert.equal(bestMatch([cand('Dune', 'movie', '1984')], 'Dune', '2021')?.title, 
 assert.equal(
   bestMatch([cand('Spider-Man: No Way Home')], 'Spider Man No Way Home')?.title,
   'Spider-Man: No Way Home'
+);
+
+// Recommendation genres: what has been watched twice or more, biggest first,
+// each tagged with the kind it was mostly watched as.
+const watched = (name: string, kind: 'movie' | 'tv', genres: string[]) =>
+  ({ ...cand(name, kind), genres }) as any;
+assert.deepEqual(
+  topGenres([
+    watched('A', 'movie', ['Action', 'Drama']),
+    watched('B', 'movie', ['Action']),
+    watched('C', 'tv', ['Comedy']),
+  ]),
+  [
+    { genre: 'Action', kind: 'movie' },
+    { genre: 'Drama', kind: 'movie' },
+    { genre: 'Comedy', kind: 'tv' },
+  ]
+);
+// One watched title is enough to say something.
+assert.deepEqual(topGenres([watched('A', 'movie', ['Horror'])]), [
+  { genre: 'Horror', kind: 'movie' },
+]);
+// Ties keep the order they came in, so the caller decides what matters most.
+assert.equal(
+  topGenres([watched('A', 'tv', ['Sci-Fi']), watched('B', 'movie', ['Western'])], 1)[0]
+    .genre,
+  'Sci-Fi'
+);
+// Mostly watched as a series -> the series catalog.
+assert.deepEqual(
+  topGenres([watched('A', 'tv', ['Drama']), watched('B', 'tv', ['Drama'])]),
+  [{ genre: 'Drama', kind: 'tv' }]
 );
 
 console.log('ok');

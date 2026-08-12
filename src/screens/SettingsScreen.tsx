@@ -1,5 +1,5 @@
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Switch, Text, TextInput, View } from 'react-native';
-import { memo, useRef, useState } from 'react';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Switch, Text, View } from 'react-native';
+import { memo, useRef } from 'react';
 import { Icon, type IconName } from '../components/Icon';
 import { Screen } from '../components/Screen';
 import type { Settings } from '../lib/settings';
@@ -33,7 +33,6 @@ function SettingsScreenView({
   onClearHistory: () => void;
   historyCount: number;
 }) {
-  const [showKey, setShowKey] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const colors = useColors();
   const { mode: themeMode, setMode } = useTheme();
@@ -160,44 +159,6 @@ function SettingsScreenView({
           </Pressable>
         </Group>
 
-        <Group title="Subtitles">
-          <View style={styles.row}>
-            <View style={styles.rowIcon}>
-              <Icon name="type" size={16} color={colors.accent} />
-            </View>
-            <View style={styles.rowText}>
-              <Text style={styles.rowTitle}>OpenSubtitles API key</Text>
-              <Text style={styles.rowSubtitle}>
-                Free signup at opensubtitles.com
-              </Text>
-            </View>
-          </View>
-          <View style={styles.keyRow}>
-            <TextInput
-              style={styles.apiInput}
-              value={showKey ? settings.openSubtitlesKey : (settings.openSubtitlesKey ? '••••••••••••••••••••••••' : '')}
-              onChangeText={(v) => set('openSubtitlesKey', v)}
-              placeholder="Paste your API key..."
-              placeholderTextColor={colors.faint}
-              onFocus={() => {
-                setTimeout(() => {
-                  scrollRef.current?.scrollToEnd({ animated: true });
-                }, 300);
-              }}
-              autoCapitalize="none"
-              autoCorrect={false}
-              secureTextEntry={!showKey}
-            />
-            <Pressable
-              onPress={() => setShowKey((s) => !s)}
-              hitSlop={8}
-              style={styles.eyeBtn}
-            >
-              <Icon name={showKey ? 'eye-off' : 'eye'} size={16} color={colors.faint} />
-            </Pressable>
-          </View>
-        </Group>
-
         <Text style={styles.footer}>
           Watchly · movies and series, ready when you are. You are responsible
           for what you watch and download.
@@ -276,29 +237,6 @@ function useSettingsStyles() {
       color: c.faint,
       textAlign: 'center' as const,
       paddingHorizontal: space.lg,
-    },
-    apiInput: {
-      flex: 1,
-      ...type.body,
-      color: c.text,
-      backgroundColor: c.surfaceAlt,
-      borderRadius: radius.md,
-      paddingHorizontal: space.lg,
-      paddingVertical: space.sm,
-    },
-    keyRow: {
-      flexDirection: 'row' as const,
-      alignItems: 'center' as const,
-      gap: space.sm,
-      marginBottom: space.lg,
-    },
-    eyeBtn: {
-      width: 36,
-      height: 36,
-      borderRadius: radius.md,
-      backgroundColor: c.surfaceAlt,
-      alignItems: 'center' as const,
-      justifyContent: 'center' as const,
     },
   }));
 }

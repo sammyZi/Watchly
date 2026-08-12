@@ -22,6 +22,7 @@ import {
 import TorrentStream from '../modules/torrent-stream';
 import { ConfirmModal, type Confirm } from './components/ConfirmModal';
 import { Icon } from './components/Icon';
+import { OfflineBanner } from './components/Offline';
 import { TabBar, type TabKey } from './components/TabBar';
 import { resumeRatio, useTorrent } from './hooks/useTorrent';
 import {
@@ -37,10 +38,12 @@ import {
 import { DEFAULTS, loadSettings, saveSettings, type Settings } from './lib/settings';
 import { linkEpisode, loadEpisodeLinks, type EpisodeLinks } from './lib/watched';
 import { isTorrentSource } from './lib/magnet';
-import { pickFile } from './lib/pick';
-import { parseEpisode } from './lib/search';
+import { nextEpisode, pickFile } from './lib/pick';
+import { episodeTag, parseEpisode, searchEpisode } from './lib/search';
 import { titleOf } from './lib/title';
 import { loadTitle, resolveTitle, type Title } from './lib/meta';
+import { isOnline, useOnline } from './lib/net';
+import { loadSaved, toggleSaved, type List, type Saved } from './lib/saved';
 import { CatalogScreen } from './screens/CatalogScreen';
 import { DetailScreen } from './screens/DetailScreen';
 import { FilesScreen } from './screens/FilesScreen';
@@ -143,11 +146,16 @@ function Shell() {
 
   return (
     <ThemeProvider mode={settings.themeMode} onChangeMode={changeThemeMode}>
-      <ShellApp
-        settings={settings}
-        onChangeSettings={changeSettings}
-        onReady={reveal}
-      />
+      {/* The banner sits above every screen, including the player and the file
+          picker — each of those is its own early return inside ShellApp. */}
+      <View style={{ flex: 1 }}>
+        <ShellApp
+          settings={settings}
+          onChangeSettings={changeSettings}
+          onReady={reveal}
+        />
+        <OfflineBanner />
+      </View>
     </ThemeProvider>
   );
 }
@@ -250,6 +258,8 @@ function ShellApp({
 
   const [tab, setTab] = useState<TabKey>('home');
   const [history, setHistory] = useState<Item[]>([]);
+  /** Favourites and watch-later, both lists in one array. */
+  const [saved, setSaved] = useState<Saved[]>([]);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
 
   const torrent = useTorrent(settings);
@@ -294,6 +304,7 @@ function ShellApp({
   useEffect(() => {
     loadHistory().then(setHistory);
     loadEpisodeLinks().then(setEpisodeLinks);
+    loadSaved().then(setSaved);
     // Drop leftover stream pieces from a previous kill (can be multi‑GB).
     TorrentStream.clearCache().catch(() => {});
   }, []);
@@ -448,7 +459,11 @@ function ShellApp({
    * up once per torrent; after that it is stored on the entry.
    */
   const tried = useRef(new Set<string>());
+  const online = useOnline();
   useEffect(() => {
+    // Offline every lookup would come back empty and mark the row as tried,
+    // which is how a row ends up with no art for the rest of the session.
+    if (!online) return;
     const pending = history
       .filter((h) => !h.poster && !h.imdb && !tried.current.has(h.uri))
       .slice(0, 12);
@@ -461,6 +476,11 @@ function ShellApp({
         // every history change for the rest of the session.
         tried.current.add(target.uri);
         const found = await resolveTitle(target.torrentName ?? target.title);
+        // Dropped mid-run: unmark this one and leave the rest for the retry.
+        if (!isOnline()) {
+          tried.current.delete(target.uri);
+          return;
+        }
         if (!live || !found) continue;
         const items = await patch(target.uri, {
           imdb: found.imdb,
@@ -474,7 +494,7 @@ function ShellApp({
     return () => {
       live = false;
     };
-  }, [history]);
+  }, [history, online]);
 
   const openUri = useCallback(
     async (
@@ -520,6 +540,10 @@ function ShellApp({
   // hidden tabs re-render on a switch instead of rebuilding.
   const playFile = useCallback((target: Item, index: number) => open(target, index), [open]);
   const showHistory = useCallback(() => setTab('history'), []);
+  const saveTitle = useCallback(
+    (target: Title, list: List) => toggleSaved(target, list).then(setSaved),
+    []
+  );
   const streamUri = useCallback(
     (uri: string) => {
       setTorrentMode('stream');
@@ -705,6 +729,57 @@ function ShellApp({
   if (phase === 'playing' && item && torrentMode !== 'download') {
     // Freshest copy, so subtitle and resume edits reach the player.
     const stored = history.find((h) => h.uri === item.uri) ?? item;
+    // Inside this torrent first — see `nextEpisode`; the engine's own file list
+    // wins over the stored one while it is up.
+    const following = nextEpisode(meta?.files ?? stored.files ?? [], playingIndex);
+
+    /**
+     * Up next, when the torrent holds this episode and nothing else.
+     *
+     * That is the normal case for anything started from a title page: the
+     * release picked was the single episode asked for, so "next" is a
+     * different torrent entirely and has to be found first. The title page it
+     * was opened from is still in state, which is where the episode order and
+     * the show's name come from.
+     */
+    const playingName =
+      fileName ?? stored.files?.find((f) => f.index === playingIndex)?.name ?? '';
+    const at = parseEpisode(playingName);
+    const episodeList = detail?.kind === 'tv' ? (detail.episodes ?? []) : [];
+    const atIndex = at
+      ? episodeList.findIndex((e) => e.season === at.season && e.episode === at.episode)
+      : -1;
+    const nextEp = atIndex >= 0 ? (episodeList[atIndex + 1] ?? null) : null;
+
+    const upNext = following
+      ? {
+          name: following.name,
+          go: () => open(stored, following.index, { keepProgress: true }),
+        }
+      : nextEp && detail
+        ? {
+            name: `${episodeTag(nextEp.season, nextEp.episode)} · ${nextEp.name}`,
+            go: async () => {
+              const hits = await searchEpisode(
+                detail.title,
+                nextEp.season,
+                nextEp.episode,
+                undefined,
+                detail.imdb
+              ).catch(() => []);
+              if (!hits.length) {
+                fail(`No releases found for ${episodeTag(nextEp.season, nextEp.episode)}`);
+                return;
+              }
+              setTorrentMode('stream');
+              const local = await openUri(hits[0].magnet, {
+                auto: episodeTag(nextEp.season, nextEp.episode),
+                keepProgress: true,
+              });
+              if (local) linkEpisode(nextEp.id, local).then(setEpisodeLinks);
+            },
+          }
+        : null;
 
     return (
       <PlayerScreen
@@ -720,8 +795,11 @@ function ShellApp({
         url={url}
         lanUrl={torrent.lanUrl}
         subtitleFiles={subtitleFiles}
-        openSubtitlesKey={settings.openSubtitlesKey}
         fileIndex={playingIndex}
+        next={upNext && { name: upNext.name }}
+        // Starts from the top: an episode reached by finishing the one before
+        // it has no resume point worth honouring.
+        onNext={upNext ? upNext.go : undefined}
         progress={progress}
         onSavePosition={(seconds) =>
           setPosition(stored, playingIndex, seconds).then(setHistory)
@@ -809,6 +887,8 @@ function ShellApp({
         error={torrent.error}
         progress={episodeProgress}
         resume={filmProgress[detail.imdb]}
+        saved={saved}
+        onToggleSaved={saveTitle}
         // `tag` is the SxxEyy to look for inside a season pack; true just means
         // "pick the feature". Either way, no file list.
         onPlay={async (magnet, episodeId, tag, startOver) => {
@@ -851,6 +931,7 @@ function ShellApp({
         <TabPage show={tab === 'home'} mounted>
           <HomeScreen
             recent={history}
+            saved={saved}
             onOpenTitle={setDetail}
             onOpenShelf={setShelf}
             onPlayFile={playFile}
@@ -863,7 +944,9 @@ function ShellApp({
         <TabPage show={tab === 'history'} mounted={visited.has('history')}>
           <HistoryScreen
             history={history}
+            saved={saved}
             onOpenItem={openItem}
+            onOpenTitle={setDetail}
             onPlayFile={playFile}
             onDownloadFile={downloadFile}
             onRemove={askRemove}

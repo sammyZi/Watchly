@@ -6,6 +6,7 @@
  * rating would be worse than showing no rating at all.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { net } from './net.ts';
 import { isSeries, searchableName, yearOf } from './title.ts';
 
 const BASE = 'https://v3-cinemeta.strem.io/meta';
@@ -15,6 +16,21 @@ const BASE = 'https://v3-cinemeta.strem.io/meta';
 const CATALOG = 'https://cinemeta-catalogs.strem.io/top/catalog';
 /** Search has to go through the front door, which actually reads the query. */
 const SEARCH = 'https://v3-cinemeta.strem.io/catalog';
+/**
+ * Anime, which Cinemeta has no genre for — its list stops at "Animation", and
+ * that is half western cartoons.
+ *
+ * Stremio's Kitsu addon speaks the same catalog format, and most of its rows
+ * carry a real IMDb id; `toTitles` drops the handful that do not, so a title
+ * from here behaves like any other — the detail page still fills itself from
+ * Cinemeta by id, and releases are still found by name.
+ */
+const ANIME = 'https://anime-kitsu.strem.fun/catalog/series/kitsu-anime-trending.json';
+
+/** Not one of Cinemeta's genres — asking for it switches catalogs entirely.
+ *  Everything that browses by genre goes through `loadCatalog`, so naming it
+ *  here is all it takes for the shelf, the grid and the chip to work. */
+export const ANIME_GENRE = 'Anime';
 
 export type Episode = {
   /** Cinemeta's own "tt10986410:1:2" — unique, and stable enough to key a
@@ -66,7 +82,7 @@ const TTL = 24 * 60 * 60 * 1000;
  * `undefined.map`. The version is part of the key, so old entries are simply
  * never found again.
  */
-const STORE = 'meta:2:';
+const STORE = 'meta:3:';
 
 /**
  * Memory cache over a disk cache over the network.
@@ -124,10 +140,10 @@ export function loadTitle(imdb: string, kind: 'movie' | 'tv'): Promise<Title | n
 }
 
 async function fetchTitle(imdb: string, kind: 'movie' | 'tv'): Promise<Title | null> {
-  const res = await fetch(`${BASE}/${kind === 'tv' ? 'series' : 'movie'}/${imdb}.json`);
+  const res = await net(`${BASE}/${kind === 'tv' ? 'series' : 'movie'}/${imdb}.json`);
   if (!res.ok) return null;
   const { meta } = await res.json();
-  return meta ? (toTitles([{ ...meta, imdb_id: imdb }], kind)[0] ?? null) : null;
+  return meta ? (toTitles([{ ...meta, imdb_id: imdb }], kind, true)[0] ?? null) : null;
 }
 
 /**
@@ -148,9 +164,12 @@ export function loadCatalog(kind: 'movie' | 'tv', genre?: string): Promise<Title
   if (hit) return hit;
 
   const type = kind === 'tv' ? 'series' : 'movie';
-  const url = `${CATALOG}/${type}/top${genre ? `/genre=${encodeURIComponent(genre)}` : ''}.json`;
+  const url =
+    genre === ANIME_GENRE
+      ? ANIME
+      : `${CATALOG}/${type}/top${genre ? `/genre=${encodeURIComponent(genre)}` : ''}.json`;
   const pending = remember(key, async () => {
-    const res = await fetch(url);
+    const res = await net(url);
     if (!res.ok) throw new Error(`Catalog returned ${res.status}`);
     return toTitles((await res.json())?.metas ?? [], kind);
   })
@@ -176,7 +195,7 @@ export function searchTitles(query: string, kind: 'movie' | 'tv'): Promise<Title
   if (hit) return hit;
 
   const type = kind === 'tv' ? 'series' : 'movie';
-  const pending = fetch(`${SEARCH}/${type}/top/search=${encodeURIComponent(query)}.json`)
+  const pending = net(`${SEARCH}/${type}/top/search=${encodeURIComponent(query)}.json`)
     .then((r) => (r.ok ? r.json() : { metas: [] }))
     .then((body) => toTitles(body?.metas ?? [], kind))
     .catch(() => {
@@ -185,6 +204,46 @@ export function searchTitles(query: string, kind: 'movie' | 'tv'): Promise<Title
     });
   cache.set(key, pending);
   return pending;
+}
+
+/**
+ * What a set of watched titles is mostly made of, most-watched first.
+ *
+ * Every genre that turns up counts, so one film is enough to shape the page —
+ * an earlier version wanted two before it would say anything, which on a normal
+ * library meant it said nothing at all and the home page stayed on the stock
+ * shelves. Pass the titles in the order they matter: ties keep that order, so
+ * putting what is being watched now at the front is what makes it win.
+ *
+ * Each genre carries the kind it was mostly watched as, so a shelf built from
+ * it lands on the right catalog.
+ */
+export function topGenres(
+  titles: Title[],
+  limit = 3
+): { genre: string; kind: 'movie' | 'tv' }[] {
+  const tally = new Map<string, { seen: number; films: number }>();
+  for (const title of titles) {
+    for (const genre of title.genres ?? []) {
+      const at = tally.get(genre) ?? { seen: 0, films: 0 };
+      at.seen++;
+      if (title.kind === 'movie') at.films++;
+      tally.set(genre, at);
+    }
+  }
+  return [...tally]
+    .sort((a, b) => b[1].seen - a[1].seen)
+    .slice(0, limit)
+    .map(([genre, at]) => ({ genre, kind: at.films * 2 >= at.seen ? 'movie' : 'tv' }));
+}
+
+/** The same, from ids. Every lookup is a cache hit for anything already opened. */
+export async function watchedGenres(
+  seen: { imdb: string; kind: 'movie' | 'tv' }[],
+  limit = 3
+): Promise<{ genre: string; kind: 'movie' | 'tv' }[]> {
+  const titles = await Promise.all(seen.map((s) => loadTitle(s.imdb, s.kind)));
+  return topGenres(titles.filter((t): t is Title => !!t), limit);
 }
 
 const norm = (s: string) =>
@@ -257,15 +316,27 @@ export async function resolveTitle(releaseName: string): Promise<Title | null> {
   return bestMatch(likely, query, year) ?? bestMatch(other, query, year);
 }
 
-/** Catalog rows without art are unusable on a poster shelf, so they are dropped. */
-export function toTitles(metas: Record<string, any>[], kind: 'movie' | 'tv'): Title[] {
+/**
+ * Catalog rows without art are unusable on a poster shelf, so they are dropped.
+ *
+ * `withEpisodes` is off by default, and that is the whole point: a catalog row
+ * carries a `videos` array holding the twenty most recent episodes and nothing
+ * else. Copying that onto a Title made a series look like it began at season
+ * six — the page had "some" episodes, so it never asked for the real ones.
+ * Only `/meta` returns the full list, so only `/meta` is allowed to fill it.
+ */
+export function toTitles(
+  metas: Record<string, any>[],
+  kind: 'movie' | 'tv',
+  withEpisodes = false
+): Title[] {
   return metas
     .filter((m) => m.poster && /^tt\d+$/.test(String(m.imdb_id ?? m.id ?? '')))
     .map((m) => ({
       ...toMeta(m),
       imdb: String(m.imdb_id ?? m.id),
       kind,
-      episodes: toEpisodes(m.videos),
+      episodes: withEpisodes ? toEpisodes(m.videos) : [],
       backdrop: m.background ? String(m.background) : null,
       runtime: m.runtime ? String(m.runtime) : null,
     }));

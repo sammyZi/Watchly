@@ -4,6 +4,7 @@ import { Icon } from '../components/Icon';
 import { PosterGrid } from '../components/PosterGrid';
 import { Screen } from '../components/Screen';
 import { loadCatalog, type Title } from '../lib/meta';
+import { useOnline } from '../lib/net';
 import { space, useColors, useThemedStyles } from '../theme';
 
 /** Everything on one shelf, three across. The rail shows what fits; this shows
@@ -22,6 +23,8 @@ export function CatalogScreen({
   onBack: () => void;
 }) {
   const [titles, setTitles] = useState<Title[] | null>(null);
+  /** Failed loads run again when the connection returns. */
+  const online = useOnline();
   const colors = useColors();
   const styles = useThemedStyles(() => ({
     spin: { marginTop: space.xxl },
@@ -29,11 +32,11 @@ export function CatalogScreen({
 
   useEffect(() => {
     let live = true;
-    loadCatalog(kind, genre).then((t) => live && setTitles(t));
+    loadCatalog(kind, genre).then((t) => live && t.length && setTitles(t));
     return () => {
       live = false;
     };
-  }, [kind, genre]);
+  }, [kind, genre, online]);
 
   return (
     <Screen
