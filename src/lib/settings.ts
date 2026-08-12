@@ -7,6 +7,9 @@ export type Settings = {
   addTrackers: boolean;
   /** Delete the downloaded pieces when the stream stops. */
   removeFilesAfterStop: boolean;
+  /** Genres to lead the home page with, in Cinemeta's spelling. Empty means
+   *  the page is built from watch history alone. */
+  genres: string[];
   /** App appearance. */
   themeMode: 'system' | 'light' | 'dark';
 };
@@ -18,6 +21,7 @@ export const DEFAULTS: Settings = {
   prepareMb: 1,
   addTrackers: true,
   removeFilesAfterStop: true,
+  genres: [],
   themeMode: 'system',
 };
 
@@ -29,6 +33,8 @@ export async function loadSettings(): Promise<Settings> {
     if (raw.themeMode !== 'system' && raw.themeMode !== 'light' && raw.themeMode !== 'dark') {
       raw.themeMode = DEFAULTS.themeMode;
     }
+    // Stored by an older build, or hand-edited: the home page maps over this.
+    if (!Array.isArray(raw.genres)) raw.genres = [];
     return raw;
   } catch {
     return DEFAULTS;
