@@ -937,6 +937,7 @@ function ShellApp({
           <HomeScreen
             recent={history}
             saved={saved}
+            genres={settings.genres}
             onOpenTitle={setDetail}
             onOpenShelf={setShelf}
             onPlayFile={playFile}

@@ -2,6 +2,7 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Switch, Text, Vi
 import { memo, useRef } from 'react';
 import { Icon, type IconName } from '../components/Icon';
 import { Screen } from '../components/Screen';
+import { GENRES } from '../lib/meta';
 import type { Settings } from '../lib/settings';
 import {
   font,
@@ -91,6 +92,41 @@ function SettingsScreenView({
             4K remuxes use Download instead.
           </Text>
         </View>
+
+        <Group title="Your genres">
+          <View style={styles.choiceRow}>
+            <Row
+              icon="heart"
+              title="Favourite genres"
+              subtitle={
+                settings.genres.length
+                  ? `${settings.genres.length} chosen — these lead the home page`
+                  : 'Pick a few and the home page opens with them'
+              }
+            />
+            <View style={styles.genres}>
+              {GENRES.map((g) => {
+                const on = settings.genres.includes(g);
+                return (
+                  <Pressable
+                    key={g}
+                    onPress={() =>
+                      set(
+                        'genres',
+                        on
+                          ? settings.genres.filter((x) => x !== g)
+                          : [...settings.genres, g]
+                      )
+                    }
+                    style={[styles.choice, on && styles.choiceOn]}
+                  >
+                    <Text style={[styles.choiceText, on && styles.choiceTextOn]}>{g}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        </Group>
 
         <Group title="Startup speed">
           <Row
@@ -223,6 +259,14 @@ function useSettingsStyles() {
     divider: { height: 1, backgroundColor: c.line, marginLeft: 34 + space.md },
     choiceRow: { paddingBottom: space.lg },
     choices: { flexDirection: 'row' as const, gap: space.sm, marginLeft: 34 + space.md },
+    // Same chips as the theme picker, but there are twenty of them, so they
+    // wrap and take the full width rather than sitting in the icon's gutter.
+    genres: {
+      flexDirection: 'row' as const,
+      flexWrap: 'wrap' as const,
+      gap: space.sm,
+      paddingHorizontal: space.lg,
+    },
     choice: {
       paddingHorizontal: space.lg,
       paddingVertical: space.sm,

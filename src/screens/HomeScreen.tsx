@@ -16,6 +16,8 @@ import { Thumb } from '../components/Thumb';
 import { resumeRatio } from '../hooks/useTorrent';
 import type { Item } from '../lib/history';
 import {
+  ANIME_GENRE,
+  kindOfGenre,
   loadCatalog,
   peekCatalog,
   watchedGenres,
@@ -41,6 +43,9 @@ export type Shelf = { title: string; kind: 'movie' | 'tv'; genre?: string };
 const SHELVES: Shelf[] = [
   { title: 'Trending films', kind: 'movie' },
   { title: 'Popular series', kind: 'tv' },
+  // Its own catalogue rather than a Cinemeta genre — see ANIME_GENRE. High up
+  // because it is the one shelf nothing else on the page can stand in for.
+  { title: 'Anime', kind: 'tv', genre: ANIME_GENRE },
 ];
 
 /** Still watching — has a resume point short of the end. */
@@ -161,6 +166,7 @@ function useHomeStyles() {
 function HomeScreenView({
   recent,
   saved,
+  genres,
   onOpenTitle,
   onOpenShelf,
   onPlayFile,
@@ -168,6 +174,8 @@ function HomeScreenView({
 }: {
   recent: Item[];
   saved: Saved[];
+  /** Chosen in Settings. These lead the page; history fills in behind them. */
+  genres: string[];
   onOpenTitle: (title: Title) => void;
   /** The whole shelf as a grid — a rail only ever shows the first handful. */
   onOpenShelf: (shelf: Shelf) => void;
@@ -236,12 +244,32 @@ function HomeScreenView({
     };
   }, [recent, saved, online]);
 
-  // Recommendations first, then the fixed charts — minus any the picks already
-  // cover, so the same catalog is never on the page twice.
+  /**
+   * What was asked for, ahead of what was inferred.
+   *
+   * A genre picked in Settings is a statement; a genre counted out of watch
+   * history is a guess. When both point at the same catalogue the stated one
+   * wins the slot, so the page never explains a shelf you chose as "because
+   * you like" something.
+   */
+  const chosen = useMemo(
+    () =>
+      genres.map((genre) => ({
+        title: genre === ANIME_GENRE ? 'Anime' : genre,
+        kind: kindOfGenre(genre),
+        genre,
+      })),
+    [genres]
+  );
+
+  // Chosen first, then recommendations, then the fixed charts — each minus
+  // whatever the ones above already cover, so no catalogue appears twice.
   const shelves = useMemo(() => {
-    const taken = new Set(picks.map(shelfKey));
-    return [...picks, ...SHELVES.filter((s) => !taken.has(shelfKey(s)))];
-  }, [picks]);
+    const taken = new Set(chosen.map(shelfKey));
+    const rest = picks.filter((p) => !taken.has(shelfKey(p)));
+    for (const p of rest) taken.add(shelfKey(p));
+    return [...chosen, ...rest, ...SHELVES.filter((s) => !taken.has(shelfKey(s)))];
+  }, [chosen, picks]);
 
   useEffect(() => {
     let live = true;
@@ -264,7 +292,9 @@ function HomeScreenView({
     () => new Set(recent.map((h) => h.imdb).filter(Boolean) as string[]),
     [recent]
   );
-  const heroShelf = picks[0] ?? SHELVES[0];
+  // Whatever leads the page leads the hero: a genre chosen in Settings, else
+  // the top recommendation, else the chart.
+  const heroShelf = chosen[0] ?? picks[0] ?? SHELVES[0];
   // Personalized rails never re-show titles already in history — Continue
   // watching is the place for unfinished ones.
   const featured = (
@@ -300,9 +330,15 @@ function HomeScreenView({
                 titles={featured}
                 // The genre only holds while its shelf is the one on screen —
                 // the fallback above can leave the chart showing instead.
+                // Only claims to be personal while the shelf backing it is —
+                // the fallback below can leave the chart showing instead.
                 eyebrow={
-                  picks[0] && loaded[shelfKey(picks[0])]
-                    ? 'for you'
+                  loaded[shelfKey(heroShelf)]
+                    ? chosen[0]
+                      ? `in ${chosen[0].genre}`
+                      : picks[0]
+                        ? 'for you'
+                        : 'today'
                     : 'today'
                 }
                 top={insets.top}

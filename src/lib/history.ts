@@ -52,6 +52,27 @@ export async function loadHistory(): Promise<Item[]> {
   }
 }
 
+/**
+ * Every mutation runs one at a time.
+ *
+ * They are all read-modify-write against a single key, and they fire from
+ * everywhere at once: the player checkpointing a position, the poster backfill
+ * finishing a lookup, metadata landing. Interleaved, the later write is built
+ * on a list read before the earlier one landed — which is how "clear history"
+ * came back undone. The clear writes an empty list, an already-in-flight patch
+ * writes back the copy it read a moment earlier, and the rows are on disk again
+ * for the next launch.
+ */
+let queue: Promise<unknown> = Promise.resolve();
+
+function serial<T>(job: () => Promise<T>): Promise<T> {
+  const next = queue.then(job, job);
+  // The chain must survive a failed job, or one rejection strands every write
+  // after it.
+  queue = next.catch(() => {});
+  return next;
+}
+
 async function write(items: Item[]) {
   const capped = items.slice(0, MAX);
   await AsyncStorage.setItem(KEY, JSON.stringify(capped));
@@ -59,15 +80,19 @@ async function write(items: Item[]) {
 }
 
 /** Insert or move-to-top, merging over whatever was already stored. */
-export async function put(item: Item) {
-  const rest = await loadHistory();
-  const prev = rest.find((x) => x.uri === item.uri);
-  return write([{ ...prev, ...item }, ...rest.filter((x) => x.uri !== item.uri)]);
+export function put(item: Item) {
+  return serial(async () => {
+    const rest = await loadHistory();
+    const prev = rest.find((x) => x.uri === item.uri);
+    return write([{ ...prev, ...item }, ...rest.filter((x) => x.uri !== item.uri)]);
+  });
 }
 
-export async function patch(uri: string, fields: Partial<Item>) {
-  const items = await loadHistory();
-  return write(items.map((x) => (x.uri === uri ? { ...x, ...fields } : x)));
+export function patch(uri: string, fields: Partial<Item>) {
+  return serial(async () => {
+    const items = await loadHistory();
+    return write(items.map((x) => (x.uri === uri ? { ...x, ...fields } : x)));
+  });
 }
 
 /** Resume point for one file, without clobbering the others. */
@@ -93,15 +118,17 @@ const wipeSubs = (paths: string[]) =>
     ? TorrentStream.deleteSubtitles(paths).catch(() => {})
     : Promise.resolve();
 
-export const drop = async (uri: string) => {
-  const items = await loadHistory();
-  const gone = items.find((x) => x.uri === uri);
-  if (gone) await wipeSubs(subPaths(gone));
-  return write(items.filter((x) => x.uri !== uri));
-};
+export const drop = (uri: string) =>
+  serial(async () => {
+    const items = await loadHistory();
+    const gone = items.find((x) => x.uri === uri);
+    if (gone) await wipeSubs(subPaths(gone));
+    return write(items.filter((x) => x.uri !== uri));
+  });
 
-export const clearHistory = async () => {
-  const items = await loadHistory();
-  await wipeSubs(items.flatMap(subPaths));
-  return write([]);
-};
+export const clearHistory = () =>
+  serial(async () => {
+    const items = await loadHistory();
+    await wipeSubs(items.flatMap(subPaths));
+    return write([]);
+  });

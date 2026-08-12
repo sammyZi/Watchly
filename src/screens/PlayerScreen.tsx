@@ -26,6 +26,7 @@ import {
 import { VlcPlayer, type VlcPlayerRef, type VlcTrack } from '../../modules/vlc-player';
 import TorrentStream, { type Progress } from '../../modules/torrent-stream';
 import { Icon, type IconName } from '../components/Icon';
+import { Marquee } from '../components/Marquee';
 import { clock, speed } from '../lib/format';
 import { searchSubtitles, type Sub } from '../lib/subdl';
 import { parseEpisode } from '../lib/search';
@@ -926,6 +927,33 @@ export function PlayerScreen({
 
           {picking && (
             <View style={styles.sheet}>
+              {/* Audio to the left of subtitles rather than under them: the
+                  screen is landscape, so the room is sideways, and a stacked
+                  second section pushed the list past the bottom edge. */}
+              {audioTracks.length > 1 && (
+                <View style={styles.sheetCol}>
+                  <Text style={styles.sheetTitle}>Audio</Text>
+                  {audioTracks.map((t) => (
+                    <TrackOption
+                      key={`audio-${t.id}`}
+                      label={t.name}
+                      active={audioTrack === t.id}
+                      onPress={() => {
+                        setAudioTrack(t.id);
+                        setPicking(false);
+                        bumpUi();
+                      }}
+                    />
+                  ))}
+                </View>
+              )}
+
+              <View
+                style={[
+                  styles.sheetCol,
+                  audioTracks.length > 1 && styles.sheetColSecond,
+                ]}
+              >
               <Text style={styles.sheetTitle}>Subtitles</Text>
               <TrackOption
                 label="Off"
@@ -962,25 +990,7 @@ export function PlayerScreen({
                 />
               ))}
 
-              {/* Audio only earns a place when there is a choice to make — a
-                  single track is not a decision. */}
-              {audioTracks.length > 1 && (
-                <>
-                  <Text style={styles.sheetHeading}>Audio</Text>
-                  {audioTracks.map((t) => (
-                    <TrackOption
-                      key={`audio-${t.id}`}
-                      label={t.name}
-                      active={audioTrack === t.id}
-                      onPress={() => {
-                        setAudioTrack(t.id);
-                        setPicking(false);
-                        bumpUi();
-                      }}
-                    />
-                  ))}
-                </>
-              )}
+              </View>
             </View>
           )}
 
@@ -1193,7 +1203,7 @@ function TrackOption({
       style={[styles.option, active && styles.optionOn, unsupported && styles.optionOff]}
     >
       <View style={{ flex: 1, minWidth: 0 }}>
-        <MarqueeText style={styles.optionText}>{label}</MarqueeText>
+        <Marquee style={styles.optionText}>{label}</Marquee>
         {!!sublabel && <Text style={styles.optionNote}>{sublabel}</Text>}
       </View>
       {unsupported ? (
@@ -1202,58 +1212,6 @@ function TrackOption({
         <Icon name="check" size={16} color="#fff" />
       ) : null}
     </Pressable>
-  );
-}
-
-/** Scroll long subtitle names instead of clipping them to “…”. */
-function MarqueeText({
-  children,
-  style,
-}: {
-  children: string;
-  style?: object;
-}) {
-  const x = useRef(new Animated.Value(0)).current;
-  const [box, setBox] = useState(0);
-  const [textW, setTextW] = useState(0);
-
-  useEffect(() => {
-    x.stopAnimation();
-    x.setValue(0);
-    if (textW <= box + 4 || box === 0) return;
-    const dist = textW - box + 32;
-    const anim = Animated.loop(
-      Animated.sequence([
-        Animated.delay(900),
-        Animated.timing(x, {
-          toValue: -dist,
-          duration: Math.min(14000, Math.max(3500, dist * 28)),
-          useNativeDriver: true,
-        }),
-        Animated.delay(1000),
-        Animated.timing(x, { toValue: 0, duration: 1, useNativeDriver: true }),
-      ])
-    );
-    anim.start();
-    return () => anim.stop();
-  }, [textW, box, children, x]);
-
-  return (
-    <View
-      style={{ overflow: 'hidden', width: '100%' }}
-      onLayout={(e) => setBox(e.nativeEvent.layout.width)}
-    >
-      <Animated.Text
-        numberOfLines={1}
-        style={[
-          style,
-          { transform: [{ translateX: x }], alignSelf: 'flex-start' },
-        ]}
-        onLayout={(e) => setTextW(e.nativeEvent.layout.width)}
-      >
-        {children}
-      </Animated.Text>
-    </View>
   );
 }
 
@@ -1380,11 +1338,11 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 68,
     right: 16,
-    minWidth: 170,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     padding: 6,
     borderRadius: 12,
     backgroundColor: '#000d',
-    gap: 2,
   },
   sheetTitle: {
     ...type.overline,
@@ -1393,17 +1351,15 @@ const styles = StyleSheet.create({
     paddingTop: 6,
     paddingBottom: 4,
   },
-  /** Second section in the same sheet — a rule above it, so it reads as its
-   *  own group rather than more subtitles. */
-  sheetHeading: {
-    ...type.overline,
-    color: '#ffffff70',
-    paddingHorizontal: 10,
-    paddingTop: 10,
-    paddingBottom: 4,
-    marginTop: 6,
-    borderTopWidth: 1,
-    borderTopColor: '#ffffff1f',
+  /** One list. Capped so a release with long track names cannot push the
+   *  other column off the screen — the names scroll instead. */
+  sheetCol: { minWidth: 170, maxWidth: 260, gap: 2 },
+  /** The rule between the two, on whichever is on the right. */
+  sheetColSecond: {
+    marginLeft: 6,
+    paddingLeft: 6,
+    borderLeftWidth: 1,
+    borderLeftColor: '#ffffff1f',
   },
   option: {
     flexDirection: 'row',

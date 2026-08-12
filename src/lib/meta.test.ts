@@ -1,6 +1,6 @@
 // node --experimental-strip-types src/lib/meta.test.ts
 import assert from 'node:assert';
-import { bestMatch, reviewLinks, toEpisodes, toMeta, toTitles, topGenres } from './meta.ts';
+import { bestMatch, reviewLinks, toEpisodes, toMeta, toTitles, topGenres, uniqueById } from './meta.ts';
 
 assert.deepEqual(
   toMeta({
@@ -159,5 +159,37 @@ assert.deepEqual(
   topGenres([watched('A', 'tv', ['Drama']), watched('B', 'tv', ['Drama'])]),
   [{ genre: 'Drama', kind: 'tv' }]
 );
+
+// The anime catalogue files each season as its own row under one IMDb id —
+// five Attack on Titan entries is a duplicate React key and five tiles opening
+// the same page.
+const seasons = toTitles(
+  [
+    { id: 'tt2560140', name: 'Attack on Titan', poster: 'p' },
+    { id: 'tt2560140', name: 'Attack on Titan Season 2', poster: 'p' },
+    { imdb_id: 'tt2560140', name: 'Attack on Titan: The Final Season', poster: 'p' },
+    { id: 'tt5626028', name: 'Boku no Hero Academia', poster: 'p' },
+  ],
+  'tv'
+);
+assert.deepEqual(
+  seasons.map((t) => t.title),
+  ['Attack on Titan', 'Boku no Hero Academia']
+);
+
+// A shelf cached by an older build still holds its duplicates, and it is
+// served for a day — so the list is cleaned where it is used, not only where
+// it is parsed.
+const stale = [
+  { imdb: 'tt1', title: 'Attack on Titan' },
+  { imdb: 'tt1', title: 'Attack on Titan Season 2' },
+  { imdb: 'tt2', title: 'Something else' },
+] as any;
+assert.deepEqual(
+  uniqueById(stale).map((t) => t.title),
+  ['Attack on Titan', 'Something else']
+);
+// Anything without an id cannot be keyed on, so it cannot be rendered either.
+assert.deepEqual(uniqueById([{ title: 'no id' }] as any), []);
 
 console.log('ok');

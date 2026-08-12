@@ -32,6 +32,41 @@ const ANIME = 'https://anime-kitsu.strem.fun/catalog/series/kitsu-anime-trending
  *  here is all it takes for the shelf, the grid and the chip to work. */
 export const ANIME_GENRE = 'Anime';
 
+/**
+ * The genres worth offering, in Cinemeta's own spelling — anything not in its
+ * vocabulary comes back as an empty shelf.
+ *
+ * Trimmed to the ones both the film and series catalogues carry, so a chosen
+ * genre always has something behind it whichever kind it is asked for. Anime
+ * leads because it is the one entry that is not a Cinemeta genre at all.
+ */
+export const GENRES = [
+  ANIME_GENRE,
+  'Action',
+  'Adventure',
+  'Animation',
+  'Comedy',
+  'Crime',
+  'Documentary',
+  'Drama',
+  'Family',
+  'Fantasy',
+  'History',
+  'Horror',
+  'Mystery',
+  'Romance',
+  'Sci-Fi',
+  'Sport',
+  'Thriller',
+  'War',
+  'Western',
+];
+
+/** Anime only exists as a series catalogue; everything else defaults to film
+ *  unless the viewer's own history says otherwise. */
+export const kindOfGenre = (genre: string): 'movie' | 'tv' =>
+  genre === ANIME_GENRE ? 'tv' : 'movie';
+
 export type Episode = {
   /** Cinemeta's own "tt10986410:1:2" — unique, and stable enough to key a
    *  watch record on. */
@@ -116,6 +151,24 @@ async function remember<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
   }
 }
 
+/**
+ * One row per IMDb id, first wins.
+ *
+ * Applied on the way *out* of the disk cache as well as on the way in. A list
+ * stored by an older build carries whatever duplicates that build allowed, and
+ * it is served for a day — bumping the cache version would drop the stale
+ * entries but leave the next such bug live for 24h all over again. Cleaning at
+ * the point of use is the one place that cannot go stale.
+ */
+export function uniqueById(titles: Title[]): Title[] {
+  const seen = new Set<string>();
+  return titles.filter((t) => {
+    if (!t?.imdb || seen.has(t.imdb)) return false;
+    seen.add(t.imdb);
+    return true;
+  });
+}
+
 /** Drop every cached shelf and title. Storage is bounded but not small. */
 export async function clearMetaCache(): Promise<void> {
   cache.clear();
@@ -173,7 +226,8 @@ export function loadCatalog(kind: 'movie' | 'tv', genre?: string): Promise<Title
     if (!res.ok) throw new Error(`Catalog returned ${res.status}`);
     return toTitles((await res.json())?.metas ?? [], kind);
   })
-    .then((titles) => {
+    .then((all) => {
+      const titles = uniqueById(all);
       settled.set(key, titles);
       return titles;
     })
@@ -330,8 +384,21 @@ export function toTitles(
   kind: 'movie' | 'tv',
   withEpisodes = false
 ): Title[] {
+  // One row per id. The anime catalogue lists every season separately —
+  // "Attack on Titan", "Attack on Titan Season 2", "…: The Final Season" — and
+  // all five carry the same IMDb id, which is a duplicate React key on the
+  // shelf and five tiles opening the same page. The first is kept because that
+  // is the base entry, and the detail page loads every season from the id
+  // anyway.
+  const seen = new Set<string>();
   return metas
     .filter((m) => m.poster && /^tt\d+$/.test(String(m.imdb_id ?? m.id ?? '')))
+    .filter((m) => {
+      const id = String(m.imdb_id ?? m.id);
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    })
     .map((m) => ({
       ...toMeta(m),
       imdb: String(m.imdb_id ?? m.id),
