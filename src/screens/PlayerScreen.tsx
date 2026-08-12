@@ -69,6 +69,8 @@ export function PlayerScreen({
   url,
   lanUrl,
   subtitleFiles,
+  savedSubs,
+  onSaveSubs,
   fileIndex,
   next,
   onNext,
@@ -86,6 +88,9 @@ export function PlayerScreen({
    *  so loopback is no use to it — no LAN address, no casting. */
   lanUrl?: string | null;
   subtitleFiles?: string[];
+  /** SubDL picks kept from a previous session for this file. */
+  savedSubs?: { path: string; label: string }[];
+  onSaveSubs?: (subs: { path: string; label: string }[]) => void;
   fileIndex: number;
   /** The episode after this one — from this torrent or the next one. */
   next?: { name: string } | null;
@@ -130,7 +135,20 @@ export function PlayerScreen({
   const [subResults, setSubResults] = useState<Sub[]>([]);
   const [subLoading, setSubLoading] = useState(false);
   const [subQuery, setSubQuery] = useState('');
-  const [externalSubs, setExternalSubs] = useState<string[]>([]);
+  const [externalSubs, setExternalSubs] = useState<
+    { path: string; label: string }[]
+  >(savedSubs ?? []);
+  const externalSubsRef = useRef(externalSubs);
+  externalSubsRef.current = externalSubs;
+
+  // Same player instance can move to the next episode — reload that file's picks.
+  useEffect(() => {
+    setExternalSubs(savedSubs ?? []);
+    // Only on file change; including savedSubs would reset mid-session on every history write.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileIndex]);
+  /** After a SubDL pick, select the matching track once libVLC lists it. */
+  const pendingSub = useRef<string | null>(null);
   /** "Cancel" on the up-next card — only for the episode playing now. */
   const [dismissedNext, setDismissedNext] = useState(false);
 
@@ -322,19 +340,33 @@ export function PlayerScreen({
 
   const applySubtitle = useCallback(async (result: Sub) => {
     try {
+      const label = srtDisplayName(result);
       // Native: SubDL serves zips, and unpacking one in JS would need a
       // dependency the app does not have.
-      const dest = await TorrentStream.saveSubtitle(result.url, result.release || result.name);
-      setExternalSubs((prev) => [...prev, dest]);
+      const dest = await TorrentStream.saveSubtitle(
+        result.url,
+        label.replace(/\.srt$/i, '')
+      );
+      pendingSub.current = label;
+      setExternalSubs((prev) => {
+        const next = prev.some((s) => s.path === dest)
+          ? prev
+          : [...prev, { path: dest, label }];
+        onSaveSubs?.(next);
+        return next;
+      });
       setSearching(false);
-      // Through the ref: bumpUi is declared below this callback, so naming it
-      // here read it inside its own temporal dead zone.
+      setPicking(true);
+      // Picker is the feedback — don't leave a toast that can outlive its timer
+      // when bumpUi recreates (picking flips).
+      setFailure(null);
+      if (warnTimer.current) clearTimeout(warnTimer.current);
       bump.current();
     } catch (e: any) {
       warn(String(e?.message ?? e));
       setSearching(false);
     }
-  }, [warn]);
+  }, [warn, onSaveSubs]);
 
   // No setCurrent here: every caller either seeks (which sets it) or is only
   // reachable while the overlay is already up and the clock already live. The
@@ -479,11 +511,19 @@ export function PlayerScreen({
   useEffect(() => {
     bumpUi();
     return () => {
-      [hideTimer, tapTimer, nudgeTimer, warnTimer].forEach((t) => {
+      // Do not clear warnTimer here — bumpUi changes when the subtitle picker
+      // opens, and wiping the timer left "Subtitle ready" on screen forever.
+      [hideTimer, tapTimer, nudgeTimer].forEach((t) => {
         if (t.current) clearTimeout(t.current);
       });
     };
   }, [bumpUi]);
+
+  useEffect(() => {
+    return () => {
+      if (warnTimer.current) clearTimeout(warnTimer.current);
+    };
+  }, []);
 
   /**
    * Straight off the native event rather than down through props: the parent
@@ -566,18 +606,43 @@ export function PlayerScreen({
         <View style={StyleSheet.absoluteFill}>
           <VlcPlayer
             ref={videoRef}
-            style={StyleSheet.absoluteFill}
+          style={StyleSheet.absoluteFill}
             source={url}
             startPosition={startAt}
             paused={paused}
             rate={rate}
             subtitleTrack={subTrack}
             audioTrack={audioTrack}
-            subtitleFiles={[...(subtitleFiles ?? []), ...externalSubs]}
+            subtitleFiles={[
+              ...(subtitleFiles ?? []),
+              ...externalSubs.map((s) => s.path),
+            ]}
             scaleType={SCALES[scaleIdx].type}
             onTracks={({ nativeEvent }) => {
-              setTracks(nativeEvent.subtitles);
+              const externals = externalSubsRef.current;
+              const next = nativeEvent.subtitles.map((t, i) => ({
+                ...t,
+                name: friendlySubName(t, i, externals),
+              }));
+              setTracks(next);
               setAudioTracks(nativeEvent.audio);
+              const want = pendingSub.current;
+              if (want) {
+                const hit =
+                  next.find((t) => t.name === want) ??
+                  next.find((t) =>
+                    t.name
+                      .toLowerCase()
+                      .includes(want.replace(/\.srt$/i, '').toLowerCase())
+                  ) ??
+                  next[next.length - 1];
+                if (hit) {
+                  pendingSub.current = null;
+                  pickedAt.current = Date.now();
+                  pickedTrack.current = hit.id;
+                  setSubTrack(hit.id);
+                }
+              }
             }}
             onProgress={({ nativeEvent: { currentTime } }) => {
               // Between asking for a seek and it landing, this still reports
@@ -586,7 +651,7 @@ export function PlayerScreen({
               // Bounded by time as well as by onSeek, so a seek that never
               // reports completion cannot freeze the clock.
               if (Date.now() - seekAt.current < 1200) return;
-              position.current = currentTime;
+            position.current = currentTime;
               // Only the clock and scrubber read this. Re-rendering twice a
               // second behind a hidden overlay is what makes the first tap on
               // the picture feel dead.
@@ -665,7 +730,7 @@ export function PlayerScreen({
               that wants the touch responder (the scrubber) cannot win it from
               an ancestor Pressable, which is why dragging the bar did nothing. */}
           <Pressable
-            style={[StyleSheet.absoluteFill, showUi && styles.dim]}
+            style={[StyleSheet.absoluteFill, showUi && !locked && styles.dim]}
             onPress={(e) => tapPicture(e.nativeEvent.locationX)}
           />
 
@@ -921,13 +986,13 @@ export function PlayerScreen({
 
           {searching && (
             <View style={styles.sheet}>
-              <Text style={styles.sheetTitle}>Open Subtitles</Text>
+              <Text style={styles.sheetTitle}>Find subtitles</Text>
               <View style={styles.searchRow}>
                 <TextInput
                   style={styles.searchInput}
                   value={subQuery}
                   onChangeText={setSubQuery}
-                  placeholder="Search by file name..."
+                  placeholder="Search by title..."
                   placeholderTextColor="#ffffff60"
                   onSubmitEditing={searchSubs}
                   returnKeyType="search"
@@ -942,32 +1007,29 @@ export function PlayerScreen({
               </View>
               {subResults.length > 0 ? (
                 <ScrollView style={styles.resultList}>
-                  {subResults.map((r) => (
-                    <Pressable
-                      key={r.url}
-                      onPress={() => applySubtitle(r)}
-                      style={styles.subResult}
-                    >
-                      <View style={styles.subResultBody}>
-                        <Text numberOfLines={1} style={styles.subResultTitle}>
-                          {[
-                            r.name || r.release,
-                            r.season != null ? `S${r.season}` : null,
-                            r.episode != null ? `E${r.episode}` : null,
-                            r.language,
-                          ]
-                            .filter(Boolean)
-                            .join(' ')}
-                        </Text>
-                        {/* What it was timed against — the one thing that says
-                            whether it will actually line up with this rip. */}
-                        <Text numberOfLines={1} style={styles.subResultMeta}>
-                          {r.release}
-                        </Text>
-                      </View>
-                      <Icon name="download" size={14} color="#ffffff80" />
-                    </Pressable>
-                  ))}
+                  {subResults.map((r) => {
+                    const name = srtDisplayName(r);
+                    return (
+                      <Pressable
+                        key={r.url}
+                        onPress={() => applySubtitle(r)}
+                        style={styles.subResult}
+                      >
+                        <View style={styles.subResultBody}>
+                          <Text style={styles.subResultTitle}>{name}</Text>
+                          <Text style={styles.subResultMeta}>
+                            {[r.language || 'EN', 'SRT',
+                              r.season != null ? `S${r.season}` : null,
+                              r.episode != null ? `E${r.episode}` : null,
+                            ]
+                              .filter(Boolean)
+                              .join(' · ')}
+                          </Text>
+                        </View>
+                        <Icon name="download" size={14} color="#ffffff80" />
+                      </Pressable>
+                    );
+                  })}
                 </ScrollView>
               ) : subLoading ? (
                 <ActivityIndicator
@@ -1130,21 +1192,106 @@ function TrackOption({
       disabled={unsupported}
       style={[styles.option, active && styles.optionOn, unsupported && styles.optionOff]}
     >
-      <View style={{ flex: 1 }}>
-        <Text numberOfLines={1} style={styles.optionText}>
-          {label}
-        </Text>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <MarqueeText style={styles.optionText}>{label}</MarqueeText>
         {!!sublabel && <Text style={styles.optionNote}>{sublabel}</Text>}
       </View>
       {unsupported ? (
         <Text style={styles.optionNote}>unsupported</Text>
-      ) : (
-        active && <Icon name="check" size={14} color="#fff" />
-      )}
+      ) : active ? (
+        <Icon name="check" size={16} color="#fff" />
+      ) : null}
     </Pressable>
   );
 }
 
+/** Scroll long subtitle names instead of clipping them to “…”. */
+function MarqueeText({
+  children,
+  style,
+}: {
+  children: string;
+  style?: object;
+}) {
+  const x = useRef(new Animated.Value(0)).current;
+  const [box, setBox] = useState(0);
+  const [textW, setTextW] = useState(0);
+
+  useEffect(() => {
+    x.stopAnimation();
+    x.setValue(0);
+    if (textW <= box + 4 || box === 0) return;
+    const dist = textW - box + 32;
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.delay(900),
+        Animated.timing(x, {
+          toValue: -dist,
+          duration: Math.min(14000, Math.max(3500, dist * 28)),
+          useNativeDriver: true,
+        }),
+        Animated.delay(1000),
+        Animated.timing(x, { toValue: 0, duration: 1, useNativeDriver: true }),
+      ])
+    );
+    anim.start();
+    return () => anim.stop();
+  }, [textW, box, children, x]);
+
+  return (
+    <View
+      style={{ overflow: 'hidden', width: '100%' }}
+      onLayout={(e) => setBox(e.nativeEvent.layout.width)}
+    >
+      <Animated.Text
+        numberOfLines={1}
+        style={[
+          style,
+          { transform: [{ translateX: x }], alignSelf: 'flex-start' },
+        ]}
+        onLayout={(e) => setTextW(e.nativeEvent.layout.width)}
+      >
+        {children}
+      </Animated.Text>
+    </View>
+  );
+}
+
+/** SubDL links are .zip; after save they are .srt — show that to the user. */
+function srtDisplayName(r: Sub): string {
+  const raw = (r.release || r.name || 'subtitle').trim() || 'subtitle';
+  const base = raw.replace(/\.zip$/i, '').replace(/\.srt$/i, '');
+  return `${base}.srt`;
+}
+
+function friendlySubName(
+  t: VlcTrack,
+  index: number,
+  externals: { path: string; label: string }[]
+): string {
+  const raw = (t.name || '').trim().replace(/\.zip$/i, '.srt');
+  const useless =
+    !raw ||
+    raw === '...' ||
+    raw === '—' ||
+    /^Track\s*\d*$/i.test(raw) ||
+    /^Subtitle\s*\d+$/i.test(raw);
+
+  if (!useless) {
+    const byFile = externals.find((e) => {
+      const base = e.path.replace(/^file:\/\//, '').split(/[/\\]/).pop() || '';
+      const stem = raw.replace(/\.srt$/i, '');
+      return !!base && (raw.includes(base) || base.includes(stem));
+    });
+    return byFile?.label ?? raw;
+  }
+
+  // External slaves are usually appended after embedded tracks.
+  const embedded = Math.max(0, index + 1 - externals.length);
+  const ei = index - embedded;
+  if (ei >= 0 && ei < externals.length) return externals[ei].label;
+  return externals[externals.length - 1]?.label || `Subtitle ${index + 1}`;
+}
 
 /**
  * Thin scrubber — tap anywhere on the track, or drag the head, to seek.

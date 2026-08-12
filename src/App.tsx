@@ -32,6 +32,7 @@ import {
   patch,
   put,
   setDuration,
+  setFileSubs,
   setPosition,
   type Item,
 } from './lib/history';
@@ -795,6 +796,7 @@ function ShellApp({
         url={url}
         lanUrl={torrent.lanUrl}
         subtitleFiles={subtitleFiles}
+        savedSubs={stored.subtitles?.[playingIndex]}
         fileIndex={playingIndex}
         next={upNext && { name: upNext.name }}
         // Starts from the top: an episode reached by finishing the one before
@@ -806,6 +808,9 @@ function ShellApp({
         }
         onDuration={(seconds) =>
           setDuration(stored, playingIndex, seconds).then(setHistory)
+        }
+        onSaveSubs={(subs) =>
+          setFileSubs(stored, playingIndex, subs).then(setHistory)
         }
         onExit={reset}
       />

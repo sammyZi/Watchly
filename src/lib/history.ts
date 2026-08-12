@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import TorrentStream from '../../modules/torrent-stream';
 
 export type StoredFile = {
   index: number;
@@ -7,6 +8,8 @@ export type StoredFile = {
   isVideo: boolean;
   isSubtitle: boolean;
 };
+
+export type SavedSub = { path: string; label: string };
 
 export type Item = {
   uri: string; // magnet / url / local .torrent path — the identity
@@ -22,7 +25,8 @@ export type Item = {
   positions?: Record<string, number>;
   durations?: Record<string, number>;
 
-  subtitle?: string; // attached .srt/.vtt uri
+  /** SubDL downloads kept for next play, keyed by file index. */
+  subtitles?: Record<string, SavedSub[]>;
 
   /**
    * What this torrent turned out to be, once resolved against the metadata
@@ -76,7 +80,28 @@ export const setPosition = (item: Item, index: number, seconds: number) =>
 export const setDuration = (item: Item, index: number, seconds: number) =>
   patch(item.uri, { durations: { ...item.durations, [index]: seconds } });
 
-export const drop = async (uri: string) =>
-  write((await loadHistory()).filter((x) => x.uri !== uri));
+export const setFileSubs = (item: Item, index: number, subs: SavedSub[]) =>
+  patch(item.uri, {
+    subtitles: { ...item.subtitles, [index]: subs },
+  });
 
-export const clearHistory = () => write([]);
+const subPaths = (item: Item) =>
+  Object.values(item.subtitles ?? {}).flatMap((xs) => xs.map((s) => s.path));
+
+const wipeSubs = (paths: string[]) =>
+  paths.length
+    ? TorrentStream.deleteSubtitles(paths).catch(() => {})
+    : Promise.resolve();
+
+export const drop = async (uri: string) => {
+  const items = await loadHistory();
+  const gone = items.find((x) => x.uri === uri);
+  if (gone) await wipeSubs(subPaths(gone));
+  return write(items.filter((x) => x.uri !== uri));
+};
+
+export const clearHistory = async () => {
+  const items = await loadHistory();
+  await wipeSubs(items.flatMap(subPaths));
+  return write([]);
+};

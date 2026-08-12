@@ -78,6 +78,8 @@ type TorrentStream = {
    * used to name the file on disk.
    */
   saveSubtitle(url: string, name: string): Promise<string>;
+  /** Delete SubDL files previously returned by `saveSubtitle`. Ignores others. */
+  deleteSubtitles(paths: string[]): Promise<void>;
   /** Pause the active transfer (Download Manager). */
   pause(): Promise<void>;
   /** Resume a paused transfer. */

@@ -64,6 +64,8 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
   private var buffering = false
   /** External subtitle file paths (local files from the torrent). */
   private var subtitleFiles: List<String>? = null
+  /** Paths already handed to libVLC — avoid attaching the same slave twice. */
+  private val attachedSubs = mutableSetOf<String>()
   /** Survives a restart(), which rebuilds the player it is set on. */
   private var scale = MediaPlayer.ScaleType.SURFACE_BEST_FIT
 
@@ -150,22 +152,43 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
   }
 
   fun setSubtitleFiles(paths: List<String>?) {
-    subtitleFiles = paths
+    val normalized = paths?.map { localPath(it) }?.filter { it.isNotEmpty() }
+    subtitleFiles = normalized
     val p = player ?: return
-    val m = p.media ?: return
-    (paths ?: emptyList()).forEach { subPath ->
-      val subFile = File(subPath)
-      if (subFile.exists()) {
-        m.addSlave(IMedia.Slave(IMedia.Slave.Type.Subtitle, 4, Uri.fromFile(subFile).toString()))
+    val fresh = (normalized ?: emptyList()).filter { it !in attachedSubs }
+    for (path in fresh) {
+      val subFile = File(path)
+      if (!subFile.exists()) {
+        Log.w(TAG, "subtitle missing: $path")
+        continue
+      }
+      // MediaPlayer.addSlave works while playing; Media.addSlave after setMedia
+      // often does nothing — which is why picking a search result felt dead.
+      val ok = p.addSlave(IMedia.Slave.Type.Subtitle, Uri.fromFile(subFile), true)
+      if (ok) {
+        attachedSubs.add(path)
+        Log.i(TAG, "subtitle attached: ${subFile.name}")
+      } else {
+        Log.w(TAG, "subtitle attach failed: ${subFile.name}")
       }
     }
-    // Adding a slave makes libVLC display it immediately. Fetching a file is
-    // not the same as asking for it to be shown, so put the chosen state back.
-    p.setSpuTrack(wantedSpu ?: -1)
-    // The slave is not parsed yet, so it is not in spuTracks() on this pass —
-    // re-send once it is, or a subtitle just downloaded would never appear in
-    // the picker.
-    postDelayed({ player?.let { sendTracks(it) } }, 800)
+    // Slaves are parsed async — refresh the picker once they show up, and keep
+    // the newly selected track (addSlave select=true) as wantedSpu.
+    postDelayed({
+      val pl = player ?: return@postDelayed
+      val spu = pl.spuTrack
+      if (spu >= 0) wantedSpu = spu
+      sendTracks(pl)
+    }, 600)
+  }
+
+  /** `file:///…` from JS, or a bare absolute path from older callers. */
+  private fun localPath(uriOrPath: String): String {
+    val raw = uriOrPath.trim()
+    if (raw.startsWith("file://")) {
+      return Uri.parse(raw).path ?: raw.removePrefix("file://")
+    }
+    return raw
   }
 
   /* ---------------------------------------------------------------- control */
@@ -304,10 +327,13 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
       // after play means no decoding from byte zero of a two-hour file.
       if (startMs > 0) media.addOption(":start-time=${startMs / 1000.0}")
       // External subtitle files alongside the video (e.g. from the torrent)
+      attachedSubs.clear()
       subtitleFiles?.forEach { subPath ->
-        val subFile = File(subPath)
+        val path = localPath(subPath)
+        val subFile = File(path)
         if (subFile.exists()) {
           media.addSlave(IMedia.Slave(IMedia.Slave.Type.Subtitle, 4, Uri.fromFile(subFile).toString()))
+          attachedSubs.add(path)
         }
       }
       mediaPlayer.media = media
@@ -375,7 +401,17 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     // id -1 is VLC's "Disable" entry — the UI has its own Off row.
     val subtitles = (p.spuTracks ?: emptyArray())
       .filter { it.id >= 0 }
-      .map { mapOf("id" to it.id, "name" to it.name) }
+      .mapIndexed { i, it ->
+        val raw = it.name?.trim().orEmpty()
+        // libVLC often labels external slaves as "..." — useless in the picker.
+        val label =
+          if (raw.isEmpty() || raw == "..." || raw == "—" || raw.equals("Track", true)) {
+            "Subtitle ${i + 1}"
+          } else {
+            raw.replace(Regex("\\.zip$", RegexOption.IGNORE_CASE), ".srt")
+          }
+        mapOf("id" to it.id, "name" to label)
+      }
     val audio = (p.audioTracks ?: emptyArray())
       .filter { it.id >= 0 }
       .map { mapOf("id" to it.id, "name" to it.name) }
