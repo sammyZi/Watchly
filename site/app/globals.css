@@ -1,0 +1,829 @@
+/* Watchly web — palette mirrors src/theme.ts in both schemes. */
+
+:root {
+  --control: #151922;
+  --bg: #000000;
+  --surface: #181d28;
+  --surface-alt: #232936;
+  --line: #2d3444;
+  --text: #f3f5fa;
+  --muted: #9aa4b8;
+  --faint: #66718a;
+  --accent: #d42f37;
+  --accent-soft: #2a1216;
+  --on-accent: #ffffff;
+  --danger: #ff6b5e;
+  --danger-soft: #2c1512;
+  --good: #46d17f;
+  --good-soft: #10281b;
+  --warn: #ffb340;
+  --warn-soft: #2b2011;
+  --scrim: #000000cc;
+  --tab-bar: #181d28d9;
+  --nav-bg: #0b0e14e6;
+  --app-bg: #000000;
+}
+
+[data-theme='light'] {
+  --control: #ffffff;
+  --bg: #ffffff;
+  --surface: #f2f3f7;
+  --surface-alt: #e6e8ef;
+  --line: #d5d9e2;
+  --text: #12141a;
+  --muted: #5c6578;
+  --faint: #8b93a7;
+  --accent: #d42f37;
+  --accent-soft: #fde8ea;
+  --on-accent: #ffffff;
+  --danger: #d94040;
+  --danger-soft: #fdecea;
+  --good: #1a9f55;
+  --good-soft: #e6f7ed;
+  --warn: #c47d00;
+  --warn-soft: #fff4e0;
+  --scrim: #00000099;
+  --tab-bar: #fde8eaeb;
+  --nav-bg: #ffffffe8;
+  --app-bg: #ffffff;
+}
+
+html {
+  height: 100%;
+  color-scheme: dark;
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+}
+
+html,
+body {
+  background: var(--app-bg);
+}
+
+body {
+  min-height: 100%;
+  color: var(--text);
+  font-family: 'Noto Sans', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+img {
+  display: block;
+}
+
+/* ---------- layout ---------- */
+
+.page {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0 28px 72px;
+  min-height: 100vh;
+}
+
+.page-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 28px 0 18px;
+}
+
+.page-title {
+  font-weight: 700;
+  font-size: 28px;
+  letter-spacing: -0.3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.back-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 17px;
+  flex: none;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.back-btn:hover {
+  color: var(--text);
+  background: var(--surface-alt);
+}
+
+.icon-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  font-size: 18px;
+  flex: none;
+}
+
+.icon-btn.on {
+  background: #e5091426;
+  color: #e50914;
+}
+
+/* ---------- top nav ---------- */
+
+.topnav {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: var(--nav-bg);
+  backdrop-filter: saturate(180%) blur(16px);
+  border-bottom: 1px solid var(--line);
+}
+
+.topnav-inner {
+  max-width: 1440px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding: 0 28px;
+  height: 62px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 700;
+  font-size: 19px;
+  letter-spacing: -0.4px;
+  color: var(--text);
+  flex: none;
+}
+
+.brand-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.topnav-links {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.topnav-links a {
+  padding: 9px 16px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.topnav-links a:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.topnav-links a.active {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* Below this the links stop fitting beside the brand, so they get their own
+   line rather than shrinking into unreadable stubs. */
+@media (max-width: 560px) {
+  .topnav-inner {
+    height: auto;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    padding: 10px 16px;
+  }
+  .topnav-links {
+    overflow-x: auto;
+  }
+}
+
+/* ---------- shelves ---------- */
+
+.shelf {
+  margin: 34px 0 10px;
+}
+
+.shelf-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 0 2px 10px;
+}
+
+.shelf-title {
+  font-weight: 600;
+  font-size: 21px;
+  letter-spacing: -0.2px;
+}
+
+.shelf-more {
+  font-size: 14px;
+  color: var(--accent);
+  margin-left: auto;
+}
+
+.shelf-row {
+  display: flex;
+  gap: 18px;
+  overflow-x: auto;
+  padding: 2px 2px 10px;
+  scrollbar-width: none;
+}
+
+.shelf-row::-webkit-scrollbar {
+  display: none;
+}
+
+.poster {
+  flex: none;
+  position: relative;
+  display: block;
+}
+
+/* The art holds the aspect ratio, not the whole card — putting it on the card
+   squashed the caption into the picture. */
+.poster-art {
+  position: relative;
+  aspect-ratio: 2 / 3;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 22%);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.poster:hover .poster-art {
+  transform: translateY(-4px);
+  box-shadow: 0 16px 32px rgb(0 0 0 / 38%);
+}
+
+.poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.4s ease;
+}
+
+.poster:hover img {
+  transform: scale(1.05);
+}
+
+/* Reads over artwork of any brightness — the scrim carries it, not the colour. */
+.poster-score {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 7px;
+  border-radius: 8px;
+  background: rgb(11 14 20 / 78%);
+  backdrop-filter: blur(4px);
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.poster-cap {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  padding: 9px 2px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.poster-sub {
+  font-size: 12px;
+  color: var(--faint);
+  padding: 2px 2px 0;
+}
+
+.poster-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 22px 18px;
+}
+
+.poster-grid .poster {
+  width: auto !important;
+}
+
+/* ---------- hero ---------- */
+
+.hero {
+  position: relative;
+  height: 420px;
+  border-radius: 20px;
+  overflow: hidden;
+  margin: 24px 0 6px;
+  box-shadow: 0 18px 40px rgb(0 0 0 / 30%);
+}
+
+.hero img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgb(0 0 0 / 96%) 8%, rgb(0 0 0 / 60%) 60%, transparent);
+}
+
+[data-theme='light'] .hero::after {
+  background: linear-gradient(
+    to top,
+    rgb(255 255 255 / 96%) 8%,
+    rgb(255 255 255 / 70%) 60%,
+    transparent
+  );
+}
+
+.hero-body {
+  position: absolute;
+  left: 32px;
+  right: 32px;
+  bottom: 30px;
+  max-width: 640px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.hero-title {
+  font-weight: 700;
+  font-size: 40px;
+  letter-spacing: -0.4px;
+  text-shadow: 0 2px 12px rgb(0 0 0 / 60%);
+}
+
+.hero-facts {
+  font-size: 14px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 22px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.btn-soft {
+  background: var(--surface-alt);
+  color: var(--text);
+}
+
+/* Hero paging: the top recommendations, one at a time. */
+.hero-dots {
+  position: absolute;
+  right: 26px;
+  bottom: 30px;
+  z-index: 3;
+  display: flex;
+  gap: 8px;
+}
+
+.hero-dots button {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 38%);
+  transition: width 0.2s ease, background 0.2s ease;
+}
+
+.hero-dots button.on {
+  width: 26px;
+  background: var(--accent);
+}
+
+/* ---------- title page ---------- */
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 26px;
+}
+
+/* Wide enough for two readable columns — below this the release list goes back
+   under the episodes, which is the only thing that fits on a phone. */
+@media (min-width: 1000px) {
+  .detail-grid {
+    grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.9fr);
+    gap: 40px;
+    align-items: start;
+  }
+
+  .detail-side {
+    position: sticky;
+    top: 82px;
+    max-height: calc(100vh - 110px);
+    overflow-y: auto;
+    scrollbar-width: thin;
+    padding-right: 4px;
+  }
+}
+
+/* ---------- player ---------- */
+
+/* Controls sit on video, not on the page, so they take their colours from the
+   picture rather than the theme — a light-theme white circle on a dark frame
+   was the one place the shared button styles did not carry. */
+.player-ui .icon-btn,
+.player-ui .back-btn {
+  background: rgb(255 255 255 / 14%);
+  border-color: transparent;
+  color: #fff;
+  backdrop-filter: blur(6px);
+}
+
+.player-ui .icon-btn:hover,
+.player-ui .back-btn:hover {
+  background: rgb(255 255 255 / 26%);
+  color: #fff;
+}
+
+.player-ui .icon-btn.on {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: transparent;
+}
+
+/* Nothing to point at once the chrome is gone. */
+.player-idle {
+  cursor: none;
+}
+
+/* ---------- chips ---------- */
+
+.chips {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 2px 10px;
+  scrollbar-width: none;
+}
+
+.chips::-webkit-scrollbar {
+  display: none;
+}
+
+.chip {
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--surface-alt);
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+  flex: none;
+}
+
+.chip.active {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* ---------- rows ---------- */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid transparent;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.row:hover {
+  background: var(--surface-alt);
+  border-color: var(--line);
+}
+
+.row-thumb {
+  width: 64px;
+  height: 92px;
+  border-radius: 8px;
+  flex: none;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.row-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.row-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.row-title {
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 21px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.row-right {
+  flex: none;
+  font-size: 12px;
+  color: var(--faint);
+  text-align: right;
+}
+
+/* ---------- misc ---------- */
+
+.spinner {
+  width: 34px;
+  height: 34px;
+  border: 3px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+  margin: 40px auto;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.center {
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+  padding: 40px 0;
+}
+
+.tag {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 8px;
+  background: var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.health {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+
+.health.fast {
+  background: var(--good);
+}
+
+.health.good {
+  background: var(--warn);
+}
+
+.health.weak {
+  background: var(--danger);
+}
+
+.health.dead {
+  background: var(--faint);
+}
+
+.good-text {
+  color: var(--good);
+}
+
+.warn-text {
+  color: var(--warn);
+}
+
+.danger-text {
+  color: var(--danger);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.faint {
+  color: var(--faint);
+}
+
+/* ---------- offline strip ---------- */
+
+.offline {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 13px;
+  text-align: center;
+  padding: 8px 16px;
+}
+
+/* ---------- marquee ---------- */
+
+.marquee {
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.marquee > span {
+  display: inline-block;
+  padding-right: 40px;
+  animation: marquee 18s linear infinite;
+}
+
+@keyframes marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+/* ---------- empty states & forms ---------- */
+
+.input {
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 15px;
+  outline: none;
+}
+
+.input:focus {
+  border-color: var(--accent);
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.field-label {
+  font-size: 14px;
+}
+
+.field-sub {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* ---------- switch ---------- */
+
+.switch {
+  width: 46px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--line);
+  position: relative;
+  flex: none;
+  transition: background 0.2s;
+}
+
+.switch::after {
+  content: '';
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--text);
+  top: 3px;
+  left: 3px;
+  transition: left 0.2s;
+}
+
+.switch.on {
+  background: var(--accent);
+}
+
+.switch.on::after {
+  left: 23px;
+}
+
+/* ---------- segment control ---------- */
+
+.segment {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--surface-alt);
+}
+
+.segment button {
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.segment button.active {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* ---------- list ---------- */
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.actions .btn {
+  flex: 1;
+  justify-content: center;
+}
