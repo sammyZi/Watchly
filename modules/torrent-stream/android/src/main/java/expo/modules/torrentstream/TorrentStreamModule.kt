@@ -3,12 +3,15 @@ package expo.modules.torrentstream
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.os.Handler
 import android.os.HandlerThread
+import android.provider.MediaStore
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import org.libtorrent4j.AddTorrentParams
@@ -43,7 +46,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.ZipInputStream
 
 private const val TAG = "TorrentStream"
-private const val NOTIF_CHANNEL = "torrent_downloads"
+private const val NOTIF_CHANNEL = "torrent_downloads_v2"
 private const val NOTIF_ID = 42001
 
 /** Public DHT bootstrap nodes — without these a cold session never finds peers. */
@@ -250,6 +253,7 @@ class TorrentStreamModule : Module() {
   private var showNotify = false
   private var lastNotifPct = -1
   private var lastNotifPaused: Boolean? = null
+  private var lastNotifRate = -1
 
   /** Byte offset each live HTTP reader is sitting at, keyed by connection id.
    *  The player runs more than one at a time — playback at the head plus a probe
@@ -339,10 +343,9 @@ class TorrentStreamModule : Module() {
     }
 
     /**
-     * Copy the already-downloaded file to the public Downloads folder.
-     * Call after the progress event reports 100% or after stopping playback.
-     * `fileName` is the desired filename; defaults to the torrent file name
-     * if empty.
+     * Copy the already-downloaded file into the device Downloads folder.
+     * Call after the selected file is fully present. Returns a uri the player
+     * can open later (`file://` or `content://`).
      */
     AsyncFunction("copyTo") { fileIndex: Int, fileName: String ->
       val ti = info ?: throw CodedException("No torrent is running")
@@ -351,20 +354,31 @@ class TorrentStreamModule : Module() {
       val expected = ti.files().fileSize(fileIndex)
       if (src.length() < expected) {
         throw CodedException(
-          "Only ${(src.length() * 100 / expected)}% downloaded — wait until playback finishes"
+          "Only ${(src.length() * 100 / expected)}% downloaded — wait until it finishes"
         )
       }
       val name = fileName.ifBlank { ti.files().fileName(fileIndex) }
-      val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(
-        android.os.Environment.DIRECTORY_DOWNLOADS
-      )
-      downloadsDir.mkdirs()
-      val dest = File(downloadsDir, name)
-      src.copyTo(dest, overwrite = true)
-      log("copied ${src.name} → ${dest.absolutePath}")
+      val uri = saveToDownloads(src, name)
+      log("copied ${src.name} → $uri")
       notifyComplete(name)
-      // file:// so the in-app player can open Completed downloads later.
-      "file://${dest.absolutePath}"
+      // Stop seeding the moment the file is safe — JS also resets, but that is
+      // a round trip later and leaves upload running until then.
+      showNotify = false
+      clearDownloadNotification()
+      teardown()
+      uri
+    }
+
+    /** Resolve a finished download for local playback. */
+    AsyncFunction("downloadUri") { fileName: String ->
+      findDownload(fileName)
+        ?: throw CodedException("File not found in Downloads/$fileName")
+    }
+
+    /** Remove a Completed entry's file from Downloads. */
+    AsyncFunction("deleteDownload") { fileName: String ->
+      deleteDownloadFile(fileName)
+      true
     }
 
     /**
@@ -432,18 +446,6 @@ class TorrentStreamModule : Module() {
       null
     }
 
-    /** Resolve a finished download in public Downloads/ for local playback. */
-    AsyncFunction("downloadUri") { fileName: String ->
-      val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(
-        android.os.Environment.DIRECTORY_DOWNLOADS
-      )
-      val dest = File(downloadsDir, fileName)
-      if (!dest.exists()) {
-        throw CodedException("File not found in Downloads/$fileName")
-      }
-      "file://${dest.absolutePath}"
-    }
-
     AsyncFunction("pause") {
       val h = handle
       if (h != null && h.isValid) {
@@ -478,6 +480,7 @@ class TorrentStreamModule : Module() {
         ensureNotifyChannel()
         lastNotifPct = -1
         lastNotifPaused = null
+        lastNotifRate = -1
         updateDownloadNotification()
       }
     }
@@ -1484,6 +1487,9 @@ class TorrentStreamModule : Module() {
    * The one progress event. `buffer` is how much of the pre-roll has landed —
    * meaningless for a download, which reports it full so the UI never shows a
    * transfer waiting on a buffer nobody is reading.
+   *
+   * Downloads use totalWanted/Done: whole-torrent progress never reaches 100%
+   * when other files in the pack are ignored, so the finish step never ran.
    */
   private fun reportProgress(h: TorrentHandle, buffer: Int) {
     val status = h.status()
@@ -1491,7 +1497,7 @@ class TorrentStreamModule : Module() {
       "progress",
       mapOf(
         "buffer" to buffer,
-        "progress" to (status.progress() * 100f),
+        "progress" to downloadProgress(status),
         "speed" to if (userPaused) 0 else status.downloadRate(),
         "seeds" to status.numSeeds(),
         "peers" to status.numPeers(),
@@ -1501,6 +1507,19 @@ class TorrentStreamModule : Module() {
       )
     )
     updateDownloadNotification()
+  }
+
+  /** 0–100. For a full-file download, only the pieces we asked for. */
+  private fun downloadProgress(status: org.libtorrent4j.TorrentStatus): Float {
+    if (fullFile) {
+      val wanted = status.totalWanted()
+      if (wanted > 0) {
+        return (status.totalWantedDone().toDouble() / wanted * 100.0)
+          .toFloat()
+          .coerceIn(0f, 100f)
+      }
+    }
+    return (status.progress() * 100f).coerceIn(0f, 100f)
   }
 
   /** Piece holding the given byte offset *within the selected file*. */
@@ -1520,10 +1539,13 @@ class TorrentStreamModule : Module() {
     persistPeers()
     persistSession()
     clearDownloadNotification()
-    showNotify = false
+    // Keep showNotify: play() tears down before the download runs, and JS has
+    // already asked for a progress notification by then. stop()/setNotify(false)
+    // clear the flag.
     userPaused = false
     lastNotifPct = -1
     lastNotifPaused = null
+    lastNotifRate = -1
 
     server?.stop()
     server = null
@@ -1611,7 +1633,7 @@ class TorrentStreamModule : Module() {
       NotificationChannel(
         NOTIF_CHANNEL,
         "Downloads",
-        NotificationManager.IMPORTANCE_LOW
+        NotificationManager.IMPORTANCE_DEFAULT
       ).apply {
         description = "Torrent download progress"
         setShowBadge(false)
@@ -1625,15 +1647,27 @@ class TorrentStreamModule : Module() {
     val ti = info ?: return
     val name =
       if (fileIndex >= 0) ti.files().fileName(fileIndex) else ti.name()
-    val h = handle
-    val pct = if (h != null && h.isValid) {
-      (h.status().progress() * 100f).toInt().coerceIn(0, 100)
-    } else {
-      0
-    }
-    if (pct == lastNotifPct && lastNotifPaused == userPaused) return
+    val h = handle?.takeIf { it.isValid }
+    val status = h?.status()
+    val pct = if (status != null) downloadProgress(status).toInt().coerceIn(0, 100) else 0
+    val rate = if (userPaused) 0 else (status?.downloadRate() ?: 0)
+    // Bucket speed so tiny fluctuations do not rebuild the notification every tick.
+    val rateKey = rate / 25_000
+    if (pct == lastNotifPct && lastNotifPaused == userPaused && rateKey == lastNotifRate) return
     lastNotifPct = pct
     lastNotifPaused = userPaused
+    lastNotifRate = rateKey
+
+    val fileSize =
+      if (fileIndex >= 0) ti.files().fileSize(fileIndex) else ti.totalSize()
+    val leftBytes =
+      if (status != null && fullFile && status.totalWanted() > 0) {
+        (status.totalWanted() - status.totalWantedDone()).coerceAtLeast(0)
+      } else {
+        ((1.0 - pct / 100.0) * fileSize).toLong().coerceAtLeast(0)
+      }
+    val speedText = formatRate(rate)
+    val etaText = formatEta(leftBytes, rate)
 
     ensureNotifyChannel()
     val launch = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)?.apply {
@@ -1645,12 +1679,16 @@ class TorrentStreamModule : Module() {
       launch,
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
-    val title = if (userPaused) "Paused" else "Downloading"
-    val text = if (userPaused) name else "$pct% · $name"
+    val title = if (userPaused) "Paused" else "Downloading · $pct%"
+    val text = if (userPaused) {
+      name
+    } else {
+      "$speedText · $etaText\n$name"
+    }
     val notif = NotificationCompat.Builder(ctx, NOTIF_CHANNEL)
       .setSmallIcon(android.R.drawable.stat_sys_download)
       .setContentTitle(title)
-      .setContentText(text)
+      .setContentText(if (userPaused) name else "$speedText · $etaText")
       .setStyle(NotificationCompat.BigTextStyle().bigText(text))
       .setProgress(100, pct, pct <= 0 && !userPaused)
       .setOngoing(true)
@@ -1660,6 +1698,21 @@ class TorrentStreamModule : Module() {
       .build()
     val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     nm.notify(NOTIF_ID, notif)
+  }
+
+  private fun formatRate(bytesPerSec: Int): String {
+    if (bytesPerSec <= 0) return "—/s"
+    if (bytesPerSec < 1024) return "$bytesPerSec B/s"
+    if (bytesPerSec < 1024 * 1024) return "${bytesPerSec / 1024} KB/s"
+    return String.format("%.1f MB/s", bytesPerSec / (1024.0 * 1024.0))
+  }
+
+  private fun formatEta(remainingBytes: Long, bytesPerSec: Int): String {
+    if (bytesPerSec <= 0 || remainingBytes <= 0) return "— left"
+    val secs = (remainingBytes / bytesPerSec).toInt()
+    if (secs < 60) return "${secs}s left"
+    if (secs < 3600) return "${secs / 60}m left"
+    return "${secs / 3600}h ${(secs % 3600) / 60}m left"
   }
 
   private fun notifyComplete(name: String) {
@@ -1684,6 +1737,53 @@ class TorrentStreamModule : Module() {
     nm.cancel(NOTIF_ID)
   }
 
+  /** App-owned Downloads dir — always writable, no runtime permission. */
+  private fun appDownloadsDir(): File {
+    val ctx = appContext.reactContext!!
+    return (ctx.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+      ?: File(ctx.filesDir, "Download")).apply { mkdirs() }
+  }
+
+  /**
+   * App Downloads folder — always writable. Public MediaStore copies of multi-GB
+   * files would double storage, so the Completed list opens this path.
+   */
+  private fun saveToDownloads(src: File, name: String): String {
+    val safe = name.replace(Regex("[\\\\/]+"), "_").ifBlank { "download" }
+    val dest = File(appDownloadsDir(), safe)
+    src.copyTo(dest, overwrite = true)
+    return "file://${dest.absolutePath}"
+  }
+
+  private fun findDownload(fileName: String): String? {
+    val safe = fileName.replace(Regex("[\\\\/]+"), "_")
+    val private = File(appDownloadsDir(), safe)
+    if (private.exists()) return "file://${private.absolutePath}"
+    val pub = File(
+      Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+      safe
+    )
+    if (pub.exists()) return "file://${pub.absolutePath}"
+    return null
+  }
+
+  private fun deleteDownloadFile(fileName: String) {
+    val safe = fileName.replace(Regex("[\\\\/]+"), "_")
+    File(appDownloadsDir(), safe).delete()
+    File(
+      Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+      safe
+    ).delete()
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      val ctx = appContext.reactContext ?: return
+      ctx.contentResolver.delete(
+        MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+        "${MediaStore.MediaColumns.DISPLAY_NAME}=?",
+        arrayOf(safe)
+      )
+    }
+  }
+
   /** Immediate progress tick so the UI flips Pause/Resume without waiting. */
   private fun emitPausedProgress(h: TorrentHandle) {
     if (!h.isValid) return
@@ -1692,7 +1792,7 @@ class TorrentStreamModule : Module() {
       "progress",
       mapOf(
         "buffer" to 0,
-        "progress" to (status.progress() * 100f),
+        "progress" to downloadProgress(status),
         "speed" to if (userPaused) 0 else status.downloadRate(),
         "seeds" to status.numSeeds(),
         "peers" to status.numPeers(),

@@ -558,9 +558,8 @@ export function DetailScreen({
     // An episode also looks for the packs that contain it — they routinely
     // carry twenty times the seeders, and only the one file inside is fetched.
     const wanted = picked
-      ? searchEpisode(title.title, picked.season, picked.episode, ctrl.signal, title.imdb)
+      ? searchEpisode(title.title, picked.season, picked.episode, ctrl.signal)
       : searchTorrents(title.title, ctrl.signal, {
-          imdb: title.imdb,
           // Series only ever carry their first-aired year, which is not what
           // the season being watched is labelled with.
           year: title.kind === 'movie' ? title.year : null,
