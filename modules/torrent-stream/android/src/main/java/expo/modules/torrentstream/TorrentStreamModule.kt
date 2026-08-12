@@ -386,7 +386,7 @@ class TorrentStreamModule : Module() {
       if (bytes[0] != 0x50.toByte() || bytes[1] != 0x4B.toByte()) {
         val dest = File(dir, "$safe.srt")
         dest.writeBytes(bytes)
-        return@AsyncFunction "file://${dest.absolutePath}"
+        return@AsyncFunction dest.absolutePath
       }
 
       ZipInputStream(bytes.inputStream()).use { zip ->
@@ -413,12 +413,23 @@ class TorrentStreamModule : Module() {
             val dest = File(dir, "$safe.$ext")
             dest.writeBytes(body)
             log("subtitle: ${current.name} → ${dest.name} (${body.size}B)")
-            return@AsyncFunction "file://${dest.absolutePath}"
+            // Bare path — the player opens File(path); file:// broke attach.
+            return@AsyncFunction dest.absolutePath
           }
           entry = zip.nextEntry
         }
       }
       throw CodedException("No subtitle file inside the archive")
+    }
+
+    /** Drop SubDL files when their library row goes. Paths outside subs/ are ignored. */
+    AsyncFunction("deleteSubtitles") { paths: List<String> ->
+      val dir = File(cacheRoot, "subs").absolutePath + File.separator
+      for (path in paths) {
+        val file = File(path)
+        if (file.absolutePath.startsWith(dir)) file.delete()
+      }
+      null
     }
 
     /** Resolve a finished download in public Downloads/ for local playback. */

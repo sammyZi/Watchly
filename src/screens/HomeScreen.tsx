@@ -1,6 +1,7 @@
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   FlatList,
   Image,
   Pressable,
@@ -12,9 +13,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../components/Icon';
 import { Thumb } from '../components/Thumb';
+import { resumeRatio } from '../hooks/useTorrent';
 import type { Item } from '../lib/history';
 import {
-  ANIME_GENRE,
   loadCatalog,
   peekCatalog,
   watchedGenres,
@@ -31,26 +32,22 @@ import {
   TAB_INSET,
   type,
   useColors,
-  useTheme,
   useThemedStyles,
 } from '../theme';
 
-/** The shelves, in the order they appear. Genre rails are the recommendations:
- *  Cinemeta ranks each by popularity, which is as close to "for you" as a
- *  service that knows nothing about the user can get. */
+/** Fixed charts only. Genre rails come from watch history via `watchedGenres`. */
 export type Shelf = { title: string; kind: 'movie' | 'tv'; genre?: string };
 
 const SHELVES: Shelf[] = [
   { title: 'Trending films', kind: 'movie' },
   { title: 'Popular series', kind: 'tv' },
-  { title: 'Action', kind: 'movie', genre: 'Action' },
-  { title: 'Comedy', kind: 'movie', genre: 'Comedy' },
-  { title: 'Thriller', kind: 'movie', genre: 'Thriller' },
-  { title: 'Animation', kind: 'movie', genre: 'Animation' },
-  { title: 'Drama series', kind: 'tv', genre: 'Drama' },
-  // Its own catalog rather than a Cinemeta genre — see ANIME_GENRE.
-  { title: 'Anime', kind: 'tv', genre: ANIME_GENRE },
 ];
+
+/** Still watching — has a resume point short of the end. */
+function isInProgress(item: Item): boolean {
+  if (item.lastFileIndex == null) return false;
+  return resumeRatio(item, item.lastFileIndex) < 0.9;
+}
 
 /** What identifies a shelf's contents — two shelves with the same kind and
  *  genre are the same catalog however they are labelled. */
@@ -82,18 +79,15 @@ function useHomeStyles() {
       right: 0,
       flexDirection: 'row' as const,
       justifyContent: 'center' as const,
+      alignItems: 'center' as const,
       gap: 6,
     },
     dot: {
-      width: 6,
       height: 6,
       borderRadius: 3,
       backgroundColor: c.faint,
-      opacity: 0.5,
     },
-    dotOn: { width: 18, backgroundColor: c.accent, opacity: 1 },
-    heroBody: { padding: space.xl, gap: space.sm },
-    heroEyebrow: {
+    heroBody: { padding: space.xl, gap: space.sm },    heroEyebrow: {
       ...type.overline,
       color: c.accent,
       fontFamily: font.bold,
@@ -207,27 +201,31 @@ function HomeScreenView({
    */
   const [picks, setPicks] = useState<Shelf[]>([]);
   useEffect(() => {
-    // Order is the weighting — `topGenres` breaks ties on it. What is being
-    // watched right now leads, then the rest of the library, then the saved
-    // lists, which are an intention rather than a habit.
+    // In-progress titles lead the taste signal — what you are mid-way through
+    // says more than something finished last month. They never appear *in* the
+    // recommendation shelves themselves (those stay fresh titles only).
     const identified = (items: Item[]) =>
       items
         .filter((h): h is Item & { imdb: string } => !!h.imdb)
         .map((h) => ({ imdb: h.imdb, kind: h.kind ?? ('movie' as const) }));
 
-    const continuing = recent.filter((h) => h.lastFileIndex != null);
+    const continuing = recent.filter(isInProgress);
+    const rest = recent.filter((h) => !continuing.includes(h));
     const seen = [
       ...identified(continuing),
-      ...identified(recent.filter((h) => !continuing.includes(h))),
+      ...identified(rest),
       ...saved.map((s) => ({ imdb: s.imdb, kind: s.kind })),
     ].slice(0, 30);
-    if (!seen.length) return;
+    if (!seen.length) {
+      setPicks([]);
+      return;
+    }
     let live = true;
-    watchedGenres(seen).then((genres) => {
+    watchedGenres(seen, 4).then((genres) => {
       if (!live) return;
       setPicks(
-        genres.map(({ genre, kind }) => ({
-          title: `More ${genre}`,
+        genres.map(({ genre, kind }, i) => ({
+          title: i === 0 ? 'Recommended for you' : `Because you like ${genre}`,
           kind,
           genre,
         }))
@@ -262,13 +260,21 @@ function HomeScreenView({
 
   // Once there is a taste to go on the hero follows it, and says so — the
   // popularity chart is what to show someone nothing is known about yet.
+  const watchedIds = useMemo(
+    () => new Set(recent.map((h) => h.imdb).filter(Boolean) as string[]),
+    [recent]
+  );
   const heroShelf = picks[0] ?? SHELVES[0];
+  // Personalized rails never re-show titles already in history — Continue
+  // watching is the place for unfinished ones.
   const featured = (
     loaded[shelfKey(heroShelf)] ??
     loaded[shelfKey(SHELVES[0])] ??
     []
-  ).slice(0, 5);
-  const resumable = recent.filter((i) => i.lastFileIndex != null);
+  )
+    .filter((t) => !watchedIds.has(t.imdb))
+    .slice(0, 5);
+  const resumable = recent.filter(isInProgress);
   const later = inList(saved, 'later');
   const favorites = inList(saved, 'favorite');
 
@@ -296,7 +302,7 @@ function HomeScreenView({
                 // the fallback above can leave the chart showing instead.
                 eyebrow={
                   picks[0] && loaded[shelfKey(picks[0])]
-                    ? `in ${picks[0].genre}`
+                    ? 'for you'
                     : 'today'
                 }
                 top={insets.top}
@@ -376,29 +382,38 @@ function HomeScreenView({
             )}
           </>
         }
-        renderItem={({ item: shelf, index: i }) => (
+        renderItem={({ item: shelf, index: i }) => {
+          const raw = loaded[shelfKey(shelf)];
+          // Genre shelves = recommendations: drop anything already watched.
+          // Trending / Popular keep the full chart.
+          const data = raw
+            ? shelf.genre
+              ? raw.filter((t) => !watchedIds.has(t.imdb))
+              : raw
+            : null;
+          return (
           <View style={styles.shelf}>
             <Head
               title={shelf.title}
               hue={hues[(i + 1) % hues.length]}
-              onSeeAll={loaded[shelfKey(shelf)]?.length ? () => onOpenShelf(shelf) : undefined}
+              onSeeAll={data?.length ? () => onOpenShelf(shelf) : undefined}
             />
-            {loaded[shelfKey(shelf)] ? (
+            {data ? (
               <Rail
-                data={loaded[shelfKey(shelf)]!}
+                data={data}
                 keyOf={(t) => t.imdb}
                 render={(item) => (
                   <Poster title={item} onPress={() => onOpenTitle(item)} />
                 )}
               />
             ) : (
-              // Same height as a poster, so nothing jumps when the shelf lands.
               <View style={styles.railPlaceholder}>
                 <ActivityIndicator color={colors.faint} size="small" />
               </View>
             )}
           </View>
-        )}
+          );
+        }}
       />
     </View>
   );
@@ -452,20 +467,39 @@ function Hero({
 }) {
   const { width } = useWindowDimensions();
   const [page, setPage] = useState(0);
+  const list = useRef<FlatList<Title>>(null);
+  const pageRef = useRef(0);
   const colors = useColors();
   const styles = useHomeStyles();
+
+  pageRef.current = page;
+
+  // Advance every 10s; a manual swipe resets the clock via the page change.
+  useEffect(() => {
+    if (titles.length < 2) return;
+    const id = setInterval(() => {
+      const next = (pageRef.current + 1) % titles.length;
+      list.current?.scrollToIndex({ index: next, animated: true });
+      setPage(next);
+    }, 10_000);
+    return () => clearInterval(id);
+  }, [titles.length, page]);
 
   return (
     <View style={styles.hero}>
       <FlatList
+        ref={list}
         data={titles}
         horizontal
         pagingEnabled
         showsHorizontalScrollIndicator={false}
         keyExtractor={(t) => t.imdb}
-        // Every page is exactly the screen wide, so the list never has to
-        // measure anything to know where page N starts.
         getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
+        onScroll={(e) => {
+          const next = Math.round(e.nativeEvent.contentOffset.x / width);
+          if (next !== page) setPage(next);
+        }}
+        scrollEventThrottle={16}
         onMomentumScrollEnd={(e) =>
           setPage(Math.round(e.nativeEvent.contentOffset.x / width))
         }
@@ -478,7 +512,6 @@ function Hero({
                 resizeMode="cover"
               />
             )}
-            {/* One gradient, art to page — no band, no seam. */}
             <View style={styles.heroFade} />
             <View style={[styles.heroBody, { paddingTop: top + space.xl }]}>
               <Text style={styles.heroEyebrow}>
@@ -503,10 +536,52 @@ function Hero({
 
       <View style={styles.dots}>
         {titles.map((t, i) => (
-          <View key={t.imdb} style={[styles.dot, i === page && styles.dotOn]} />
+          <HeroDot key={t.imdb} active={i === page} accent={colors.accent} faint={colors.faint} />
         ))}
       </View>
     </View>
+  );
+}
+
+/** Red pill that stretches when active — smoother than swapping styles. */
+function HeroDot({
+  active,
+  accent,
+  faint,
+}: {
+  active: boolean;
+  accent: string;
+  faint: string;
+}) {
+  const width = useRef(new Animated.Value(active ? 18 : 6)).current;
+  const opacity = useRef(new Animated.Value(active ? 1 : 0.45)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(width, {
+        toValue: active ? 18 : 6,
+        useNativeDriver: false,
+        friction: 7,
+        tension: 80,
+      }),
+      Animated.timing(opacity, {
+        toValue: active ? 1 : 0.45,
+        duration: 220,
+        useNativeDriver: false,
+      }),
+    ]).start();
+  }, [active, width, opacity]);
+
+  return (
+    <Animated.View
+      style={{
+        width,
+        height: 6,
+        borderRadius: 3,
+        opacity,
+        backgroundColor: active ? accent : faint,
+      }}
+    />
   );
 }
 
