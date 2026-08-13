@@ -44,6 +44,8 @@ export function useTorrent(settings: Settings) {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [playingIndex, setPlayingIndex] = useState(0);
+  /** File indexes this play() asked for — a season download is many, not one. */
+  const [wantedIndices, setWantedIndices] = useState<number[]>([]);
 
   // Latest source, so play() uses the same (tracker-augmented) uri as inspect().
   const source = useRef<string | null>(null);
@@ -99,6 +101,7 @@ export function useTorrent(settings: Settings) {
     setLanUrl(null);
     setFileName(null);
     setSubtitleFiles([]);
+    setWantedIndices([]);
     setProgress(null);
     source.current = null;
     lastState.current = null;
@@ -147,7 +150,12 @@ export function useTorrent(settings: Settings) {
     (
       fileIndex: number,
       startRatio = 0,
-      opts?: { keepProgress?: boolean; fullFile?: boolean }
+      opts?: {
+        keepProgress?: boolean;
+        fullFile?: boolean;
+        fileIndices?: number[];
+        season?: number;
+      }
     ) => {
       const uri = source.current;
       if (!uri) return;
@@ -159,15 +167,29 @@ export function useTorrent(settings: Settings) {
       streaming.current = false;
       keepProgress.current = !!opts?.keepProgress;
       setPlayingIndex(fileIndex);
+      setWantedIndices(
+        opts?.fileIndices?.length ? opts.fileIndices : [fileIndex]
+      );
       setPhase('playing');
+      console.log('[torrent] play', {
+        index: fileIndex,
+        season: opts?.season ?? -1,
+        files: opts?.fileIndices ?? [],
+      });
 
-      TorrentStream.play(uri, fileIndex, {
-        prepareMb: settings.prepareMb,
-        removeFilesAfterStop: settings.removeFilesAfterStop,
-        startRatio,
-        // No reader to follow: fetch the file end to end instead of a window.
-        fullFile: !!opts?.fullFile,
-      }).catch((e: any) => {
+      TorrentStream.play(
+        uri,
+        fileIndex,
+        {
+          prepareMb: settings.prepareMb,
+          removeFilesAfterStop: settings.removeFilesAfterStop,
+          startRatio,
+          fullFile: !!opts?.fullFile,
+          fileList: (opts?.fileIndices ?? []).join(','),
+          season: opts?.season ?? -1,
+        },
+        (opts?.fileIndices ?? []).join(',')
+      ).catch((e: any) => {
         console.warn('[torrent] play failed', e?.message ?? e);
         setError(String(e?.message ?? e));
         setPhase('idle');
@@ -184,7 +206,12 @@ export function useTorrent(settings: Settings) {
     (
       next: Item,
       fileIndex: number,
-      opts?: { keepProgress?: boolean; fullFile?: boolean }
+      opts?: {
+        keepProgress?: boolean;
+        fullFile?: boolean;
+        fileIndices?: number[];
+        season?: number;
+      }
     ) => {
       const uri = settings.addTrackers ? withTrackers(next.uri) : next.uri;
       source.current = uri;
@@ -221,6 +248,7 @@ export function useTorrent(settings: Settings) {
     fileName,
     subtitleFiles,
     playingIndex,
+    wantedIndices,
     progress,
     error,
     fail,

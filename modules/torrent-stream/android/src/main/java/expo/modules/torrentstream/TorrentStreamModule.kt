@@ -199,6 +199,13 @@ class PlayOptions : Record {
   /** Fetch all of the selected file instead of a window around the reader.
    *  See `fullFile` in the JS PlayOptions. */
   @Field val fullFile: Boolean = false
+
+  /** Extra files to fetch with `fullFile` — comma-separated indexes.
+   *  A JS number[] on a Record arrives empty on Android, so this is a string. */
+  @Field var fileList: String = ""
+
+  /** When >= 0, fetch every video in this season, not just `index`. */
+  @Field var season: Int = -1
 }
 
 class TorrentStreamModule : Module() {
@@ -239,6 +246,8 @@ class TorrentStreamModule : Module() {
   private val deadlined = mutableSetOf<Int>()
   /** Absolute paths of subtitle files found in the same folder as the video. */
   private var subtitleFiles = emptyList<String>()
+  /** Video + matching sidecar subs — the only files whose pieces are wanted. */
+  private var wantedFiles = intArrayOf()
 
   /** User paused the transfer from the Downloads UI. */
   private var userPaused = false
@@ -331,8 +340,8 @@ class TorrentStreamModule : Module() {
       mapOf("name" to ti.name(), "files" to entries)
     }
 
-    AsyncFunction("play") { uri: String, index: Int, options: PlayOptions ->
-      play(uri, index, options)
+    AsyncFunction("play") { uri: String, index: Int, options: PlayOptions, extraFiles: String ->
+      play(uri, index, options, extraFiles)
     }
 
     /**
@@ -343,13 +352,6 @@ class TorrentStreamModule : Module() {
     AsyncFunction("copyTo") { fileIndex: Int, fileName: String ->
       log("copyTo: begin index=$fileIndex name=$fileName")
       val ti = info ?: throw CodedException("No torrent is running")
-      val expected = ti.files().fileSize(fileIndex)
-      val rel = ti.files().filePath(fileIndex)
-      val src = File(saveDir, rel)
-      log(
-        "copyTo: src=${src.absolutePath} exists=${src.exists()} " +
-          "len=${src.length()} expected=$expected"
-      )
 
       // Drop every reader that might hold the file open.
       server?.stop()
@@ -361,29 +363,35 @@ class TorrentStreamModule : Module() {
       }
       log("copyTo: server stopped, torrent paused")
 
-      var waits = 0
-      while (src.length() < expected && waits < 20) {
-        Thread.sleep(200)
-        waits++
-      }
-      val have = src.length()
-      log("copyTo: after wait len=$have expected=$expected waits=$waits")
-      // Accept a tiny shortfall (filesystem rounding); refuse a real gap.
-      if (have < expected * 99 / 100) {
-        throw CodedException(
-          "Only ${(have * 100 / expected.coerceAtLeast(1))}% on disk — not ready to save"
-        )
-      }
-
       val name = fileName.ifBlank { ti.files().fileName(fileIndex) }
-      val uri = saveToDownloads(src, name)
-      log("copyTo: saved → $uri")
-      notifyComplete(name)
+      val videos = wantedFiles.filter { i ->
+        i in 0 until ti.files().numFiles() &&
+          ti.files().filePath(i).substringAfterLast('.', "").lowercase() in VIDEO
+      }.ifEmpty { listOf(fileIndex) }
+      val uris = videos.map { i ->
+        val rel = ti.files().filePath(i)
+        val src = File(saveDir, rel)
+        val expected = ti.files().fileSize(i)
+        var waits = 0
+        while (src.length() < expected && waits < 20) {
+          Thread.sleep(200)
+          waits++
+        }
+        if (src.length() < expected * 99 / 100) {
+          throw CodedException(
+            "Only ${(src.length() * 100 / expected.coerceAtLeast(1))}% on disk — not ready to save"
+          )
+        }
+        val outName = if (i == fileIndex) name else ti.files().fileName(i)
+        saveToDownloads(src, outName)
+      }
+      log("copyTo: saved ${uris.size} file(s) → ${uris.joinToString()}")
+      notifyComplete(if (uris.size == 1) name else "${uris.size} files")
       showNotify = false
       clearDownloadNotification()
       teardown()
       log("copyTo: torn down")
-      uri
+      uris
     }
 
     /** Resolve a finished download for local playback. */
@@ -851,6 +859,11 @@ class TorrentStreamModule : Module() {
         val ti = runCatching { h.torrentFile() }.getOrNull()
         if (ti != null && ti.isValid) {
           warm = h
+          // Magnet add wants every file until play() picks one. Sequential
+          // then fetches from piece 0 — the start of a season pack — while
+          // the user is still choosing an episode.
+          val skip = Array(ti.files().numFiles()) { Priority.IGNORE }
+          runCatching { h.prioritizeFiles(skip) }
           val status = h.status()
           log(
             "metadata: ready in ${System.currentTimeMillis() - started}ms, " +
@@ -1051,7 +1064,35 @@ class TorrentStreamModule : Module() {
 
   /* ------------------------------------------------------------ playback */
 
-  private fun play(uri: String, index: Int, options: PlayOptions) {
+  private val JUNK_FILE =
+    Regex("""\b(sample|trailer|featurette|behind[. _-]?the[. _-]?scenes)\b""", RegexOption.IGNORE_CASE)
+  private val EP_SEASON =
+    Regex("""\bs(\d{1,2})(?=e\d{1,2}\b|\b)""", RegexOption.IGNORE_CASE)
+  private val NAMED_SEASON =
+    Regex("""\bseasons?[ ._-]*(\d{1,2})\b""", RegexOption.IGNORE_CASE)
+
+  private fun seasonsIn(hay: String): Set<Int> {
+    val out = mutableSetOf<Int>()
+    EP_SEASON.findAll(hay).forEach { it.groupValues[1].toIntOrNull()?.let(out::add) }
+    NAMED_SEASON.findAll(hay).forEach { it.groupValues[1].toIntOrNull()?.let(out::add) }
+    return out
+  }
+
+  /** Video indexes that belong to `season`, or every video if none are tagged. */
+  private fun seasonVideos(ti: TorrentInfo, season: Int): List<Int> {
+    val files = ti.files()
+    val videos = (0 until files.numFiles()).filter { i ->
+      val name = files.fileName(i)
+      files.filePath(i).substringAfterLast('.').lowercase() in VIDEO &&
+        !JUNK_FILE.containsMatchIn(name)
+    }
+    val hit = videos.filter { i ->
+      season in seasonsIn(files.fileName(i)) || season in seasonsIn(files.filePath(i))
+    }
+    return hit.ifEmpty { videos }
+  }
+
+  private fun play(uri: String, index: Int, options: PlayOptions, extraFiles: String = "") {
     val startedAt = System.currentTimeMillis()
     ensureSession()
 
@@ -1112,36 +1153,48 @@ class TorrentStreamModule : Module() {
     zoneStarts = emptyList()
     zoneWidth = -1
 
-    // Everything except the chosen file is skipped entirely.
+    // Everything except the chosen file(s) is skipped entirely.
     val priorities = Array(files.numFiles()) { Priority.IGNORE }
-    priorities[index] = Priority.DEFAULT
+    val extra = (extraFiles + "," + options.fileList)
+      .split(',')
+      .mapNotNull { it.trim().toIntOrNull() }
+    val fromSeason =
+      if (options.season >= 0) seasonVideos(ti, options.season) else emptyList()
+    val videos = (listOf(index) + extra + fromSeason)
+      .distinct()
+      .filter { it in 0 until files.numFiles() }
+    log(
+      "play: wanting ${videos.size} video(s) [${videos.joinToString()}] " +
+        "season=${options.season} extra='$extraFiles'"
+    )
+    videos.forEach { priorities[it] = Priority.DEFAULT }
     // Sidecar subs for *this* file only. A season pack can hold hundreds of
     // .srt/.ass files; attaching all of them makes VLC miss the matching one
     // and the picker overflow the screen.
-    val videoStem = files.fileName(index).substringBeforeLast('.').lowercase()
-    val targetPath = files.filePath(index).replace("\\", "/")
-    val targetDir = targetPath.substringBeforeLast("/", "")
-    fun besideVideo(i: Int): Boolean {
+    fun besideVideo(dir: String, i: Int): Boolean {
       val subDir = files.filePath(i).replace("\\", "/")
         .substringBeforeLast("/", "")
-      return subDir == targetDir ||
-        (targetDir.isNotEmpty() && subDir.startsWith("$targetDir/"))
+      return subDir == dir || (dir.isNotEmpty() && subDir.startsWith("$dir/"))
     }
-    fun matchesVideo(i: Int): Boolean {
-      val stem = files.fileName(i).substringBeforeLast('.').lowercase()
-      return stem == videoStem || stem.startsWith("$videoStem.")
+    fun matchesStem(stem: String, i: Int): Boolean {
+      val name = files.fileName(i).substringBeforeLast('.').lowercase()
+      return name == stem || name.startsWith("$stem.")
     }
-    val nearby = (0 until files.numFiles())
-      .filter { i ->
-        i != index &&
+    val subHits = videos.flatMap { vid ->
+      val stem = files.fileName(vid).substringBeforeLast('.').lowercase()
+      val dir = files.filePath(vid).replace("\\", "/").substringBeforeLast("/", "")
+      (0 until files.numFiles()).filter { i ->
+        i !in videos &&
           files.filePath(i).substringAfterLast('.', "").lowercase() in SUBTITLE &&
-          besideVideo(i)
+          besideVideo(dir, i) &&
+          matchesStem(stem, i)
       }
-    val indices = nearby.filter(::matchesVideo)
-    subtitleFiles = indices.map { File(saveDir, files.filePath(it)).absolutePath }
-    indices.forEach { priorities[it] = Priority.DEFAULT }
-    if (indices.isNotEmpty()) {
-      log("play: found ${indices.size} subtitle file(s) alongside the video")
+    }.distinct()
+    subtitleFiles = subHits.map { File(saveDir, files.filePath(it)).absolutePath }
+    wantedFiles = (videos + subHits).toIntArray()
+    wantedFiles.forEach { priorities[it] = Priority.DEFAULT }
+    if (subHits.isNotEmpty()) {
+      log("play: found ${subHits.size} subtitle file(s) alongside the video")
     }
 
     log("play: ${files.fileName(index)} (${files.fileSize(index)} bytes)")
@@ -1187,9 +1240,14 @@ class TorrentStreamModule : Module() {
     h.forceDHTAnnounce()
 
     // Byte offsets inside the file map onto a contiguous range of pieces.
+    // A season download spans every selected video, so the sequential picker
+    // walks that range instead of one episode.
     val size = files.fileSize(index)
-    firstPiece = ti.mapFile(index, 0, 1).piece()
-    lastPiece = ti.mapFile(index, maxOf(0, size - 1), 1).piece()
+    firstPiece = videos.minOf { ti.mapFile(it, 0, 1).piece() }
+    lastPiece = videos.maxOf {
+      val sz = files.fileSize(it)
+      ti.mapFile(it, maxOf(0, sz - 1), 1).piece()
+    }
     tailPiece =
       maxOf(firstPiece, ti.mapFile(index, maxOf(0, size - tailBytesFor(size)), 1).piece())
     headEndPiece = ti.mapFile(index, minOf(HEAD_BYTES, maxOf(0, size - 1)), 1).piece()
@@ -1207,8 +1265,45 @@ class TorrentStreamModule : Module() {
         "— setup took ${System.currentTimeMillis() - startedAt}ms"
     )
 
+    // File priorities alone are not enough: a magnet/inspect torrent already
+    // has every piece wanted, and sequential download then walks the pack from
+    // episode 1. Pin the picker to this file's pieces.
+    wantOnly(h, wantedFiles)
+
     readyAt = System.currentTimeMillis()
     startPolling()
+  }
+
+  /**
+   * Want these files and no others — both the file list and every piece.
+   * `prioritizeFiles` does not reliably clear piece priorities left over from
+   * inspect(), so a season-pack download would fetch the whole torrent.
+   */
+  private fun wantOnly(h: TorrentHandle, filesWanted: IntArray) {
+    val ti = info ?: return
+    val files = ti.files()
+    val filePrio = Array(files.numFiles()) { Priority.IGNORE }
+    for (i in filesWanted) if (i in filePrio.indices) filePrio[i] = Priority.DEFAULT
+    runCatching { h.prioritizeFiles(filePrio) }
+
+    val n = ti.numPieces()
+    val piecePrio = Array(n) { Priority.IGNORE }
+    var expect = 0L
+    for (i in filesWanted) {
+      if (i < 0 || i >= files.numFiles()) continue
+      val size = files.fileSize(i)
+      if (size <= 0) continue
+      expect += size
+      val a = ti.mapFile(i, 0, 1).piece()
+      val b = ti.mapFile(i, size - 1, 1).piece()
+      for (p in a..b) if (p in 0 until n) piecePrio[p] = Priority.DEFAULT
+    }
+    runCatching { h.prioritizePieces(piecePrio) }
+    val wanted = runCatching { h.status().totalWanted() }.getOrNull()
+    log(
+      "want ${filesWanted.size} file(s), ${expect / 1024 / 1024}MB selected, " +
+        "torrent ${ti.totalSize() / 1024 / 1024}MB, picker ${wanted?.let { "${it / 1024 / 1024}MB" } ?: "?"}"
+    )
   }
 
   private fun awaitHandle(ti: TorrentInfo): TorrentHandle? {
@@ -1288,6 +1383,12 @@ class TorrentStreamModule : Module() {
             "subtitleFiles" to emptyList<Map<String, Any>>()
           )
         )
+      }
+      // Inspect/magnet leftovers can creep back in; keep the picker on this file.
+      if (ticks % 10 == 1) {
+        val wanted = runCatching { h.status().totalWanted() }.getOrNull() ?: 0
+        val fileBytes = ti.files().fileSize(fileIndex)
+        if (fileBytes > 0 && wanted > fileBytes * 2) wantOnly(h, wantedFiles)
       }
       session.postSessionStats()
       if (ticks % 2 == 0) reportProgress(h, 100)
@@ -1629,6 +1730,7 @@ class TorrentStreamModule : Module() {
     zoneStarts = emptyList()
     zoneWidth = -1
     subtitleFiles = emptyList()
+    wantedFiles = intArrayOf()
     handle = null
     info = null
     infoHashHex = null
@@ -1684,8 +1786,14 @@ class TorrentStreamModule : Module() {
     if (!showNotify) return
     val ctx = appContext.reactContext ?: return
     val ti = info ?: return
+    val videos = wantedFiles.count { i ->
+      i in 0 until ti.files().numFiles() &&
+        ti.files().filePath(i).substringAfterLast('.', "").lowercase() in VIDEO
+    }
     val name =
-      if (fileIndex >= 0) ti.files().fileName(fileIndex) else ti.name()
+      if (videos > 1) ti.name()
+      else if (fileIndex >= 0) ti.files().fileName(fileIndex)
+      else ti.name()
     val h = handle?.takeIf { it.isValid }
     val status = h?.status()
     val pct = if (status != null) downloadProgress(status).toInt().coerceIn(0, 100) else 0

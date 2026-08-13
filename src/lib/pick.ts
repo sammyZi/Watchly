@@ -1,7 +1,7 @@
-import { parseEpisode } from './search.ts';
+import { parseEpisode, seasonsIn } from './search.ts';
 
 /** Just what picking needs — `TorrentFile` from the native module fits this. */
-type Filed = { index: number; name: string; size: number; isVideo: boolean };
+type Filed = { index: number; name: string; size: number; isVideo: boolean; path?: string };
 
 /** Sample, trailer and "extras" folders sit next to the feature in a lot of
  *  releases, and are always small — but a 200MB trailer is still smaller than
@@ -74,4 +74,19 @@ export function nextEpisode(files: Filed[], index: number): Filed | null {
 
   const at = ordered.findIndex((e) => e.file.index === index);
   return at < 0 ? null : (ordered[at + 1]?.file ?? null);
+}
+
+/** Video files that belong to one season — or every video, when the pack
+ *  does not label seasons (anime episode numbers, a single-season rip). */
+export function seasonFiles(files: Filed[], season?: number): number[] {
+  const videos = files.filter((f) => f.isVideo && !JUNK.test(f.name));
+  if (!videos.length) return [];
+  if (season == null) return videos.map((f) => f.index);
+  const hit = videos.filter((f) => {
+    const at = parseEpisode(f.name) ?? parseEpisode(f.path ?? '');
+    if (at?.season === season) return true;
+    const hay = `${f.path ?? ''} ${f.name}`;
+    return seasonsIn(hay).includes(season);
+  });
+  return (hit.length ? hit : videos).map((f) => f.index);
 }

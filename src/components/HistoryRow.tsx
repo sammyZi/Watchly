@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FlatList, Pressable, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { Icon } from './Icon';
 import { Marquee } from './Marquee';
 import { ProgressBar } from './ProgressBar';
@@ -18,12 +18,14 @@ export function HistoryRow({
   onOpen,
   onPlayFile,
   onDownloadFile,
+  onDownloadSeason,
   onRemove,
 }: {
   item: Item;
   onOpen: () => void;
   onPlayFile: (index: number) => void;
   onDownloadFile: (index: number) => void;
+  onDownloadSeason?: () => void;
   onRemove: () => void;
 }) {
   // Torrents list files in whatever order they were packed; sort naturally so
@@ -61,9 +63,14 @@ export function HistoryRow({
       flexDirection: 'row' as const,
       alignItems: 'center' as const,
       justifyContent: 'center' as const,
-      gap: space.xs,
+      gap: space.sm,
       paddingTop: space.sm,
       paddingBottom: space.xs,
+    },
+    moreHit: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: space.xs,
     },
     moreText: { ...type.meta, fontFamily: font.medium, color: c.muted },
 
@@ -71,7 +78,6 @@ export function HistoryRow({
       borderTopWidth: 1,
       borderTopColor: c.line,
       paddingTop: space.sm,
-      maxHeight: 280,
     },
     file: {
       flexDirection: 'row' as const,
@@ -181,27 +187,29 @@ export function HistoryRow({
       {/* A season pack: the row plays what you were last on, this reaches the
           rest. Only worth a control when there is more than one thing inside. */}
       {videos.length > 1 && (
-        <Pressable onPress={() => setExpanded((e) => !e)} style={styles.more}>
-          <Text style={styles.moreText}>
-            {expanded ? 'Hide' : `All ${videos.length} files`}
-          </Text>
-          <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={15} color={colors.muted} />
-        </Pressable>
+        <View style={styles.more}>
+          <Pressable onPress={() => setExpanded((e) => !e)} style={styles.moreHit}>
+            <Text style={styles.moreText}>
+              {expanded ? 'Hide' : `All ${videos.length} files`}
+            </Text>
+            <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={15} color={colors.muted} />
+          </Pressable>
+          {!!onDownloadSeason && (
+            <Pressable onPress={onDownloadSeason} hitSlop={8} style={styles.downloadBtn}>
+              <Icon name="download" size={14} color={colors.accent} />
+            </Pressable>
+          )}
+        </View>
       )}
 
       {expanded && (
-        <FlatList
-          data={videos}
-          style={styles.files}
-          keyExtractor={(file) => String(file.index)}
-          nestedScrollEnabled
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-          renderItem={({ item: file }) => {
+        <View style={styles.files}>
+          {videos.map((file) => {
             const position = item.positions?.[file.index];
             const duration = item.durations?.[file.index];
             return (
               <Pressable
+                key={file.index}
                 onPress={() => onPlayFile(file.index)}
                 style={({ pressed }) => [styles.file, pressed && styles.pressed]}
               >
@@ -225,8 +233,8 @@ export function HistoryRow({
                 </Pressable>
               </Pressable>
             );
-          }}
-        />
+          })}
+        </View>
       )}
     </View>
   );

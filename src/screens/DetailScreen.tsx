@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { startTransition, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -129,6 +129,18 @@ function useDetailStyles() {
       backgroundColor: c.surfaceAlt,
     },
     downloadOff: { opacity: 0.4 },
+    seasonDl: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+      gap: space.sm,
+      marginHorizontal: space.xl,
+      marginTop: space.md,
+      paddingVertical: space.md,
+      borderRadius: radius.pill,
+      backgroundColor: c.surfaceAlt,
+    },
+    seasonDlText: { ...type.label, fontFamily: font.medium, color: c.text },
     play: {
       flex: 1,
       flexDirection: 'row' as const,
@@ -424,8 +436,9 @@ export function DetailScreen({
     tag?: string,
     startOver?: boolean
   ) => void;
-  /** Same source, kept to storage instead of streamed. */
-  onDownload: (magnet: string, tag?: string) => void;
+  /** Same source, kept to storage instead of streamed. `season` downloads
+   *  every episode in that season from a pack, not just the picked episode. */
+  onDownload: (magnet: string, tag?: string, season?: number) => void;
   onBack: () => void;
 }) {
   const insets = useSafeAreaInsets();
@@ -434,6 +447,8 @@ export function DetailScreen({
   const HEALTH = healthTone(colors);
   const [title, setTitle] = useState<Title>(seed);
   const [sources, setSources] = useState<Hit[] | null>(null);
+  /** Which episode/title `sources` belongs to — Play ignores a stale list. */
+  const [sourceKey, setSourceKey] = useState<string | null>(null);
   /** Plot expanded. Three lines is enough to decide; the rest is on request. */
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -469,6 +484,10 @@ export function DetailScreen({
   const listed = showsWhole ? inSeason : inSeason.slice(0, EPISODE_PAGE);
 
   const tag = picked ? episodeTag(picked.season, picked.episode) : undefined;
+  const pickKey = picked
+    ? `${picked.season}:${picked.episode}`
+    : `movie:${title.imdb}`;
+  const fresh = sourceKey === pickKey;
 
   /**
    * Which quality the buttons mean.
@@ -481,7 +500,7 @@ export function DetailScreen({
   /** In the order they are worth offering, and only the ones actually found. */
   const qualities = QUALITIES.filter((q) => sources?.some((h) => h.quality === q));
   const shown = wanted ? (sources ?? []).filter((h) => h.quality === wanted) : sources;
-  const best = shown?.[0] ?? null;
+  const best = fresh ? shown?.[0] ?? null : null;
 
   // A pick that the new release list cannot honour — a different episode, or a
   // title nobody ripped in 4K — would otherwise disable Play with no way back.
@@ -504,6 +523,21 @@ export function DetailScreen({
   const start = (magnet: string, startOver = false) =>
     onPlay(magnet, picked?.id, tag, startOver);
   const save = (magnet: string) => onDownload(magnet, tag);
+  const saveSeason = async () => {
+    if (season == null) return;
+    const isPack = (h: Hit) => h.scope === 'season' || h.scope === 'complete';
+    let pack =
+      (shown ?? []).find(isPack) ?? (sources ?? []).find(isPack);
+    if (!pack) {
+      const season2 = String(season).padStart(2, '0');
+      const hits = await searchTorrents(title.title, undefined, {
+        suffix: `S${season2}`,
+      }).catch(() => [] as Hit[]);
+      pack = hits.find(isPack) ?? hits.find((h) => h.scope !== 'episode');
+    }
+    if (!pack) return;
+    onDownload(pack.magnet, undefined, season);
+  };
 
   // A catalog row carries no episode list, so a series always needs the full
   // record even when the shelf already gave us a plot.
@@ -531,10 +565,11 @@ export function DetailScreen({
    */
   const chooseSeason = (which: number) => {
     setSeason(which);
-    // A new season starts folded again, whatever the last one was left as.
     setWholeSeason(false);
     const next = nextIn(which);
-    if (next) setPicked(next);
+    // Defer the episode pick (and its torrent search) so the season chips
+    // paint before the index is hit.
+    if (next) startTransition(() => setPicked(next));
   };
 
   // Open on the first episode not yet finished — carrying on is the common
@@ -550,29 +585,38 @@ export function DetailScreen({
 
   // Releases are found by name, not by id: the index's own IMDb tagging is
   // patchy, and a title search returns the rips that were never tagged too.
+  //
+  // Do not wipe `sources` while flipping seasons — that relayouts the whole
+  // page. Debounce so a swipe across S1–S4 only fetches the last one.
   useEffect(() => {
     const ctrl = new AbortController();
     abort.current = ctrl;
-    setSources(null);
-    setError(null);
-    // An episode also looks for the packs that contain it — they routinely
-    // carry twenty times the seeders, and only the one file inside is fetched.
-    const wanted = picked
-      ? searchEpisode(title.title, picked.season, picked.episode, ctrl.signal)
-      : searchTorrents(title.title, ctrl.signal, {
-          // Series only ever carry their first-aired year, which is not what
-          // the season being watched is labelled with.
-          year: title.kind === 'movie' ? title.year : null,
+    const delay = sourceKey == null ? 0 : 280;
+    const timer = setTimeout(() => {
+      setError(null);
+      const wanted = picked
+        ? searchEpisode(title.title, picked.season, picked.episode, ctrl.signal)
+        : searchTorrents(title.title, ctrl.signal, {
+            year: title.kind === 'movie' ? title.year : null,
+          });
+      wanted
+        .then((hits) => {
+          if (ctrl.signal.aborted) return;
+          setSources(hits);
+          setSourceKey(pickKey);
+        })
+        .catch((e) => {
+          if (ctrl.signal.aborted) return;
+          setSources([]);
+          setSourceKey(pickKey);
+          setError(String(e?.message ?? e));
         });
-    wanted
-      .then((hits) => !ctrl.signal.aborted && setSources(hits))
-      .catch((e) => {
-        if (ctrl.signal.aborted) return;
-        setSources([]);
-        setError(String(e?.message ?? e));
-      });
-    return () => ctrl.abort();
-  }, [title.title, title.year, title.kind, title.imdb, picked, online]);
+    }, delay);
+    return () => {
+      clearTimeout(timer);
+      ctrl.abort();
+    };
+  }, [title.title, title.year, title.kind, title.imdb, picked, pickKey, online]);
 
   return (
     <View style={styles.page}>
@@ -723,6 +767,23 @@ export function DetailScreen({
             <Icon name="download" size={18} color={colors.text} />
           </Pressable>
         </View>
+
+        {title.kind === 'tv' && season != null && (
+          <Pressable
+            disabled={!best || busy}
+            onPress={saveSeason}
+            style={({ pressed }) => [
+              styles.seasonDl,
+              (!best || busy) && styles.downloadOff,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Icon name="download" size={15} color={colors.text} />
+            <Text style={styles.seasonDlText}>
+              Download season {season === 0 ? 'specials' : season}
+            </Text>
+          </Pressable>
+        )}
 
         {/* Directly under the button it governs, and only once there is a
             choice to make. One track rather than loose chips: these are four
@@ -941,12 +1002,16 @@ export function DetailScreen({
           onLayout={(e) => (sourcesY.current = e.nativeEvent.layout.y)}
         >
           <Text style={styles.heading}>
-            {shown
-              ? `${shown.length} release${shown.length === 1 ? '' : 's'}`
-              : 'Finding releases…'}
+            {!fresh
+              ? 'Finding releases…'
+              : shown
+                ? `${shown.length} release${shown.length === 1 ? '' : 's'}`
+                : 'Finding releases…'}
           </Text>
 
-          {!sources && <ActivityIndicator color={colors.accent} style={styles.spin} />}
+          {(!sources || !fresh) && (
+            <ActivityIndicator color={colors.accent} style={styles.spin} />
+          )}
 
           {busy && (
             <View style={styles.opening}>
@@ -957,14 +1022,14 @@ export function DetailScreen({
 
           {!!(error ?? opening) && <Text style={styles.error}>{error ?? opening}</Text>}
 
-          {sources?.length === 0 && !error && (
+          {sources?.length === 0 && fresh && !error && (
             <Text style={styles.none}>
               Nothing on the index for this title. Try the Search tab with a
               different spelling.
             </Text>
           )}
 
-          {shown?.map((hit, i) => {
+          {fresh && shown?.map((hit, i) => {
             const tone = HEALTH[health(hit.seeders)];
             return (
               <Pressable

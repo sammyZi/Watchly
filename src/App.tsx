@@ -39,7 +39,7 @@ import {
 import { DEFAULTS, loadSettings, saveSettings, type Settings } from './lib/settings';
 import { linkEpisode, loadEpisodeLinks, type EpisodeLinks } from './lib/watched';
 import { isTorrentSource } from './lib/magnet';
-import { nextEpisode, pickFile } from './lib/pick';
+import { nextEpisode, pickFile, seasonFiles } from './lib/pick';
 import { episodeTag, parseEpisode, searchEpisode } from './lib/search';
 import { titleOf } from './lib/title';
 import { loadTitle, resolveTitle, type Title } from './lib/meta';
@@ -272,6 +272,7 @@ function ShellApp({
     fileName,
     subtitleFiles,
     playingIndex,
+    wantedIndices,
     progress,
     fail,
     inspect,
@@ -348,7 +349,13 @@ function ShellApp({
     async (
       next: Item,
       fileIndex?: number,
-      opts?: { keepProgress?: boolean; auto?: string | boolean; fullFile?: boolean }
+      opts?: {
+        keepProgress?: boolean;
+        auto?: string | boolean;
+        fullFile?: boolean;
+        fileIndices?: number[];
+        season?: number;
+      }
     ) => {
       const items = await put({ ...next, at: Date.now() });
       setHistory(items);
@@ -378,15 +385,26 @@ function ShellApp({
       // episode or that release, so the file list is a screen with one sensible
       // answer on it. Take the answer.
       if (opts?.auto) {
-        const chosen = pickFile(
-          found.files,
-          typeof opts.auto === 'string' ? opts.auto : undefined
-        );
+        const indices =
+          opts.season != null
+            ? seasonFiles(found.files, opts.season)
+            : null;
+        const chosen =
+          indices?.length
+            ? indices[0]
+            : pickFile(
+                found.files,
+                typeof opts.auto === 'string' ? opts.auto : undefined
+              );
         if (chosen != null) {
           play(
             chosen,
             opts.keepProgress ? 0 : resumeRatio(fresh, chosen),
-            opts
+            {
+              ...opts,
+              season: opts.season,
+              fileIndices: indices?.length ? indices : opts.fileIndices,
+            }
           );
         }
         // Null means no video inside — the picker is then the only useful thing
@@ -514,6 +532,8 @@ function ShellApp({
         kind?: 'movie' | 'tv';
         poster?: string | null;
         titleName?: string;
+        season?: number;
+        fileIndices?: number[];
       }
     ) => {
       // A shared file arrives as a content:// grant that expires — take our own
@@ -702,6 +722,25 @@ function ShellApp({
     [open, enableDownloadNotify]
   );
 
+  const downloadSeason = useCallback(
+    (target: Item, season?: number) => {
+      const indices = seasonFiles(target.files ?? [], season);
+      if (!indices.length) return;
+      setTorrentMode('download');
+      setTab('downloads');
+      setDetail(null);
+      setShelf(null);
+      enableDownloadNotify();
+      open(target, indices[0], {
+        keepProgress: true,
+        fullFile: true,
+        fileIndices: indices,
+        season,
+      });
+    },
+    [open, enableDownloadNotify]
+  );
+
   // Auto-save when a download hits 100%. Logs every step — if it sticks on
   // "Saving to Downloads…", Metro will show where it died.
   //
@@ -745,9 +784,19 @@ function ShellApp({
         size,
       });
       TorrentStream.copyTo(playingIndex, name)
-        .then((path) => {
-          console.log('[download] copyTo ok', { path, ms: Date.now() - started });
-          return recordDownload(name, size, path);
+        .then((dest) => {
+          const paths = Array.isArray(dest) ? dest : [dest];
+          console.log('[download] copyTo ok', { paths, ms: Date.now() - started });
+          return Promise.all(
+            paths.map((path) => {
+              const file = path.split(/[/\\]/).pop() ?? name;
+              const bytes =
+                meta?.files.find((f) => f.name === file)?.size ??
+                item?.files?.find((f) => f.name === file)?.size ??
+                size;
+              return recordDownload(file, bytes, path);
+            })
+          );
         })
         .then(() => {
           console.log('[download] done — stop torrent');
@@ -960,6 +1009,16 @@ function ShellApp({
           enableDownloadNotify();
           play(file.index, 0, { keepProgress: true, fullFile: true });
         }}
+        onDownloadAll={() => {
+          const indices = seasonFiles(meta.files);
+          if (!indices.length) return;
+          setTorrentMode('download');
+          setTab('downloads');
+          setDetail(null);
+          setShelf(null);
+          enableDownloadNotify();
+          play(indices[0], 0, { keepProgress: true, fullFile: true, fileIndices: indices });
+        }}
         onBack={() => {
           setTorrentMode(null);
           reset();
@@ -988,6 +1047,15 @@ function ShellApp({
           setShelf(null);
           enableDownloadNotify();
           play(file.index, 0, { keepProgress: true, fullFile: true });
+        }}
+        onDownloadAll={() => {
+          const indices = seasonFiles(meta.files);
+          if (!indices.length) return;
+          setTab('downloads');
+          setDetail(null);
+          setShelf(null);
+          enableDownloadNotify();
+          play(indices[0], 0, { keepProgress: true, fullFile: true, fileIndices: indices });
         }}
         onBack={() => {
           setTorrentMode(null);
@@ -1028,7 +1096,7 @@ function ShellApp({
           });
           if (episodeId && local) linkEpisode(episodeId, local).then(setEpisodeLinks);
         }}
-        onDownload={(magnet, tag) => {
+        onDownload={(magnet, tag, season) => {
           setTorrentMode('download');
           setTab('downloads');
           setDetail(null);
@@ -1038,6 +1106,7 @@ function ShellApp({
             auto: tag ?? true,
             keepProgress: true,
             fullFile: true,
+            season,
             imdb: detail.imdb,
             kind: detail.kind,
             poster: detail.poster,
@@ -1086,6 +1155,7 @@ function ShellApp({
             onOpenTitle={setDetail}
             onPlayFile={playFile}
             onDownloadFile={downloadFile}
+            onDownloadSeason={downloadSeason}
             onRemove={askRemove}
             onClear={askClear}
           />
@@ -1095,17 +1165,31 @@ function ShellApp({
             onPlayFile={playCompleted}
             active={
               torrentMode === 'download' && phase !== 'idle'
-                ? {
-                    name:
-                      fileName ??
-                      meta?.files.find((f) => f.index === playingIndex)?.name ??
+                ? (() => {
+                    const indices =
+                      wantedIndices.length > 0 ? wantedIndices : [playingIndex];
+                    const files = indices.map(
+                      (i) =>
+                        meta?.files.find((f) => f.index === i) ??
+                        item?.files?.find((f) => f.index === i)
+                    );
+                    const many = files.filter(Boolean).length > 1;
+                    const pack =
+                      item?.titleName ??
+                      meta?.name ??
                       item?.torrentName ??
-                      item?.title ??
-                      (phase === 'inspecting' ? 'Fetching metadata…' : 'Downloading…'),
-                    size:
-                      meta?.files.find((f) => f.index === playingIndex)?.size ??
-                      item?.files?.find((f) => f.index === playingIndex)?.size ??
-                      0,
+                      item?.title;
+                    return {
+                    name: many
+                      ? pack ?? 'Season download'
+                      : fileName ??
+                        files[0]?.name ??
+                        pack ??
+                        (phase === 'inspecting'
+                          ? 'Fetching metadata…'
+                          : 'Downloading…'),
+                    size: files.reduce((s, f) => s + (f?.size ?? 0), 0),
+                    files: many ? files.filter(Boolean).length : 1,
                     progress,
                     onPause: () => {
                       TorrentStream.pause().catch(() => {});
@@ -1118,7 +1202,8 @@ function ShellApp({
                       setTorrentMode(null);
                       reset();
                     },
-                  }
+                    };
+                  })()
                 : null
             }
           />

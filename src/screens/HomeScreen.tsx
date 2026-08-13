@@ -34,6 +34,7 @@ import {
   TAB_INSET,
   type,
   useColors,
+  useTheme,
   useThemedStyles,
 } from '../theme';
 
@@ -184,6 +185,7 @@ function HomeScreenView({
 }) {
   const insets = useSafeAreaInsets();
   const colors = useColors();
+  const { scheme } = useTheme();
   const styles = useHomeStyles();
   // Seeded from whatever has already resolved this session, so switching tabs
   // and coming back paints the shelves on the first render — no spinner, no
@@ -310,12 +312,17 @@ function HomeScreenView({
 
   return (
     <View style={styles.page}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <StatusBar
+        barStyle={scheme === 'light' ? 'dark-content' : 'light-content'}
+        backgroundColor="transparent"
+        translucent
+      />
       {/* A FlatList, not a ScrollView: a ScrollView renders every child up
           front, so all seven rails and their posters were being built — and
           held — whether or not you ever scrolled to them. */}
       <FlatList
         data={shelves}
+        extraData={`${genres.join('|')}:${scheme}`}
         keyExtractor={(shelf) => shelfKey(shelf)}
         contentContainerStyle={styles.body}
         showsVerticalScrollIndicator={false}
