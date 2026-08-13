@@ -9,7 +9,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { IconButton } from '../components/Button';
 import { Icon } from '../components/Icon';
+import { Marquee } from '../components/Marquee';
 import { bytes } from '../lib/format';
+import { groupByFolder } from '../lib/pick';
 import { parseEpisode } from '../lib/search';
 import { searchableName } from '../lib/title';
 import type { TorrentFile, TorrentMeta } from '../../modules/torrent-stream';
@@ -31,30 +33,16 @@ export function FilesScreen({
   onDownloadAll?: () => void;
   onBack: () => void;
 }) {
-  const sections = useMemo(() => {
-    const byFolder = new Map<string, TorrentFile[]>();
-    for (const file of meta.files) {
-      const parts = file.path.split(/[/\\]/);
-      const folder = parts.slice(0, -1).join('/') || meta.name;
-      const list = byFolder.get(folder);
-      if (list) list.push(file);
-      else byFolder.set(folder, [file]);
-    }
-
-    // Packed order is arbitrary — sort so episode 2 lands between 1 and 10,
-    // and keep the playable files above the samples and nfo clutter.
-    const natural = (a: string, b: string) =>
-      a.localeCompare(b, undefined, { numeric: true });
-
-    return [...byFolder.entries()]
-      .map(([title, data]) => ({
-        title,
-        data: data.sort(
-          (a, b) => Number(b.isVideo) - Number(a.isVideo) || natural(a.name, b.name)
-        ),
-      }))
-      .sort((a, b) => natural(a.title, b.title));
-  }, [meta]);
+  const sections = useMemo(
+    () =>
+      groupByFolder(meta.files).map((g) => ({
+        title: g.folder || meta.name,
+        data: g.files
+          .slice()
+          .sort((a, b) => Number(b.isVideo) - Number(a.isVideo)),
+      })),
+    [meta]
+  );
 
   const videos = meta.files.filter((f) => f.isVideo).length;
   const insets = useSafeAreaInsets();
@@ -215,13 +203,6 @@ export function FilesScreen({
           const action = () =>
             downloading ? onDownload(item) : onPlay(item);
           const at = item.isVideo ? parseEpisode(item.name) : null;
-          const label = at
-            ? at.season === 0
-              ? `Special ${at.episode}`
-              : `Episode ${at.episode}`
-            : item.isVideo
-              ? searchableName(item.name) || item.name
-              : item.name;
 
           return (
             <Pressable
@@ -258,12 +239,11 @@ export function FilesScreen({
               </View>
 
               <View style={styles.body}>
-                <Text
-                  numberOfLines={1}
+                <Marquee
                   style={[styles.name, !item.isVideo && styles.nameMuted]}
                 >
-                  {label}
-                </Text>
+                  {item.name}
+                </Marquee>
                 <Text style={styles.size} numberOfLines={1}>
                   {bytes(item.size)}
                   {item.isSubtitle

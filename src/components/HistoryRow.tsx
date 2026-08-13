@@ -7,6 +7,7 @@ import { Thumb } from './Thumb';
 import { ago, bytes, clock } from '../lib/format';
 import type { Item } from '../lib/history';
 import { posterOf } from '../lib/history';
+import { groupByFolder } from '../lib/pick';
 import { parseEpisode } from '../lib/search';
 import { WATCHED } from '../lib/watched';
 import type { Saved } from '../lib/saved';
@@ -32,16 +33,14 @@ export function HistoryRow({
   onOpen: () => void;
   onPlayFile: (index: number) => void;
   onDownloadFile: (index: number) => void;
-  onDownloadSeason?: () => void;
+  onDownloadSeason?: (indices?: number[]) => void;
   onRemove: () => void;
 }) {
   // Torrents list files in whatever order they were packed; sort naturally so
   // episode 2 lands between 1 and 10.
-  const videos = (item.files ?? [])
-    .filter((f) => f.isVideo)
-    .slice()
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  const videos = (item.files ?? []).filter((f) => f.isVideo);
   const [expanded, setExpanded] = useState(false);
+  const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
   const colors = useColors();
   const styles = useThemedStyles((c) => ({
     // A card per torrent, artwork-led: the poster is what identifies it at a
@@ -83,6 +82,15 @@ export function HistoryRow({
     moreText: { ...type.overline, color: c.faint },
 
     files: { paddingTop: space.sm, gap: space.xs },
+    folder: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      justifyContent: 'space-between' as const,
+      paddingTop: space.md,
+      paddingBottom: space.xs,
+      paddingHorizontal: space.xs,
+    },
+    folderName: { ...type.overline, color: c.muted, flex: 1 },
     file: {
       flexDirection: 'row' as const,
       alignItems: 'center' as const,
@@ -240,50 +248,87 @@ export function HistoryRow({
 
       {expanded && (
         <View style={styles.files}>
-          {videos.map((file) => {
-            const position = item.positions?.[file.index];
-            const duration = item.durations?.[file.index];
-            const at = parseEpisode(file.name);
-            const label = at
-              ? at.season === 0
-                ? `Special ${at.episode}`
-                : `Episode ${at.episode}`
-              : file.name;
-            const mark = at
-              ? String(at.episode).padStart(2, '0')
-              : String(file.index + 1).padStart(2, '0');
+          {groupByFolder(videos).map((group) => {
+            const key = group.dir || group.folder || 'files';
+            const folderOpen = !group.folder || !!openFolders[key];
+            const folderBytes = group.files.reduce((s, f) => s + f.size, 0);
             return (
-              <Pressable
-                key={file.index}
-                onPress={() => onPlayFile(file.index)}
-                style={({ pressed }) => [styles.file, pressed && styles.pressed]}
-              >
-                <View style={styles.fileMark}>
-                  <Text style={styles.fileNum}>{mark}</Text>
-                </View>
-                <View style={styles.fileBody}>
-                  <Text numberOfLines={1} style={styles.fileName}>
-                    {label}
-                  </Text>
-                  <Text style={styles.fileMeta}>
-                    {bytes(file.size)}
-                    {position ? ` · ${clock(position)}` : ''}
-                  </Text>
-                  {!!position && !!duration && (
-                    <ProgressBar value={(position / duration) * 100} height={3} />
+            <View key={key}>
+              {!!group.folder && (
+                <View style={styles.folder}>
+                  <Pressable
+                    onPress={() =>
+                      setOpenFolders((prev) => ({ ...prev, [key]: !prev[key] }))
+                    }
+                    style={[styles.moreHit, { flex: 1 }]}
+                  >
+                    <Icon
+                      name={folderOpen ? 'chevron-down' : 'chevron-right'}
+                      size={14}
+                      color={colors.faint}
+                    />
+                    <Text numberOfLines={1} style={styles.folderName}>
+                      {group.folder}
+                    </Text>
+                    <Text style={styles.moreText}>
+                      {group.files.length} · {bytes(folderBytes)}
+                    </Text>
+                  </Pressable>
+                  {!!onDownloadSeason && (
+                    <Pressable
+                      onPress={() =>
+                        onDownloadSeason(group.files.map((f) => f.index))
+                      }
+                      hitSlop={8}
+                      style={styles.downloadBtn}
+                      accessibilityLabel={`Download ${group.folder}`}
+                    >
+                      <Icon name="download" size={14} color={colors.accent} />
+                    </Pressable>
                   )}
                 </View>
-                <Pressable
-                  onPress={() => onDownloadFile(file.index)}
-                  hitSlop={8}
-                  style={styles.downloadBtn}
-                >
-                  <Icon name="download" size={14} color={colors.muted} />
-                </Pressable>
-                <View style={styles.filePlay}>
-                  <Icon name="play" size={13} color={colors.accent} />
-                </View>
-              </Pressable>
+              )}
+              {folderOpen &&
+              group.files.map((file) => {
+                const position = item.positions?.[file.index];
+                const duration = item.durations?.[file.index];
+                const at = parseEpisode(file.name);
+                const mark = at
+                  ? String(at.episode).padStart(2, '0')
+                  : String(file.index + 1).padStart(2, '0');
+                return (
+                  <Pressable
+                    key={file.index}
+                    onPress={() => onPlayFile(file.index)}
+                    style={({ pressed }) => [styles.file, pressed && styles.pressed]}
+                  >
+                    <View style={styles.fileMark}>
+                      <Text style={styles.fileNum}>{mark}</Text>
+                    </View>
+                    <View style={styles.fileBody}>
+                      <Marquee style={styles.fileName}>{file.name}</Marquee>
+                      <Text style={styles.fileMeta}>
+                        {bytes(file.size)}
+                        {position ? ` · ${clock(position)}` : ''}
+                      </Text>
+                      {!!position && !!duration && (
+                        <ProgressBar value={(position / duration) * 100} height={3} />
+                      )}
+                    </View>
+                    <Pressable
+                      onPress={() => onDownloadFile(file.index)}
+                      hitSlop={8}
+                      style={styles.downloadBtn}
+                    >
+                      <Icon name="download" size={14} color={colors.muted} />
+                    </Pressable>
+                    <View style={styles.filePlay}>
+                      <Icon name="play" size={13} color={colors.accent} />
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
             );
           })}
         </View>

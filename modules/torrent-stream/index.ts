@@ -74,6 +74,8 @@ type TorrentStream = {
   /** Copy the currently-downloaded file to the public Downloads folder.
    *  Returns a `file://` URI for the saved file. */
   copyTo(fileIndex: number, fileName: string): Promise<string | string[]>;
+  /** `file://` URI for a finished episode still in the torrent cache. */
+  fileUri(index: number): Promise<string>;
   /** `file://` URI for a finished file in public Downloads/. */
   downloadUri(fileName: string): Promise<string>;
   /** Delete a finished file from public Downloads/. */
@@ -92,6 +94,8 @@ type TorrentStream = {
   resume(): Promise<void>;
   /** Stop fetching one file; the rest of a season download continues. */
   skipFile(index: number): Promise<void>;
+  /** Put a skipped file back into a season download. */
+  includeFile(index: number): Promise<void>;
   /** Show / hide the ongoing download notification. */
   setNotify(enabled: boolean): Promise<void>;
   /** Move the prefetch window; `ratio` is 0-1 through the file. */

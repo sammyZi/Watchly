@@ -121,6 +121,7 @@ export function PlayerScreen({
   /** Audio tracks, for the dubs and commentaries a release often carries. */
   const [audioTracks, setAudioTracks] = useState<VlcTrack[]>([]);
   const [audioTrack, setAudioTrack] = useState<number | null>(null);
+  const [defaultAudio, setDefaultAudio] = useState<number | null>(null);
   /** Index of the chosen track, null for off. */
   const [subTrack, setSubTrack] = useState<number | null>(null);
   const [picking, setPicking] = useState(false);
@@ -153,6 +154,9 @@ export function PlayerScreen({
   // Same player instance can move to the next episode — reload that file's picks.
   useEffect(() => {
     setExternalSubs(savedSubs ?? []);
+    setDefaultAudio(null);
+    setAudioTrack(null);
+    setSubTrack(null);
     // Only on file change; including savedSubs would reset mid-session on every history write.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileIndex]);
@@ -687,6 +691,9 @@ export function PlayerScreen({
               }));
               setTracks(next);
               setAudioTracks(nativeEvent.audio);
+              if (nativeEvent.defaultAudio != null && nativeEvent.defaultAudio >= 0) {
+                setDefaultAudio(nativeEvent.defaultAudio);
+              }
               const want = pendingSub.current;
               if (want) {
                 const hit =
@@ -1026,7 +1033,11 @@ export function PlayerScreen({
                     <TrackOption
                       key={`audio-${t.id}`}
                       label={t.name}
-                      active={audioTrack === t.id}
+                      sublabel={t.id === defaultAudio ? 'Default' : undefined}
+                      active={
+                        audioTrack === t.id ||
+                        (audioTrack == null && t.id === defaultAudio)
+                      }
                       onPress={() => {
                         setAudioTrack(t.id);
                         setPicking(false);

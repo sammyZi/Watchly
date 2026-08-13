@@ -47,6 +47,8 @@ export function useTorrent(settings: Settings) {
   const [playingIndex, setPlayingIndex] = useState(0);
   /** File indexes this play() asked for — a season download is many, not one. */
   const [wantedIndices, setWantedIndices] = useState<number[]>([]);
+  /** Original season list; skipped episodes stay here so they can be ticked back. */
+  const [queueIndices, setQueueIndices] = useState<number[]>([]);
 
   // Latest source, so play() uses the same (tracker-augmented) uri as inspect().
   const source = useRef<string | null>(null);
@@ -105,6 +107,7 @@ export function useTorrent(settings: Settings) {
     setFileName(null);
     setSubtitleFiles([]);
     setWantedIndices([]);
+    setQueueIndices([]);
     setProgress(null);
     source.current = null;
     lastState.current = null;
@@ -170,9 +173,9 @@ export function useTorrent(settings: Settings) {
       streaming.current = false;
       keepProgress.current = !!opts?.keepProgress;
       setPlayingIndex(fileIndex);
-      setWantedIndices(
-        opts?.fileIndices?.length ? opts.fileIndices : [fileIndex]
-      );
+      const indices = opts?.fileIndices?.length ? opts.fileIndices : [fileIndex];
+      setWantedIndices(indices);
+      setQueueIndices(indices);
       setPhase('playing');
       if (opts?.fullFile) {
         const it = itemRef.current;
@@ -239,7 +242,7 @@ export function useTorrent(settings: Settings) {
           name: next.torrentName,
           files: next.files.map((f) => ({
             index: f.index,
-            path: f.name,
+            path: f.path ?? f.name,
             name: f.name,
             size: f.size,
             isVideo: f.isVideo,
@@ -256,21 +259,41 @@ export function useTorrent(settings: Settings) {
     [play, settings.addTrackers]
   );
 
+  const persistWanted = (next: number[]) => {
+    const uri = source.current;
+    if (!uri || !next.length) return;
+    const it = itemRef.current;
+    saveDownloadJob({
+      uri,
+      fileIndex: next[0],
+      fileIndices: next,
+      title: it?.title,
+      titleName: it?.titleName,
+      poster: it?.poster,
+      imdb: it?.imdb,
+      kind: it?.kind,
+    }).catch(() => {});
+  };
+
   const skipFile = useCallback((index: number) => {
     setWantedIndices((prev) => {
       const next = prev.filter((i) => i !== index);
-      const uri = source.current;
-      if (uri && next.length) {
-        saveDownloadJob({
-          uri,
-          fileIndex: next[0],
-          fileIndices: next,
-        }).catch(() => {});
-      }
+      persistWanted(next);
       return next;
     });
     TorrentStream.skipFile(index).catch((e: any) =>
       console.warn('[torrent] skip failed', e?.message ?? e)
+    );
+  }, []);
+
+  const includeFile = useCallback((index: number) => {
+    setWantedIndices((prev) => {
+      const next = prev.includes(index) ? prev : [...prev, index];
+      persistWanted(next);
+      return next;
+    });
+    TorrentStream.includeFile(index).catch((e: any) =>
+      console.warn('[torrent] include failed', e?.message ?? e)
     );
   }, []);
 
@@ -284,6 +307,7 @@ export function useTorrent(settings: Settings) {
     subtitleFiles,
     playingIndex,
     wantedIndices,
+    queueIndices,
     progress,
     error,
     fail,
@@ -291,6 +315,7 @@ export function useTorrent(settings: Settings) {
     play,
     playKnown,
     skipFile,
+    includeFile,
     reset,
   };
 }

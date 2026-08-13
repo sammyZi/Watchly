@@ -8,6 +8,8 @@ export type VlcTrack = { id: number; name: string };
 export type VlcTracks = {
   subtitles: VlcTrack[];
   audio: VlcTrack[];
+  audioId?: number;
+  defaultAudio?: number;
 };
 
 export type VlcPlayerRef = {

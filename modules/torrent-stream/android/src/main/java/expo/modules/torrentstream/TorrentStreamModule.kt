@@ -237,6 +237,8 @@ class TorrentStreamModule : Module() {
   /** Starts of the currently applied readahead zones; empty until first apply. */
   private var zoneStarts = emptyList<Int>()
   private var zoneWidth = -1
+  /** Whether the last applyZone() treated the full tail as DEFAULT. */
+  private var zoneRushedTail = false
   /** Replaced by play() before anything reads it; see WINDOW_BYTES. */
   private var windowPieces = 4
   private var prepareBytes = 3L * 1024 * 1024
@@ -370,7 +372,7 @@ class TorrentStreamModule : Module() {
         i in 0 until ti.files().numFiles() &&
           ti.files().filePath(i).substringAfterLast('.', "").lowercase() in VIDEO
       }.ifEmpty { listOf(fileIndex) }
-      val uris = videos.map { i ->
+      val uris = videos.mapNotNull { i ->
         val rel = ti.files().filePath(i)
         val src = File(saveDir, rel)
         val expected = ti.files().fileSize(i)
@@ -380,12 +382,17 @@ class TorrentStreamModule : Module() {
           waits++
         }
         if (src.length() < expected * 99 / 100) {
-          throw CodedException(
-            "Only ${(src.length() * 100 / expected.coerceAtLeast(1))}% on disk — not ready to save"
+          log(
+            "copyTo: skip index=$i — only " +
+              "${(src.length() * 100 / expected.coerceAtLeast(1))}% on disk"
           )
+          return@mapNotNull null
         }
         val outName = if (i == fileIndex) name else ti.files().fileName(i)
         saveToDownloads(src, outName)
+      }
+      if (uris.isEmpty()) {
+        throw CodedException("No finished files on disk yet")
       }
       log("copyTo: saved ${uris.size} file(s) → ${uris.joinToString()}")
       notifyComplete(if (uris.size == 1) name else "${uris.size} files")
@@ -395,6 +402,20 @@ class TorrentStreamModule : Module() {
       wipeStreamCache()
       log("copyTo: torn down")
       uris
+    }
+
+    /** `file://` for a finished episode still in the torrent cache. */
+    AsyncFunction("fileUri") { index: Int ->
+      val ti = info ?: throw CodedException("No torrent is running")
+      if (index !in 0 until ti.files().numFiles()) {
+        throw CodedException("No file at index $index")
+      }
+      val src = File(saveDir, ti.files().filePath(index))
+      val expected = ti.files().fileSize(index)
+      if (!src.exists() || (expected > 0 && src.length() < expected * 95 / 100)) {
+        throw CodedException("This episode is not ready to play yet")
+      }
+      "file://${src.absolutePath}"
     }
 
     /** Resolve a finished download for local playback. */
@@ -506,6 +527,15 @@ class TorrentStreamModule : Module() {
       val h = handle
       if (h != null && h.isValid) wantOnly(h, wantedFiles)
       log("skip file $index — still wanting ${wantedFiles.size}")
+      null
+    }
+
+    /** Put a skipped file back into a season download. */
+    AsyncFunction("includeFile") { index: Int ->
+      if (index !in wantedFiles) wantedFiles += index
+      val h = handle
+      if (h != null && h.isValid) wantOnly(h, wantedFiles)
+      log("include file $index — wanting ${wantedFiles.size}")
       null
     }
 
@@ -695,21 +725,6 @@ class TorrentStreamModule : Module() {
     }
   }
 
-  /** DHT needs a moment before it can answer anything. Waits, and says what it saw. */
-  private fun awaitDht(seconds: Int) {
-    if (seconds <= 0) return
-    repeat(seconds * 2) {
-      session.postSessionStats()
-      val nodes = session.stats().dhtNodes()
-      if (nodes > 0) {
-        log("dht ready: $nodes nodes")
-        return
-      }
-      Thread.sleep(500)
-    }
-    log("dht still empty after ${seconds}s (running=${session.isDhtRunning}) — relying on trackers")
-  }
-
   /* -------------------------------------------------------------- import */
 
   /**
@@ -796,7 +811,8 @@ class TorrentStreamModule : Module() {
 
     val (ti, bytes) = when {
       clean.startsWith("magnet:", true) -> {
-        awaitDht(15)
+        // Trackers answer without DHT. Waiting here delays the first announce
+        // and is the longest stretch of the open-to-player spinner.
         val fetched = addMagnet(clean, timeoutSec)
         // This is the path that costs five to ten seconds of DHT and peer
         // chatter, and it used to pay that on every single open: metadata from
@@ -1167,6 +1183,7 @@ class TorrentStreamModule : Module() {
     ticks = 0
     zoneStarts = emptyList()
     zoneWidth = -1
+    zoneRushedTail = false
 
     // Everything except the chosen file(s) is skipped entirely.
     val priorities = Array(files.numFiles()) { Priority.IGNORE }
@@ -1224,8 +1241,7 @@ class TorrentStreamModule : Module() {
     } else {
       val peers = loadPeers(infoHashHex!!)
       log("play: cold start, ${peers.size} cached peer(s)")
-      // With known peers we can start dialing immediately; otherwise wait for DHT.
-      if (peers.isEmpty()) awaitDht(15) else awaitDht(2)
+      // Dial immediately. DHT bootstraps in parallel; trackers do not need it.
       session.download(ti, saveDir, null, priorities, peers, TorrentFlags.SEQUENTIAL_DOWNLOAD)
       awaitHandle(ti) ?: throw CodedException("Torrent could not be added to the session")
     }
@@ -1345,9 +1361,9 @@ class TorrentStreamModule : Module() {
         } catch (e: Exception) {
           Log.w(TAG, "poll failed", e)
         }
-        // Twice a second: this is what decides how fast the prefetch window
-        // chases a seek. The progress event still only goes out every other tick.
-        handler.postDelayed(this, 500)
+        // Faster while waiting for the first frame so ready fires the tick the
+        // opening piece lands; twice a second is enough once the player is up.
+        handler.postDelayed(this, if (announcedReady) 500 else 200)
       }
     }
     handler.post(tick)
@@ -1435,15 +1451,22 @@ class TorrentStreamModule : Module() {
     val targets = live.filter { it < tailPiece }.ifEmpty { live }.ifEmpty { preroll }
     headPiece = targets.first()
 
+    val status = h.status()
+    val pieceLen = ti.pieceLength().toLong().coerceAtLeast(1L)
+
     // Two widths, and the difference matters.
     //
     // `reach` is the deadline window: the pieces the swarm is told to rush.
     // Narrow before playback starts, so everything converges on what unblocks
     // the first frame instead of spreading over tens of MB of readahead.
-    val reach = if (announcedReady) {
-      windowPieces
+    // After start, a slow swarm stays tight (finish the next piece) and a
+    // fast one opens to the full WINDOW_BYTES so playback never catches up.
+    val reach = if (!announcedReady) {
+      maxOf(1, Math.ceil(prepareBytes.toDouble() / pieceLen).toInt())
     } else {
-      maxOf(2, Math.ceil(prepareBytes.toDouble() / ti.pieceLength()).toInt())
+      val rate = status.downloadRate()
+      if (rate < 400_000) maxOf(2, (8L * 1024 * 1024 / pieceLen).toInt())
+      else windowPieces
     }
 
     // `width` is the zone: everything the torrent is *allowed* to fetch. It
@@ -1454,10 +1477,10 @@ class TorrentStreamModule : Module() {
     // the zone just keeps the peers doing something useful.
     // Two pieces is the floor purely so the arithmetic cannot produce a zone
     // narrower than the reader plus its next step.
-    val width = maxOf(2, (READAHEAD_BYTES / ti.pieceLength()).toInt())
+    val width = maxOf(2, (READAHEAD_BYTES / pieceLen).toInt())
 
     /** How far behind each reader stays wanted. See REWIND_BYTES. */
-    val back = maxOf(8, (REWIND_BYTES / ti.pieceLength()).toInt())
+    val back = maxOf(8, (REWIND_BYTES / pieceLen).toInt())
 
     // Re-aim the zones when a reader leaves the half of one it was given (a
     // seek), when their number changes, or when the pre-roll ends and they
@@ -1468,9 +1491,10 @@ class TorrentStreamModule : Module() {
     // zone. Without that tolerance the cheapest seek in the app was also the
     // one that threw away every deadline in the torrent.
     val stale = zoneWidth != width ||
+      zoneRushedTail != announcedReady ||
       zoneStarts.size != targets.size ||
       targets.any { t -> zoneStarts.none { t >= it - back && t <= it + width / 2 } }
-    if (stale) applyZone(h, targets, width, back)
+    if (stale) applyZone(h, targets, width, back, rushTail = announcedReady)
 
     val keep = mutableSetOf<Int>()
     targets.forEachIndexed { rank, target ->
@@ -1489,11 +1513,12 @@ class TorrentStreamModule : Module() {
         h.setPieceDeadline(p, rank * 3000 + (p - target) * 300)
       }
     }
-    // The tail rides along from the start — fetching it only when the player
-    // asks makes the first frame wait out a cold download of the end of the
-    // file. Normal priority with a distant deadline: present, never ahead of
-    // the pieces the viewer is actually about to watch.
-    for (p in tailPiece..lastPiece) {
+    // During preroll, only the first ~2MB of the index — enough for VLC to
+    // parse Cues/moov — so the rest of a 16MB tail does not steal the opening
+    // piece. After ready, the full tail stays wanted at a distant deadline.
+    val tailEnd = if (announcedReady) lastPiece
+      else minOf(lastPiece, tailPiece + maxOf(0, (2L * 1024 * 1024 / pieceLen).toInt() - 1))
+    for (p in tailPiece..tailEnd) {
       keep.add(p)
       if (!h.havePiece(p) && deadlined.add(p)) {
         h.setPieceDeadline(p, 10_000 + (p - tailPiece) * 300)
@@ -1504,22 +1529,22 @@ class TorrentStreamModule : Module() {
       (piece !in keep).also { if (it) runCatching { h.resetPieceDeadline(piece) } }
     }
 
-    // Playback needs the container header *and* the point it resumes from. Two
-    // separate runs of pieces, and the readiness of the pre-roll is whichever is
-    // further behind.
-    val headBytes = maxOf(HEAD_BYTES, ti.pieceLength().toLong())
+    // First complete piece of the header (and of the resume point) is enough
+    // to hand the URL over. The HTTP server blocks if the demuxer asks for
+    // more; waiting for 2MB of header here just delayed first frame.
+    val headNeed = pieceLen
     val headHave = contiguousFrom(h, ti, firstPiece)
     val startHave =
       if (startPiece == firstPiece) headHave else contiguousFrom(h, ti, startPiece)
-    val startNeed = if (startPiece == firstPiece) maxOf(prepareBytes, headBytes) else prepareBytes
+    val startNeed =
+      if (startPiece == firstPiece) maxOf(prepareBytes, headNeed) else prepareBytes
 
     val buffered = minOf(startHave, headHave)
-    val ready = headHave >= headBytes && startHave >= startNeed
+    val ready = headHave >= headNeed && startHave >= startNeed
 
     // stats() only advances when session stats alerts are posted.
     session.postSessionStats()
 
-    val status = h.status()
     if (ticks % 2 == 0) {
       reportProgress(h, ((buffered * 100 / maxOf(1L, startNeed)).coerceAtMost(100L)).toInt())
     }
@@ -1583,7 +1608,13 @@ class TorrentStreamModule : Module() {
    * Pieces outside the selected file keep whatever the file priorities gave
    * them — only this file's range is touched.
    */
-  private fun applyZone(h: TorrentHandle, targets: List<Int>, width: Int, back: Int) {
+  private fun applyZone(
+    h: TorrentHandle,
+    targets: List<Int>,
+    width: Int,
+    back: Int,
+    rushTail: Boolean,
+  ) {
     val prios = runCatching { h.piecePriorities() }.getOrNull() ?: return
     val zones = targets.map { it..minOf(it + width, lastPiece) }
     // Behind each reader, kept only at LOW — a rewind of a few seconds should
@@ -1601,6 +1632,9 @@ class TorrentStreamModule : Module() {
     // playback long enough to fill the window would disconnect the swarm and
     // stall on resume.
     val spare = targets.map { (it + width + 1)..minOf(it + width + width / 2, lastPiece) }
+    val pieceLen = (info?.pieceLength() ?: 1).toLong().coerceAtLeast(1L)
+    val tailEnd = if (rushTail) lastPiece
+      else minOf(lastPiece, tailPiece + maxOf(0, (2L * 1024 * 1024 / pieceLen).toInt() - 1))
 
     for (p in firstPiece..lastPiece) {
       if (p >= prios.size) break
@@ -1609,7 +1643,7 @@ class TorrentStreamModule : Module() {
       // is the only value that takes a piece out of the running entirely, and
       // the whole point is that the swarm has exactly one job.
       prios[p] = when {
-        p in tailPiece..lastPiece || zones.any { p in it } -> Priority.DEFAULT
+        p in tailPiece..tailEnd || zones.any { p in it } -> Priority.DEFAULT
         spare.any { p in it } || behind.any { p in it } -> Priority.LOW
         else -> Priority.IGNORE
       }
@@ -1621,9 +1655,10 @@ class TorrentStreamModule : Module() {
     deadlined.clear()
     zoneStarts = targets
     zoneWidth = width
+    zoneRushedTail = rushTail
     log(
       "zone: ${zones.joinToString(", ") { "${it.first}..${it.last}" }} " +
-        "(back $back) of $firstPiece..$lastPiece"
+        "(back $back, tail $tailPiece..$tailEnd) of $firstPiece..$lastPiece"
     )
   }
 
@@ -1668,11 +1703,10 @@ class TorrentStreamModule : Module() {
   private fun downloadProgress(status: org.libtorrent4j.TorrentStatus): Float {
     if (fullFile) {
       val wanted = status.totalWanted()
-      if (wanted > 0) {
-        return (status.totalWantedDone().toDouble() / wanted * 100.0)
-          .toFloat()
-          .coerceIn(0f, 100f)
-      }
+      if (wanted <= 0) return 0f
+      return (status.totalWantedDone().toDouble() / wanted * 100.0)
+        .toFloat()
+        .coerceIn(0f, 100f)
     }
     return (status.progress() * 100f).coerceIn(0f, 100f)
   }
@@ -1744,6 +1778,7 @@ class TorrentStreamModule : Module() {
     readers.clear()
     zoneStarts = emptyList()
     zoneWidth = -1
+    zoneRushedTail = false
     subtitleFiles = emptyList()
     wantedFiles = intArrayOf()
     handle = null

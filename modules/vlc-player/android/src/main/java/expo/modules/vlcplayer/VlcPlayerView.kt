@@ -2,6 +2,9 @@ package expo.modules.vlcplayer
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -71,6 +74,18 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
   private val attachSubs = Runnable { attachPendingSubs() }
   /** Survives a restart(), which rebuilds the player it is set on. */
   private var scale = MediaPlayer.ScaleType.SURFACE_BEST_FIT
+  /** Audio track VLC picked on load — the picker marks this as Default. */
+  private var defaultAudioId: Int? = null
+  private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+  private var focusRequest: AudioFocusRequest? = null
+  private var holdingFocus = false
+  private val onAudioFocus = AudioManager.OnAudioFocusChangeListener { change ->
+    if (change == AudioManager.AUDIOFOCUS_LOSS ||
+      change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT
+    ) {
+      pause()
+    }
+  }
 
   /**
    * The video surface is added here, not by React, and React Native does not
@@ -108,6 +123,7 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
 
   fun setPaused(value: Boolean) {
     paused = value
+    if (value) dropAudioFocus() else takeAudioFocus()
     val p = player ?: return
     // Unconditional. Gating on isPlaying looks like an optimisation but leaves a
     // hole: while buffering, libVLC reports not-playing yet resumes on its own
@@ -125,6 +141,7 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
    */
   fun pause() {
     paused = true
+    dropAudioFocus()
     runCatching { player?.pause() }
   }
 
@@ -175,7 +192,7 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
       }
       // MediaPlayer.addSlave works while playing; Media.addSlave after setMedia
       // often does nothing — which is why picking a search result felt dead.
-      val ok = p.addSlave(IMedia.Slave.Type.Subtitle, Uri.fromFile(subFile), true)
+      val ok = p.addSlave(IMedia.Slave.Type.Subtitle, Uri.fromFile(subFile), false)
       if (ok) {
         attachedSubs.add(path)
         Log.i(TAG, "subtitle attached: ${subFile.name}")
@@ -186,8 +203,7 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     if (attachedSubs.isNotEmpty()) {
       postDelayed({
         val pl = player ?: return@postDelayed
-        val spu = pl.spuTrack
-        if (spu >= 0) wantedSpu = spu
+        pl.setSpuTrack(wantedSpu ?: -1)
         sendTracks(pl)
       }, 600)
     }
@@ -315,13 +331,16 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
 
     try {
       // --file-caching / --network-caching are milliseconds of demux buffer.
-      // The stream is local HTTP over a torrent, so it can stall at any moment;
-      // a deeper buffer rides over the gaps the swarm leaves.
+      // The torrent window already holds tens of MB ahead; 1s covers a piece
+      // stall without adding another 3s of black screen after ready.
       val instance = LibVLC(
         context,
         arrayListOf(
-          "--network-caching=3000",
-          "--file-caching=3000",
+          // Native torrent window already holds tens of MB ahead of the
+          // playhead. 1s is enough to ride a piece stall; 3s was extra black
+          // screen after the URL was already handed over.
+          "--network-caching=1000",
+          "--file-caching=1000",
           "--no-video-title-show",
           "--audio-time-stretch"
         )
@@ -357,7 +376,11 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
       player = mediaPlayer
       announced = false
       mediaPlayer.rate = rate
-      if (!paused) mediaPlayer.play()
+      if (!paused) {
+        takeAudioFocus()
+        mediaPlayer.play()
+      }
+      mediaPlayer.setSpuTrack(wantedSpu ?: -1)
       attachPendingSubs()
     } catch (e: Throwable) {
       Log.e(TAG, "could not start playback", e)
@@ -408,6 +431,10 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     // itself. Subtitles appeared while the picker still said Off, and choosing
     // Off did nothing because that was already the state it thought it was in.
     p.setSpuTrack(wantedSpu ?: -1)
+    if (defaultAudioId == null) {
+      val id = p.audioTrack
+      if (id >= 0) defaultAudioId = id
+    }
     onLoaded(mapOf("duration" to length / 1000.0))
     sendTracks(p)
   }
@@ -430,10 +457,56 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     val audio = (p.audioTracks ?: emptyArray())
       .filter { it.id >= 0 }
       .map { mapOf("id" to it.id, "name" to it.name) }
-    onTracks(mapOf("subtitles" to subtitles, "audio" to audio))
+    onTracks(
+      mapOf(
+        "subtitles" to subtitles,
+        "audio" to audio,
+        "audioId" to p.audioTrack,
+        "defaultAudio" to (defaultAudioId ?: p.audioTrack),
+      )
+    )
+  }
+
+  /** Pause Spotify / other apps for the duration of playback. */
+  private fun takeAudioFocus() {
+    if (holdingFocus) return
+    val granted = if (Build.VERSION.SDK_INT >= 26) {
+      val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+        .setAudioAttributes(
+          AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
+            .build()
+        )
+        .setOnAudioFocusChangeListener(onAudioFocus)
+        .build()
+      focusRequest = req
+      audioManager.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+    } else {
+      @Suppress("DEPRECATION")
+      audioManager.requestAudioFocus(
+        onAudioFocus,
+        AudioManager.STREAM_MUSIC,
+        AudioManager.AUDIOFOCUS_GAIN,
+      ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+    }
+    holdingFocus = granted
+  }
+
+  private fun dropAudioFocus() {
+    if (!holdingFocus) return
+    if (Build.VERSION.SDK_INT >= 26) {
+      focusRequest?.let { runCatching { audioManager.abandonAudioFocusRequest(it) } }
+      focusRequest = null
+    } else {
+      @Suppress("DEPRECATION")
+      runCatching { audioManager.abandonAudioFocus(onAudioFocus) }
+    }
+    holdingFocus = false
   }
 
   fun release() {
+    dropAudioFocus()
     removeCallbacks(attachSubs)
     subRetries = 0
     player?.let { p ->
@@ -447,6 +520,7 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     vlc = null
     announced = false
     buffering = false
+    defaultAudioId = null
   }
 
   override fun onDetachedFromWindow() {
