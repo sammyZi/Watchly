@@ -19,12 +19,14 @@ export function FilesScreen({
   mode,
   onPlay,
   onDownload,
+  onDownloadAll,
   onBack,
 }: {
   meta: TorrentMeta;
   mode?: 'stream' | 'download';
   onPlay: (file: TorrentFile) => void;
   onDownload: (file: TorrentFile) => void;
+  onDownloadAll?: () => void;
   onBack: () => void;
 }) {
   const sections = useMemo(() => {
@@ -177,6 +179,12 @@ export function FilesScreen({
             {videos} playable · {meta.files.length} files
           </Text>
         </View>
+        {downloading && videos > 1 && onDownloadAll ? (
+          <Pressable onPress={onDownloadAll} hitSlop={8} style={styles.modeChip}>
+            <Icon name="download" size={12} color={colors.accent} />
+            <Text style={styles.modeChipText}>All {videos}</Text>
+          </Pressable>
+        ) : (
         <View style={[styles.modeChip, downloading && styles.modeChipDownload]}>
           <Icon
             name={downloading ? 'download' : 'play'}
@@ -187,13 +195,16 @@ export function FilesScreen({
             {downloading ? 'Download' : 'Stream'}
           </Text>
         </View>
+        )}
       </View>
 
       <View style={styles.hintBar}>
         <Icon name="info" size={13} color={colors.muted} />
         <Text style={styles.hintText}>
           {downloading
-            ? 'Tap a video to download it to your device'
+            ? videos > 1
+              ? 'Tap a video, or All to save the whole season'
+              : 'Tap a video to download it to your device'
             : 'Tap a video to start watching'}
         </Text>
       </View>

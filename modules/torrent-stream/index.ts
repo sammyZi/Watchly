@@ -43,10 +43,14 @@ export type PlayOptions = {
    * so that window stays pinned at the head — the swarm saturates the link on
    * a few MB and the file never finishes. Set this for downloads.
    *
-   * This never widens to the rest of the torrent: only `fileIndex` and any
-   * subtitles beside it are ever fetched, in both modes.
+   * This never widens to the rest of the torrent unless `fileList` names
+   * more files (a season download).
    */
   fullFile?: boolean;
+  /** Extra file indexes as `"0,1,2"` — a JS array does not survive the Record bridge. */
+  fileList?: string;
+  /** When >= 0, native fetches every video in this season. */
+  season?: number;
 };
 
 type TorrentStream = {
@@ -59,7 +63,7 @@ type TorrentStream = {
   /** Resolve metadata and list the files inside. Slow for cold magnets. */
   inspect(uri: string, timeoutSec: number): Promise<TorrentMeta>;
   /** Start streaming one file from the torrent. */
-  play(uri: string, fileIndex: number, options: PlayOptions): Promise<void>;
+  play(uri: string, fileIndex: number, options: PlayOptions, extraFiles: string): Promise<void>;
   /**
    * Open the running stream in another installed player, resuming at
    * `positionSeconds`. The torrent keeps running — the other app reads from the
@@ -69,7 +73,7 @@ type TorrentStream = {
   openExternally(url: string, positionSeconds: number): Promise<void>;
   /** Copy the currently-downloaded file to the public Downloads folder.
    *  Returns a `file://` URI for the saved file. */
-  copyTo(fileIndex: number, fileName: string): Promise<string>;
+  copyTo(fileIndex: number, fileName: string): Promise<string | string[]>;
   /** `file://` URI for a finished file in public Downloads/. */
   downloadUri(fileName: string): Promise<string>;
   /** Delete a finished file from public Downloads/. */

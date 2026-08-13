@@ -89,6 +89,7 @@ assert.equal(episodeTag(10, 11), 'S10E11');
 
 // What a release contains, from its name alone.
 assert.equal(scopeOf('Ted Lasso S01E02 1080p WEB-DL'), 'episode');
+assert.equal(scopeOf('Ted.Lasso.S01E01-E10.1080p'), 'season');
 assert.equal(scopeOf('Ted.Lasso.S01.COMPLETE.720p.WEBRip'), 'season');
 assert.equal(scopeOf('Ted Lasso (2020) Season 1 S01 1080p'), 'season');
 assert.equal(scopeOf('Ted Lasso Seasons 1-3 COMPLETE 1080p'), 'complete');

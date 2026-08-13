@@ -22,6 +22,8 @@ type DownloadEntry = {
 export type ActiveDownload = {
   name: string;
   size: number;
+  /** Videos in this transfer — a season download is more than one. */
+  files?: number;
   progress: Progress | null;
   onPause: () => void;
   onResume: () => void;
@@ -258,6 +260,9 @@ function DownloadsScreenView({
                       {pct >= 100
                         ? 'Saving to Downloads…'
                         : stageLabel(active.progress?.state, paused)}
+                      {!!active.files && active.files > 1
+                        ? ` · ${active.files} files`
+                        : ''}
                     </Text>
                   </View>
                 </View>

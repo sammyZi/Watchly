@@ -1,6 +1,6 @@
 // node --experimental-strip-types src/lib/pick.test.ts
 import assert from 'node:assert';
-import { nextEpisode, pickFile } from './pick.ts';
+import { nextEpisode, pickFile, seasonFiles } from './pick.ts';
 
 const f = (index: number, name: string, size: number, isVideo = true) => ({
   index,
@@ -51,5 +51,9 @@ assert.equal(nextEpisode(season, 0)?.name, 'Show.S02E01.mkv');
 assert.equal(nextEpisode(season, 3), null);
 // A film has nothing to follow it.
 assert.equal(nextEpisode([f(0, 'Dune.2021.1080p.mkv', 100)], 0), null);
+
+assert.deepEqual(seasonFiles(pack, 1), [0, 1, 2]);
+assert.deepEqual(seasonFiles(season, 1), [0, 1, 2]);
+assert.deepEqual(seasonFiles(season, 2), [3]);
 
 console.log('ok');

@@ -80,6 +80,8 @@ export function seasonsIn(name: string): number[] {
 }
 
 export function scopeOf(name: string): Scope {
+  // "S01E01-E10" is a season pack, not a single episode.
+  if (/\bs\d{1,2}\s?e\d{1,2}\s*[-–]\s*e?\d{1,2}\b/i.test(name)) return 'season';
   if (/\bs\d{1,2}\s?e\d{1,2}\b|\b\d{1,2}x\d{2}\b/i.test(name)) return 'episode';
   if (/\bseasons?\s*\d{1,2}\s*[-–]\s*\d{1,2}\b|\ball seasons\b|\bcomplete series\b/i.test(name))
     return 'complete';

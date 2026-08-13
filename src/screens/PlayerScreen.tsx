@@ -315,7 +315,8 @@ export function PlayerScreen({
     const name = title ?? 'video.mp4';
     try {
       const path = await TorrentStream.copyTo(fileIndex, name);
-      recordDownload(name, 0, path);
+      const dest = Array.isArray(path) ? path[0] : path;
+      recordDownload(name, 0, dest);
       warn(`Saved to Downloads/${name}`);
     } catch (e: any) {
       warn(String(e?.message ?? e));
