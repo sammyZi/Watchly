@@ -7,6 +7,7 @@ export type StoredFile = {
   size: number;
   isVideo: boolean;
   isSubtitle: boolean;
+  path?: string;
 };
 
 export type SavedSub = { path: string; label: string };

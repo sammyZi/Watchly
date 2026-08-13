@@ -34,7 +34,7 @@ function HistoryScreenView({
   onOpenTitle: (title: Title) => void;
   onPlayFile: (item: Item, index: number) => void;
   onDownloadFile: (item: Item, index: number) => void;
-  onDownloadSeason: (item: Item) => void;
+  onDownloadSeason: (item: Item, indices?: number[]) => void;
   onRemove: (item: Item) => void;
   onClear: () => void;
 }) {
@@ -280,7 +280,7 @@ function HistoryScreenView({
             onOpen={() => onOpenItem(item)}
             onPlayFile={(index) => onPlayFile(item, index)}
             onDownloadFile={(index) => onDownloadFile(item, index)}
-            onDownloadSeason={() => onDownloadSeason(item)}
+            onDownloadSeason={(indices) => onDownloadSeason(item, indices)}
             onRemove={() => onRemove(item)}
           />
         )}

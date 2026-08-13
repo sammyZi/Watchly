@@ -184,7 +184,7 @@ class LocalFileServer(
           // Superseded and stalled — this reader is going nowhere; let go of its
           // window instead of competing with the connection that replaced it.
           if (generation.get() != generationAtStart) return
-          Thread.sleep(150)
+          Thread.sleep(40)
           continue
         }
 
@@ -192,7 +192,7 @@ class LocalFileServer(
         val want = minOf(buffer.size.toLong(), end - position + 1).toInt()
         val read = raf.read(buffer, 0, want)
         if (read <= 0) {
-          Thread.sleep(150)
+          Thread.sleep(40)
           continue
         }
 

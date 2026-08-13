@@ -40,7 +40,6 @@ import { DEFAULTS, loadSettings, saveSettings, type Settings } from './lib/setti
 import {
   clearDownloadJob,
   loadDownloadJob,
-  parkDownload,
   type DownloadJob,
 } from './lib/downloadJob';
 import { linkEpisode, loadEpisodeLinks, type EpisodeLinks } from './lib/watched';
@@ -279,12 +278,14 @@ function ShellApp({
     subtitleFiles,
     playingIndex,
     wantedIndices,
+    queueIndices,
     progress,
     fail,
     inspect,
     play,
     playKnown,
     skipFile,
+    includeFile,
     reset,
   } = torrent;
 
@@ -333,9 +334,10 @@ function ShellApp({
     if (!item || !meta) return;
     patch(item.uri, {
       torrentName: meta.name,
-      files: meta.files.map(({ index, name, size, isVideo, isSubtitle }) => ({
+      files: meta.files.map(({ index, name, path, size, isVideo, isSubtitle }) => ({
         index,
         name,
+        path,
         size,
         isVideo,
         isSubtitle,
@@ -721,23 +723,26 @@ function ShellApp({
     [history.length]
   );
 
-  // Back key unwinds the streaming flow; the player handles its own.
+  // Back key unwinds overlays; an active download is not an overlay.
   useEffect(() => {
-    if (phase === 'playing') return;
+    if (phase === 'playing' && torrentMode !== 'download') return;
     if (phase === 'idle' && !detail && !shelf) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      // Idle means the browsing stack is all there is to unwind, innermost first.
-      if (phase === 'idle') {
-        if (detail) setDetail(null);
-        else setShelf(null);
+      if (detail) {
+        setDetail(null);
         return true;
       }
+      if (shelf) {
+        setShelf(null);
+        return true;
+      }
+      if (torrentMode === 'download') return false;
       setTorrentMode(null);
       reset();
       return true;
     });
     return () => sub.remove();
-  }, [phase, detail, shelf, reset]);
+  }, [phase, torrentMode, detail, shelf, reset]);
 
   /** Ask for notification permission (Android 13+) then show the download notif. */
   const enableDownloadNotify = useCallback(async () => {
@@ -807,19 +812,20 @@ function ShellApp({
   );
 
   const downloadSeason = useCallback(
-    (target: Item, season?: number) => {
-      const indices = seasonFiles(target.files ?? [], season);
-      if (!indices.length) return;
+    (target: Item, indices?: number[]) => {
+      const list = indices?.length
+        ? indices
+        : seasonFiles(target.files ?? []);
+      if (!list.length) return;
       setTorrentMode('download');
       setTab('downloads');
       setDetail(null);
       setShelf(null);
       enableDownloadNotify();
-      open(target, indices[0], {
+      open(target, list[0], {
         keepProgress: true,
         fullFile: true,
-        fileIndices: indices,
-        season,
+        fileIndices: list,
       });
     },
     [open, enableDownloadNotify]
@@ -837,6 +843,7 @@ function ShellApp({
       return;
     }
     if (phase !== 'playing') return;
+    if (!wantedIndices.length) return;
     const name =
       fileName ??
       meta?.files.find((f) => f.index === playingIndex)?.name ??
@@ -924,6 +931,7 @@ function ShellApp({
     phase,
     fileName,
     playingIndex,
+    wantedIndices.length,
     meta,
     item,
     reset,
@@ -1159,8 +1167,7 @@ function ShellApp({
 
   // Sits above the tabs but below the streaming flow: once a source is picked,
   // the file picker and the player take the screen from here.
-  // An active download owns the Downloads tab — do not bury it under a title page.
-  if (detail && torrentMode !== 'download') {
+  if (detail) {
     return (
       <DetailScreen
         seed={detail}
@@ -1210,7 +1217,7 @@ function ShellApp({
     );
   }
 
-  if (shelf && torrentMode !== 'download') {
+  if (shelf) {
     return (
       <CatalogScreen
         heading={shelf.title}
@@ -1255,12 +1262,12 @@ function ShellApp({
         <TabPage show={tab === 'downloads'} mounted={visited.has('downloads')}>
           <DownloadsScreen
             onPlayFile={playCompleted}
-            onResumeParked={startJob}
             active={
               torrentMode === 'download' && phase !== 'idle'
                 ? (() => {
                     const indices =
-                      wantedIndices.length > 0 ? wantedIndices : [playingIndex];
+                      queueIndices.length > 0 ? queueIndices : wantedIndices.length > 0 ? wantedIndices : [playingIndex];
+                    const wanted = new Set(wantedIndices);
                     const files = indices.map(
                       (i) =>
                         meta?.files.find((f) => f.index === i) ??
@@ -1277,15 +1284,21 @@ function ShellApp({
                       fileName ??
                       files[0]?.name ??
                       (phase === 'inspecting' ? 'Starting…' : 'Downloading…'),
-                    size: files.reduce((s, f) => s + (f?.size ?? 0), 0),
-                    files: files.filter(Boolean).length,
+                    size: files
+                      .filter((f) => f && wanted.has(f.index))
+                      .reduce((s, f) => s + (f?.size ?? 0), 0),
+                    files: files.filter((f) => f && wanted.has(f.index)).length,
                     queue: files
                       .filter((f): f is NonNullable<typeof f> => !!f)
                       .map((f) => ({
                         index: f.index,
                         name: f.name,
                         size: f.size,
+                        path:
+                          f.path ??
+                          meta?.files.find((m) => m.index === f.index)?.path,
                       })),
+                    wanted: [...wanted],
                     poster:
                       item?.poster ??
                       history.find(
@@ -1301,27 +1314,6 @@ function ShellApp({
                       TorrentStream.resume().catch(() => {});
                     },
                     onCancel: () => {
-                      parkDownload({
-                        uri: item?.uri ?? '',
-                        fileIndex: playingIndex,
-                        fileIndices: wantedIndices.length
-                          ? wantedIndices
-                          : [playingIndex],
-                        season: undefined,
-                        title: item?.title,
-                        titleName: item?.titleName,
-                        poster: item?.poster,
-                        imdb: item?.imdb,
-                        kind: item?.kind,
-                        name:
-                          item?.titleName ??
-                          meta?.name ??
-                          item?.torrentName ??
-                          item?.title ??
-                          'Download',
-                        size: files.reduce((s, f) => s + (f?.size ?? 0), 0),
-                        at: Date.now(),
-                      }).catch(() => {});
                       TorrentStream.setNotify(false).catch(() => {});
                       clearDownloadJob().catch(() => {});
                       reset();
@@ -1329,34 +1321,20 @@ function ShellApp({
                       setTorrentMode(null);
                     },
                     onSkip: (index: number) => {
-                      const left = wantedIndices.filter((i) => i !== index);
-                      if (!left.length) {
-                        parkDownload({
-                          uri: item?.uri ?? '',
-                          fileIndex: playingIndex,
-                          fileIndices: wantedIndices,
-                          title: item?.title,
-                          titleName: item?.titleName,
-                          poster: item?.poster,
-                          imdb: item?.imdb,
-                          kind: item?.kind,
-                          name:
-                            item?.titleName ??
-                            meta?.name ??
-                            item?.torrentName ??
-                            item?.title ??
-                            'Download',
-                          size: files.reduce((s, f) => s + (f?.size ?? 0), 0),
-                          at: Date.now(),
-                        }).catch(() => {});
-                        TorrentStream.setNotify(false).catch(() => {});
-                        clearDownloadJob().catch(() => {});
-                        reset();
-                        TorrentStream.clearCache().catch(() => {});
-                        setTorrentMode(null);
-                        return;
-                      }
                       skipFile(index);
+                    },
+                    onInclude: (index: number) => {
+                      includeFile(index);
+                    },
+                    onPlayFile: (file) => {
+                      TorrentStream.fileUri(file.index)
+                        .then((uri) =>
+                          setLocalPlay({
+                            url: uri,
+                            title: file.name.replace(/\.[^.]+$/, ''),
+                          })
+                        )
+                        .catch((e: any) => fail(String(e?.message ?? e)));
                     },
                     };
                   })()

@@ -76,6 +76,80 @@ export function nextEpisode(files: Filed[], index: number): Filed | null {
   return at < 0 ? null : (ordered[at + 1]?.file ?? null);
 }
 
+export function parentDir(path?: string, name?: string) {
+  const p = (path || name || '').replace(/\\/g, '/');
+  const i = p.lastIndexOf('/');
+  return i > 0 ? p.slice(0, i) : '';
+}
+
+export function folderName(dir: string) {
+  return dir.split('/').filter(Boolean).pop() || dir;
+}
+
+function natural(a: string, b: string) {
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+}
+
+function fileOrder(
+  a: { name: string; path?: string },
+  b: { name: string; path?: string }
+) {
+  const ea = parseEpisode(a.name) ?? parseEpisode(a.path ?? '');
+  const eb = parseEpisode(b.name) ?? parseEpisode(b.path ?? '');
+  if (ea && eb) {
+    const byEp = ea.season - eb.season || ea.episode - eb.episode;
+    if (byEp) return byEp;
+  }
+  return natural(a.name, b.name) || natural(a.path ?? '', b.path ?? '');
+}
+
+function commonPrefix(dirs: string[]): string {
+  if (dirs.length < 2) return '';
+  const parts = dirs[0].split('/');
+  let n = parts.length;
+  for (const dir of dirs.slice(1)) {
+    const p = dir.split('/');
+    let i = 0;
+    while (i < n && i < p.length && parts[i] === p[i]) i++;
+    n = i;
+  }
+  return n > 0 ? parts.slice(0, n).join('/') : '';
+}
+
+function displayFolder(dir: string, prefix: string) {
+  if (!dir) return '';
+  const rest =
+    prefix && (dir === prefix || dir.startsWith(`${prefix}/`))
+      ? dir.slice(prefix.length).replace(/^\//, '')
+      : dir;
+  return rest || folderName(dir);
+}
+
+/** Group files by their full parent path. Sort folders and episodes naturally. */
+export function groupByFolder<T extends { name: string; path?: string }>(
+  files: T[]
+): { folder: string; dir: string; files: T[] }[] {
+  const groups = new Map<string, T[]>();
+  for (const file of files) {
+    const dir = parentDir(file.path, file.name);
+    const list = groups.get(dir) ?? [];
+    list.push(file);
+    groups.set(dir, list);
+  }
+  if (groups.size <= 1) {
+    const [dir, list] = [...groups.entries()][0] ?? ['', files];
+    return [{ folder: '', dir, files: list.slice().sort(fileOrder) }];
+  }
+  const prefix = commonPrefix([...groups.keys()].filter(Boolean));
+  return [...groups.entries()]
+    .sort((a, b) => natural(a[0], b[0]))
+    .map(([dir, grouped]) => ({
+      dir,
+      folder: displayFolder(dir, prefix),
+      files: grouped.slice().sort(fileOrder),
+    }));
+}
+
 /** Video files that belong to one season — or every video, when the pack
  *  does not label seasons (anime episode numbers, a single-season rip). */
 export function seasonFiles(files: Filed[], season?: number): number[] {

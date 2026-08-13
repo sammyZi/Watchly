@@ -5,17 +5,14 @@ import TorrentStream, { type Progress } from '../../modules/torrent-stream';
 import { Button } from '../components/Button';
 import { ConfirmModal, type Confirm } from '../components/ConfirmModal';
 import { Icon } from '../components/Icon';
+import { Marquee } from '../components/Marquee';
 import { Thumb } from '../components/Thumb';
 import { ProgressBar } from '../components/ProgressBar';
 import { Screen } from '../components/Screen';
 import { ago, bytes, speed } from '../lib/format';
+import { groupByFolder } from '../lib/pick';
 import { parseEpisode } from '../lib/search';
 import { searchableName } from '../lib/title';
-import {
-  dropParked,
-  loadParked,
-  type ParkedDownload,
-} from '../lib/downloadJob';
 import { font, radius, space, TAB_INSET, type, useColors, useThemedStyles } from '../theme';
 
 type DownloadEntry = {
@@ -27,24 +24,36 @@ type DownloadEntry = {
   titleName?: string;
 };
 
-export type QueueFile = { index: number; name: string; size: number };
+export type QueueFile = {
+  index: number;
+  name: string;
+  size: number;
+  path?: string;
+};
 
 export type ActiveDownload = {
   name: string;
   size: number;
   files?: number;
   queue?: QueueFile[];
+  /** Indexes currently fetching. Missing ones sit unmarked at the bottom. */
+  wanted?: number[];
   poster?: string | null;
   progress: Progress | null;
   onPause: () => void;
   onResume: () => void;
   onCancel: () => void;
   onSkip?: (index: number) => void;
+  onInclude?: (index: number) => void;
+  onPlayFile?: (file: QueueFile) => void;
 };
 
 function queueProgress(queue: QueueFile[], pct: number, total: number) {
   let left = total > 0 ? (pct / 100) * total : 0;
   return queue.map((file) => {
+    if (file.size <= 0) {
+      return { ...file, done: 0, label: 'Queued' as const };
+    }
     if (left >= file.size) {
       left -= file.size;
       return { ...file, done: 100, label: 'Done' as const };
@@ -130,17 +139,15 @@ function stageLabel(state?: string, paused?: boolean): string {
 
 function DownloadsScreenView({
   onPlayFile,
-  onResumeParked,
   active,
 }: {
   onPlayFile: (item: { name: string; path?: string }) => void;
-  onResumeParked?: (job: ParkedDownload) => void;
   active?: ActiveDownload | null;
 }) {
   const [items, setItems] = useState<DownloadEntry[]>([]);
-  const [parked, setParked] = useState<ParkedDownload[]>([]);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [open, setOpen] = useState(true);
+  const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
   const colors = useColors();
   const styles = useThemedStyles((c) => ({
     flex: { flex: 1 },
@@ -180,6 +187,14 @@ function DownloadsScreenView({
       paddingTop: space.xs,
     },
     filesHeadText: { ...type.overline, color: c.faint },
+    folder: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: space.sm,
+      paddingTop: space.md,
+      paddingBottom: space.xs,
+    },
+    folderName: { ...type.overline, color: c.muted, flex: 1 },
     file: {
       flexDirection: 'row' as const,
       alignItems: 'center' as const,
@@ -206,6 +221,7 @@ function DownloadsScreenView({
     fileNumDone: { color: c.good },
     fileBody: { flex: 1, minWidth: 0, gap: 4 },
     fileName: { ...type.body, fontFamily: font.medium, color: c.text },
+    fileNameOff: { color: c.faint },
     fileMeta: { ...type.meta, color: c.faint },
     skip: {
       width: 32,
@@ -214,7 +230,6 @@ function DownloadsScreenView({
       alignItems: 'center' as const,
       justifyContent: 'center' as const,
     },
-    section: { paddingTop: space.sm, gap: space.sm },
     heading: { ...type.overline, color: c.faint, paddingHorizontal: space.xs },
     empty: {
       alignItems: 'center' as const,
@@ -257,23 +272,15 @@ function DownloadsScreenView({
       alignItems: 'center' as const,
       justifyContent: 'center' as const,
     },
-    add: {
-      ...type.label,
-      fontFamily: font.semibold,
-      color: c.accent,
-      paddingHorizontal: space.sm,
-    },
   }));
 
   useEffect(() => {
     loadDownloads().then(setItems);
-    loadParked().then(setParked);
-  }, [active?.name, active?.progress?.progress]);
+  }, [active?.name, active?.progress?.progress, active?.wanted?.length]);
 
   useEffect(() => {
     const id = setInterval(() => {
       loadDownloads().then(setItems);
-      loadParked().then(setParked);
     }, 2000);
     return () => clearInterval(id);
   }, []);
@@ -292,7 +299,7 @@ function DownloadsScreenView({
     if (!active) return;
     setConfirm({
       title: 'Stop download?',
-      message: `${showTitle(active.name)} will leave this list. You can add it again from Stopped.`,
+      message: `${showTitle(active.name)} will be removed and will not come back.`,
       icon: 'x',
       confirmLabel: 'Stop',
       destructive: true,
@@ -305,7 +312,20 @@ function DownloadsScreenView({
   const rate = paused ? 0 : active?.progress?.speed ?? 0;
   const remaining = active ? Math.max(0, active.size * (1 - pct / 100)) : 0;
   const queue = active?.queue && active.queue.length > 1 ? active.queue : null;
-  const queued = queue ? queueProgress(queue, pct, active.size) : [];
+  const wantedSet = new Set(active?.wanted ?? queue?.map((f) => f.index) ?? []);
+  const onQueue = queue?.filter((f) => wantedSet.has(f.index)) ?? [];
+  const progressed = onQueue.length
+    ? queueProgress(onQueue, pct, active.size)
+    : [];
+  const byIndex = new Map(progressed.map((f) => [f.index, f]));
+  const queued = queue
+    ? queue.map((f) =>
+        wantedSet.has(f.index)
+          ? (byIndex.get(f.index) ?? { ...f, done: 0, label: 'Queued' as const })
+          : { ...f, done: 0, label: 'Off' as const }
+      )
+    : [];
+  const groups = groupByFolder(queued);
   const doneCount = queued.filter((f) => f.label === 'Done').length;
   const one = active?.queue?.[0];
   const ep = one && !queue ? fileTitle(one.name) : null;
@@ -315,7 +335,7 @@ function DownloadsScreenView({
     pct >= 100
       ? 'Saving to device…'
       : queue
-        ? `${stage} · ${doneCount} of ${queue.length}`
+        ? `${stage} · ${doneCount} of ${onQueue.length || queue.length}`
         : ep && parseEpisode(one!.name)
           ? `${stage} · ${ep}`
           : stage;
@@ -397,60 +417,146 @@ function DownloadsScreenView({
                   />
                 </Pressable>
                 {open &&
-                  queued.map((file) => {
-                    const on = file.label === 'Downloading';
-                    const done = file.label === 'Done';
-                    const at = parseEpisode(file.name);
-                    const mark = at
-                      ? String(at.episode).padStart(2, '0')
-                      : String(file.index + 1).padStart(2, '0');
+                  groups.map((group) => {
+                    const key = group.dir || group.folder || 'files';
+                    const folderOpen = !group.folder || !!openFolders[key];
+                    const folderBytes = group.files.reduce((s, f) => s + f.size, 0);
+                    const skippable = group.files.filter(
+                      (f) => f.label !== 'Off' && f.label !== 'Done'
+                    );
+                    const includable = group.files.filter((f) => f.label === 'Off');
                     return (
-                      <View key={file.index} style={styles.file}>
-                        <View
-                          style={[
-                            styles.fileMark,
-                            on && styles.fileMarkOn,
-                            done && styles.fileMarkDone,
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.fileNum,
-                              on && styles.fileNumOn,
-                              done && styles.fileNumDone,
-                            ]}
-                          >
-                            {mark}
-                          </Text>
-                        </View>
-                        <View style={styles.fileBody}>
-                          <Text numberOfLines={1} style={styles.fileName}>
-                            {fileTitle(file.name)}
-                          </Text>
-                          {on || done ? (
-                            <ProgressBar
-                              value={file.done}
-                              height={3}
-                              color={done ? colors.good : colors.accent}
-                            />
-                          ) : (
-                            <Text style={styles.fileMeta}>{bytes(file.size)}</Text>
-                          )}
-                        </View>
-                        {file.label !== 'Done' && !!active.onSkip && (
+                    <View key={key}>
+                      {!!group.folder && (
+                        <View style={styles.folder}>
                           <Pressable
-                            onPress={() => active.onSkip?.(file.index)}
-                            hitSlop={8}
-                            style={styles.skip}
-                            accessibilityLabel={`Skip ${file.name}`}
+                            onPress={() =>
+                              setOpenFolders((prev) => ({
+                                ...prev,
+                                [key]: !prev[key],
+                              }))
+                            }
+                            style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }}
                           >
-                            <Icon name="x" size={14} color={colors.faint} />
+                            <Icon
+                              name={folderOpen ? 'chevron-down' : 'chevron-right'}
+                              size={14}
+                              color={colors.faint}
+                            />
+                            <Text numberOfLines={1} style={styles.folderName}>
+                              {group.folder}
+                            </Text>
+                            <Text style={styles.filesHeadText}>
+                              {group.files.length} · {bytes(folderBytes)}
+                            </Text>
                           </Pressable>
-                        )}
-                        {done && (
-                          <Icon name="check" size={14} color={colors.good} />
-                        )}
-                      </View>
+                          {includable.length === group.files.length ? (
+                            <Pressable
+                              onPress={() =>
+                                includable.forEach((f) => active.onInclude?.(f.index))
+                              }
+                              hitSlop={8}
+                              style={styles.skip}
+                              accessibilityLabel={`Download ${group.folder}`}
+                            >
+                              <Icon name="plus" size={16} color={colors.accent} />
+                            </Pressable>
+                          ) : skippable.length > 0 ? (
+                            <Pressable
+                              onPress={() =>
+                                skippable.forEach((f) => active.onSkip?.(f.index))
+                              }
+                              hitSlop={8}
+                              style={styles.skip}
+                              accessibilityLabel={`Skip ${group.folder}`}
+                            >
+                              <Icon name="x" size={16} color={colors.faint} />
+                            </Pressable>
+                          ) : null}
+                        </View>
+                      )}
+                      {folderOpen &&
+                      group.files.map((file) => {
+                        const off = file.label === 'Off';
+                        const on = file.label === 'Downloading';
+                        const done = file.label === 'Done';
+                        const at = parseEpisode(file.name);
+                        const mark = at
+                          ? String(at.episode).padStart(2, '0')
+                          : String(file.index + 1).padStart(2, '0');
+                        return (
+                          <View key={file.index} style={styles.file}>
+                            <View
+                              style={[
+                                styles.fileMark,
+                                on && styles.fileMarkOn,
+                                done && styles.fileMarkDone,
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.fileNum,
+                                  on && styles.fileNumOn,
+                                  done && styles.fileNumDone,
+                                  off && { color: colors.faint },
+                                ]}
+                              >
+                                {mark}
+                              </Text>
+                            </View>
+                            <View style={styles.fileBody}>
+                              <Marquee
+                                style={[
+                                  styles.fileName,
+                                  off && styles.fileNameOff,
+                                ]}
+                              >
+                                {file.name}
+                              </Marquee>
+                              {on || done ? (
+                                <ProgressBar
+                                  value={file.done}
+                                  height={3}
+                                  color={done ? colors.good : colors.accent}
+                                />
+                              ) : (
+                                <Text style={styles.fileMeta}>
+                                  {off ? 'Skipped' : bytes(file.size)}
+                                </Text>
+                              )}
+                            </View>
+                            {off ? (
+                              <Pressable
+                                onPress={() => active.onInclude?.(file.index)}
+                                hitSlop={8}
+                                style={styles.skip}
+                                accessibilityLabel={`Download ${file.name}`}
+                              >
+                                <Icon name="plus" size={16} color={colors.accent} />
+                              </Pressable>
+                            ) : done ? (
+                              <Pressable
+                                onPress={() => active.onPlayFile?.(file)}
+                                hitSlop={8}
+                                style={styles.skip}
+                                accessibilityLabel={`Play ${file.name}`}
+                              >
+                                <Icon name="play" size={16} color={colors.accent} />
+                              </Pressable>
+                            ) : (
+                              <Pressable
+                                onPress={() => active.onSkip?.(file.index)}
+                                hitSlop={8}
+                                style={styles.skip}
+                                accessibilityLabel={`Skip ${file.name}`}
+                              >
+                                <Icon name="x" size={16} color={colors.faint} />
+                              </Pressable>
+                            )}
+                          </View>
+                        );
+                      })}
+                    </View>
                     );
                   })}
               </View>
@@ -462,7 +568,7 @@ function DownloadsScreenView({
           </View>
         }
         ListEmptyComponent={
-          active || parked.length ? null : (
+          active ? null : (
             <View style={styles.empty}>
               <View style={styles.emptyMark}>
                 <Icon name="download" size={22} color={colors.faint} />
@@ -516,49 +622,7 @@ function DownloadsScreenView({
             </Pressable>
           );
         }}
-        ListFooterComponent={
-          parked.length ? (
-            <View style={styles.section}>
-              <Text style={styles.heading}>Stopped</Text>
-              {parked.map((job) => (
-                <View key={job.uri} style={styles.row}>
-                  <Thumb
-                    name={job.titleName ?? job.name}
-                    poster={job.poster ?? undefined}
-                    width={44}
-                    height={66}
-                  />
-                  <View style={styles.rowBody}>
-                    <Text numberOfLines={1} style={styles.rowName}>
-                      {showTitle(job.name, job.titleName)}
-                    </Text>
-                    <Text style={styles.rowMeta}>
-                      {[job.size > 0 ? bytes(job.size) : null, ago(job.at)]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </Text>
-                  </View>
-                  <Pressable
-                    onPress={() => {
-                      dropParked(job.uri).then(setParked);
-                      onResumeParked?.(job);
-                    }}
-                    hitSlop={8}
-                  >
-                    <Text style={styles.add}>Add</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => dropParked(job.uri).then(setParked)}
-                    hitSlop={8}
-                    accessibilityLabel={`Remove ${job.name}`}
-                  >
-                    <Icon name="trash-2" size={16} color={colors.faint} />
-                  </Pressable>
-                </View>
-              ))}
-            </View>
-          ) : null
-        }
+        ListFooterComponent={null}
       />
       </View>
       <ConfirmModal request={confirm} onClose={() => setConfirm(null)} />

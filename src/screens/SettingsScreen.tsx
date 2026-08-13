@@ -16,7 +16,7 @@ import {
   type ThemeMode,
 } from '../theme';
 
-const BUFFER_CHOICES = [2, 3, 6];
+const BUFFER_CHOICES = [1, 2, 4];
 const APPEARANCE: { mode: ThemeMode; label: string }[] = [
   { mode: 'system', label: 'System' },
   { mode: 'light', label: 'Light' },
