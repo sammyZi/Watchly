@@ -1,5 +1,6 @@
 import { FlatList, Image, Pressable, Text, View } from 'react-native';
 import { Icon } from './Icon';
+import { Marquee } from './Marquee';
 import type { Title } from '../lib/meta';
 import { font, radius, space, TAB_INSET, type, useColors, useThemedStyles } from '../theme';
 
@@ -74,9 +75,7 @@ export function PosterGrid({
               <Text style={styles.scoreText}>{item.rating}</Text>
             </View>
           )}
-          <Text style={styles.name} numberOfLines={1}>
-            {item.title}
-          </Text>
+          <Marquee style={styles.name}>{item.title}</Marquee>
           <Text style={styles.year}>
             {[item.year, item.kind === 'tv' ? 'Series' : null].filter(Boolean).join(' · ')}
           </Text>

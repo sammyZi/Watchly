@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { FlatList, Pressable, Text, View } from 'react-native';
 import { Icon } from './Icon';
+import { Marquee } from './Marquee';
 import { ProgressBar } from './ProgressBar';
 import { Thumb } from './Thumb';
 import { ago, bytes, clock } from '../lib/format';
@@ -44,7 +45,7 @@ export function HistoryRow({
     },
     row: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: space.md },
     pressed: { opacity: 0.6 },
-    body: { flex: 1, gap: space.xs, paddingRight: space.xs },
+    body: { flex: 1, minWidth: 0, gap: space.xs, paddingRight: space.xs },
     title: {
       ...type.title,
       fontFamily: font.semibold,
@@ -70,6 +71,7 @@ export function HistoryRow({
       borderTopWidth: 1,
       borderTopColor: c.line,
       paddingTop: space.sm,
+      maxHeight: 280,
     },
     file: {
       flexDirection: 'row' as const,
@@ -78,7 +80,7 @@ export function HistoryRow({
       paddingVertical: space.sm,
       paddingLeft: space.sm,
     },
-    fileBody: { flex: 1, gap: 3 },
+    fileBody: { flex: 1, minWidth: 0, gap: 3 },
     fileName: { ...type.body, fontFamily: font.medium, color: c.text },
     fileMeta: { ...type.meta, color: c.faint },
     downloadBtn: {
@@ -151,16 +153,14 @@ export function HistoryRow({
         />
 
         <View style={styles.body}>
-          <Text numberOfLines={2} style={styles.title}>
+          <Marquee style={styles.title}>
             {item.titleName ?? item.torrentName ?? item.title}
-          </Text>
+          </Marquee>
 
           {/* The release name is still how two rips of the same film differ,
               but it stops being the headline once the real title is known. */}
           {!!item.titleName && (
-            <Text numberOfLines={1} style={styles.release}>
-              {item.torrentName ?? item.title}
-            </Text>
+            <Marquee style={styles.release}>{item.torrentName ?? item.title}</Marquee>
           )}
 
           {!!progressLabel && (
@@ -190,21 +190,24 @@ export function HistoryRow({
       )}
 
       {expanded && (
-        <View style={styles.files}>
-          {videos.map((file) => {
+        <FlatList
+          data={videos}
+          style={styles.files}
+          keyExtractor={(file) => String(file.index)}
+          nestedScrollEnabled
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          renderItem={({ item: file }) => {
             const position = item.positions?.[file.index];
             const duration = item.durations?.[file.index];
             return (
               <Pressable
-                key={file.index}
                 onPress={() => onPlayFile(file.index)}
                 style={({ pressed }) => [styles.file, pressed && styles.pressed]}
               >
                 <Icon name="play" size={13} color={colors.accent} />
                 <View style={styles.fileBody}>
-                  <Text numberOfLines={1} style={styles.fileName}>
-                    {file.name}
-                  </Text>
+                  <Marquee style={styles.fileName}>{file.name}</Marquee>
                   <Text style={styles.fileMeta}>
                     {bytes(file.size)}
                     {position ? ` · resume ${clock(position)}` : ''}
@@ -222,8 +225,8 @@ export function HistoryRow({
                 </Pressable>
               </Pressable>
             );
-          })}
-        </View>
+          }}
+        />
       )}
     </View>
   );
