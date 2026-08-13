@@ -66,6 +66,9 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
   private var subtitleFiles: List<String>? = null
   /** Paths already handed to libVLC — avoid attaching the same slave twice. */
   private val attachedSubs = mutableSetOf<String>()
+  /** Sidecar files often land after the video is already playing. */
+  private var subRetries = 0
+  private val attachSubs = Runnable { attachPendingSubs() }
   /** Survives a restart(), which rebuilds the player it is set on. */
   private var scale = MediaPlayer.ScaleType.SURFACE_BEST_FIT
 
@@ -154,12 +157,20 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
   fun setSubtitleFiles(paths: List<String>?) {
     val normalized = paths?.map { localPath(it) }?.filter { it.isNotEmpty() }
     subtitleFiles = normalized
+    subRetries = 0
+    attachPendingSubs()
+  }
+
+  private fun attachPendingSubs() {
+    removeCallbacks(attachSubs)
     val p = player ?: return
-    val fresh = (normalized ?: emptyList()).filter { it !in attachedSubs }
-    for (path in fresh) {
+    val pending = (subtitleFiles ?: emptyList()).filter { it !in attachedSubs }
+    if (pending.isEmpty()) return
+    var waiting = false
+    for (path in pending) {
       val subFile = File(path)
-      if (!subFile.exists()) {
-        Log.w(TAG, "subtitle missing: $path")
+      if (!subFile.exists() || subFile.length() == 0L) {
+        waiting = true
         continue
       }
       // MediaPlayer.addSlave works while playing; Media.addSlave after setMedia
@@ -172,14 +183,15 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
         Log.w(TAG, "subtitle attach failed: ${subFile.name}")
       }
     }
-    // Slaves are parsed async — refresh the picker once they show up, and keep
-    // the newly selected track (addSlave select=true) as wantedSpu.
-    postDelayed({
-      val pl = player ?: return@postDelayed
-      val spu = pl.spuTrack
-      if (spu >= 0) wantedSpu = spu
-      sendTracks(pl)
-    }, 600)
+    if (attachedSubs.isNotEmpty()) {
+      postDelayed({
+        val pl = player ?: return@postDelayed
+        val spu = pl.spuTrack
+        if (spu >= 0) wantedSpu = spu
+        sendTracks(pl)
+      }, 600)
+    }
+    if (waiting && subRetries++ < 20) postDelayed(attachSubs, 1500)
   }
 
   /** `file:///…` from JS, or a bare absolute path from older callers. */
@@ -328,10 +340,12 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
       if (startMs > 0) media.addOption(":start-time=${startMs / 1000.0}")
       // External subtitle files alongside the video (e.g. from the torrent)
       attachedSubs.clear()
+      subRetries = 0
+      removeCallbacks(attachSubs)
       subtitleFiles?.forEach { subPath ->
         val path = localPath(subPath)
         val subFile = File(path)
-        if (subFile.exists()) {
+        if (subFile.exists() && subFile.length() > 0L) {
           media.addSlave(IMedia.Slave(IMedia.Slave.Type.Subtitle, 4, Uri.fromFile(subFile).toString()))
           attachedSubs.add(path)
         }
@@ -344,6 +358,7 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
       announced = false
       mediaPlayer.rate = rate
       if (!paused) mediaPlayer.play()
+      attachPendingSubs()
     } catch (e: Throwable) {
       Log.e(TAG, "could not start playback", e)
       onFailed(mapOf("message" to (e.message ?: "Playback could not start")))
@@ -419,6 +434,8 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
   }
 
   fun release() {
+    removeCallbacks(attachSubs)
+    subRetries = 0
     player?.let { p ->
       runCatching { p.setEventListener(null) }
       runCatching { if (p.isPlaying) p.stop() }

@@ -67,6 +67,9 @@ const SCALES = [
  */
 export function PlayerScreen({
   title,
+  metaTitle,
+  imdb,
+  kind,
   resumeAt,
   url,
   lanUrl,
@@ -83,6 +86,10 @@ export function PlayerScreen({
 }: {
   /** What is playing — the file inside the torrent, not the torrent. */
   title?: string;
+  /** IMDb / Cinemeta title. SubDL search uses this, never the release filename. */
+  metaTitle?: string;
+  imdb?: string;
+  kind?: 'movie' | 'tv';
   resumeAt?: number;
   /** null until the first piece lands — the player mounts before that. */
   url: string | null;
@@ -315,20 +322,22 @@ export function PlayerScreen({
     }
   }, [fileIndex, title, warn]);
 
-  const searchSubs = useCallback(async () => {
-    const q = subQuery.trim() || title;
+  const searchSubs = useCallback(async (query?: string) => {
+    const typed = (query ?? subQuery).trim();
     const key = SUBDL_KEY;
-    if (!q) return;
     if (!key) { warn('This build has no SubDL key'); setSearching(false); return; }
+    const q = typed || metaTitle || searchableName(title ?? '') || '';
+    if (!q && !imdb) return;
     setSubLoading(true);
     setSubResults([]);
     try {
-      // SubDL matches on a title, so the release name has to come off first —
-      // "Show.S01E02.1080p.WEB-DL.mkv" as a `film_name` matches nothing. The
-      // episode markers it carries are the useful part, and they go in the
-      // query separately.
-      const at = parseEpisode(q);
-      const results = await searchSubtitles(searchableName(q) || q, key, { ...at });
+      const at = parseEpisode(title ?? '');
+      const useImdb = !!imdb && (!typed || typed === metaTitle);
+      const results = await searchSubtitles(useImdb ? '' : q, key, {
+        ...at,
+        imdb: useImdb ? imdb : undefined,
+        type: (at || kind === 'tv') ? 'tv' : kind === 'movie' ? 'movie' : undefined,
+      });
       setSubResults(results.slice(0, 20));
     } catch (e: any) {
       const msg = String(e?.message ?? e);
@@ -341,7 +350,7 @@ export function PlayerScreen({
     } finally {
       setSubLoading(false);
     }
-  }, [subQuery, title, warn]);
+  }, [subQuery, title, metaTitle, imdb, kind, warn]);
 
   const applySubtitle = useCallback(async (result: Sub) => {
     try {
@@ -952,6 +961,7 @@ export function PlayerScreen({
                       label="Subtitles"
                       on={subTrack !== null}
                       onPress={() => {
+                        setSearching(false);
                         setPicking((p) => !p);
                         bumpUi();
                       }}
@@ -961,8 +971,15 @@ export function PlayerScreen({
                       label="Find subs"
                       on={searching}
                       onPress={() => {
-                        setSearching((s) => !s);
-                        if (!searching) setSubQuery(title ?? '');
+                        setPicking(false);
+                        const next = !searching;
+                        setSearching(next);
+                        if (next) {
+                          const q = metaTitle || searchableName(title ?? '') || '';
+                          setSubQuery(q);
+                          setSubResults([]);
+                          if (q || imdb) searchSubs(q);
+                        }
                         bumpUi();
                       }}
                     />
@@ -989,12 +1006,20 @@ export function PlayerScreen({
           )}
 
           {picking && (
-            <View style={styles.sheet}>
+            <View
+              style={[
+                styles.sheet,
+                { maxHeight: Math.max(140, height - 88), maxWidth: width - 24 },
+              ]}
+            >
               {/* Audio to the left of subtitles rather than under them: the
                   screen is landscape, so the room is sideways, and a stacked
                   second section pushed the list past the bottom edge. */}
               {audioTracks.length > 1 && (
-                <View style={styles.sheetCol}>
+                <ScrollView
+                  style={[styles.sheetCol, { maxHeight: Math.max(120, height - 100) }]}
+                  keyboardShouldPersistTaps="handled"
+                >
                   <Text style={styles.sheetTitle}>Audio</Text>
                   {audioTracks.map((t) => (
                     <TrackOption
@@ -1008,14 +1033,16 @@ export function PlayerScreen({
                       }}
                     />
                   ))}
-                </View>
+                </ScrollView>
               )}
 
-              <View
+              <ScrollView
                 style={[
                   styles.sheetCol,
                   audioTracks.length > 1 && styles.sheetColSecond,
+                  { maxHeight: Math.max(120, height - 100) },
                 ]}
+                keyboardShouldPersistTaps="handled"
               >
               <Text style={styles.sheetTitle}>Subtitles</Text>
               <TrackOption
@@ -1052,13 +1079,21 @@ export function PlayerScreen({
                   }}
                 />
               ))}
-
-              </View>
+              </ScrollView>
             </View>
           )}
 
           {searching && (
-            <View style={styles.sheet}>
+            <View
+              style={[
+                styles.sheet,
+                styles.searchSheet,
+                {
+                  maxHeight: Math.max(160, height - 88),
+                  width: Math.min(420, width - 24),
+                },
+              ]}
+            >
               <Text style={styles.sheetTitle}>Find subtitles</Text>
               <View style={styles.searchRow}>
                 <TextInput
@@ -1067,10 +1102,10 @@ export function PlayerScreen({
                   onChangeText={setSubQuery}
                   placeholder="Search by title..."
                   placeholderTextColor="#ffffff60"
-                  onSubmitEditing={searchSubs}
+                  onSubmitEditing={() => searchSubs()}
                   returnKeyType="search"
                 />
-                <Pressable onPress={searchSubs} style={styles.searchBtn}>
+                <Pressable onPress={() => searchSubs()} style={styles.searchBtn}>
                   {subLoading ? (
                     <ActivityIndicator color="#fff" size="small" />
                   ) : (
@@ -1079,7 +1114,10 @@ export function PlayerScreen({
                 </Pressable>
               </View>
               {subResults.length > 0 ? (
-                <ScrollView style={styles.resultList}>
+                <ScrollView
+                  style={{ maxHeight: Math.max(80, height - 180) }}
+                  keyboardShouldPersistTaps="handled"
+                >
                   {subResults.map((r) => {
                     const name = srtDisplayName(r);
                     return (
@@ -1109,7 +1147,7 @@ export function PlayerScreen({
                   color="#fff"
                   style={{ marginVertical: 20 }}
                 />
-              ) : subQuery ? (
+              ) : subQuery || imdb ? (
                 <Text style={styles.noResults}>No subtitles found</Text>
               ) : (
                 <Text style={styles.noResults}>
@@ -1416,7 +1454,7 @@ const styles = StyleSheet.create({
   },
   /** One list. Capped so a release with long track names cannot push the
    *  other column off the screen — the names scroll instead. */
-  sheetCol: { minWidth: 170, maxWidth: 260, gap: 2 },
+  sheetCol: { minWidth: 170, maxWidth: 260 },
   /** The rule between the two, on whichever is on the right. */
   sheetColSecond: {
     marginLeft: 6,
@@ -1696,6 +1734,10 @@ const styles = StyleSheet.create({
   failureText: { ...type.meta, color: '#fff' },
 
   // OpenSubtitles search sheet
+  searchSheet: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+  },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1720,7 +1762,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  resultList: { maxHeight: 280, marginTop: 4 },
   subResult: {
     flexDirection: 'row',
     alignItems: 'center',

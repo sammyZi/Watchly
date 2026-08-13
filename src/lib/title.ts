@@ -32,6 +32,7 @@ export function hueOf(name: string): number {
 export function searchableName(name: string): string {
   return name
     .replace(/\.[a-z0-9]{2,4}$/i, '')
+    .replace(/\[[^\]]*\]/g, ' ')
     .replace(/[._]+/g, ' ')
     .split(
       /\b(?:19\d{2}|20\d{2}|s\d{1,2}e\d{1,2}|season|complete|\d{3,4}p|2160p|4k|bluray|brrip|bdrip|web[ -]?dl|webrip|hdtv|dvdrip|x26[45]|h ?26[45]|hevc|aac|ac3|dts)\b/i

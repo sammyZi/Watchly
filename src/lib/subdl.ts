@@ -49,14 +49,25 @@ export function toSubs(rows: Record<string, any>[]): Sub[] {
 export async function searchSubtitles(
   query: string,
   apiKey: string,
-  opts?: { language?: string; season?: number; episode?: number }
+  opts?: {
+    language?: string;
+    season?: number;
+    episode?: number;
+    imdb?: string;
+    type?: 'movie' | 'tv';
+  }
 ): Promise<Sub[]> {
   const params = new URLSearchParams({
     api_key: apiKey,
-    film_name: query,
     languages: opts?.language ?? 'EN',
     subs_per_page: '30',
   });
+  // IMDb id is the reliable key; film_name is the fallback when we only have
+  // a title. Sending a release filename here matches nothing.
+  if (opts?.imdb) params.set('imdb_id', opts.imdb);
+  else if (query) params.set('film_name', query);
+  else return [];
+  if (opts?.type) params.set('type', opts.type);
   if (opts?.season != null) params.set('season_number', String(opts.season));
   if (opts?.episode != null) params.set('episode_number', String(opts.episode));
 
