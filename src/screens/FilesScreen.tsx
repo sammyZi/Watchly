@@ -10,6 +10,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { IconButton } from '../components/Button';
 import { Icon } from '../components/Icon';
 import { bytes } from '../lib/format';
+import { parseEpisode } from '../lib/search';
+import { searchableName } from '../lib/title';
 import type { TorrentFile, TorrentMeta } from '../../modules/torrent-stream';
 import { font, radius, space, type, useColors, useTheme, useThemedStyles } from '../theme';
 
@@ -91,16 +93,6 @@ export function FilesScreen({
     },
     modeChipTextOn: { color: c.onAccent },
 
-    hintBar: {
-      flexDirection: 'row' as const,
-      alignItems: 'center' as const,
-      gap: space.sm,
-      paddingHorizontal: space.xl,
-      paddingVertical: space.md,
-      backgroundColor: c.surface,
-    },
-    hintText: { ...type.meta, color: c.muted, flex: 1 },
-
     list: { padding: space.lg, paddingBottom: space.xxl },
     folder: {
       flexDirection: 'row' as const,
@@ -117,22 +109,26 @@ export function FilesScreen({
       flexDirection: 'row' as const,
       alignItems: 'center' as const,
       gap: space.md,
-      padding: space.md,
+      padding: space.sm,
       marginBottom: space.sm,
-      borderRadius: radius.lg,
+      borderRadius: radius.md,
     },
     playable: { backgroundColor: c.surface },
-    muted: { backgroundColor: 'transparent', opacity: 0.65 },
+    muted: { backgroundColor: 'transparent', opacity: 0.5 },
     pressed: { opacity: 0.65 },
     mark: {
-      width: 38,
-      height: 38,
-      borderRadius: radius.md,
+      width: 56,
+      height: 56,
+      borderRadius: radius.sm,
       alignItems: 'center' as const,
       justifyContent: 'center' as const,
+      backgroundColor: c.control,
     },
     markVideo: { backgroundColor: c.accentSoft },
     markSub: { backgroundColor: c.surface },
+    ep: { ...type.title, fontFamily: font.semibold, fontSize: 16, lineHeight: 20 },
+    epOn: { color: c.accent },
+    epOff: { color: c.faint },
     body: { flex: 1, gap: 2 },
     name: { ...type.body, fontFamily: font.medium, color: c.text },
     nameMuted: { fontFamily: font.regular, color: c.muted },
@@ -173,10 +169,10 @@ export function FilesScreen({
         />
         <View style={styles.headerText}>
           <Text numberOfLines={1} style={styles.title}>
-            {meta.name}
+            {searchableName(meta.name) || meta.name}
           </Text>
           <Text style={styles.subtitle}>
-            {videos} playable · {meta.files.length} files
+            {videos} {videos === 1 ? 'episode' : 'episodes'}
           </Text>
         </View>
         {downloading && videos > 1 && onDownloadAll ? (
@@ -196,17 +192,6 @@ export function FilesScreen({
           </Text>
         </View>
         )}
-      </View>
-
-      <View style={styles.hintBar}>
-        <Icon name="info" size={13} color={colors.muted} />
-        <Text style={styles.hintText}>
-          {downloading
-            ? videos > 1
-              ? 'Tap a video, or All to save the whole season'
-              : 'Tap a video to download it to your device'
-            : 'Tap a video to start watching'}
-        </Text>
       </View>
 
       <SectionList
@@ -229,6 +214,14 @@ export function FilesScreen({
         renderItem={({ item }) => {
           const action = () =>
             downloading ? onDownload(item) : onPlay(item);
+          const at = item.isVideo ? parseEpisode(item.name) : null;
+          const label = at
+            ? at.season === 0
+              ? `Special ${at.episode}`
+              : `Episode ${at.episode}`
+            : item.isVideo
+              ? searchableName(item.name) || item.name
+              : item.name;
 
           return (
             <Pressable
@@ -247,21 +240,31 @@ export function FilesScreen({
                   item.isSubtitle && styles.markSub,
                 ]}
               >
-                <Icon
-                  name={item.isVideo ? (downloading ? 'download' : 'play') : item.isSubtitle ? 'type' : 'file'}
-                  size={14}
-                  color={item.isVideo ? colors.accent : colors.faint}
-                />
+                <Text
+                  style={[
+                    styles.ep,
+                    item.isVideo ? styles.epOn : styles.epOff,
+                  ]}
+                >
+                  {at ? String(at.episode) : ''}
+                </Text>
+                {!at && (
+                  <Icon
+                    name={item.isVideo ? (downloading ? 'download' : 'play') : item.isSubtitle ? 'type' : 'file'}
+                    size={14}
+                    color={item.isVideo ? colors.accent : colors.faint}
+                  />
+                )}
               </View>
 
               <View style={styles.body}>
                 <Text
-                  numberOfLines={2}
+                  numberOfLines={1}
                   style={[styles.name, !item.isVideo && styles.nameMuted]}
                 >
-                  {item.name}
+                  {label}
                 </Text>
-                <Text style={styles.size}>
+                <Text style={styles.size} numberOfLines={1}>
                   {bytes(item.size)}
                   {item.isSubtitle
                     ? ' · subtitle'

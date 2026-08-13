@@ -90,6 +90,8 @@ type TorrentStream = {
   pause(): Promise<void>;
   /** Resume a paused transfer. */
   resume(): Promise<void>;
+  /** Stop fetching one file; the rest of a season download continues. */
+  skipFile(index: number): Promise<void>;
   /** Show / hide the ongoing download notification. */
   setNotify(enabled: boolean): Promise<void>;
   /** Move the prefetch window; `ratio` is 0-1 through the file. */

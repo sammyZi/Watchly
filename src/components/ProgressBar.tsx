@@ -6,10 +6,12 @@ export function ProgressBar({
   value,
   style,
   height = 3,
+  color,
 }: {
   value: number;
   style?: ViewStyle;
   height?: number;
+  color?: string;
 }) {
   const pct = Math.max(0, Math.min(100, value));
   const styles = useThemedStyles((c) => ({
@@ -19,7 +21,11 @@ export function ProgressBar({
   return (
     <View style={[styles.track, { height, borderRadius: height }, style]}>
       <View
-        style={[styles.fill, { width: `${pct}%`, height, borderRadius: height }]}
+        style={[
+          styles.fill,
+          { width: `${pct}%`, height, borderRadius: height },
+          color ? { backgroundColor: color } : null,
+        ]}
       />
     </View>
   );

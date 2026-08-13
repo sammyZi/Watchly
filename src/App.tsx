@@ -37,6 +37,12 @@ import {
   type Item,
 } from './lib/history';
 import { DEFAULTS, loadSettings, saveSettings, type Settings } from './lib/settings';
+import {
+  clearDownloadJob,
+  loadDownloadJob,
+  parkDownload,
+  type DownloadJob,
+} from './lib/downloadJob';
 import { linkEpisode, loadEpisodeLinks, type EpisodeLinks } from './lib/watched';
 import { isTorrentSource } from './lib/magnet';
 import { nextEpisode, pickFile, seasonFiles } from './lib/pick';
@@ -278,6 +284,7 @@ function ShellApp({
     inspect,
     play,
     playKnown,
+    skipFile,
     reset,
   } = torrent;
 
@@ -307,8 +314,6 @@ function ShellApp({
     loadHistory().then(setHistory);
     loadEpisodeLinks().then(setEpisodeLinks);
     loadSaved().then(setSaved);
-    // Drop leftover stream pieces from a previous kill (can be multi‑GB).
-    TorrentStream.clearCache().catch(() => {});
   }, []);
 
   // Leaving the app while idle: clear stream cache. Active downloads keep data
@@ -357,7 +362,14 @@ function ShellApp({
         season?: number;
       }
     ) => {
-      const items = await put({ ...next, at: Date.now() });
+      const items = await put({
+        ...next,
+        at: Date.now(),
+        poster: next.poster ?? detail?.poster ?? undefined,
+        imdb: next.imdb ?? detail?.imdb,
+        kind: next.kind ?? detail?.kind,
+        titleName: next.titleName ?? detail?.title,
+      });
       setHistory(items);
       // Merged copy — `next` can arrive without the resume points already stored
       // under this uri, and both the player and the engine seek by them.
@@ -411,7 +423,7 @@ function ShellApp({
         // to show, and `inspect` has already left us on it.
       }
     },
-    [inspect, play, playKnown]
+    [inspect, play, playKnown, detail]
   );
 
   /**
@@ -484,24 +496,36 @@ function ShellApp({
   const tried = useRef(new Set<string>());
   const online = useOnline();
   useEffect(() => {
-    // Offline every lookup would come back empty and mark the row as tried,
-    // which is how a row ends up with no art for the rest of the session.
-    if (!online) return;
-    const pending = history
-      .filter((h) => !h.poster && !tried.current.has(h.uri))
-      .slice(0, 12);
-    if (!pending.length) return;
-
     let live = true;
     (async () => {
+      // Artwork already on a saved title — stamp it without waiting for the net.
+      for (const h of history) {
+        if (/^https?:\/\//i.test(h.poster ?? '')) continue;
+        const book = saved.find(
+          (s) =>
+            (h.imdb && s.imdb === h.imdb) ||
+            (!!h.titleName && s.title === h.titleName)
+        );
+        if (!book?.poster) continue;
+        const items = await patch(h.uri, {
+          poster: book.poster,
+          imdb: h.imdb || book.imdb,
+          kind: h.kind || book.kind,
+          titleName: h.titleName || book.title,
+        });
+        if (!live) return;
+        setHistory(items);
+      }
+
+      if (!online) return;
+      const pending = history
+        .filter((h) => !/^https?:\/\//i.test(h.poster ?? '') && !tried.current.has(h.uri))
+        .slice(0, 12);
       for (const target of pending) {
-        // Marked before the await: a failed lookup must not be retried on
-        // every history change for the rest of the session.
         tried.current.add(target.uri);
         const found = target.imdb
           ? await loadTitle(target.imdb, target.kind ?? 'movie')
           : await resolveTitle(target.torrentName ?? target.title);
-        // Dropped mid-run: unmark this one and leave the rest for the retry.
         if (!isOnline()) {
           tried.current.delete(target.uri);
           return;
@@ -519,7 +543,7 @@ function ShellApp({
     return () => {
       live = false;
     };
-  }, [history, online]);
+  }, [history, saved, online]);
 
   const openUri = useCallback(
     async (
@@ -585,7 +609,25 @@ function ShellApp({
 
   // Stable identities for the two screens heavy enough to care — with these the
   // hidden tabs re-render on a switch instead of rebuilding.
-  const playFile = useCallback((target: Item, index: number) => open(target, index), [open]);
+  const playFile = useCallback(
+    (target: Item, index: number) => {
+      const book = saved.find((s) => s.imdb && s.imdb === target.imdb);
+      const kin = history.find(
+        (h) => h.uri !== target.uri && h.imdb === target.imdb && h.poster
+      );
+      open(
+        {
+          ...target,
+          poster: target.poster || kin?.poster || book?.poster || undefined,
+          imdb: target.imdb || book?.imdb,
+          kind: target.kind || book?.kind,
+          titleName: target.titleName || book?.title,
+        },
+        index
+      );
+    },
+    [open, saved, history]
+  );
   const showHistory = useCallback(() => setTab('history'), []);
   const saveTitle = useCallback(
     (target: Title, list: List) => toggleSaved(target, list).then(setSaved),
@@ -708,6 +750,48 @@ function ShellApp({
     TorrentStream.setNotify(true).catch(() => {});
   }, []);
 
+  const startJob = useCallback(
+    (job: DownloadJob) => {
+      setTorrentMode('download');
+      setTab('downloads');
+      setDetail(null);
+      setShelf(null);
+      enableDownloadNotify();
+      open(
+        {
+          uri: job.uri,
+          title: job.titleName ?? job.title ?? 'Download',
+          at: Date.now(),
+          imdb: job.imdb,
+          kind: job.kind,
+          poster: job.poster ?? undefined,
+          titleName: job.titleName,
+        },
+        job.fileIndex,
+        {
+          keepProgress: true,
+          fullFile: true,
+          fileIndices: job.fileIndices,
+          season: job.season,
+        }
+      );
+    },
+    [open, enableDownloadNotify]
+  );
+
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    loadDownloadJob().then((job) => {
+      if (!job) {
+        TorrentStream.clearCache().catch(() => {});
+        return;
+      }
+      startJob(job);
+    });
+  }, [startJob]);
+
   /** Declared here rather than with the other stable callbacks — it needs
    *  `enableDownloadNotify`, which is defined just above. */
   const downloadFile = useCallback(
@@ -794,13 +878,17 @@ function ShellApp({
                 meta?.files.find((f) => f.name === file)?.size ??
                 item?.files?.find((f) => f.name === file)?.size ??
                 size;
-              return recordDownload(file, bytes, path);
+              return recordDownload(file, bytes, path, {
+                poster: item?.poster,
+                titleName: item?.titleName,
+              });
             })
           );
         })
         .then(() => {
           console.log('[download] done — stop torrent');
           TorrentStream.setNotify(false).catch(() => {});
+          clearDownloadJob().catch(() => {});
           reset();
           setTorrentMode(null);
           setTab('downloads');
@@ -904,6 +992,10 @@ function ShellApp({
               const local = await openUri(hits[0].magnet, {
                 auto: episodeTag(nextEp.season, nextEp.episode),
                 keepProgress: true,
+                imdb: detail.imdb,
+                kind: detail.kind,
+                poster: detail.poster,
+                titleName: detail.title,
               });
               if (local) linkEpisode(nextEp.id, local).then(setEpisodeLinks);
             },
@@ -1163,6 +1255,7 @@ function ShellApp({
         <TabPage show={tab === 'downloads'} mounted={visited.has('downloads')}>
           <DownloadsScreen
             onPlayFile={playCompleted}
+            onResumeParked={startJob}
             active={
               torrentMode === 'download' && phase !== 'idle'
                 ? (() => {
@@ -1173,23 +1266,33 @@ function ShellApp({
                         meta?.files.find((f) => f.index === i) ??
                         item?.files?.find((f) => f.index === i)
                     );
-                    const many = files.filter(Boolean).length > 1;
                     const pack =
                       item?.titleName ??
                       meta?.name ??
                       item?.torrentName ??
                       item?.title;
                     return {
-                    name: many
-                      ? pack ?? 'Season download'
-                      : fileName ??
-                        files[0]?.name ??
-                        pack ??
-                        (phase === 'inspecting'
-                          ? 'Fetching metadata…'
-                          : 'Downloading…'),
+                    name:
+                      pack ??
+                      fileName ??
+                      files[0]?.name ??
+                      (phase === 'inspecting' ? 'Starting…' : 'Downloading…'),
                     size: files.reduce((s, f) => s + (f?.size ?? 0), 0),
-                    files: many ? files.filter(Boolean).length : 1,
+                    files: files.filter(Boolean).length,
+                    queue: files
+                      .filter((f): f is NonNullable<typeof f> => !!f)
+                      .map((f) => ({
+                        index: f.index,
+                        name: f.name,
+                        size: f.size,
+                      })),
+                    poster:
+                      item?.poster ??
+                      history.find(
+                        (h) =>
+                          h.uri === item?.uri ||
+                          (!!item?.imdb && h.imdb === item.imdb)
+                      )?.poster,
                     progress,
                     onPause: () => {
                       TorrentStream.pause().catch(() => {});
@@ -1198,9 +1301,62 @@ function ShellApp({
                       TorrentStream.resume().catch(() => {});
                     },
                     onCancel: () => {
+                      parkDownload({
+                        uri: item?.uri ?? '',
+                        fileIndex: playingIndex,
+                        fileIndices: wantedIndices.length
+                          ? wantedIndices
+                          : [playingIndex],
+                        season: undefined,
+                        title: item?.title,
+                        titleName: item?.titleName,
+                        poster: item?.poster,
+                        imdb: item?.imdb,
+                        kind: item?.kind,
+                        name:
+                          item?.titleName ??
+                          meta?.name ??
+                          item?.torrentName ??
+                          item?.title ??
+                          'Download',
+                        size: files.reduce((s, f) => s + (f?.size ?? 0), 0),
+                        at: Date.now(),
+                      }).catch(() => {});
                       TorrentStream.setNotify(false).catch(() => {});
-                      setTorrentMode(null);
+                      clearDownloadJob().catch(() => {});
                       reset();
+                      TorrentStream.clearCache().catch(() => {});
+                      setTorrentMode(null);
+                    },
+                    onSkip: (index: number) => {
+                      const left = wantedIndices.filter((i) => i !== index);
+                      if (!left.length) {
+                        parkDownload({
+                          uri: item?.uri ?? '',
+                          fileIndex: playingIndex,
+                          fileIndices: wantedIndices,
+                          title: item?.title,
+                          titleName: item?.titleName,
+                          poster: item?.poster,
+                          imdb: item?.imdb,
+                          kind: item?.kind,
+                          name:
+                            item?.titleName ??
+                            meta?.name ??
+                            item?.torrentName ??
+                            item?.title ??
+                            'Download',
+                          size: files.reduce((s, f) => s + (f?.size ?? 0), 0),
+                          at: Date.now(),
+                        }).catch(() => {});
+                        TorrentStream.setNotify(false).catch(() => {});
+                        clearDownloadJob().catch(() => {});
+                        reset();
+                        TorrentStream.clearCache().catch(() => {});
+                        setTorrentMode(null);
+                        return;
+                      }
+                      skipFile(index);
                     },
                     };
                   })()

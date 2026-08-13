@@ -79,12 +79,46 @@ async function write(items: Item[]) {
   return capped;
 }
 
+/** Prefer a real poster URL over a missing or leftover local still. */
+export const remoteArt = (...urls: (string | null | undefined)[]) =>
+  urls.find((u) => !!u && /^https?:\/\//i.test(u)) ?? undefined;
+
+/** Artwork to show for a library row — this item, a saved title, or a sibling. */
+export function posterOf(
+  item: Item,
+  extras?: { saved?: { imdb: string; poster: string | null }[]; kin?: Item[] }
+) {
+  return remoteArt(
+    item.poster,
+    extras?.saved?.find((s) => s.imdb === item.imdb)?.poster,
+    extras?.kin?.find((h) => h.uri !== item.uri && h.imdb && h.imdb === item.imdb)
+      ?.poster
+  );
+}
+
 /** Insert or move-to-top, merging over whatever was already stored. */
 export function put(item: Item) {
   return serial(async () => {
     const rest = await loadHistory();
     const prev = rest.find((x) => x.uri === item.uri);
-    return write([{ ...prev, ...item }, ...rest.filter((x) => x.uri !== item.uri)]);
+    // A different episode of the same show still has the artwork this row needs.
+    const kin = rest.find(
+      (x) =>
+        x.uri !== item.uri &&
+        !!remoteArt(x.poster) &&
+        ((item.imdb && x.imdb === item.imdb) ||
+          (prev?.imdb && x.imdb === prev.imdb) ||
+          (item.titleName && x.titleName === item.titleName))
+    );
+    const merged: Item = {
+      ...prev,
+      ...item,
+      poster: remoteArt(item.poster, prev?.poster, kin?.poster),
+      imdb: item.imdb || prev?.imdb || kin?.imdb,
+      kind: item.kind || prev?.kind || kin?.kind,
+      titleName: item.titleName || prev?.titleName || kin?.titleName,
+    };
+    return write([merged, ...rest.filter((x) => x.uri !== item.uri)]);
   });
 }
 

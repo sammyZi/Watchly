@@ -4,6 +4,7 @@ import TorrentStream, {
   type TorrentMeta,
 } from '../../modules/torrent-stream';
 import type { Item } from '../lib/history';
+import { saveDownloadJob } from '../lib/downloadJob';
 import { withTrackers } from '../lib/magnet';
 import type { Settings } from '../lib/settings';
 
@@ -50,6 +51,8 @@ export function useTorrent(settings: Settings) {
   // Latest source, so play() uses the same (tracker-augmented) uri as inspect().
   const source = useRef<string | null>(null);
   const lastState = useRef<string | null>(null);
+  const itemRef = useRef<Item | null>(null);
+  itemRef.current = item;
   // Progress ticks once a second. Once the player is up that re-render makes
   // controls feel laggy — mute it for streaming. Download mode needs every tick.
   const streaming = useRef(false);
@@ -171,6 +174,20 @@ export function useTorrent(settings: Settings) {
         opts?.fileIndices?.length ? opts.fileIndices : [fileIndex]
       );
       setPhase('playing');
+      if (opts?.fullFile) {
+        const it = itemRef.current;
+        saveDownloadJob({
+          uri,
+          fileIndex,
+          fileIndices: opts.fileIndices?.length ? opts.fileIndices : [fileIndex],
+          season: opts.season,
+          title: it?.title,
+          titleName: it?.titleName,
+          poster: it?.poster,
+          imdb: it?.imdb,
+          kind: it?.kind,
+        }).catch(() => {});
+      }
       console.log('[torrent] play', {
         index: fileIndex,
         season: opts?.season ?? -1,
@@ -182,7 +199,7 @@ export function useTorrent(settings: Settings) {
         fileIndex,
         {
           prepareMb: settings.prepareMb,
-          removeFilesAfterStop: settings.removeFilesAfterStop,
+          removeFilesAfterStop: opts?.fullFile ? false : settings.removeFilesAfterStop,
           startRatio,
           fullFile: !!opts?.fullFile,
           fileList: (opts?.fileIndices ?? []).join(','),
@@ -239,6 +256,24 @@ export function useTorrent(settings: Settings) {
     [play, settings.addTrackers]
   );
 
+  const skipFile = useCallback((index: number) => {
+    setWantedIndices((prev) => {
+      const next = prev.filter((i) => i !== index);
+      const uri = source.current;
+      if (uri && next.length) {
+        saveDownloadJob({
+          uri,
+          fileIndex: next[0],
+          fileIndices: next,
+        }).catch(() => {});
+      }
+      return next;
+    });
+    TorrentStream.skipFile(index).catch((e: any) =>
+      console.warn('[torrent] skip failed', e?.message ?? e)
+    );
+  }, []);
+
   return {
     phase,
     item,
@@ -255,6 +290,7 @@ export function useTorrent(settings: Settings) {
     inspect,
     play,
     playKnown,
+    skipFile,
     reset,
   };
 }

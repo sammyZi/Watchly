@@ -60,7 +60,7 @@ export function PosterGrid({
       keyboardDismissMode="on-drag"
       initialNumToRender={9}
       windowSize={5}
-      removeClippedSubviews
+      removeClippedSubviews={false}
       ListHeaderComponent={header}
       ListEmptyComponent={empty}
       renderItem={({ item }) => (
@@ -68,7 +68,11 @@ export function PosterGrid({
           onPress={() => onOpen(item)}
           style={({ pressed }) => [styles.card, pressed && styles.pressed]}
         >
-          <Image source={{ uri: item.poster! }} style={styles.poster} resizeMode="cover" />
+          {item.poster ? (
+            <Image source={{ uri: item.poster }} style={styles.poster} resizeMode="cover" />
+          ) : (
+            <View style={styles.poster} />
+          )}
           {!!item.rating && (
             <View style={styles.score}>
               <Icon name="star" size={9} color={colors.warn} />
