@@ -12,9 +12,12 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../components/Icon';
+import { ProgressBar } from '../components/ProgressBar';
 import { Thumb } from '../components/Thumb';
 import { resumeRatio } from '../hooks/useTorrent';
-import type { Item } from '../lib/history';
+import { clock } from '../lib/format';
+import { posterOf, type Item } from '../lib/history';
+import { parseEpisode } from '../lib/search';
 import {
   ANIME_GENRE,
   kindOfGenre,
@@ -49,10 +52,47 @@ const SHELVES: Shelf[] = [
   { title: 'Anime', kind: 'tv', genre: ANIME_GENRE },
 ];
 
+function resumeStamp(item: Item): string | null {
+  const index = item.lastFileIndex;
+  if (index == null) return null;
+  const file = item.files?.find((f) => f.index === index);
+  const at = parseEpisode(file?.name ?? item.title);
+  const ep = at
+    ? at.season === 0
+      ? `Sp ${at.episode}`
+      : `S${at.season} E${at.episode}`
+    : null;
+  const position = item.positions?.[index];
+  const time = position ? clock(position) : null;
+  const bits = [ep, time].filter(Boolean);
+  return bits.length ? bits.join('  ·  ') : null;
+}
+
 /** Still watching — has a resume point short of the end. */
 function isInProgress(item: Item): boolean {
   if (item.lastFileIndex == null) return false;
   return resumeRatio(item, item.lastFileIndex) < 0.9;
+}
+
+/** History as a shelf card — same shape as Watch later, real artwork only. */
+function fromHistory(item: Item, saved: Saved[]): Title {
+  const book = saved.find((s) => s.imdb && s.imdb === item.imdb);
+  return {
+    imdb: item.imdb ?? item.uri,
+    kind: item.kind ?? book?.kind ?? 'movie',
+    title: item.titleName ?? book?.title ?? item.title,
+    poster: posterOf(item, { saved }) ?? null,
+    year: null,
+    rating: null,
+    genres: [],
+    plot: null,
+    cast: [],
+    directors: [],
+    awards: null,
+    backdrop: null,
+    runtime: null,
+    episodes: [],
+  };
 }
 
 /** What identifies a shelf's contents — two shelves with the same kind and
@@ -139,11 +179,18 @@ function useHomeStyles() {
     },
     card: { width: CARD, gap: space.sm },
     pressed: { opacity: 0.6 },
+    posterWrap: { width: CARD, height: CARD * 1.5 },
     poster: {
       width: CARD,
       height: CARD * 1.5,
       borderRadius: radius.md,
       backgroundColor: c.surface,
+    },
+    posterBar: {
+      position: 'absolute' as const,
+      left: space.sm,
+      right: space.sm,
+      bottom: space.sm,
     },
     score: {
       position: 'absolute' as const,
@@ -158,9 +205,23 @@ function useHomeStyles() {
       backgroundColor: '#0b0e14cc',
     },
     scoreText: { ...type.meta, fontSize: 10, fontFamily: font.medium, color: '#fff' },
+    stamp: {
+      position: 'absolute' as const,
+      left: space.sm,
+      bottom: space.sm + 7,
+      paddingHorizontal: 5,
+      paddingVertical: 2,
+      borderRadius: radius.sm,
+      backgroundColor: '#0b0e14cc',
+      maxWidth: CARD - space.md,
+    },
+    stampText: {
+      ...type.meta,
+      fontSize: 10,
+      fontFamily: font.semibold,
+      color: '#fff',
+    },
     cardName: { ...type.meta, fontSize: 11, color: c.muted },
-    resume: { width: 168, gap: space.sm },
-    resumeName: { ...type.meta, fontSize: 11, color: c.muted },
   }));
 }
 
@@ -368,22 +429,14 @@ function HomeScreenView({
                     const duration = item.durations?.[index];
                     const position = item.positions?.[index] ?? 0;
                     return (
-                      <Pressable
+                      <Poster
+                        title={fromHistory(item, saved)}
+                        progress={
+                          duration ? (position / duration) * 100 : undefined
+                        }
+                        stamp={resumeStamp(item)}
                         onPress={() => onPlayFile(item, index)}
-                        style={({ pressed }) => [styles.resume, pressed && styles.pressed]}
-                      >
-                        <Thumb
-                          name={item.torrentName ?? item.title}
-                          poster={item.poster}
-                          icon="play"
-                          progress={duration ? (position / duration) * 100 : 0}
-                          width={168}
-                          height={96}
-                        />
-                        <Text style={styles.resumeName} numberOfLines={2}>
-                          {item.files?.find((f) => f.index === index)?.name ?? item.title}
-                        </Text>
-                      </Pressable>
+                      />
                     );
                   }}
                 />
@@ -653,18 +706,52 @@ function Head({
   );
 }
 
-function Poster({ title, onPress }: { title: Title; onPress: () => void }) {
+function Poster({
+  title,
+  onPress,
+  progress,
+  stamp,
+}: {
+  title: Title;
+  onPress: () => void;
+  progress?: number;
+  stamp?: string | null;
+}) {
   const colors = useColors();
   const styles = useHomeStyles();
+  const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [title.poster]);
+  const show = !!title.poster && !broken;
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
-      <Image source={{ uri: title.poster! }} style={styles.poster} resizeMode="cover" />
-      {!!title.rating && (
-        <View style={styles.score}>
-          <Icon name="star" size={9} color={colors.warn} />
-          <Text style={styles.scoreText}>{title.rating}</Text>
-        </View>
-      )}
+      <View style={styles.posterWrap}>
+        {show ? (
+          <Image
+            source={{ uri: title.poster! }}
+            style={styles.poster}
+            resizeMode="cover"
+            onError={() => setBroken(true)}
+          />
+        ) : (
+          <Thumb name={title.title} width={CARD} height={CARD * 1.5} />
+        )}
+        {!!stamp && (
+          <View style={styles.stamp}>
+            <Text numberOfLines={1} style={styles.stampText}>
+              {stamp}
+            </Text>
+          </View>
+        )}
+        {progress != null && progress > 0 && (
+          <ProgressBar value={progress} height={3} style={styles.posterBar} />
+        )}
+        {!!title.rating && (
+          <View style={styles.score}>
+            <Icon name="star" size={9} color={colors.warn} />
+            <Text style={styles.scoreText}>{title.rating}</Text>
+          </View>
+        )}
+      </View>
       <Text style={styles.cardName} numberOfLines={1}>
         {title.title}
       </Text>

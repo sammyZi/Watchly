@@ -1,12 +1,15 @@
 import { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, Text, View, Image } from 'react-native';
 import { Icon } from './Icon';
 import { Marquee } from './Marquee';
 import { ProgressBar } from './ProgressBar';
 import { Thumb } from './Thumb';
 import { ago, bytes, clock } from '../lib/format';
 import type { Item } from '../lib/history';
+import { posterOf } from '../lib/history';
+import { parseEpisode } from '../lib/search';
 import { WATCHED } from '../lib/watched';
+import type { Saved } from '../lib/saved';
 import { font, radius, space, type, useColors, useThemedStyles } from '../theme';
 
 /**
@@ -15,6 +18,8 @@ import { font, radius, space, type, useColors, useThemedStyles } from '../theme'
  */
 export function HistoryRow({
   item,
+  saved,
+  kin,
   onOpen,
   onPlayFile,
   onDownloadFile,
@@ -22,6 +27,8 @@ export function HistoryRow({
   onRemove,
 }: {
   item: Item;
+  saved?: Saved[];
+  kin?: Item[];
   onOpen: () => void;
   onPlayFile: (index: number) => void;
   onDownloadFile: (index: number) => void;
@@ -43,7 +50,6 @@ export function HistoryRow({
       backgroundColor: c.surface,
       borderRadius: radius.lg,
       padding: space.md,
-      overflow: 'hidden' as const,
     },
     row: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: space.md },
     pressed: { opacity: 0.6 },
@@ -62,38 +68,64 @@ export function HistoryRow({
     more: {
       flexDirection: 'row' as const,
       alignItems: 'center' as const,
-      justifyContent: 'center' as const,
-      gap: space.sm,
-      paddingTop: space.sm,
+      justifyContent: 'space-between' as const,
+      paddingTop: space.md,
       paddingBottom: space.xs,
+      borderTopWidth: 1,
+      borderTopColor: c.line,
+      marginTop: space.md,
     },
     moreHit: {
       flexDirection: 'row' as const,
       alignItems: 'center' as const,
       gap: space.xs,
     },
-    moreText: { ...type.meta, fontFamily: font.medium, color: c.muted },
+    moreText: { ...type.overline, color: c.faint },
 
-    files: {
-      borderTopWidth: 1,
-      borderTopColor: c.line,
-      paddingTop: space.sm,
-    },
+    files: { paddingTop: space.sm, gap: space.xs },
     file: {
       flexDirection: 'row' as const,
       alignItems: 'center' as const,
       gap: space.md,
       paddingVertical: space.sm,
-      paddingLeft: space.sm,
+      paddingHorizontal: space.xs,
+    },
+    fileMark: {
+      width: 36,
+      height: 36,
+      borderRadius: radius.sm,
+      backgroundColor: c.control,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+    },
+    fileNum: {
+      ...type.meta,
+      fontFamily: font.semibold,
+      fontSize: 12,
+      color: c.faint,
     },
     fileBody: { flex: 1, minWidth: 0, gap: 3 },
     fileName: { ...type.body, fontFamily: font.medium, color: c.text },
     fileMeta: { ...type.meta, color: c.faint },
-    downloadBtn: {
-      width: 30,
-      height: 30,
+    filePlay: {
+      width: 32,
+      height: 32,
       borderRadius: radius.pill,
       backgroundColor: c.accentSoft,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+    },
+    art: {
+      width: 66,
+      height: 99,
+      borderRadius: radius.md,
+      backgroundColor: c.control,
+    },
+    downloadBtn: {
+      width: 32,
+      height: 32,
+      borderRadius: radius.pill,
+      backgroundColor: c.control,
       alignItems: 'center' as const,
       justifyContent: 'center' as const,
     },
@@ -140,6 +172,8 @@ export function HistoryRow({
     .filter(Boolean)
     .join(' · ');
 
+  const art = posterOf(item, { saved, kin });
+
   return (
     <View style={styles.card}>
       <Pressable
@@ -150,13 +184,15 @@ export function HistoryRow({
         {/* Portrait, because that is the shape a poster is. The old landscape
             tile held a frame grabbed while watching; cropping real artwork into
             it cut the top and bottom off every one. */}
-        <Thumb
-          name={item.torrentName ?? item.title}
-          poster={item.poster}
-          icon={item.poster ? undefined : 'film'}
-          width={66}
-          height={99}
-        />
+        {art ? (
+          <Image source={{ uri: art }} style={styles.art} resizeMode="cover" />
+        ) : (
+          <Thumb
+            name={item.titleName ?? item.torrentName ?? item.title}
+            width={66}
+            height={99}
+          />
+        )}
 
         <View style={styles.body}>
           <Marquee style={styles.title}>
@@ -190,9 +226,9 @@ export function HistoryRow({
         <View style={styles.more}>
           <Pressable onPress={() => setExpanded((e) => !e)} style={styles.moreHit}>
             <Text style={styles.moreText}>
-              {expanded ? 'Hide' : `All ${videos.length} files`}
+              {expanded ? 'Episodes' : `${videos.length} episodes`}
             </Text>
-            <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={15} color={colors.muted} />
+            <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={14} color={colors.faint} />
           </Pressable>
           {!!onDownloadSeason && (
             <Pressable onPress={onDownloadSeason} hitSlop={8} style={styles.downloadBtn}>
@@ -207,21 +243,34 @@ export function HistoryRow({
           {videos.map((file) => {
             const position = item.positions?.[file.index];
             const duration = item.durations?.[file.index];
+            const at = parseEpisode(file.name);
+            const label = at
+              ? at.season === 0
+                ? `Special ${at.episode}`
+                : `Episode ${at.episode}`
+              : file.name;
+            const mark = at
+              ? String(at.episode).padStart(2, '0')
+              : String(file.index + 1).padStart(2, '0');
             return (
               <Pressable
                 key={file.index}
                 onPress={() => onPlayFile(file.index)}
                 style={({ pressed }) => [styles.file, pressed && styles.pressed]}
               >
-                <Icon name="play" size={13} color={colors.accent} />
+                <View style={styles.fileMark}>
+                  <Text style={styles.fileNum}>{mark}</Text>
+                </View>
                 <View style={styles.fileBody}>
-                  <Marquee style={styles.fileName}>{file.name}</Marquee>
+                  <Text numberOfLines={1} style={styles.fileName}>
+                    {label}
+                  </Text>
                   <Text style={styles.fileMeta}>
                     {bytes(file.size)}
-                    {position ? ` · resume ${clock(position)}` : ''}
+                    {position ? ` · ${clock(position)}` : ''}
                   </Text>
                   {!!position && !!duration && (
-                    <ProgressBar value={(position / duration) * 100} height={2} />
+                    <ProgressBar value={(position / duration) * 100} height={3} />
                   )}
                 </View>
                 <Pressable
@@ -229,8 +278,11 @@ export function HistoryRow({
                   hitSlop={8}
                   style={styles.downloadBtn}
                 >
-                  <Icon name="download" size={14} color={colors.accent} />
+                  <Icon name="download" size={14} color={colors.muted} />
                 </Pressable>
+                <View style={styles.filePlay}>
+                  <Icon name="play" size={13} color={colors.accent} />
+                </View>
               </Pressable>
             );
           })}

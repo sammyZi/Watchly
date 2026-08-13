@@ -53,6 +53,14 @@ class MainActivity : ReactActivity() {
     super.onPause()
   }
 
+  override fun onDestroy() {
+    if (isFinishing) {
+      // Swipe-away skips JS stop; the download notification would otherwise stick.
+      (getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager).cancelAll()
+    }
+    super.onDestroy()
+  }
+
   private fun startCastDiscovery() {
     runCatching {
       val castContext = RNGCCastContext.getSharedInstance(this) ?: return

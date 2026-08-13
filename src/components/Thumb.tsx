@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Image, StyleSheet, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Image, View } from 'react-native';
 import { Icon, type IconName } from './Icon';
 import { hueOf } from '../lib/title';
 import { radius, useThemedStyles } from '../theme';
@@ -31,7 +31,9 @@ export function Thumb({
   progress?: number;
 }) {
   const [broken, setBroken] = useState(false);
-  const showPoster = !!poster && !broken;
+  const remote = !!poster && /^https?:\/\//i.test(poster);
+  useEffect(() => setBroken(false), [poster]);
+  const showPoster = remote && !broken;
   const styles = useThemedStyles((c) => ({
     tile: {
       borderRadius: radius.md,
@@ -70,10 +72,9 @@ export function Thumb({
       {showPoster && (
         <Image
           source={{ uri: poster }}
-          style={StyleSheet.absoluteFill}
+          style={{ width, height, borderRadius: radius.md }}
           resizeMode="cover"
           onError={(e) => {
-            // Usually means Android reclaimed the cache file.
             console.warn(
               `[poster] cannot render ${poster}:`,
               e.nativeEvent?.error ?? 'unknown'

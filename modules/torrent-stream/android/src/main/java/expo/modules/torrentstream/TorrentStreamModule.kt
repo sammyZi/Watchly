@@ -256,6 +256,8 @@ class TorrentStreamModule : Module() {
   private var lastNotifPct = -1
   private var lastNotifPaused: Boolean? = null
   private var lastNotifRate = -1
+  /** Survives React context teardown so we can still cancel the tray icon. */
+  private var appCtx: Context? = null
 
   /** Byte offset each live HTTP reader is sitting at, keyed by connection id.
    *  The player runs more than one at a time — playback at the head plus a probe
@@ -390,6 +392,7 @@ class TorrentStreamModule : Module() {
       showNotify = false
       clearDownloadNotification()
       teardown()
+      wipeStreamCache()
       log("copyTo: torn down")
       uris
     }
@@ -497,8 +500,18 @@ class TorrentStreamModule : Module() {
       null
     }
 
+    /** Drop one file from a season download. Remaining files keep going. */
+    AsyncFunction("skipFile") { index: Int ->
+      wantedFiles = wantedFiles.filter { it != index }.toIntArray()
+      val h = handle
+      if (h != null && h.isValid) wantOnly(h, wantedFiles)
+      log("skip file $index — still wanting ${wantedFiles.size}")
+      null
+    }
+
     /** Toggle the ongoing download notification (Download Manager mode). */
     AsyncFunction("setNotify") { enabled: Boolean ->
+      appContext.reactContext?.let { rememberCtx(it) }
       showNotify = enabled
       if (!enabled) clearDownloadNotification()
       else {
@@ -562,6 +575,8 @@ class TorrentStreamModule : Module() {
     }
 
     OnDestroy {
+      showNotify = false
+      clearDownloadNotification()
       teardown()
       // Force-kill / process death often skips JS stop — drop video pieces here.
       if (removeFilesAfterStop) wipeStreamCache()
@@ -1765,10 +1780,21 @@ class TorrentStreamModule : Module() {
 
   /* ---------------------------------------------------------- notifications */
 
+  private fun rememberCtx(ctx: Context) {
+    appCtx = ctx.applicationContext
+  }
+
+  private fun notifyManager(): NotificationManager? {
+    val ctx = appContext.reactContext ?: appCtx ?: return null
+    rememberCtx(ctx)
+    return ctx.applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+  }
+
   private fun ensureNotifyChannel() {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-    val ctx = appContext.reactContext ?: return
-    val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    val ctx = appContext.reactContext ?: appCtx ?: return
+    rememberCtx(ctx)
+    val nm = notifyManager() ?: return
     if (nm.getNotificationChannel(NOTIF_CHANNEL) != null) return
     nm.createNotificationChannel(
       NotificationChannel(
@@ -1785,6 +1811,7 @@ class TorrentStreamModule : Module() {
   private fun updateDownloadNotification() {
     if (!showNotify) return
     val ctx = appContext.reactContext ?: return
+    rememberCtx(ctx)
     val ti = info ?: return
     val videos = wantedFiles.count { i ->
       i in 0 until ti.files().numFiles() &&
@@ -1843,7 +1870,7 @@ class TorrentStreamModule : Module() {
       .setContentIntent(pi)
       .setCategory(NotificationCompat.CATEGORY_PROGRESS)
       .build()
-    val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    val nm = notifyManager() ?: return
     nm.notify(NOTIF_ID, notif)
   }
 
@@ -1864,6 +1891,7 @@ class TorrentStreamModule : Module() {
 
   private fun notifyComplete(name: String) {
     val ctx = appContext.reactContext ?: return
+    rememberCtx(ctx)
     ensureNotifyChannel()
     clearDownloadNotification()
     showNotify = false
@@ -1874,14 +1902,14 @@ class TorrentStreamModule : Module() {
       .setAutoCancel(true)
       .setTimeoutAfter(5_000)
       .build()
-    val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    val nm = notifyManager() ?: return
     nm.notify(NOTIF_ID + 1, notif)
   }
 
   private fun clearDownloadNotification() {
-    val ctx = appContext.reactContext ?: return
-    val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    val nm = notifyManager() ?: return
     nm.cancel(NOTIF_ID)
+    nm.cancel(NOTIF_ID + 1)
   }
 
   /** App-owned Downloads dir — always writable, no runtime permission. */

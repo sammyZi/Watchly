@@ -237,6 +237,7 @@ function HistoryScreenView({
         keyExtractor={(i) => i.uri}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
+        removeClippedSubviews={false}
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
           shown.length ? (
@@ -274,6 +275,8 @@ function HistoryScreenView({
         renderItem={({ item }) => (
           <HistoryRow
             item={item}
+            saved={saved}
+            kin={history}
             onOpen={() => onOpenItem(item)}
             onPlayFile={(index) => onPlayFile(item, index)}
             onDownloadFile={(index) => onDownloadFile(item, index)}
