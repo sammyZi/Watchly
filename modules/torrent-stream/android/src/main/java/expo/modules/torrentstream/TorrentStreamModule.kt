@@ -77,15 +77,8 @@ private val VIDEO = setOf(
   "mp4", "mkv", "avi", "mov", "m4v", "webm", "flv", "wmv", "mpg", "mpeg", "ts", "m2ts"
 )
 
-/**
- * SubRip only.
- *
- * The others are all renderable by libVLC, but ass/ssa carry their own styling
- * and positioning that fights the player's own overlay, and sub/idx is a pair
- * of files that is useless if only one of them is fetched. Loading just .srt
- * keeps what appears on screen predictable.
- */
-private val SUBTITLE = setOf("srt")
+/** Text subtitle files libVLC can load as slaves. */
+private val SUBTITLE = setOf("srt", "ass", "ssa", "vtt")
 
 /**
  * Limits on anything fetched from a subtitle host.
@@ -1122,29 +1115,34 @@ class TorrentStreamModule : Module() {
     // Everything except the chosen file is skipped entirely.
     val priorities = Array(files.numFiles()) { Priority.IGNORE }
     priorities[index] = Priority.DEFAULT
-    // Also download subtitle files sitting next to the video or in a subfolder
+    // Sidecar subs for *this* file only. A season pack can hold hundreds of
+    // .srt/.ass files; attaching all of them makes VLC miss the matching one
+    // and the picker overflow the screen.
+    val videoStem = files.fileName(index).substringBeforeLast('.').lowercase()
     val targetPath = files.filePath(index).replace("\\", "/")
     val targetDir = targetPath.substringBeforeLast("/", "")
-    subtitleFiles = (0 until files.numFiles())
+    fun besideVideo(i: Int): Boolean {
+      val subDir = files.filePath(i).replace("\\", "/")
+        .substringBeforeLast("/", "")
+      return subDir == targetDir ||
+        (targetDir.isNotEmpty() && subDir.startsWith("$targetDir/"))
+    }
+    fun matchesVideo(i: Int): Boolean {
+      val stem = files.fileName(i).substringBeforeLast('.').lowercase()
+      return stem == videoStem || stem.startsWith("$videoStem.")
+    }
+    val nearby = (0 until files.numFiles())
       .filter { i ->
         i != index &&
-          files.filePath(i).substringAfterLast('.', "").lowercase() in SUBTITLE
+          files.filePath(i).substringAfterLast('.', "").lowercase() in SUBTITLE &&
+          besideVideo(i)
       }
-      .filter { i ->
-        val subDir = files.filePath(i).replace("\\", "/")
-          .substringBeforeLast("/", "")
-        // Same folder, or a subfolder relative to the video (e.g. Subs/, subtitles/)
-        subDir == targetDir ||
-          (targetDir.isEmpty() && subDir.isNotEmpty()) ||
-          (targetDir.isNotEmpty() && subDir.startsWith("$targetDir/"))
-      }
-      .also { indices ->
-        indices.forEach { priorities[it] = Priority.DEFAULT }
-        if (indices.isNotEmpty()) {
-          log("play: found ${indices.size} subtitle file(s) alongside the video")
-        }
-      }
-      .map { File(saveDir, files.filePath(it)).absolutePath }
+    val indices = nearby.filter(::matchesVideo)
+    subtitleFiles = indices.map { File(saveDir, files.filePath(it)).absolutePath }
+    indices.forEach { priorities[it] = Priority.DEFAULT }
+    if (indices.isNotEmpty()) {
+      log("play: found ${indices.size} subtitle file(s) alongside the video")
+    }
 
     log("play: ${files.fileName(index)} (${files.fileSize(index)} bytes)")
 

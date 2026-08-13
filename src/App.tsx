@@ -871,6 +871,9 @@ function ShellApp({
           stored.torrentName ??
           stored.title
         }
+        metaTitle={detail?.title ?? stored.titleName}
+        imdb={detail?.imdb ?? stored.imdb}
+        kind={detail?.kind ?? stored.kind}
         resumeAt={stored.positions?.[playingIndex]}
         url={url}
         lanUrl={torrent.lanUrl}
