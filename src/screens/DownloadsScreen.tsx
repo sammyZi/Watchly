@@ -1,5 +1,5 @@
 import { memo, useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import TorrentStream, { type Progress } from '../../modules/torrent-stream';
 import { Button } from '../components/Button';
@@ -10,7 +10,6 @@ import { Thumb } from '../components/Thumb';
 import { ProgressBar } from '../components/ProgressBar';
 import { Screen } from '../components/Screen';
 import { ago, bytes, speed } from '../lib/format';
-import { groupByFolder } from '../lib/pick';
 import { parseEpisode } from '../lib/search';
 import { searchableName } from '../lib/title';
 import { font, radius, space, TAB_INSET, type, useColors, useThemedStyles } from '../theme';
@@ -32,6 +31,7 @@ export type QueueFile = {
 };
 
 export type ActiveDownload = {
+  id?: string;
   name: string;
   size: number;
   files?: number;
@@ -177,17 +177,14 @@ function stageLabel(state?: string, paused?: boolean): string {
 
 function DownloadsScreenView({
   onPlayFile,
-  active,
-  waiting,
+  actives = [],
 }: {
   onPlayFile: (item: { name: string; path?: string }) => void;
-  active?: ActiveDownload | null;
-  waiting?: string[];
+  actives?: ActiveDownload[];
 }) {
   const [items, setItems] = useState<DownloadEntry[]>([]);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
-  const [open, setOpen] = useState(true);
-  const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
+  const [openQueues, setOpenQueues] = useState<Record<string, boolean>>({});
   const [openSaved, setOpenSaved] = useState<Record<string, boolean>>({});
   const colors = useColors();
   const styles = useThemedStyles((c) => ({
@@ -218,6 +215,12 @@ function DownloadsScreenView({
       fontSize: 13,
       color: c.text,
     },
+    pctRow: {
+      flexDirection: 'row' as const,
+      alignItems: 'baseline' as const,
+      justifyContent: 'space-between' as const,
+      gap: 8,
+    },
     metaLine: { ...type.meta, color: c.muted },
     waitTitle: { ...type.overline, color: c.faint },
     actions: { flexDirection: 'row' as const, gap: space.sm },
@@ -226,7 +229,9 @@ function DownloadsScreenView({
       flexDirection: 'row' as const,
       alignItems: 'center' as const,
       justifyContent: 'space-between' as const,
-      paddingTop: space.xs,
+      paddingTop: space.md,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: c.line,
     },
     filesHeadText: { ...type.overline, color: c.faint },
     folder: {
@@ -349,7 +354,7 @@ function DownloadsScreenView({
 
   useEffect(() => {
     loadDownloads().then(setItems);
-  }, [active?.name, active?.progress?.progress, active?.wanted?.length]);
+  }, [actives.map((a) => a.name).join('|'), actives.map((a) => a.progress?.progress).join('|')]);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -371,22 +376,22 @@ function DownloadsScreenView({
   const askDelete = (item: DownloadEntry) =>
     askDeleteNames([item.name], showTitle(item.name, item.titleName));
 
-  const askStop = () => {
-    if (!active) return;
+  const askStop = (target: ActiveDownload) => {
     setConfirm({
       title: 'Stop download?',
-      message: `${showTitle(active.name)} will be removed and will not come back.`,
+      message: `${showTitle(target.name)} will be removed and will not come back.`,
       icon: 'x',
       confirmLabel: 'Stop',
       destructive: true,
-      onConfirm: active.onCancel,
+      onConfirm: target.onCancel,
     });
   };
 
-  const pct = Math.min(100, active?.progress?.progress ?? 0);
-  const paused = !!active?.progress?.paused;
-  const rate = paused ? 0 : active?.progress?.speed ?? 0;
-  const queue = active?.queue && active.queue.length > 1 ? active.queue : null;
+  const renderActive = (active: ActiveDownload) => {
+  const pct = Math.min(100, active.progress?.progress ?? 0);
+  const paused = !!active.progress?.paused;
+  const rate = paused ? 0 : active.progress?.speed ?? 0;
+  const queue = active.queue && active.queue.length > 1 ? active.queue : null;
   const wantedSet = new Set(active?.wanted ?? queue?.map((f) => f.index) ?? []);
   const savedSet = new Set(active?.saved ?? []);
   const queued = queue
@@ -413,7 +418,6 @@ function DownloadsScreenView({
       ? { ...f, done: pct, label: 'Downloading' as const }
       : f
   );
-  const groups = groupByFolder(marked);
   const doneCount = marked.filter((f) => f.label === 'Done').length;
   const onQueue = queue?.filter((f) => wantedSet.has(f.index)) ?? [];
   const totalSize =
@@ -430,16 +434,14 @@ function DownloadsScreenView({
   const overallPct =
     totalSize > 0 ? Math.min(100, (haveBytes / totalSize) * 100) : pct;
   const remaining = Math.max(0, totalSize - haveBytes);
-  const headline = active ? showTitle(active.name) : '';
-  const stage = stageLabel(active?.progress?.state, paused);
+  const headline = showTitle(active.name);
+  const stage = stageLabel(active.progress?.state, paused);
   const sub = paused ? stage : pct >= 100 ? 'Saving to device…' : stage;
-  const starting = !!active && !paused && pct < 1;
+  const starting = !paused && pct < 1;
+  const qid = active.id ?? active.name;
 
   return (
-    <Screen title="Downloads" icon="download">
-      <View style={styles.flex}>
-        {!!active && (
-          <View style={styles.pinned}>
+          <View key={qid} style={styles.pinned}>
             <View style={styles.card}>
               <View style={styles.hero}>
                 <Thumb
@@ -477,11 +479,14 @@ function DownloadsScreenView({
                     {totalSize > 0
                       ? `${bytes(haveBytes)} of ${bytes(totalSize)}`
                       : 'Starting…'}
-                    {paused
-                      ? ' · Paused'
-                      : ` · ${speed(rate)} · ${eta(remaining, rate)}`}
+                    {paused ? ' · Paused' : ` · ${speed(rate)}`}
                   </Text>
-                  <Text style={styles.pct}>{Math.round(overallPct)}%</Text>
+                  <View style={styles.pctRow}>
+                    <Text style={styles.pct}>{Math.round(overallPct)}%</Text>
+                    {!paused && pct < 100 ? (
+                      <Text style={styles.metaLine}>{eta(remaining, rate)}</Text>
+                    ) : null}
+                  </View>
                 </View>
               </View>
 
@@ -495,25 +500,129 @@ function DownloadsScreenView({
                 <Button
                   label="Stop"
                   icon="x"
-                  onPress={askStop}
+                  onPress={() => askStop(active)}
                   style={styles.action}
                 />
               </View>
+              {queue ? (
+                <>
+                  <Pressable
+                    onPress={() =>
+                      setOpenQueues((s) => ({ ...s, [qid]: !(s[qid] !== false) }))
+                    }
+                    style={styles.filesHead}
+                  >
+                    <Text style={styles.filesHeadText}>
+                      {queue.length} episode{queue.length === 1 ? '' : 's'}
+                    </Text>
+                    <Icon
+                      name={openQueues[qid] !== false ? 'chevron-up' : 'chevron-down'}
+                      size={16}
+                      color={colors.faint}
+                    />
+                  </Pressable>
+                  {openQueues[qid] !== false &&
+                    marked.map((file) => {
+                      const off = file.label === 'Off';
+                      const on = file.label === 'Downloading';
+                      const done = file.label === 'Done';
+                      const at = parseEpisode(file.name);
+                      const mark = at
+                        ? String(at.episode).padStart(2, '0')
+                        : String(file.index + 1).padStart(2, '0');
+                      return (
+                        <View key={file.index} style={styles.file}>
+                          <View
+                            style={[
+                              styles.fileMark,
+                              on && styles.fileMarkOn,
+                              done && styles.fileMarkDone,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.fileNum,
+                                on && styles.fileNumOn,
+                                done && styles.fileNumDone,
+                                off && { color: colors.faint },
+                              ]}
+                            >
+                              {mark}
+                            </Text>
+                          </View>
+                          <View style={styles.fileBody}>
+                            <Marquee
+                              style={
+                                off ? [styles.fileName, styles.fileNameOff] : styles.fileName
+                              }
+                            >
+                              {fileTitle(file.name)}
+                            </Marquee>
+                            {on || done ? (
+                              <View style={styles.fileBar}>
+                                <ProgressBar
+                                  value={file.done}
+                                  height={3}
+                                  color={done ? colors.good : colors.accent}
+                                  style={{ flex: 1 }}
+                                />
+                                <Text
+                                  style={[
+                                    styles.filePct,
+                                    done && { color: colors.good },
+                                    on && { color: colors.accent },
+                                  ]}
+                                >
+                                  {Math.round(file.done)}%
+                                </Text>
+                              </View>
+                            ) : (
+                              <Text style={styles.fileMeta}>
+                                {off
+                                  ? `Skipped · ${bytes(file.size)}`
+                                  : bytes(file.size)}
+                              </Text>
+                            )}
+                          </View>
+                          {off ? (
+                            <Pressable
+                              onPress={() => active.onInclude?.(file.index)}
+                              hitSlop={8}
+                              style={styles.skip}
+                            >
+                              <Icon name="plus" size={16} color={colors.accent} />
+                            </Pressable>
+                          ) : done ? (
+                            <Pressable
+                              onPress={() => active.onPlayFile?.(file)}
+                              hitSlop={8}
+                              style={styles.skip}
+                            >
+                              <Icon name="play" size={16} color={colors.accent} />
+                            </Pressable>
+                          ) : (
+                            <Pressable
+                              onPress={() => active.onSkip?.(file.index)}
+                              hitSlop={8}
+                              style={styles.skip}
+                            >
+                              <Icon name="x" size={16} color={colors.faint} />
+                            </Pressable>
+                          )}
+                        </View>
+                      );
+                    })}
+                </>
+              ) : null}
             </View>
           </View>
-        )}
-        {!!waiting?.length && (
-          <View style={[styles.pinned, !active && { paddingTop: space.md }]}>
-            <View style={styles.card}>
-              <Text style={styles.waitTitle}>Waiting</Text>
-              {waiting.map((name, i) => (
-                <Text key={`${name}-${i}`} numberOfLines={1} style={styles.metaLine}>
-                  {name}
-                </Text>
-              ))}
-            </View>
-          </View>
-        )}
+  );
+  };
+
+  return (
+    <Screen title="Downloads" icon="download">
+      <View style={styles.flex}>
+        {actives.map(renderActive)}
       <FlatList
         style={styles.flex}
         data={groupSaved(items)}
@@ -524,215 +633,13 @@ function DownloadsScreenView({
         ItemSeparatorComponent={() => <View style={{ height: space.sm }} />}
         ListHeaderComponent={
           <View style={styles.head}>
-            {!!active && !!queue && (
-              <View style={styles.card}>
-                <Pressable
-                  onPress={() => setOpen((v) => !v)}
-                  style={styles.filesHead}
-                >
-                  <Text style={styles.filesHeadText}>
-                    {queue.length} episodes
-                  </Text>
-                  <Icon
-                    name={open ? 'chevron-up' : 'chevron-down'}
-                    size={16}
-                    color={colors.faint}
-                  />
-                </Pressable>
-                {open &&
-                  groups.map((group) => {
-                    const key = group.dir || group.folder || 'files';
-                    const folderOpen = !group.folder || !!openFolders[key];
-                    const folderBytes = group.files.reduce((s, f) => s + f.size, 0);
-                    const skippable = group.files.filter(
-                      (f) => f.label !== 'Off' && f.label !== 'Done'
-                    );
-                    const includable = group.files.filter((f) => f.label === 'Off');
-                    const savedHere = group.files.filter((f) => f.label === 'Done');
-                    return (
-                    <View key={key}>
-                      {!!group.folder && (
-                        <View style={styles.folder}>
-                          <Pressable
-                            onPress={() =>
-                              setOpenFolders((prev) => ({
-                                ...prev,
-                                [key]: !prev[key],
-                              }))
-                            }
-                            style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }}
-                          >
-                            <Icon
-                              name={folderOpen ? 'chevron-down' : 'chevron-right'}
-                              size={14}
-                              color={colors.faint}
-                            />
-                            <Text numberOfLines={1} style={styles.folderName}>
-                              {group.folder}
-                            </Text>
-                            <Text style={styles.filesHeadText}>
-                              {group.files.length} · {bytes(folderBytes)}
-                            </Text>
-                          </Pressable>
-                          <View style={styles.fileActions}>
-                            {savedHere.length > 0 && (
-                              <Pressable
-                                onPress={() =>
-                                  askDeleteNames(
-                                    savedHere.map((f) => f.name),
-                                    group.folder
-                                  )
-                                }
-                                hitSlop={8}
-                                style={styles.skip}
-                                accessibilityLabel={`Delete ${group.folder}`}
-                              >
-                                <Icon name="trash-2" size={16} color={colors.faint} />
-                              </Pressable>
-                            )}
-                            {includable.length === group.files.length ? (
-                              <Pressable
-                                onPress={() =>
-                                  includable.forEach((f) => active.onInclude?.(f.index))
-                                }
-                                hitSlop={8}
-                                style={styles.skip}
-                                accessibilityLabel={`Download ${group.folder}`}
-                              >
-                                <Icon name="plus" size={16} color={colors.accent} />
-                              </Pressable>
-                            ) : skippable.length > 0 ? (
-                              <Pressable
-                                onPress={() =>
-                                  skippable.forEach((f) => active.onSkip?.(f.index))
-                                }
-                                hitSlop={8}
-                                style={styles.skip}
-                                accessibilityLabel={`Skip ${group.folder}`}
-                              >
-                                <Icon name="x" size={16} color={colors.faint} />
-                              </Pressable>
-                            ) : null}
-                          </View>
-                        </View>
-                      )}
-                      {folderOpen &&
-                      group.files.map((file) => {
-                        const off = file.label === 'Off';
-                        const on = file.label === 'Downloading';
-                        const done = file.label === 'Done';
-                        const at = parseEpisode(file.name);
-                        const mark = at
-                          ? String(at.episode).padStart(2, '0')
-                          : String(file.index + 1).padStart(2, '0');
-                        return (
-                          <View key={file.index} style={styles.file}>
-                            <View
-                              style={[
-                                styles.fileMark,
-                                on && styles.fileMarkOn,
-                                done && styles.fileMarkDone,
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.fileNum,
-                                  on && styles.fileNumOn,
-                                  done && styles.fileNumDone,
-                                  off && { color: colors.faint },
-                                ]}
-                              >
-                                {mark}
-                              </Text>
-                            </View>
-                            <View style={styles.fileBody}>
-                              <Marquee
-                                style={off ? [styles.fileName, styles.fileNameOff] : styles.fileName}
-                              >
-                                {file.name}
-                              </Marquee>
-                              {on || done ? (
-                                <View style={styles.fileBar}>
-                                  <ProgressBar
-                                    value={file.done}
-                                    height={3}
-                                    color={done ? colors.good : colors.accent}
-                                    style={{ flex: 1 }}
-                                  />
-                                  <Text
-                                    style={[
-                                      styles.filePct,
-                                      done && { color: colors.good },
-                                      on && { color: colors.accent },
-                                    ]}
-                                  >
-                                    {Math.round(file.done)}%
-                                  </Text>
-                                </View>
-                              ) : (
-                                <Text style={styles.fileMeta}>
-                                  {off
-                                    ? `Skipped · ${bytes(file.size)}`
-                                    : bytes(file.size)}
-                                </Text>
-                              )}
-                            </View>
-                            {off ? (
-                              <Pressable
-                                onPress={() => active.onInclude?.(file.index)}
-                                hitSlop={8}
-                                style={styles.skip}
-                                accessibilityLabel={`Download ${file.name}`}
-                              >
-                                <Icon name="plus" size={16} color={colors.accent} />
-                              </Pressable>
-                            ) : done ? (
-                              <View style={styles.fileActions}>
-                                <Pressable
-                                  onPress={() => active.onPlayFile?.(file)}
-                                  hitSlop={8}
-                                  style={styles.skip}
-                                  accessibilityLabel={`Play ${file.name}`}
-                                >
-                                  <Icon name="play" size={16} color={colors.accent} />
-                                </Pressable>
-                                <Pressable
-                                  onPress={() =>
-                                    askDeleteNames([file.name], file.name)
-                                  }
-                                  hitSlop={8}
-                                  style={styles.skip}
-                                  accessibilityLabel={`Delete ${file.name}`}
-                                >
-                                  <Icon name="trash-2" size={16} color={colors.faint} />
-                                </Pressable>
-                              </View>
-                            ) : (
-                              <Pressable
-                                onPress={() => active.onSkip?.(file.index)}
-                                hitSlop={8}
-                                style={styles.skip}
-                                accessibilityLabel={`Skip ${file.name}`}
-                              >
-                                <Icon name="x" size={16} color={colors.faint} />
-                              </Pressable>
-                            )}
-                          </View>
-                        );
-                      })}
-                    </View>
-                    );
-                  })}
-              </View>
-            )}
-
             {items.length > 0 && (
               <Text style={styles.heading}>Saved</Text>
             )}
           </View>
         }
         ListEmptyComponent={
-          active ? null : (
+          actives.length ? null : (
             <View style={styles.empty}>
               <View style={styles.emptyMark}>
                 <Icon name="download" size={22} color={colors.faint} />

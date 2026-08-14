@@ -70,6 +70,7 @@ export function useTorrent(settings: Settings) {
         console.log('[torrent]', message)
       ),
       TorrentStream.addListener('progress', (p: Progress) => {
+        if (p.uri) return;
         // One line per tick drowns the log and costs real time in dev; only
         // speak up when the torrent actually changes state.
         if (p.state !== lastState.current) {
@@ -78,7 +79,8 @@ export function useTorrent(settings: Settings) {
         }
         if (!streaming.current || keepProgress.current) setProgress(p);
       }),
-      TorrentStream.addListener('ready', ({ url, lanUrl: lan, name, subtitleFiles: subs }) => {
+      TorrentStream.addListener('ready', ({ url, lanUrl: lan, name, subtitleFiles: subs, uri }) => {
+        if (uri) return;
         console.log('[torrent] ready', name, 'lan:', lan ?? 'none');
         streaming.current = true;
         setUrl(url);
@@ -101,8 +103,8 @@ export function useTorrent(settings: Settings) {
     setPhase('idle');
   }, []);
 
-  const reset = useCallback(() => {
-    TorrentStream.stop();
+  const reset = useCallback((native: unknown = true) => {
+    if (native !== false) TorrentStream.stop();
     setPhase('idle');
     setItem(null);
     setMeta(null);

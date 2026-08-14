@@ -263,6 +263,23 @@ class TorrentStreamModule : Module() {
   /** Wanted videos already copied into Downloads while the torrent is still up. */
   private val savedFiles = ConcurrentHashMap.newKeySet<Int>()
 
+  /** One full-file download. Stream playback still uses the singleton handle above. */
+  private class Dl(
+    val uri: String,
+    var info: TorrentInfo,
+    var handle: TorrentHandle,
+    val hash: String,
+    var wantedFiles: IntArray,
+    var fileIndex: Int,
+    var saveFolder: String,
+    val savedFiles: MutableSet<Int> = ConcurrentHashMap.newKeySet(),
+    var userPaused: Boolean = false,
+    var announcedReady: Boolean = false,
+  )
+
+  private val downloads = LinkedHashMap<String, Dl>()
+  private val downloadByUri = ConcurrentHashMap<String, String>()
+
   /** User paused the transfer from the Downloads UI. */
   private var userPaused = false
   /** Bumped on stop() so an in-flight play() does not put the torrent back. */
@@ -336,7 +353,11 @@ class TorrentStreamModule : Module() {
 
   private fun persistWanted() {
     val hex = infoHashHex ?: return
-    runCatching { wantedStore(hex).writeText(wantedFiles.joinToString(",")) }
+    persistWanted(hex, wantedFiles)
+  }
+
+  private fun persistWanted(hex: String, files: IntArray) {
+    runCatching { wantedStore(hex).writeText(files.joinToString(",")) }
   }
 
   private fun loadWanted(hex: String): List<Int> {
@@ -446,12 +467,70 @@ class TorrentStreamModule : Module() {
      * Leaves the torrent running so later episodes can keep fetching.
      */
     AsyncFunction("saveReady") {
-      saveReadyFiles()
+      downloads.values.flatMap { saveReadyFiles(it) }
+    }
+
+    AsyncFunction("pauseDownload") { id: String ->
+      val dl = findDl(id) ?: return@AsyncFunction null
+      if (dl.handle.isValid) {
+        dl.handle.pause()
+        dl.userPaused = true
+        emitDlProgress(dl)
+        if (downloads.values.none { !it.userPaused }) {
+          watchTask(false)
+          clearDownloadNotification()
+        }
+        log("paused download ${dl.hash}")
+      }
+      null
+    }
+
+    AsyncFunction("resumeDownload") { id: String ->
+      val dl = findDl(id) ?: return@AsyncFunction null
+      if (dl.handle.isValid) {
+        dl.handle.resume()
+        dl.userPaused = false
+        emitDlProgress(dl)
+        if (showNotify) {
+          watchTask(true)
+          updateDownloadNotification()
+        }
+        log("resumed download ${dl.hash}")
+      }
+      null
+    }
+
+    AsyncFunction("stopDownload") { id: String ->
+      stopDownload(id)
+      null
+    }
+
+    AsyncFunction("skipDownload") { id: String, index: Int ->
+      val dl = findDl(id) ?: return@AsyncFunction null
+      dl.wantedFiles = dl.wantedFiles.filter { it != index }.toIntArray()
+      if (dl.handle.isValid) applyFocus(dl)
+      persistWanted(dl.hash, dl.wantedFiles)
+      log("skip download ${dl.hash} file $index")
+      null
+    }
+
+    AsyncFunction("includeDownload") { id: String, index: Int ->
+      val dl = findDl(id) ?: return@AsyncFunction null
+      if (index !in dl.wantedFiles) dl.wantedFiles += index
+      if (dl.handle.isValid) applyFocus(dl)
+      persistWanted(dl.hash, dl.wantedFiles)
+      if (dl.userPaused) {
+        dl.handle.resume()
+        dl.userPaused = false
+      }
+      log("include download ${dl.hash} file $index")
+      null
     }
 
     /** `file://` for a finished episode still in the torrent cache. */
-    AsyncFunction("fileUri") { index: Int ->
-      val ti = info ?: throw CodedException("No torrent is running")
+    AsyncFunction("fileUri") { index: Int, id: String ->
+      val ti = (if (id.isNotEmpty()) findDl(id)?.info else info)
+        ?: throw CodedException("No torrent is running")
       if (index !in 0 until ti.files().numFiles()) {
         throw CodedException("No file at index $index")
       }
@@ -648,34 +727,39 @@ class TorrentStreamModule : Module() {
 
     AsyncFunction("stop") {
       playGen++
-      showNotify = false
+      if (downloads.isEmpty()) {
+        showNotify = false
+        watchTask(false)
+        clearDownloadNotification()
+      }
       userPaused = true
-      watchTask(false)
-      clearDownloadNotification()
       forgetWanted(infoHashHex)
       val h = handle?.takeIf { it.isValid }
       handle = null
       if (h != null) {
-        runCatching { h.unsetFlags(TorrentFlags.AUTO_MANAGED) }
-        runCatching { h.pause() }
-        info?.let { ti ->
-          runCatching {
-            h.prioritizeFiles(Array(ti.files().numFiles()) { Priority.IGNORE })
+        val hex = runCatching { h.infoHash().toHex() }.getOrNull()
+        if (hex == null || !downloads.containsKey(hex)) {
+          runCatching { h.unsetFlags(TorrentFlags.AUTO_MANAGED) }
+          runCatching { h.pause() }
+          info?.let { ti ->
+            runCatching {
+              h.prioritizeFiles(Array(ti.files().numFiles()) { Priority.IGNORE })
+            }
+            runCatching {
+              h.prioritizePieces(Array(ti.numPieces()) { Priority.IGNORE })
+            }
           }
-          runCatching {
-            h.prioritizePieces(Array(ti.numPieces()) { Priority.IGNORE })
-          }
+          runCatching { session.remove(h, SessionHandle.DELETE_FILES) }
         }
-        runCatching { session.remove(h, SessionHandle.DELETE_FILES) }
       }
       teardown()
-      wipeStreamCache()
-      log("stop: torrent removed")
+      if (downloads.isEmpty()) wipeStreamCache()
+      log("stop: stream removed")
     }
 
     /** Wipe piece data under cache/torrents (not public Downloads or meta/peers). */
     AsyncFunction("clearCache") {
-      if (handle != null) return@AsyncFunction false
+      if (handle != null || downloads.isNotEmpty()) return@AsyncFunction false
       wipeStreamCache()
       true
     }
@@ -684,9 +768,10 @@ class TorrentStreamModule : Module() {
       showNotify = false
       clearDownloadNotification()
       watchTask(false)
+      downloads.keys.toList().forEach { stopDownload(it) }
       teardown()
       // Force-kill / process death often skips JS stop — drop video pieces here.
-      if (removeFilesAfterStop) wipeStreamCache()
+      if (removeFilesAfterStop && downloads.isEmpty()) wipeStreamCache()
       persistSession()
       if (session.isRunning) session.stop()
     }
@@ -1006,11 +1091,19 @@ class TorrentStreamModule : Module() {
   }
 
   /** Let go of a warm torrent that is not the one we are about to use. Never
-   *  touches the torrent currently playing. */
+   *  touches the torrent currently playing or an active download. */
   private fun dropWarm(keepHex: String?) {
     val w = warm ?: return
     val hex = runCatching { w.infoHash().toHex() }.getOrNull()
-    if (hex != null && hex == keepHex) return
+    if (hex != null && (hex == keepHex || hex == infoHashHex || downloads.containsKey(hex))) {
+      if (hex != keepHex) warm = null
+      return
+    }
+    // ponytail: leftover inspect torrents stay while anything is downloading
+    if (downloads.isNotEmpty()) {
+      warm = null
+      return
+    }
     if (w.isValid && hex != infoHashHex) {
       log("session: dropping warm torrent $hex")
       runCatching { session.remove(w) }
@@ -1136,6 +1229,10 @@ class TorrentStreamModule : Module() {
   private fun persistPeers() {
     val h = handle ?: return
     val hash = infoHashHex ?: return
+    persistPeers(h, hash)
+  }
+
+  private fun persistPeers(h: TorrentHandle, hash: String) {
     if (!h.isValid) return
     try {
       @Suppress("UNCHECKED_CAST")
@@ -1201,14 +1298,15 @@ class TorrentStreamModule : Module() {
   }
 
   private fun play(uri: String, index: Int, options: PlayOptions, extraFiles: String = ""): List<Int> {
-    val gen = ++playGen
+    val download = options.fullFile
+    val gen = if (download) playGen else ++playGen
     val startedAt = System.currentTimeMillis()
     ensureSession()
 
     // Resolve before tearing down, so teardown knows whether the torrent it is
     // about to drop is the one we are about to play.
     val ti = resolve(uri, 60)
-    if (gen != playGen) return emptyList()
+    if (!download && gen != playGen) return emptyList()
     // Metadata that outlived its torrent answers with garbage rather than
     // failing, and the first thing to notice is a division a few lines down.
     // Say so here instead.
@@ -1237,6 +1335,7 @@ class TorrentStreamModule : Module() {
           "file — playback will stop if you watch far enough to fill the disk"
       )
     }
+    if (download) return playDownload(uri, ti, index, options, extraFiles)
     teardown(keep = ti.infoHash().toHex())
     if (gen != playGen) return emptyList()
 
@@ -1389,6 +1488,121 @@ class TorrentStreamModule : Module() {
     return videos
   }
 
+  private fun findDl(id: String): Dl? {
+    if (id.isEmpty()) return null
+    downloads[id]?.let { return it }
+    downloadByUri[id]?.let { downloads[it] }?.let { return it }
+    return downloads.values.find { it.uri == id || it.hash.equals(id, ignoreCase = true) }
+  }
+
+  private fun stopDownload(id: String) {
+    val dl = findDl(id) ?: return
+    downloads.remove(dl.hash)
+    downloadByUri.remove(dl.uri)
+    forgetWanted(dl.hash)
+    if (dl.handle.isValid) {
+      runCatching { session.remove(dl.handle, SessionHandle.DELETE_FILES) }
+    }
+    log("stop download ${dl.hash}")
+    if (downloads.isEmpty()) {
+      if (handle == null) {
+        poller?.removeCallbacksAndMessages(null)
+        pollThread?.quitSafely()
+        poller = null
+        pollThread = null
+        watchTask(false)
+        showNotify = false
+        clearDownloadNotification()
+      }
+    } else {
+      updateDownloadNotification()
+    }
+  }
+
+  private fun playDownload(
+    uri: String,
+    ti: TorrentInfo,
+    index: Int,
+    options: PlayOptions,
+    extraFiles: String,
+  ): List<Int> {
+    val hash = ti.infoHash().toHex()
+    val files = ti.files()
+    val extra = (extraFiles + "," + options.fileList)
+      .split(',')
+      .mapNotNull { it.trim().toIntOrNull() }
+    val fromSeason =
+      if (options.season >= 0) seasonVideos(ti, options.season) else emptyList()
+    val videos = (listOf(index) + extra + fromSeason)
+      .distinct()
+      .filter { it in 0 until files.numFiles() }
+    log(
+      "download: wanting ${videos.size} video(s) [${videos.joinToString()}] " +
+        "season=${options.season} extra='$extraFiles'"
+    )
+    fun besideVideo(dir: String, i: Int): Boolean {
+      val subDir = files.filePath(i).replace("\\", "/")
+        .substringBeforeLast("/", "")
+      return subDir == dir || (dir.isNotEmpty() && subDir.startsWith("$dir/"))
+    }
+    fun matchesStem(stem: String, i: Int): Boolean {
+      val name = files.fileName(i).substringBeforeLast('.').lowercase()
+      return name == stem || name.startsWith("$stem.")
+    }
+    val subHits = videos.flatMap { vid ->
+      val stem = files.fileName(vid).substringBeforeLast('.').lowercase()
+      val dir = files.filePath(vid).replace("\\", "/").substringBeforeLast("/", "")
+      (0 until files.numFiles()).filter { i ->
+        i !in videos &&
+          files.filePath(i).substringAfterLast('.', "").lowercase() in SUBTITLE &&
+          besideVideo(dir, i) &&
+          matchesStem(stem, i)
+      }
+    }.distinct()
+    val wanted = (videos + subHits).toIntArray()
+    val priorities = Array(files.numFiles()) { Priority.IGNORE }
+    wanted.forEach { if (it in priorities.indices) priorities[it] = Priority.DEFAULT }
+
+    val running = session.find(ti.infoHash())?.takeIf { it.isValid }
+    val h = if (running != null) {
+      log("download: reusing running torrent (${running.status().numPeers()} peer(s))")
+      running.prioritizeFiles(priorities)
+      running
+    } else {
+      val peers = loadPeers(hash)
+      log("download: cold start, ${peers.size} cached peer(s)")
+      session.download(ti, saveDir, null, priorities, peers, TorrentFlags.SEQUENTIAL_DOWNLOAD)
+      awaitHandle(ti) ?: throw CodedException("Torrent could not be added to the session")
+    }
+    h.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
+    val existing = runCatching { h.trackers().map { it.url() } }.getOrDefault(emptyList())
+    TRACKERS.filterNot { it in existing }.forEach {
+      runCatching { h.addTracker(AnnounceEntry(it)) }
+    }
+    h.forceReannounce()
+    h.forceDHTAnnounce()
+
+    val prev = downloads[hash]
+    val dl = Dl(
+      uri = uri,
+      info = ti,
+      handle = h,
+      hash = hash,
+      wantedFiles = wanted,
+      fileIndex = index,
+      saveFolder = options.saveFolder,
+      savedFiles = prev?.savedFiles ?: ConcurrentHashMap.newKeySet(),
+    )
+    downloads[hash] = dl
+    downloadByUri[uri] = hash
+    persistWanted(hash, wanted)
+    adoptSaved(dl)
+    applyFocus(dl)
+    startPolling()
+    log("download: ${files.fileName(index)} — ${downloads.size} active")
+    return videos
+  }
+
   private fun isVideoFile(i: Int, files: org.libtorrent4j.FileStorage) =
     files.filePath(i).substringAfterLast('.', "").lowercase() in VIDEO
 
@@ -1415,9 +1629,14 @@ class TorrentStreamModule : Module() {
   }
 
   /** Already copied into Movies/Watchly — do not fetch or copy again. */
-  private fun destComplete(relPath: String, expected: Long): Boolean {
+  private fun destComplete(
+    relPath: String,
+    expected: Long,
+    folder: String = saveFolder,
+    torrentName: String = info?.name() ?: "",
+  ): Boolean {
     if (expected <= 0) return false
-    val dest = downloadDest(relPath)
+    val dest = downloadDest(relPath, folder, torrentName)
     return dest.exists() && dest.length() >= expected * 99L / 100L
   }
 
@@ -1435,18 +1654,42 @@ class TorrentStreamModule : Module() {
     if (n > 0) log("play: $n file(s) already in Movies — skipping")
   }
 
+  private fun adoptSaved(dl: Dl) {
+    val files = dl.info.files()
+    var n = 0
+    for (i in dl.wantedFiles) {
+      if (!isVideoFile(i, files)) continue
+      if (destComplete(files.filePath(i), files.fileSize(i), dl.saveFolder, dl.info.name())) {
+        dl.savedFiles.add(i)
+        n++
+      }
+    }
+    if (n > 0) log("download: $n file(s) already in Movies — skipping")
+  }
+
   /** Next unfinished wanted video (+ its sidecar subs). One file at a time. */
   private fun sequentialFocus(): IntArray {
     val ti = info ?: return wantedFiles
+    return sequentialFocus(ti, wantedFiles, savedFiles)
+  }
+
+  private fun sequentialFocus(dl: Dl): IntArray =
+    sequentialFocus(dl.info, dl.wantedFiles, dl.savedFiles)
+
+  private fun sequentialFocus(
+    ti: TorrentInfo,
+    wanted: IntArray,
+    saved: Set<Int>,
+  ): IntArray {
     val files = ti.files()
-    val next = wantedFiles
+    val next = wanted
       .filter { i ->
-        i in 0 until files.numFiles() && isVideoFile(i, files) && i !in savedFiles
+        i in 0 until files.numFiles() && isVideoFile(i, files) && i !in saved
       }
       .minByOrNull { episodeOrd(files.fileName(it), it) } ?: return intArrayOf()
     val dir = files.filePath(next).replace("\\", "/").substringBeforeLast("/", "")
     val stem = files.fileName(next).substringBeforeLast('.').lowercase()
-    val subs = wantedFiles.filter { i ->
+    val subs = wanted.filter { i ->
       i != next &&
         i in 0 until files.numFiles() &&
         files.filePath(i).substringAfterLast('.', "").lowercase() in SUBTITLE &&
@@ -1458,7 +1701,12 @@ class TorrentStreamModule : Module() {
   }
 
   private fun applyFocus(h: TorrentHandle) {
-    wantOnly(h, if (fullFile) sequentialFocus() else wantedFiles)
+    val ti = info ?: return
+    wantOnly(h, ti, if (fullFile) sequentialFocus() else wantedFiles)
+  }
+
+  private fun applyFocus(dl: Dl) {
+    wantOnly(dl.handle, dl.info, sequentialFocus(dl))
   }
 
   /**
@@ -1466,8 +1714,7 @@ class TorrentStreamModule : Module() {
    * `prioritizeFiles` does not reliably clear piece priorities left over from
    * inspect(), so a season-pack download would fetch the whole torrent.
    */
-  private fun wantOnly(h: TorrentHandle, filesWanted: IntArray) {
-    val ti = info ?: return
+  private fun wantOnly(h: TorrentHandle, ti: TorrentInfo, filesWanted: IntArray) {
     val files = ti.files()
     val filePrio = Array(files.numFiles()) { Priority.IGNORE }
     for (i in filesWanted) if (i in filePrio.indices) filePrio[i] = Priority.DEFAULT
@@ -1505,49 +1752,76 @@ class TorrentStreamModule : Module() {
   /* ------------------------------------------------------------- polling */
 
   private fun startPolling() {
+    if (poller != null) return
     val thread = HandlerThread("torrent-poll").apply { start() }
     val handler = Handler(thread.looper)
     pollThread = thread
     poller = handler
-    val gen = playGen
 
     val tick = object : Runnable {
       override fun run() {
-        if (gen != playGen) return
         try {
           pump()
         } catch (e: Exception) {
           Log.w(TAG, "poll failed", e)
         }
-        if (gen != playGen) return
-        handler.postDelayed(this, if (announcedReady) 500 else 200)
+        val live = handle?.isValid == true || downloads.isNotEmpty()
+        if (!live) return
+        handler.postDelayed(this, if (announcedReady || downloads.isNotEmpty()) 500 else 200)
       }
     }
     handler.post(tick)
   }
 
-  private fun pump() {
-    val gen = playGen
-    val h = handle ?: return
-    val ti = info ?: return
-    if (!h.isValid) return
+  private fun pumpDownload(dl: Dl) {
+    if (!dl.announcedReady) {
+      dl.announcedReady = true
+      val name = dl.info.files().fileName(dl.fileIndex)
+      log("download ready: $name")
+      sendEvent(
+        "ready",
+        mapOf(
+          "url" to "",
+          "lanUrl" to null,
+          "name" to name,
+          "subtitleFiles" to emptyList<Map<String, Any>>(),
+          "uri" to dl.uri,
+          "id" to dl.hash,
+        )
+      )
+    }
+    if (ticks % 10 == 1 && !dl.userPaused) applyFocus(dl)
+    if (ticks % 2 == 0) emitDlProgress(dl)
+    if (ticks % 30 == 0) persistPeers(dl.handle, dl.hash)
+  }
 
+  private fun pump() {
     ticks++
 
-    // A session only grows: every piece it fetches stays until it stops, so a
-    // long enough film on a small enough phone will run the disk out. Stop on
-    // our own terms — with a message and a wipe — rather than letting libtorrent
-    // discover it on a write and stall with no explanation.
     if (ticks % 20 == 0 && saveDir.usableSpace < FREE_SPACE_MIN) {
       log("out of space — stopping")
       sendEvent(
         "error",
         mapOf("message" to "Out of storage space. The stream has been stopped and its files cleared.")
       )
-      teardown()
-      wipeStreamCache()
+      downloads.keys.toList().forEach { stopDownload(it) }
+      if (handle != null) {
+        teardown()
+        wipeStreamCache()
+      }
       return
     }
+
+    session.postSessionStats()
+    for (dl in downloads.values.toList()) {
+      if (!dl.handle.isValid) continue
+      pumpDownload(dl)
+    }
+
+    val gen = playGen
+    val h = handle ?: return
+    val ti = info ?: return
+    if (!h.isValid) return
 
     // A download wants every piece of the selected file, so none of the
     // windowing below applies: there is no reader to follow, the zone would
@@ -1858,8 +2132,8 @@ class TorrentStreamModule : Module() {
   }
 
   /** 0–100. For a full-file download, only the pieces we asked for. */
-  private fun downloadProgress(status: org.libtorrent4j.TorrentStatus): Float {
-    if (fullFile) {
+  private fun downloadProgress(status: org.libtorrent4j.TorrentStatus, wantedOnly: Boolean = fullFile): Float {
+    if (wantedOnly) {
       val wanted = status.totalWanted()
       if (wanted <= 0) return 0f
       return (status.totalWantedDone().toDouble() / wanted * 100.0)
@@ -1867,6 +2141,27 @@ class TorrentStreamModule : Module() {
         .coerceIn(0f, 100f)
     }
     return (status.progress() * 100f).coerceIn(0f, 100f)
+  }
+
+  private fun emitDlProgress(dl: Dl) {
+    if (!dl.handle.isValid) return
+    val status = dl.handle.status()
+    sendEvent(
+      "progress",
+      mapOf(
+        "buffer" to 100,
+        "progress" to downloadProgress(status, true),
+        "speed" to if (dl.userPaused) 0 else status.downloadRate(),
+        "seeds" to status.numSeeds(),
+        "peers" to status.numPeers(),
+        "dhtNodes" to session.stats().dhtNodes().toInt(),
+        "state" to status.state().name,
+        "paused" to dl.userPaused,
+        "uri" to dl.uri,
+        "id" to dl.hash,
+      )
+    )
+    updateDownloadNotification()
   }
 
   /** Piece holding the given byte offset *within the selected file*. */
@@ -1885,27 +2180,29 @@ class TorrentStreamModule : Module() {
   private fun teardown(keep: String? = null) {
     persistPeers()
     persistSession()
-    clearDownloadNotification()
-    // Keep showNotify: play() tears down before the download runs, and JS has
-    // already asked for a progress notification by then. stop()/setNotify(false)
-    // clear the flag.
-    userPaused = false
-    lastNotifPct = -1
-    lastNotifPaused = null
-    lastNotifRate = -1
+    if (downloads.isEmpty()) {
+      clearDownloadNotification()
+      userPaused = false
+      lastNotifPct = -1
+      lastNotifPaused = null
+      lastNotifRate = -1
+    }
 
     server?.stop()
     server = null
-    poller?.removeCallbacksAndMessages(null)
-    pollThread?.quitSafely()
-    poller = null
-    pollThread = null
+    if (downloads.isEmpty()) {
+      poller?.removeCallbacksAndMessages(null)
+      pollThread?.quitSafely()
+      poller = null
+      pollThread = null
+    }
 
     val keeping = keep != null && keep == infoHashHex
+    val keepDownload = infoHashHex != null && downloads.containsKey(infoHashHex)
     handle?.let { h ->
       if (h.isValid) {
         h.clearPieceDeadlines()
-        if (!keeping) {
+        if (!keeping && !keepDownload) {
           session.remove(h)
           forgetMeta()
         }
@@ -1917,9 +2214,9 @@ class TorrentStreamModule : Module() {
     // keep != null only delete the outgoing torrent's tree. Full stop wipes all
     // piece data — old.name() alone left multi-file / renamed torrents behind
     // and grew the app to gigabytes.
-    if (removeFilesAfterStop && !keeping) {
+    if (removeFilesAfterStop && !keeping && !keepDownload) {
       if (keep == null) {
-        wipeStreamCache()
+        if (downloads.isEmpty()) wipeStreamCache()
       } else {
         info?.let { old ->
           File(saveDir, old.name()).deleteRecursively()
@@ -1946,6 +2243,8 @@ class TorrentStreamModule : Module() {
     fileIndex = -1
     announcedReady = false
     peerSaveTick = 0
+    fullFile = false
+    if (downloads.isNotEmpty() && poller == null) startPolling()
   }
 
   /* ---------------------------------------------------------------- utils */
@@ -2038,37 +2337,34 @@ class TorrentStreamModule : Module() {
   }
 
   private fun updateDownloadNotification() {
-    if (!showNotify || userPaused) return
+    if (!showNotify) return
+    val running = downloads.values.filter { !it.userPaused }
+    if (running.isEmpty()) return
     val ctx = appContext.reactContext ?: appCtx ?: return
     rememberCtx(ctx)
-    val ti = info ?: return
-    val videos = wantedFiles.count { i ->
-      i in 0 until ti.files().numFiles() &&
-        ti.files().filePath(i).substringAfterLast('.', "").lowercase() in VIDEO
+    var pct = 0
+    var rate = 0
+    var leftBytes = 0L
+    for (dl in running) {
+      if (!dl.handle.isValid) continue
+      val status = dl.handle.status()
+      pct += downloadProgress(status, true).toInt().coerceIn(0, 100)
+      rate += status.downloadRate()
+      if (status.totalWanted() > 0) {
+        leftBytes += (status.totalWanted() - status.totalWantedDone()).coerceAtLeast(0)
+      }
     }
+    pct /= running.size.coerceAtLeast(1)
     val name =
-      if (videos > 1) ti.name()
-      else if (fileIndex >= 0) ti.files().fileName(fileIndex)
-      else ti.name()
-    val h = handle?.takeIf { it.isValid }
-    val status = h?.status()
-    val pct = if (status != null) downloadProgress(status).toInt().coerceIn(0, 100) else 0
-    val rate = if (userPaused) 0 else (status?.downloadRate() ?: 0)
-    // Bucket speed so tiny fluctuations do not rebuild the notification every tick.
+      if (downloads.size > 1) "${downloads.size} downloads"
+      else running.first().info.name()
+    val paused = false
     val rateKey = rate / 25_000
-    if (pct == lastNotifPct && lastNotifPaused == userPaused && rateKey == lastNotifRate) return
+    if (pct == lastNotifPct && lastNotifPaused == paused && rateKey == lastNotifRate) return
     lastNotifPct = pct
-    lastNotifPaused = userPaused
+    lastNotifPaused = paused
     lastNotifRate = rateKey
 
-    val fileSize =
-      if (fileIndex >= 0) ti.files().fileSize(fileIndex) else ti.totalSize()
-    val leftBytes =
-      if (status != null && fullFile && status.totalWanted() > 0) {
-        (status.totalWanted() - status.totalWantedDone()).coerceAtLeast(0)
-      } else {
-        ((1.0 - pct / 100.0) * fileSize).toLong().coerceAtLeast(0)
-      }
     val speedText = formatRate(rate)
     val etaText = formatEta(leftBytes, rate)
 
@@ -2082,18 +2378,14 @@ class TorrentStreamModule : Module() {
       launch,
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
-    val title = if (userPaused) "Paused" else "Downloading · $pct%"
-    val text = if (userPaused) {
-      name
-    } else {
-      "$speedText · $etaText\n$name"
-    }
+    val title = "Downloading · $pct%"
+    val text = "$speedText · $etaText\n$name"
     val notif = NotificationCompat.Builder(ctx, NOTIF_CHANNEL)
       .setSmallIcon(android.R.drawable.stat_sys_download)
       .setContentTitle(title)
-      .setContentText(if (userPaused) name else "$speedText · $etaText")
+      .setContentText("$speedText · $etaText")
       .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-      .setProgress(100, pct, pct <= 0 && !userPaused)
+      .setProgress(100, pct, pct <= 0)
       .setOngoing(true)
       .setOnlyAlertOnce(true)
       .setContentIntent(pi)
@@ -2177,17 +2469,21 @@ class TorrentStreamModule : Module() {
    * Keeps the torrent's own folders (minus a duplicate torrent-name root).
    * Does not invent a Season N folder.
    */
-  private fun downloadDest(relPath: String): File {
+  private fun downloadDest(
+    relPath: String,
+    folder: String = saveFolder,
+    torrentName: String = info?.name() ?: "",
+  ): File {
     val parts = relPath.replace('\\', '/').split('/').filter { it.isNotBlank() }
       .map { safeName(it) }
-    val torrentRoot = safeName(info?.name() ?: "")
+    val torrentRoot = safeName(torrentName)
     val rest =
       if (parts.size > 1 && parts.first().equals(torrentRoot, ignoreCase = true)) {
         parts.drop(1)
       } else {
         parts
       }
-    val show = safeName(saveFolder.ifBlank { torrentRoot.ifBlank { "Download" } })
+    val show = safeName(folder.ifBlank { torrentRoot.ifBlank { "Download" } })
     return (listOf(show) + rest).fold(watchlyDir()) { dir, part -> File(dir, part) }
   }
 
@@ -2195,8 +2491,13 @@ class TorrentStreamModule : Module() {
    * Copy one finished file into Downloads without removing the torrent cache
    * copy — libtorrent still needs that path for the rest of the season.
    */
-  private fun copyKeep(src: File, name: String): String {
-    val dest = downloadDest(name)
+  private fun copyKeep(
+    src: File,
+    name: String,
+    folder: String = saveFolder,
+    torrentName: String = info?.name() ?: "",
+  ): String {
+    val dest = downloadDest(name, folder, torrentName)
     dest.parentFile?.mkdirs()
     if (dest.exists() && dest.length() >= src.length() * 99 / 100 && dest.length() > 0) {
       return "file://${dest.absolutePath}"
@@ -2208,44 +2509,44 @@ class TorrentStreamModule : Module() {
     return "file://${dest.absolutePath}"
   }
 
-  private fun saveReadyFiles(): List<Map<String, Any>> {
-    if (!fullFile) return emptyList()
-    val h = handle?.takeIf { it.isValid } ?: return emptyList()
-    val ti = info ?: return emptyList()
+  private fun saveReadyFiles(dl: Dl): List<Map<String, Any>> {
+    val h = dl.handle.takeIf { it.isValid } ?: return emptyList()
+    val ti = dl.info
     val files = ti.files()
     val out = mutableListOf<Map<String, Any>>()
-    fun emit(i: Int, uri: String) {
+    fun emit(i: Int, fileUri: String) {
       out.add(
         mapOf(
           "index" to i,
           "name" to files.fileName(i),
-          "uri" to uri,
-          "size" to files.fileSize(i)
+          "uri" to fileUri,
+          "size" to files.fileSize(i),
+          "id" to dl.uri,
         )
       )
     }
-    for (i in wantedFiles) {
-      if (!isVideoFile(i, files) || i in savedFiles) continue
+    for (i in dl.wantedFiles) {
+      if (!isVideoFile(i, files) || i in dl.savedFiles) continue
       val path = files.filePath(i)
-      if (!destComplete(path, files.fileSize(i))) continue
-      if (!savedFiles.add(i)) continue
-      emit(i, "file://${downloadDest(path).absolutePath}")
+      if (!destComplete(path, files.fileSize(i), dl.saveFolder, ti.name())) continue
+      if (!dl.savedFiles.add(i)) continue
+      emit(i, "file://${downloadDest(path, dl.saveFolder, ti.name()).absolutePath}")
     }
-    val focus = sequentialFocus().firstOrNull { isVideoFile(it, files) }
-    if (focus != null && focus !in savedFiles && fileComplete(h, ti, focus)) {
+    val focus = sequentialFocus(dl).firstOrNull { isVideoFile(it, files) }
+    if (focus != null && focus !in dl.savedFiles && fileComplete(h, ti, focus)) {
       val src = File(saveDir, files.filePath(focus))
-      if (src.exists() && savedFiles.add(focus)) {
+      if (src.exists() && dl.savedFiles.add(focus)) {
         try {
-          emit(focus, copyKeep(src, files.filePath(focus)))
+          emit(focus, copyKeep(src, files.filePath(focus), dl.saveFolder, ti.name()))
         } catch (e: Exception) {
-          savedFiles.remove(focus)
+          dl.savedFiles.remove(focus)
           log("saveReady: copy failed ${files.fileName(focus)} — ${e.message}")
         }
       }
     }
     if (out.isNotEmpty()) {
       log("saveReady: ${out.joinToString { it["name"].toString() }}")
-      applyFocus(h)
+      applyFocus(dl)
     }
     return out
   }
@@ -2391,7 +2692,8 @@ class TorrentStreamModule : Module() {
     private var current: TorrentStreamModule? = null
 
     @JvmStatic
-    fun keepAlive(): Boolean = current?.showNotify == true && current?.userPaused == false
+    fun keepAlive(): Boolean =
+      current?.let { it.showNotify && it.downloads.values.any { d -> !d.userPaused } } == true
 
     @JvmStatic
     fun dismissNotify(ctx: Context) {

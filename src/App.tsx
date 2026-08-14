@@ -25,6 +25,8 @@ import { Icon } from './components/Icon';
 import { OfflineBanner } from './components/Offline';
 import { TabBar, type TabKey } from './components/TabBar';
 import { resumeRatio, useTorrent } from './hooks/useTorrent';
+import { useDownloads } from './hooks/useDownloads';
+import { type DownloadJob } from './lib/downloadJob';
 import {
   clearHistory,
   drop,
@@ -37,13 +39,6 @@ import {
   type Item,
 } from './lib/history';
 import { DEFAULTS, loadSettings, saveSettings, type Settings } from './lib/settings';
-import {
-  enqueueDownload,
-  loadQueue,
-  saveDownloadJob,
-  shiftDownload,
-  type DownloadJob,
-} from './lib/downloadJob';
 import { linkEpisode, loadEpisodeLinks, type EpisodeLinks } from './lib/watched';
 import { isTorrentSource } from './lib/magnet';
 import { nextEpisode, pickFile, seasonFiles } from './lib/pick';
@@ -279,27 +274,28 @@ function ShellApp({
     fileName,
     subtitleFiles,
     playingIndex,
-    wantedIndices,
-    queueIndices,
     progress,
     fail,
     inspect,
     play,
     playKnown,
-    skipFile,
-    includeFile,
     reset,
   } = torrent;
+
+  const downloads = useDownloads(
+    { addTrackers: settings.addTrackers, prepareMb: settings.prepareMb },
+    (name, size, path, extra) => {
+      void recordDownload(name, size, path, extra);
+    }
+  );
 
   const [torrentMode, setTorrentMode] = useState<'stream' | 'download' | null>(null);
   const torrentModeRef = useRef(torrentMode);
   torrentModeRef.current = torrentMode;
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
-  const [waiting, setWaiting] = useState<DownloadJob[]>([]);
   /** Title being browsed. Sits above the tabs, like a pushed route would. */
   const [detail, setDetail] = useState<Title | null>(null);
-  const detailAfterDownload = useRef<Title | null>(null);
   /** Shelf opened from a "See all" — under `detail`, so a title picked from the
    *  grid comes back to the grid rather than to the home page. */
   const [shelf, setShelf] = useState<Shelf | null>(null);
@@ -330,12 +326,13 @@ function ShellApp({
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
       if (state !== 'background' && state !== 'inactive') return;
+      if (downloads.live.length) return;
       if (torrentMode === 'download' && phase === 'playing') return;
       if (phase === 'playing' || phase === 'inspecting' || phase === 'choosing') return;
       TorrentStream.clearCache().catch(() => {});
     });
     return () => sub.remove();
-  }, [torrentMode, phase]);
+  }, [torrentMode, phase, downloads.live.length]);
 
   // Remember the whole torrent, not just the file that got opened.
   useEffect(() => {
@@ -775,111 +772,31 @@ function ShellApp({
     TorrentStream.setNotify(true).catch(() => {});
   }, []);
 
-  const [savedFileIds, setSavedFileIds] = useState<number[]>([]);
-  const savedRef = useRef(new Set<number>());
-  const wantedRef = useRef(wantedIndices);
-  wantedRef.current = wantedIndices;
-
-  const startJob = useCallback(
+  const beginDownload = useCallback(
     (job: DownloadJob) => {
-      savedRef.current = new Set(job.savedIndices ?? []);
-      setSavedFileIds([...(job.savedIndices ?? [])]);
-      setTorrentMode('download');
       setTab('downloads');
       setDetail(null);
       setShelf(null);
       enableDownloadNotify();
-      loadQueue().then((jobs) => setWaiting(jobs.slice(1)));
-      open(
-        {
-          uri: job.uri,
-          title: job.titleName ?? job.title ?? 'Download',
-          at: Date.now(),
-          imdb: job.imdb,
-          kind: job.kind,
-          poster: job.poster ?? undefined,
-          titleName: job.titleName,
-        },
-        job.fileIndex,
-        {
-          keepProgress: true,
-          fullFile: true,
-          auto: job.auto ?? (job.fileIndex == null ? true : undefined),
-          season: job.season,
-          fileIndices: job.fileIndices?.length ? job.fileIndices : undefined,
-          queueIndices: job.queueIndices,
-        }
-      );
+      downloads.start(job);
     },
-    [open, enableDownloadNotify]
-  );
-  const startJobRef = useRef(startJob);
-  startJobRef.current = startJob;
-
-  const requestDownload = useCallback(
-    (job: DownloadJob, start: () => void) => {
-      setTorrentMode('download');
-      setTab('downloads');
-      setDetail(null);
-      setShelf(null);
-      const busy =
-        torrentModeRef.current === 'download' && phaseRef.current !== 'idle';
-      if (busy) {
-        enqueueDownload(job).then(() =>
-          loadQueue().then((jobs) => setWaiting(jobs.slice(1)))
-        );
-        return;
-      }
-      savedRef.current = new Set(job.savedIndices ?? []);
-      setSavedFileIds([...(job.savedIndices ?? [])]);
-      // Let the Downloads tab paint before inspect blocks the JS thread.
-      setTimeout(start, 0);
-    },
-    []
+    [downloads, enableDownloadNotify]
   );
 
-  const restored = useRef(false);
-  useEffect(() => {
-    if (restored.current) return;
-    restored.current = true;
-    loadQueue().then((jobs) => {
-      setWaiting(jobs.slice(1));
-      const job = jobs[0];
-      if (!job) {
-        TorrentStream.clearCache().catch(() => {});
-        return;
-      }
-      startJob(job);
-    });
-  }, [startJob]);
-
-  /** Declared here rather than with the other stable callbacks — it needs
-   *  `enableDownloadNotify`, which is defined just above. */
   const downloadFile = useCallback(
     (target: Item, index: number) => {
-      requestDownload(
-        {
-          uri: target.uri,
-          fileIndex: index,
-          fileIndices: [index],
-          title: target.title,
-          titleName: target.titleName,
-          poster: target.poster,
-          imdb: target.imdb,
-          kind: target.kind,
-        },
-        () => {
-          setTorrentMode('download');
-          enableDownloadNotify();
-          open(target, index, {
-            keepProgress: true,
-            fullFile: true,
-            fileIndices: [index],
-          });
-        }
-      );
+      beginDownload({
+        uri: target.uri,
+        fileIndex: index,
+        fileIndices: [index],
+        title: target.title,
+        titleName: target.titleName,
+        poster: target.poster,
+        imdb: target.imdb,
+        kind: target.kind,
+      });
     },
-    [open, enableDownloadNotify, requestDownload]
+    [beginDownload]
   );
 
   const downloadSeason = useCallback(
@@ -888,122 +805,20 @@ function ShellApp({
         ? indices
         : seasonFiles(target.files ?? []);
       if (!list.length) return;
-      requestDownload(
-        {
-          uri: target.uri,
-          fileIndex: list[0],
-          fileIndices: list,
-          queueIndices: list,
-          title: target.title,
-          titleName: target.titleName,
-          poster: target.poster,
-          imdb: target.imdb,
-          kind: target.kind,
-        },
-        () => {
-          setTorrentMode('download');
-          enableDownloadNotify();
-          open(target, list[0], {
-            keepProgress: true,
-            fullFile: true,
-            fileIndices: list,
-            queueIndices: list,
-          });
-        }
-      );
+      beginDownload({
+        uri: target.uri,
+        fileIndex: list[0],
+        fileIndices: list,
+        queueIndices: list,
+        title: target.title,
+        titleName: target.titleName,
+        poster: target.poster,
+        imdb: target.imdb,
+        kind: target.kind,
+      });
     },
-    [open, enableDownloadNotify, requestDownload]
+    [beginDownload]
   );
-
-  // Copy each finished episode into Movies as soon as its pieces are on
-  // disk. The torrent stays up until every still-wanted file is saved.
-  useEffect(() => {
-    if (torrentMode !== 'download') {
-      savedRef.current = new Set();
-      setSavedFileIds([]);
-    }
-  }, [torrentMode]);
-  useEffect(() => {
-    if (torrentMode !== 'download') return;
-    if (phase !== 'playing') return;
-
-    let alive = true;
-    let finishing = false;
-    const poster = item?.poster;
-    const titleName = item?.titleName;
-
-    const finish = () => {
-      if (finishing) return;
-      finishing = true;
-      console.log('[download] all saved — stop torrent');
-      TorrentStream.setNotify(false).catch(() => {});
-      shiftDownload()
-        .then(async (next) => {
-          reset();
-          try {
-            await TorrentStream.stop();
-            await TorrentStream.clearCache();
-          } catch {
-            /* already torn down */
-          }
-          if (next) {
-            startJobRef.current(next);
-            return;
-          }
-          setWaiting([]);
-          setTorrentMode(null);
-          const back = detailAfterDownload.current;
-          detailAfterDownload.current = null;
-          if (back) setDetail(back);
-          else setTab('downloads');
-        })
-        .catch(() => {});
-    };
-
-    const tick = () => {
-      if (!alive || finishing) return;
-      TorrentStream.saveReady()
-        .then((rows) => {
-          if (!alive) return;
-          let added = false;
-          for (const row of rows) {
-            const index = Number(row.index);
-            if (savedRef.current.has(index)) continue;
-            savedRef.current.add(index);
-            added = true;
-            console.log('[download] saved', row.name);
-            void recordDownload(row.name, Number(row.size), row.uri, {
-              poster,
-              titleName,
-            });
-          }
-          if (added) {
-            const ids = [...savedRef.current];
-            setSavedFileIds(ids);
-            saveDownloadJob({ savedIndices: ids }).catch(() => {});
-          }
-          const wanted = wantedRef.current;
-          if (!wanted.length || !wanted.every((i) => savedRef.current.has(i))) {
-            return;
-          }
-          const skipped = queueIndices.filter(
-            (i) => !wanted.includes(i) && !savedRef.current.has(i)
-          );
-          if (skipped.length === 0) finish();
-          else TorrentStream.pause().catch(() => {});
-        })
-        .catch((e: any) => {
-          console.warn('[download] saveReady', String(e?.message ?? e));
-        });
-    };
-
-    tick();
-    const id = setInterval(tick, 3000);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
-  }, [torrentMode, phase, item?.poster, item?.titleName, reset, queueIndices]);
 
   if (localPlay) {
     return (
@@ -1170,22 +985,35 @@ function ShellApp({
         mode={torrentMode ?? 'stream'}
         onPlay={(file) => play(file.index, item ? resumeRatio(item, file.index) : 0)}
         onDownload={(file) => {
-          setTorrentMode('download');
-          setTab('downloads');
-          setDetail(null);
-          setShelf(null);
-          enableDownloadNotify();
-          play(file.index, 0, { keepProgress: true, fullFile: true });
+          beginDownload({
+            uri: item?.uri ?? '',
+            fileIndex: file.index,
+            fileIndices: [file.index],
+            title: meta.name,
+            titleName: item?.titleName,
+            poster: item?.poster,
+            imdb: item?.imdb,
+            kind: item?.kind,
+          });
+          setTorrentMode(null);
+          reset(false);
         }}
         onDownloadAll={() => {
           const indices = seasonFiles(meta.files);
           if (!indices.length) return;
-          setTorrentMode('download');
-          setTab('downloads');
-          setDetail(null);
-          setShelf(null);
-          enableDownloadNotify();
-          play(indices[0], 0, { keepProgress: true, fullFile: true, fileIndices: indices });
+          beginDownload({
+            uri: item?.uri ?? '',
+            fileIndex: indices[0],
+            fileIndices: indices,
+            queueIndices: indices,
+            title: meta.name,
+            titleName: item?.titleName,
+            poster: item?.poster,
+            imdb: item?.imdb,
+            kind: item?.kind,
+          });
+          setTorrentMode(null);
+          reset(false);
         }}
         onBack={() => {
           setTorrentMode(null);
@@ -1203,27 +1031,49 @@ function ShellApp({
         meta={meta}
         mode="download"
         onPlay={(file) => {
-          setTab('downloads');
-          setDetail(null);
-          setShelf(null);
-          enableDownloadNotify();
-          play(file.index, 0, { keepProgress: true, fullFile: true });
+          beginDownload({
+            uri: item?.uri ?? '',
+            fileIndex: file.index,
+            fileIndices: [file.index],
+            title: meta.name,
+            titleName: item?.titleName,
+            poster: item?.poster,
+            imdb: item?.imdb,
+            kind: item?.kind,
+          });
+          setTorrentMode(null);
+          reset(false);
         }}
         onDownload={(file) => {
-          setTab('downloads');
-          setDetail(null);
-          setShelf(null);
-          enableDownloadNotify();
-          play(file.index, 0, { keepProgress: true, fullFile: true });
+          beginDownload({
+            uri: item?.uri ?? '',
+            fileIndex: file.index,
+            fileIndices: [file.index],
+            title: meta.name,
+            titleName: item?.titleName,
+            poster: item?.poster,
+            imdb: item?.imdb,
+            kind: item?.kind,
+          });
+          setTorrentMode(null);
+          reset(false);
         }}
         onDownloadAll={() => {
           const indices = seasonFiles(meta.files);
           if (!indices.length) return;
-          setTab('downloads');
-          setDetail(null);
-          setShelf(null);
-          enableDownloadNotify();
-          play(indices[0], 0, { keepProgress: true, fullFile: true, fileIndices: indices });
+          beginDownload({
+            uri: item?.uri ?? '',
+            fileIndex: indices[0],
+            fileIndices: indices,
+            queueIndices: indices,
+            title: meta.name,
+            titleName: item?.titleName,
+            poster: item?.poster,
+            imdb: item?.imdb,
+            kind: item?.kind,
+          });
+          setTorrentMode(null);
+          reset(false);
         }}
         onBack={() => {
           setTorrentMode(null);
@@ -1264,7 +1114,7 @@ function ShellApp({
           if (episodeId && local) linkEpisode(episodeId, local).then(setEpisodeLinks);
         }}
         onDownload={(magnet, tag, season) => {
-          const job: DownloadJob = {
+          beginDownload({
             uri: magnet,
             fileIndices: [],
             auto: tag ?? true,
@@ -1274,21 +1124,6 @@ function ShellApp({
             poster: detail.poster,
             titleName: detail.title,
             title: detail.title,
-          };
-          requestDownload(job, () => {
-            setTorrentMode('download');
-            detailAfterDownload.current = detail;
-            enableDownloadNotify();
-            openUri(magnet, {
-              auto: tag ?? true,
-              keepProgress: true,
-              fullFile: true,
-              season,
-              imdb: detail.imdb,
-              kind: detail.kind,
-              poster: detail.poster,
-              titleName: detail.title,
-            });
           });
         }}
         onBack={() => setDetail(null)}
@@ -1341,100 +1176,49 @@ function ShellApp({
         <TabPage show={tab === 'downloads'} mounted={visited.has('downloads')}>
           <DownloadsScreen
             onPlayFile={playCompleted}
-            waiting={waiting.map((j) => j.titleName || j.title || 'Download')}
-            active={
-              torrentMode === 'download'
-                ? (() => {
-                    const indices =
-                      queueIndices.length > 0 ? queueIndices : wantedIndices.length > 0 ? wantedIndices : [playingIndex];
-                    const wanted = new Set(wantedIndices);
-                    const files = indices.map(
-                      (i) =>
-                        meta?.files.find((f) => f.index === i) ??
-                        item?.files?.find((f) => f.index === i)
-                    );
-                    const pack =
-                      item?.titleName ??
-                      meta?.name ??
-                      item?.torrentName ??
-                      item?.title;
-                    return {
-                    name:
-                      pack ??
-                      fileName ??
-                      files[0]?.name ??
-                      (phase === 'inspecting' ? 'Starting…' : 'Downloading…'),
-                    size: files
-                      .filter((f) => f && wanted.has(f.index))
-                      .reduce((s, f) => s + (f?.size ?? 0), 0),
-                    files: files.filter((f) => f && wanted.has(f.index)).length,
-                    queue: files
-                      .filter((f): f is NonNullable<typeof f> => !!f)
-                      .map((f) => ({
-                        index: f.index,
-                        name: f.name,
-                        size: f.size,
-                        path:
-                          f.path ??
-                          meta?.files.find((m) => m.index === f.index)?.path,
-                      })),
-                    wanted: [...wanted],
-                    saved: savedFileIds,
-                    poster:
-                      item?.poster ??
-                      history.find(
-                        (h) =>
-                          h.uri === item?.uri ||
-                          (!!item?.imdb && h.imdb === item.imdb)
-                      )?.poster,
-                    progress,
-                    onPause: () => {
-                      TorrentStream.pause().catch(() => {});
-                    },
-                    onResume: () => {
-                      TorrentStream.resume().catch(() => {});
-                    },
-                    onCancel: () => {
-                      detailAfterDownload.current = null;
-                      TorrentStream.setNotify(false).catch(() => {});
-                      shiftDownload()
-                        .then(async (next) => {
-                          reset();
-                          try {
-                            await TorrentStream.stop();
-                            await TorrentStream.clearCache();
-                          } catch {
-                            /* already torn down */
-                          }
-                          if (next) startJobRef.current(next);
-                          else {
-                            setWaiting([]);
-                            setTorrentMode(null);
-                          }
-                        })
-                        .catch(() => {});
-                    },
-                    onSkip: (index: number) => {
-                      skipFile(index);
-                    },
-                    onInclude: (index: number) => {
-                      includeFile(index);
-                      TorrentStream.resume().catch(() => {});
-                    },
-                    onPlayFile: (file) => {
-                      TorrentStream.fileUri(file.index)
-                        .then((uri) =>
-                          setLocalPlay({
-                            url: uri,
-                            title: file.name.replace(/\.[^.]+$/, ''),
-                          })
-                        )
-                        .catch((e: any) => fail(String(e?.message ?? e)));
-                    },
-                    };
-                  })()
-                : null
-            }
+            actives={downloads.live.map((l) => {
+              const wanted = new Set(l.wanted);
+              const files = l.files.length
+                ? l.files
+                : (l.job.queueIndices ?? l.job.fileIndices).map((i) => ({
+                    index: i,
+                    name: `File ${i}`,
+                    size: 0,
+                  }));
+              return {
+                id: l.job.uri,
+                name:
+                  l.job.titleName ||
+                  l.meta?.name ||
+                  l.job.title ||
+                  files[0]?.name ||
+                  'Starting…',
+                size: files.filter((f) => wanted.has(f.index)).reduce((s, f) => s + f.size, 0),
+                files: files.filter((f) => wanted.has(f.index)).length,
+                queue: files,
+                wanted: l.wanted,
+                saved: l.saved,
+                poster: l.job.poster,
+                progress: l.progress,
+                onPause: () => downloads.pause(l.job.uri),
+                onResume: () => downloads.resume(l.job.uri),
+                onCancel: () => {
+                  void downloads.stop(l.job.uri);
+                },
+                onSkip: (index: number) => downloads.skip(l.job.uri, index),
+                onInclude: (index: number) => downloads.include(l.job.uri, index),
+                onPlayFile: (file) => {
+                  TorrentStream.fileUri(file.index, l.job.uri)
+                    .then((uri) =>
+                      setLocalPlay({
+                        url: uri,
+                        title: file.name.replace(/\.[^.]+$/, ''),
+                      })
+                    )
+                    .catch((e: any) => fail(String(e?.message ?? e)));
+                },
+              };
+            })}
           />
         </TabPage>
         <TabPage show={tab === 'settings'} mounted={visited.has('settings')}>
