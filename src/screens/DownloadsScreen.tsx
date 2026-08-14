@@ -1,5 +1,5 @@
 import { memo, useEffect, useState } from 'react';
-import { FlatList, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import TorrentStream, { type Progress } from '../../modules/torrent-stream';
 import { Button } from '../components/Button';
@@ -433,6 +433,7 @@ function DownloadsScreenView({
   const headline = active ? showTitle(active.name) : '';
   const stage = stageLabel(active?.progress?.state, paused);
   const sub = paused ? stage : pct >= 100 ? 'Saving to device…' : stage;
+  const starting = !!active && !paused && pct < 1;
 
   return (
     <Screen title="Downloads" icon="download">
@@ -452,7 +453,10 @@ function DownloadsScreenView({
                   <Text numberOfLines={2} style={styles.name}>
                     {headline}
                   </Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    {starting ? (
+                      <ActivityIndicator size="small" color={colors.accent} />
+                    ) : null}
                     <Text
                       numberOfLines={1}
                       style={[styles.stage, paused && styles.stagePaused, { flex: 1 }]}
