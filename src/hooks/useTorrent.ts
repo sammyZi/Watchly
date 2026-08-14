@@ -179,14 +179,7 @@ export function useTorrent(settings: Settings) {
       keepProgress.current = !!opts?.keepProgress;
       setPlayingIndex(fileIndex);
       const indices = opts?.fileIndices?.length ? opts.fileIndices : [fileIndex];
-      const pack = (itemRef.current?.files ?? metaRef.current?.files ?? [])
-        .filter((f) => f.isVideo)
-        .map((f) => f.index);
-      const queue = opts?.queueIndices?.length
-        ? opts.queueIndices
-        : pack.length > 1
-          ? pack
-          : indices;
+      const queue = opts?.queueIndices?.length ? opts.queueIndices : indices;
       setWantedIndices(indices);
       setQueueIndices(queue);
       queueRef.current = queue;
@@ -198,6 +191,7 @@ export function useTorrent(settings: Settings) {
           fileIndex,
           fileIndices: indices,
           queueIndices: queue,
+          season: opts.season,
           title: it?.title,
           titleName: it?.titleName,
           poster: it?.poster,
@@ -234,7 +228,7 @@ export function useTorrent(settings: Settings) {
         (opts?.fileIndices ?? []).join(',')
       ).then((wanted) => {
         if (Array.isArray(wanted) && wanted.length) {
-          setWantedIndices(wanted);
+          setWantedIndices((prev) => [...new Set([...prev, ...wanted])]);
         }
       }).catch((e: any) => {
         console.warn('[torrent] play failed', e?.message ?? e);
@@ -278,17 +272,10 @@ export function useTorrent(settings: Settings) {
           })),
         });
       }
-      const pack = (next.files ?? [])
-        .filter((f) => f.isVideo)
-        .map((f) => f.index);
       play(
         fileIndex,
         opts?.keepProgress ? 0 : resumeRatio(next, fileIndex),
-        {
-          ...opts,
-          queueIndices:
-            opts?.queueIndices ?? (pack.length > 1 ? pack : undefined),
-        }
+        opts
       );
     },
     [play, settings.addTrackers]

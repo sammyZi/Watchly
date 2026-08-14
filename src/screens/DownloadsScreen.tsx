@@ -178,9 +178,11 @@ function stageLabel(state?: string, paused?: boolean): string {
 function DownloadsScreenView({
   onPlayFile,
   active,
+  waiting,
 }: {
   onPlayFile: (item: { name: string; path?: string }) => void;
   active?: ActiveDownload | null;
+  waiting?: string[];
 }) {
   const [items, setItems] = useState<DownloadEntry[]>([]);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
@@ -217,6 +219,7 @@ function DownloadsScreenView({
       color: c.text,
     },
     metaLine: { ...type.meta, color: c.muted },
+    waitTitle: { ...type.overline, color: c.faint },
     actions: { flexDirection: 'row' as const, gap: space.sm },
     action: { flex: 1 },
     filesHead: {
@@ -495,6 +498,18 @@ function DownloadsScreenView({
             </View>
           </View>
         )}
+        {!!waiting?.length && (
+          <View style={[styles.pinned, !active && { paddingTop: space.md }]}>
+            <View style={styles.card}>
+              <Text style={styles.waitTitle}>Waiting</Text>
+              {waiting.map((name, i) => (
+                <Text key={`${name}-${i}`} numberOfLines={1} style={styles.metaLine}>
+                  {name}
+                </Text>
+              ))}
+            </View>
+          </View>
+        )}
       <FlatList
         style={styles.flex}
         data={groupSaved(items)}
@@ -628,10 +643,7 @@ function DownloadsScreenView({
                             </View>
                             <View style={styles.fileBody}>
                               <Marquee
-                                style={[
-                                  styles.fileName,
-                                  off && styles.fileNameOff,
-                                ]}
+                                style={off ? [styles.fileName, styles.fileNameOff] : styles.fileName}
                               >
                                 {file.name}
                               </Marquee>

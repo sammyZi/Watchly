@@ -240,7 +240,7 @@ export function FilesScreen({
 
               <View style={styles.body}>
                 <Marquee
-                  style={[styles.name, !item.isVideo && styles.nameMuted]}
+                  style={item.isVideo ? styles.name : [styles.name, styles.nameMuted]}
                 >
                   {item.name}
                 </Marquee>

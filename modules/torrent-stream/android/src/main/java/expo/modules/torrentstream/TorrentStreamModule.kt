@@ -1273,8 +1273,7 @@ class TorrentStreamModule : Module() {
       .split(',')
       .mapNotNull { it.trim().toIntOrNull() }
     val fromSeason =
-      if (options.season >= 0 && extra.isEmpty()) seasonVideos(ti, options.season)
-      else emptyList()
+      if (options.season >= 0) seasonVideos(ti, options.season) else emptyList()
     val videos = (listOf(index) + extra + fromSeason)
       .distinct()
       .filter { it in 0 until files.numFiles() }

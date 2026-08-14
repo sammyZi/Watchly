@@ -38,9 +38,10 @@ import {
 } from './lib/history';
 import { DEFAULTS, loadSettings, saveSettings, type Settings } from './lib/settings';
 import {
-  clearDownloadJob,
-  loadDownloadJob,
+  enqueueDownload,
+  loadQueue,
   saveDownloadJob,
+  shiftDownload,
   type DownloadJob,
 } from './lib/downloadJob';
 import { linkEpisode, loadEpisodeLinks, type EpisodeLinks } from './lib/watched';
@@ -291,6 +292,11 @@ function ShellApp({
   } = torrent;
 
   const [torrentMode, setTorrentMode] = useState<'stream' | 'download' | null>(null);
+  const torrentModeRef = useRef(torrentMode);
+  torrentModeRef.current = torrentMode;
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
+  const [waiting, setWaiting] = useState<DownloadJob[]>([]);
   /** Title being browsed. Sits above the tabs, like a pushed route would. */
   const [detail, setDetail] = useState<Title | null>(null);
   const detailAfterDownload = useRef<Title | null>(null);
@@ -390,14 +396,18 @@ function ShellApp({
       if (!found) return;
 
       if (fileIndex != null) {
-        const pack = found.files.filter((f) => f.isVideo).map((f) => f.index);
         play(
           fileIndex,
           opts?.keepProgress ? 0 : resumeRatio(fresh, fileIndex),
           {
             ...opts,
+            fileIndices: opts?.fileIndices?.length ? opts.fileIndices : [fileIndex],
             queueIndices:
-              opts?.queueIndices ?? (pack.length > 1 ? pack : undefined),
+              opts?.queueIndices?.length
+                ? opts.queueIndices
+                : opts?.fileIndices?.length
+                  ? opts.fileIndices
+                  : [fileIndex],
           }
         );
         return;
@@ -419,13 +429,15 @@ function ShellApp({
                 typeof opts.auto === 'string' ? opts.auto : undefined
               );
         if (chosen != null) {
+          const files = indices?.length ? indices : opts.fileIndices;
           play(
             chosen,
             opts.keepProgress ? 0 : resumeRatio(fresh, chosen),
             {
               ...opts,
               season: opts.season,
-              fileIndices: indices?.length ? indices : opts.fileIndices,
+              fileIndices: files,
+              queueIndices: opts.queueIndices?.length ? opts.queueIndices : files,
             }
           );
         }
@@ -777,6 +789,7 @@ function ShellApp({
       setDetail(null);
       setShelf(null);
       enableDownloadNotify();
+      loadQueue().then((jobs) => setWaiting(jobs.slice(1)));
       open(
         {
           uri: job.uri,
@@ -791,19 +804,45 @@ function ShellApp({
         {
           keepProgress: true,
           fullFile: true,
-          fileIndices: job.fileIndices,
+          auto: job.auto ?? (job.fileIndex == null ? true : undefined),
+          season: job.season,
+          fileIndices: job.fileIndices?.length ? job.fileIndices : undefined,
           queueIndices: job.queueIndices,
         }
       );
     },
     [open, enableDownloadNotify]
   );
+  const startJobRef = useRef(startJob);
+  startJobRef.current = startJob;
+
+  const requestDownload = useCallback(
+    (job: DownloadJob, start: () => void) => {
+      setTab('downloads');
+      setDetail(null);
+      setShelf(null);
+      const busy =
+        torrentModeRef.current === 'download' && phaseRef.current !== 'idle';
+      if (busy) {
+        enqueueDownload(job).then(() =>
+          loadQueue().then((jobs) => setWaiting(jobs.slice(1)))
+        );
+        return;
+      }
+      savedRef.current = new Set(job.savedIndices ?? []);
+      setSavedFileIds([...(job.savedIndices ?? [])]);
+      start();
+    },
+    []
+  );
 
   const restored = useRef(false);
   useEffect(() => {
     if (restored.current) return;
     restored.current = true;
-    loadDownloadJob().then((job) => {
+    loadQueue().then((jobs) => {
+      setWaiting(jobs.slice(1));
+      const job = jobs[0];
       if (!job) {
         TorrentStream.clearCache().catch(() => {});
         return;
@@ -816,16 +855,29 @@ function ShellApp({
    *  `enableDownloadNotify`, which is defined just above. */
   const downloadFile = useCallback(
     (target: Item, index: number) => {
-      savedRef.current = new Set();
-      setSavedFileIds([]);
-      setTorrentMode('download');
-      setTab('downloads');
-      setDetail(null);
-      setShelf(null);
-      enableDownloadNotify();
-      open(target, index, { keepProgress: true, fullFile: true });
+      requestDownload(
+        {
+          uri: target.uri,
+          fileIndex: index,
+          fileIndices: [index],
+          title: target.title,
+          titleName: target.titleName,
+          poster: target.poster,
+          imdb: target.imdb,
+          kind: target.kind,
+        },
+        () => {
+          setTorrentMode('download');
+          enableDownloadNotify();
+          open(target, index, {
+            keepProgress: true,
+            fullFile: true,
+            fileIndices: [index],
+          });
+        }
+      );
     },
-    [open, enableDownloadNotify]
+    [open, enableDownloadNotify, requestDownload]
   );
 
   const downloadSeason = useCallback(
@@ -834,20 +886,31 @@ function ShellApp({
         ? indices
         : seasonFiles(target.files ?? []);
       if (!list.length) return;
-      savedRef.current = new Set();
-      setSavedFileIds([]);
-      setTorrentMode('download');
-      setTab('downloads');
-      setDetail(null);
-      setShelf(null);
-      enableDownloadNotify();
-      open(target, list[0], {
-        keepProgress: true,
-        fullFile: true,
-        fileIndices: list,
-      });
+      requestDownload(
+        {
+          uri: target.uri,
+          fileIndex: list[0],
+          fileIndices: list,
+          queueIndices: list,
+          title: target.title,
+          titleName: target.titleName,
+          poster: target.poster,
+          imdb: target.imdb,
+          kind: target.kind,
+        },
+        () => {
+          setTorrentMode('download');
+          enableDownloadNotify();
+          open(target, list[0], {
+            keepProgress: true,
+            fullFile: true,
+            fileIndices: list,
+            queueIndices: list,
+          });
+        }
+      );
     },
-    [open, enableDownloadNotify]
+    [open, enableDownloadNotify, requestDownload]
   );
 
   // Copy each finished episode into Movies as soon as its pieces are on
@@ -872,16 +935,27 @@ function ShellApp({
       finishing = true;
       console.log('[download] all saved — stop torrent');
       TorrentStream.setNotify(false).catch(() => {});
-      clearDownloadJob().catch(() => {});
-      reset();
-      TorrentStream.stop()
-        .then(() => TorrentStream.clearCache())
+      shiftDownload()
+        .then(async (next) => {
+          reset();
+          try {
+            await TorrentStream.stop();
+            await TorrentStream.clearCache();
+          } catch {
+            /* already torn down */
+          }
+          if (next) {
+            startJobRef.current(next);
+            return;
+          }
+          setWaiting([]);
+          setTorrentMode(null);
+          const back = detailAfterDownload.current;
+          detailAfterDownload.current = null;
+          if (back) setDetail(back);
+          else setTab('downloads');
+        })
         .catch(() => {});
-      setTorrentMode(null);
-      const back = detailAfterDownload.current;
-      detailAfterDownload.current = null;
-      if (back) setDetail(back);
-      else setTab('downloads');
     };
 
     const tick = () => {
@@ -907,11 +981,13 @@ function ShellApp({
             saveDownloadJob({ savedIndices: ids }).catch(() => {});
           }
           const wanted = wantedRef.current;
-          const leftover = queueIndices.filter((i) => !savedRef.current.has(i));
           if (!wanted.length || !wanted.every((i) => savedRef.current.has(i))) {
             return;
           }
-          if (leftover.length === 0) finish();
+          const skipped = queueIndices.filter(
+            (i) => !wanted.includes(i) && !savedRef.current.has(i)
+          );
+          if (skipped.length === 0) finish();
           else TorrentStream.pause().catch(() => {});
         })
         .catch((e: any) => {
@@ -1186,21 +1262,31 @@ function ShellApp({
           if (episodeId && local) linkEpisode(episodeId, local).then(setEpisodeLinks);
         }}
         onDownload={(magnet, tag, season) => {
-          setTorrentMode('download');
-          setTab('downloads');
-          detailAfterDownload.current = detail;
-          setDetail(null);
-          setShelf(null);
-          enableDownloadNotify();
-          openUri(magnet, {
+          const job: DownloadJob = {
+            uri: magnet,
+            fileIndices: [],
             auto: tag ?? true,
-            keepProgress: true,
-            fullFile: true,
             season,
             imdb: detail.imdb,
             kind: detail.kind,
             poster: detail.poster,
             titleName: detail.title,
+            title: detail.title,
+          };
+          requestDownload(job, () => {
+            setTorrentMode('download');
+            detailAfterDownload.current = detail;
+            enableDownloadNotify();
+            openUri(magnet, {
+              auto: tag ?? true,
+              keepProgress: true,
+              fullFile: true,
+              season,
+              imdb: detail.imdb,
+              kind: detail.kind,
+              poster: detail.poster,
+              titleName: detail.title,
+            });
           });
         }}
         onBack={() => setDetail(null)}
@@ -1253,8 +1339,9 @@ function ShellApp({
         <TabPage show={tab === 'downloads'} mounted={visited.has('downloads')}>
           <DownloadsScreen
             onPlayFile={playCompleted}
+            waiting={waiting.map((j) => j.titleName || j.title || 'Download')}
             active={
-              torrentMode === 'download' && phase !== 'idle'
+              torrentMode === 'download'
                 ? (() => {
                     const indices =
                       queueIndices.length > 0 ? queueIndices : wantedIndices.length > 0 ? wantedIndices : [playingIndex];
@@ -1307,10 +1394,23 @@ function ShellApp({
                     },
                     onCancel: () => {
                       detailAfterDownload.current = null;
-                      setTorrentMode(null);
                       TorrentStream.setNotify(false).catch(() => {});
-                      clearDownloadJob().catch(() => {});
-                      reset();
+                      shiftDownload()
+                        .then(async (next) => {
+                          reset();
+                          try {
+                            await TorrentStream.stop();
+                            await TorrentStream.clearCache();
+                          } catch {
+                            /* already torn down */
+                          }
+                          if (next) startJobRef.current(next);
+                          else {
+                            setWaiting([]);
+                            setTorrentMode(null);
+                          }
+                        })
+                        .catch(() => {});
                     },
                     onSkip: (index: number) => {
                       skipFile(index);
