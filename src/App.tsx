@@ -818,6 +818,7 @@ function ShellApp({
 
   const requestDownload = useCallback(
     (job: DownloadJob, start: () => void) => {
+      setTorrentMode('download');
       setTab('downloads');
       setDetail(null);
       setShelf(null);
@@ -831,7 +832,8 @@ function ShellApp({
       }
       savedRef.current = new Set(job.savedIndices ?? []);
       setSavedFileIds([...(job.savedIndices ?? [])]);
-      start();
+      // Let the Downloads tab paint before inspect blocks the JS thread.
+      setTimeout(start, 0);
     },
     []
   );

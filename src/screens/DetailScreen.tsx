@@ -526,7 +526,7 @@ export function DetailScreen({
   const wait = busy || saving;
   const save = (magnet: string) => {
     setSaving(true);
-    onDownload(magnet, tag);
+    setTimeout(() => onDownload(magnet, tag), 0);
   };
   const saveSeason = async () => {
     if (season == null) return;
