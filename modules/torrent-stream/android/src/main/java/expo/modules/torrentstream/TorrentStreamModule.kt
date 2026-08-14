@@ -1,5 +1,6 @@
 package expo.modules.torrentstream
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -7,11 +8,13 @@ import android.app.Service
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.PowerManager
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -588,15 +591,15 @@ class TorrentStreamModule : Module() {
       appContext.reactContext?.let { rememberCtx(it) }
       showNotify = enabled
       if (!enabled) {
-        clearDownloadNotification()
         watchTask(false)
+        clearDownloadNotification()
       } else {
         ensureNotifyChannel()
         lastNotifPct = -1
         lastNotifPaused = null
         lastNotifRate = -1
-        updateDownloadNotification()
         watchTask(true)
+        updateDownloadNotification()
       }
     }
 
@@ -1967,11 +1970,38 @@ class TorrentStreamModule : Module() {
 
   /* ---------------------------------------------------------- notifications */
 
+  private var wakeLock: PowerManager.WakeLock? = null
+
   private fun watchTask(on: Boolean) {
     val ctx = appContext.reactContext ?: appCtx ?: return
+    rememberCtx(ctx)
+    holdWake(on)
     val intent = Intent(ctx, DownloadTaskWatch::class.java)
     runCatching {
-      if (on) ctx.startService(intent) else ctx.stopService(intent)
+      if (on) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          ctx.startForegroundService(intent)
+        } else {
+          ctx.startService(intent)
+        }
+      } else {
+        ctx.stopService(intent)
+      }
+    }
+  }
+
+  private fun holdWake(on: Boolean) {
+    if (!on) {
+      wakeLock?.let { if (it.isHeld) it.release() }
+      wakeLock = null
+      return
+    }
+    if (wakeLock?.isHeld == true) return
+    val ctx = appCtx ?: appContext.reactContext ?: return
+    val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+    wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "watchly:download").apply {
+      setReferenceCounted(false)
+      acquire()
     }
   }
 
@@ -2005,7 +2035,7 @@ class TorrentStreamModule : Module() {
 
   private fun updateDownloadNotification() {
     if (!showNotify) return
-    val ctx = appContext.reactContext ?: return
+    val ctx = appContext.reactContext ?: appCtx ?: return
     rememberCtx(ctx)
     val ti = info ?: return
     val videos = wantedFiles.count { i ->
@@ -2067,6 +2097,7 @@ class TorrentStreamModule : Module() {
       .build()
     val nm = notifyManager() ?: return
     nm.notify(NOTIF_ID, notif)
+    DownloadTaskWatch.promote(ctx, notif)
   }
 
   private fun formatRate(bytesPerSec: Int): String {
@@ -2088,6 +2119,7 @@ class TorrentStreamModule : Module() {
     val ctx = appContext.reactContext ?: return
     rememberCtx(ctx)
     ensureNotifyChannel()
+    watchTask(false)
     clearDownloadNotification()
     showNotify = false
     val notif = NotificationCompat.Builder(ctx, NOTIF_CHANNEL)
@@ -2355,7 +2387,11 @@ class TorrentStreamModule : Module() {
     private var current: TorrentStreamModule? = null
 
     @JvmStatic
+    fun keepAlive(): Boolean = current?.showNotify == true
+
+    @JvmStatic
     fun dismissNotify(ctx: Context) {
+      if (current?.showNotify == true) return
       current?.showNotify = false
       val nm = ctx.applicationContext
         .getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -2363,15 +2399,84 @@ class TorrentStreamModule : Module() {
       nm.cancel(NOTIF_ID + 1)
       runCatching { ctx.stopService(Intent(ctx, DownloadTaskWatch::class.java)) }
     }
+
+    @JvmStatic
+    fun stubNotification(ctx: Context): Notification {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (nm.getNotificationChannel(NOTIF_CHANNEL) == null) {
+          nm.createNotificationChannel(
+            NotificationChannel(
+              NOTIF_CHANNEL,
+              "Downloads",
+              NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+              description = "Torrent download progress"
+              setShowBadge(false)
+            }
+          )
+        }
+      }
+      val launch = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)?.apply {
+        flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+      }
+      val pi = PendingIntent.getActivity(
+        ctx, 0, launch,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+      )
+      return NotificationCompat.Builder(ctx, NOTIF_CHANNEL)
+        .setSmallIcon(android.R.drawable.stat_sys_download)
+        .setContentTitle("Downloading")
+        .setOngoing(true)
+        .setOnlyAlertOnce(true)
+        .setContentIntent(pi)
+        .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+        .build()
+    }
   }
 }
 
-/** Exists so swipe-away from Recents can drop the download tray icon. */
+/** Foreground service so a background download is not killed with the UI. */
 class DownloadTaskWatch : Service() {
   override fun onBind(intent: Intent?) = null
-  override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) = START_NOT_STICKY
+
+  override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    instance = this
+    goForeground(TorrentStreamModule.stubNotification(this))
+    return START_STICKY
+  }
+
   override fun onTaskRemoved(rootIntent: Intent?) {
-    TorrentStreamModule.dismissNotify(this)
-    stopSelf()
+    // Leave the download running.
+  }
+
+  override fun onDestroy() {
+    instance = null
+    stopForeground(STOP_FOREGROUND_REMOVE)
+    super.onDestroy()
+  }
+
+  private fun goForeground(notif: Notification) {
+    if (Build.VERSION.SDK_INT >= 29) {
+      startForeground(
+        NOTIF_ID,
+        notif,
+        ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+      )
+    } else {
+      startForeground(NOTIF_ID, notif)
+    }
+  }
+
+  companion object {
+    @Volatile
+    private var instance: DownloadTaskWatch? = null
+
+    fun promote(ctx: Context, notif: Notification) {
+      val svc = instance
+      if (svc != null) {
+        svc.goForeground(notif)
+      }
+    }
   }
 }

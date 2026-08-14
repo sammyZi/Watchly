@@ -99,24 +99,45 @@ async function removeDownload(name: string): Promise<DownloadEntry[]> {
 }
 
 function groupSaved(items: DownloadEntry[]) {
-  const map = new Map<
+  type Season = { season: number | null; items: DownloadEntry[] };
+  const shows = new Map<
     string,
-    { key: string; title: string; season: number | null; items: DownloadEntry[] }
+    { key: string; title: string; poster?: string | null; seasons: Map<string, Season> }
   >();
   const order: string[] = [];
   for (const item of items) {
     const at = parseEpisode(item.name);
     const title = item.titleName || searchableName(item.name) || item.name;
-    const key = at ? `${title}\0${at.season}` : item.name;
-    let group = map.get(key);
-    if (!group) {
-      group = { key, title, season: at ? at.season : null, items: [] };
-      map.set(key, group);
-      order.push(key);
+    let show = shows.get(title);
+    if (!show) {
+      show = { key: title, title, poster: item.poster, seasons: new Map() };
+      shows.set(title, show);
+      order.push(title);
     }
-    group.items.push(item);
+    if (!show.poster && item.poster) show.poster = item.poster;
+    const sk = at ? String(at.season) : '_';
+    let season = show.seasons.get(sk);
+    if (!season) {
+      season = { season: at ? at.season : null, items: [] };
+      show.seasons.set(sk, season);
+    }
+    season.items.push(item);
   }
-  return order.map((key) => map.get(key)!);
+  return order.map((key) => {
+    const show = shows.get(key)!;
+    const seasons = [...show.seasons.values()].sort(
+      (a, b) => (a.season ?? 999) - (b.season ?? 999)
+    );
+    for (const season of seasons) {
+      season.items.sort((a, b) => {
+        const ea = parseEpisode(a.name);
+        const eb = parseEpisode(b.name);
+        if (ea && eb) return ea.episode - eb.episode;
+        return a.name.localeCompare(b.name);
+      });
+    }
+    return { key: show.key, title: show.title, poster: show.poster, seasons };
+  });
 }
 
 function seasonLabel(season: number | null) {
@@ -165,6 +186,7 @@ function DownloadsScreenView({
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [open, setOpen] = useState(true);
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
+  const [openSaved, setOpenSaved] = useState<Record<string, boolean>>({});
   const colors = useColors();
   const styles = useThemedStyles((c) => ({
     flex: { flex: 1 },
@@ -306,8 +328,15 @@ function DownloadsScreenView({
       flexDirection: 'row' as const,
       alignItems: 'center' as const,
       gap: space.md,
-      paddingBottom: space.xs,
     },
+    seasonToggle: {
+      flex: 1,
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: space.md,
+      minWidth: 0,
+    },
+    seasonLabel: { ...type.overline, color: c.muted, paddingTop: space.sm, paddingBottom: 2 },
     nestedRow: {
       backgroundColor: 'transparent',
       paddingHorizontal: 0,
@@ -714,12 +743,14 @@ function DownloadsScreenView({
                   pressed && styles.rowPressed,
                 ]}
               >
-                <Thumb
-                  name={entry.titleName ?? entry.name}
-                  poster={entry.poster ?? undefined}
-                  width={44}
-                  height={66}
-                />
+                {!nested && (
+                  <Thumb
+                    name={entry.titleName ?? entry.name}
+                    poster={entry.poster ?? undefined}
+                    width={44}
+                    height={66}
+                  />
+                )}
                 <View style={styles.rowBody}>
                   <Text numberOfLines={1} style={styles.rowName}>
                     {nested && ep ? ep : title}
@@ -748,35 +779,63 @@ function DownloadsScreenView({
             );
           };
 
-          if (group.items.length === 1) return row(group.items[0]);
+          if (group.seasons.length === 1 && group.seasons[0].items.length === 1) {
+            return row(group.seasons[0].items[0]);
+          }
 
-          const season = seasonLabel(group.season);
-          const label = [group.title, season].filter(Boolean).join(' · ');
+          const expanded = !!openSaved[group.key];
+          const n = group.seasons.reduce((s, x) => s + x.items.length, 0);
+          const names = group.seasons.flatMap((s) => s.items.map((e) => e.name));
+          const meta =
+            group.seasons.length > 1
+              ? `${group.seasons.length} seasons · ${n} episodes`
+              : group.seasons[0].season != null
+                ? `${seasonLabel(group.seasons[0].season)} · ${n} episodes`
+                : `${n} files`;
           return (
             <View style={styles.seasonCard}>
               <View style={styles.seasonHead}>
-                <View style={styles.rowBody}>
-                  <Text numberOfLines={1} style={styles.rowName}>
-                    {group.title}
-                  </Text>
-                  <Text style={styles.rowMeta}>
-                    {[season, `${group.items.length} episodes`].filter(Boolean).join(' · ')}
-                  </Text>
-                </View>
                 <Pressable
                   onPress={() =>
-                    askDeleteNames(
-                      group.items.map((entry) => entry.name),
-                      label
-                    )
+                    setOpenSaved((s) => ({ ...s, [group.key]: !s[group.key] }))
                   }
+                  style={styles.seasonToggle}
+                >
+                  <Thumb
+                    name={group.title}
+                    poster={group.poster ?? undefined}
+                    width={44}
+                    height={66}
+                  />
+                  <View style={styles.rowBody}>
+                    <Text numberOfLines={1} style={styles.rowName}>
+                      {group.title}
+                    </Text>
+                    <Text style={styles.rowMeta}>{meta}</Text>
+                  </View>
+                  <Icon
+                    name={expanded ? 'chevron-up' : 'chevron-down'}
+                    size={16}
+                    color={colors.faint}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => askDeleteNames(names, group.title)}
                   hitSlop={8}
-                  accessibilityLabel={`Delete ${label}`}
+                  accessibilityLabel={`Delete ${group.title}`}
                 >
                   <Icon name="trash-2" size={16} color={colors.faint} />
                 </Pressable>
               </View>
-              {group.items.map((entry) => row(entry, true))}
+              {expanded &&
+                group.seasons.map((season) => (
+                  <View key={String(season.season)}>
+                    {group.seasons.length > 1 && season.season != null ? (
+                      <Text style={styles.seasonLabel}>{seasonLabel(season.season)}</Text>
+                    ) : null}
+                    {season.items.map((entry) => row(entry, true))}
+                  </View>
+                ))}
             </View>
           );
         }}
