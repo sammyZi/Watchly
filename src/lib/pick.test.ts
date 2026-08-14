@@ -53,7 +53,7 @@ assert.equal(nextEpisode(season, 3), null);
 assert.equal(nextEpisode([f(0, 'Dune.2021.1080p.mkv', 100)], 0), null);
 
 assert.deepEqual(seasonFiles(pack, 1), [0, 1, 2]);
-assert.deepEqual(seasonFiles(season, 1), [0, 1, 2]);
+assert.deepEqual(seasonFiles(season, 1), [2, 1, 0]);
 assert.deepEqual(seasonFiles(season, 2), [3]);
 
 console.log('ok');

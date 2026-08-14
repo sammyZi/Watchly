@@ -51,7 +51,7 @@ export type PlayOptions = {
   fileList?: string;
   /** When >= 0, native fetches every video in this season. */
   season?: number;
-  /** Show name for Downloads/Watchly/<this>/Season 1/. */
+  /** Show name for Movies/Watchly/<this>/. */
   saveFolder?: string;
 };
 
