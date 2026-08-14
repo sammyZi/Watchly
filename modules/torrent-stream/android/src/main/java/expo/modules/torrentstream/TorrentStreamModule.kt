@@ -1301,6 +1301,7 @@ class TorrentStreamModule : Module() {
     wantedFiles = (videos + subHits).toIntArray()
     wantedFiles.forEach { priorities[it] = Priority.DEFAULT }
     persistWanted()
+    adoptSaved(ti)
     if (subHits.isNotEmpty()) {
       log("play: found ${subHits.size} subtitle file(s) alongside the video")
     }
@@ -1404,6 +1405,27 @@ class TorrentStreamModule : Module() {
     val status = runCatching { h.status() }.getOrNull() ?: return false
     val wanted = status.totalWanted()
     return wanted > 0 && status.totalWantedDone() >= wanted * 99 / 100
+  }
+
+  /** Already copied into Movies/Watchly — do not fetch or copy again. */
+  private fun destComplete(relPath: String, expected: Long): Boolean {
+    if (expected <= 0) return false
+    val dest = downloadDest(relPath)
+    return dest.exists() && dest.length() >= expected * 99L / 100L
+  }
+
+  private fun adoptSaved(ti: TorrentInfo) {
+    if (!fullFile) return
+    val files = ti.files()
+    var n = 0
+    for (i in wantedFiles) {
+      if (!isVideoFile(i, files)) continue
+      if (destComplete(files.filePath(i), files.fileSize(i))) {
+        savedFiles.add(i)
+        n++
+      }
+    }
+    if (n > 0) log("play: $n file(s) already in Movies — skipping")
   }
 
   /** Next unfinished wanted video (+ its sidecar subs). One file at a time. */
@@ -2140,6 +2162,9 @@ class TorrentStreamModule : Module() {
   private fun copyKeep(src: File, name: String): String {
     val dest = downloadDest(name)
     dest.parentFile?.mkdirs()
+    if (dest.exists() && dest.length() >= src.length() * 99 / 100 && dest.length() > 0) {
+      return "file://${dest.absolutePath}"
+    }
     if (dest.exists()) dest.delete()
     src.inputStream().use { input ->
       dest.outputStream().use { input.copyTo(it) }
@@ -2149,33 +2174,44 @@ class TorrentStreamModule : Module() {
 
   private fun saveReadyFiles(): List<Map<String, Any>> {
     if (!fullFile) return emptyList()
-    val gen = playGen
     val h = handle?.takeIf { it.isValid } ?: return emptyList()
     val ti = info ?: return emptyList()
     val files = ti.files()
-    val focus = sequentialFocus()
-    val i = focus.firstOrNull { isVideoFile(it, files) } ?: return emptyList()
-    if (i in savedFiles) return emptyList()
-    if (!fileComplete(h, ti, i)) return emptyList()
-    val expected = files.fileSize(i)
-    val src = File(saveDir, files.filePath(i))
-    if (!src.exists()) return emptyList()
-    if (!savedFiles.add(i)) return emptyList()
-    val name = files.fileName(i)
-    val uri = try {
-      copyKeep(src, files.filePath(i))
-    } catch (e: Exception) {
-      savedFiles.remove(i)
-      log("saveReady: copy failed $name — ${e.message}")
-      return emptyList()
+    val out = mutableListOf<Map<String, Any>>()
+    fun emit(i: Int, uri: String) {
+      out.add(
+        mapOf(
+          "index" to i,
+          "name" to files.fileName(i),
+          "uri" to uri,
+          "size" to files.fileSize(i)
+        )
+      )
     }
-    if (gen != playGen) {
-      savedFiles.remove(i)
-      return emptyList()
+    for (i in wantedFiles) {
+      if (!isVideoFile(i, files) || i in savedFiles) continue
+      val path = files.filePath(i)
+      if (!destComplete(path, files.fileSize(i))) continue
+      if (!savedFiles.add(i)) continue
+      emit(i, "file://${downloadDest(path).absolutePath}")
     }
-    log("saveReady: $name")
-    applyFocus(h)
-    return listOf(mapOf("index" to i, "name" to name, "uri" to uri, "size" to expected))
+    val focus = sequentialFocus().firstOrNull { isVideoFile(it, files) }
+    if (focus != null && focus !in savedFiles && fileComplete(h, ti, focus)) {
+      val src = File(saveDir, files.filePath(focus))
+      if (src.exists() && savedFiles.add(focus)) {
+        try {
+          emit(focus, copyKeep(src, files.filePath(focus)))
+        } catch (e: Exception) {
+          savedFiles.remove(focus)
+          log("saveReady: copy failed ${files.fileName(focus)} — ${e.message}")
+        }
+      }
+    }
+    if (out.isNotEmpty()) {
+      log("saveReady: ${out.joinToString { it["name"].toString() }}")
+      applyFocus(h)
+    }
+    return out
   }
 
   /**
