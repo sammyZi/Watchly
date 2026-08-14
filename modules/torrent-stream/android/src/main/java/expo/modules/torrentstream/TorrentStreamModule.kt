@@ -546,8 +546,9 @@ class TorrentStreamModule : Module() {
         h.pause()
         userPaused = true
         lastNotifPaused = null
+        watchTask(false)
+        clearDownloadNotification()
         emitPausedProgress(h)
-        updateDownloadNotification()
         log("paused")
       }
       null
@@ -558,9 +559,13 @@ class TorrentStreamModule : Module() {
       if (h != null && h.isValid) {
         h.resume()
         userPaused = false
+        lastNotifPct = -1
         lastNotifPaused = null
         emitPausedProgress(h)
-        updateDownloadNotification()
+        if (showNotify) {
+          watchTask(true)
+          updateDownloadNotification()
+        }
         log("resumed")
       }
       null
@@ -2034,7 +2039,7 @@ class TorrentStreamModule : Module() {
   }
 
   private fun updateDownloadNotification() {
-    if (!showNotify) return
+    if (!showNotify || userPaused) return
     val ctx = appContext.reactContext ?: appCtx ?: return
     rememberCtx(ctx)
     val ti = info ?: return
@@ -2387,7 +2392,7 @@ class TorrentStreamModule : Module() {
     private var current: TorrentStreamModule? = null
 
     @JvmStatic
-    fun keepAlive(): Boolean = current?.showNotify == true
+    fun keepAlive(): Boolean = current?.showNotify == true && current?.userPaused == false
 
     @JvmStatic
     fun dismissNotify(ctx: Context) {
