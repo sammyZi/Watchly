@@ -38,6 +38,8 @@ export type ActiveDownload = {
   queue?: QueueFile[];
   /** Indexes currently fetching. Missing ones sit unmarked at the bottom. */
   wanted?: number[];
+  /** Indexes copied to Downloads — only these show as Done. */
+  saved?: number[];
   poster?: string | null;
   progress: Progress | null;
   onPause: () => void;
@@ -47,25 +49,6 @@ export type ActiveDownload = {
   onInclude?: (index: number) => void;
   onPlayFile?: (file: QueueFile) => void;
 };
-
-function queueProgress(queue: QueueFile[], pct: number, total: number) {
-  let left = total > 0 ? (pct / 100) * total : 0;
-  return queue.map((file) => {
-    if (file.size <= 0) {
-      return { ...file, done: 0, label: 'Queued' as const };
-    }
-    if (left >= file.size) {
-      left -= file.size;
-      return { ...file, done: 100, label: 'Done' as const };
-    }
-    if (left > 0) {
-      const done = (left / file.size) * 100;
-      left = 0;
-      return { ...file, done, label: 'Downloading' as const };
-    }
-    return { ...file, done: 0, label: 'Queued' as const };
-  });
-}
 
 const KEY = 'torrent-downloads';
 
@@ -101,11 +84,45 @@ export async function recordDownload(
   );
 }
 
-async function removeDownload(name: string): Promise<DownloadEntry[]> {
-  const items = (await loadDownloads()).filter((d) => d.name !== name);
+async function removeDownloads(names: string[]): Promise<DownloadEntry[]> {
+  const drop = new Set(names);
+  const items = (await loadDownloads()).filter((d) => !drop.has(d.name));
   await AsyncStorage.setItem(KEY, JSON.stringify(items));
-  await TorrentStream.deleteDownload(name).catch(() => {});
+  for (const name of names) {
+    await TorrentStream.deleteDownload(name).catch(() => {});
+  }
   return items;
+}
+
+async function removeDownload(name: string): Promise<DownloadEntry[]> {
+  return removeDownloads([name]);
+}
+
+function groupSaved(items: DownloadEntry[]) {
+  const map = new Map<
+    string,
+    { key: string; title: string; season: number | null; items: DownloadEntry[] }
+  >();
+  const order: string[] = [];
+  for (const item of items) {
+    const at = parseEpisode(item.name);
+    const title = item.titleName || searchableName(item.name) || item.name;
+    const key = at ? `${title}\0${at.season}` : item.name;
+    let group = map.get(key);
+    if (!group) {
+      group = { key, title, season: at ? at.season : null, items: [] };
+      map.set(key, group);
+      order.push(key);
+    }
+    group.items.push(item);
+  }
+  return order.map((key) => map.get(key)!);
+}
+
+function seasonLabel(season: number | null) {
+  if (season == null) return '';
+  if (season === 0) return 'Specials';
+  return `Season ${season}`;
 }
 
 function eta(remainingBytes: number, bytesPerSec: number): string {
@@ -272,6 +289,24 @@ function DownloadsScreenView({
       alignItems: 'center' as const,
       justifyContent: 'center' as const,
     },
+    fileActions: { flexDirection: 'row' as const, alignItems: 'center' as const },
+    seasonCard: {
+      backgroundColor: c.surface,
+      borderRadius: radius.lg,
+      padding: space.md,
+      gap: space.xs,
+    },
+    seasonHead: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: space.md,
+      paddingBottom: space.xs,
+    },
+    nestedRow: {
+      backgroundColor: 'transparent',
+      paddingHorizontal: 0,
+      paddingVertical: space.sm,
+    },
   }));
 
   useEffect(() => {
@@ -285,15 +320,18 @@ function DownloadsScreenView({
     return () => clearInterval(id);
   }, []);
 
-  const askDelete = (item: DownloadEntry) =>
+  const askDeleteNames = (names: string[], label: string) =>
     setConfirm({
-      title: 'Delete download?',
-      message: `${showTitle(item.name, item.titleName)} will be removed from this list and from Downloads.`,
+      title: names.length > 1 ? 'Delete downloads?' : 'Delete download?',
+      message: `${label} will be removed from this list and from Downloads.`,
       icon: 'trash-2',
       confirmLabel: 'Delete',
       destructive: true,
-      onConfirm: () => removeDownload(item.name).then(setItems),
+      onConfirm: () => removeDownloads(names).then(setItems),
     });
+
+  const askDelete = (item: DownloadEntry) =>
+    askDeleteNames([item.name], showTitle(item.name, item.titleName));
 
   const askStop = () => {
     if (!active) return;
@@ -310,35 +348,49 @@ function DownloadsScreenView({
   const pct = Math.min(100, active?.progress?.progress ?? 0);
   const paused = !!active?.progress?.paused;
   const rate = paused ? 0 : active?.progress?.speed ?? 0;
-  const remaining = active ? Math.max(0, active.size * (1 - pct / 100)) : 0;
   const queue = active?.queue && active.queue.length > 1 ? active.queue : null;
   const wantedSet = new Set(active?.wanted ?? queue?.map((f) => f.index) ?? []);
-  const onQueue = queue?.filter((f) => wantedSet.has(f.index)) ?? [];
-  const progressed = onQueue.length
-    ? queueProgress(onQueue, pct, active.size)
-    : [];
-  const byIndex = new Map(progressed.map((f) => [f.index, f]));
+  const savedSet = new Set(active?.saved ?? []);
   const queued = queue
-    ? queue.map((f) =>
-        wantedSet.has(f.index)
-          ? (byIndex.get(f.index) ?? { ...f, done: 0, label: 'Queued' as const })
-          : { ...f, done: 0, label: 'Off' as const }
-      )
+    ? queue.map((f) => {
+        if (!wantedSet.has(f.index)) {
+          return { ...f, done: 0, label: 'Off' as const };
+        }
+        if (savedSet.has(f.index)) {
+          return { ...f, done: 100, label: 'Done' as const };
+        }
+        return { ...f, done: 0, label: 'Queued' as const };
+      })
     : [];
-  const groups = groupByFolder(queued);
-  const doneCount = queued.filter((f) => f.label === 'Done').length;
+  const current = queued
+    .filter((f) => f.label === 'Queued')
+    .sort((a, b) => a.index - b.index)[0];
+  const marked = queued.map((f) =>
+    current && f.index === current.index
+      ? { ...f, done: pct, label: 'Downloading' as const }
+      : f
+  );
+  const groups = groupByFolder(marked);
+  const doneCount = marked.filter((f) => f.label === 'Done').length;
+  const onQueue = queue?.filter((f) => wantedSet.has(f.index)) ?? [];
+  const showSize = current?.size || active?.size || 0;
+  const remaining = showSize > 0 ? Math.max(0, showSize * (1 - pct / 100)) : 0;
   const one = active?.queue?.[0];
   const ep = one && !queue ? fileTitle(one.name) : null;
   const headline = active ? showTitle(active.name) : '';
   const stage = stageLabel(active?.progress?.state, paused);
   const sub =
-    pct >= 100
-      ? 'Saving to device…'
-      : queue
-        ? `${stage} · ${doneCount} of ${onQueue.length || queue.length}`
-        : ep && parseEpisode(one!.name)
-          ? `${stage} · ${ep}`
-          : stage;
+    paused
+      ? onQueue.length
+        ? `${stage} · ${doneCount} of ${onQueue.length} saved`
+        : stage
+      : pct >= 100
+        ? 'Saving to device…'
+        : queue
+          ? `${stage} · ${doneCount} of ${onQueue.length || queue.length}`
+          : ep && parseEpisode(one!.name)
+            ? `${stage} · ${ep}`
+            : stage;
 
   return (
     <Screen title="Downloads" icon="download">
@@ -363,8 +415,8 @@ function DownloadsScreenView({
                   </Text>
                   <ProgressBar value={pct} height={6} />
                   <Text style={styles.metaLine}>
-                    {active.size > 0
-                      ? `${bytes(active.size * (pct / 100))} of ${bytes(active.size)}`
+                    {showSize > 0
+                      ? `${bytes(showSize * (pct / 100))} of ${bytes(showSize)}`
                       : 'Starting…'}
                     {paused
                       ? ' · Paused'
@@ -393,8 +445,8 @@ function DownloadsScreenView({
         )}
       <FlatList
         style={styles.flex}
-        data={items}
-        keyExtractor={(d) => `${d.name}-${d.at}`}
+        data={groupSaved(items)}
+        keyExtractor={(g) => g.key}
         contentContainerStyle={styles.body}
         showsVerticalScrollIndicator={false}
         removeClippedSubviews={false}
@@ -425,6 +477,7 @@ function DownloadsScreenView({
                       (f) => f.label !== 'Off' && f.label !== 'Done'
                     );
                     const includable = group.files.filter((f) => f.label === 'Off');
+                    const savedHere = group.files.filter((f) => f.label === 'Done');
                     return (
                     <View key={key}>
                       {!!group.folder && (
@@ -450,29 +503,46 @@ function DownloadsScreenView({
                               {group.files.length} · {bytes(folderBytes)}
                             </Text>
                           </Pressable>
-                          {includable.length === group.files.length ? (
-                            <Pressable
-                              onPress={() =>
-                                includable.forEach((f) => active.onInclude?.(f.index))
-                              }
-                              hitSlop={8}
-                              style={styles.skip}
-                              accessibilityLabel={`Download ${group.folder}`}
-                            >
-                              <Icon name="plus" size={16} color={colors.accent} />
-                            </Pressable>
-                          ) : skippable.length > 0 ? (
-                            <Pressable
-                              onPress={() =>
-                                skippable.forEach((f) => active.onSkip?.(f.index))
-                              }
-                              hitSlop={8}
-                              style={styles.skip}
-                              accessibilityLabel={`Skip ${group.folder}`}
-                            >
-                              <Icon name="x" size={16} color={colors.faint} />
-                            </Pressable>
-                          ) : null}
+                          <View style={styles.fileActions}>
+                            {savedHere.length > 0 && (
+                              <Pressable
+                                onPress={() =>
+                                  askDeleteNames(
+                                    savedHere.map((f) => f.name),
+                                    group.folder
+                                  )
+                                }
+                                hitSlop={8}
+                                style={styles.skip}
+                                accessibilityLabel={`Delete ${group.folder}`}
+                              >
+                                <Icon name="trash-2" size={16} color={colors.faint} />
+                              </Pressable>
+                            )}
+                            {includable.length === group.files.length ? (
+                              <Pressable
+                                onPress={() =>
+                                  includable.forEach((f) => active.onInclude?.(f.index))
+                                }
+                                hitSlop={8}
+                                style={styles.skip}
+                                accessibilityLabel={`Download ${group.folder}`}
+                              >
+                                <Icon name="plus" size={16} color={colors.accent} />
+                              </Pressable>
+                            ) : skippable.length > 0 ? (
+                              <Pressable
+                                onPress={() =>
+                                  skippable.forEach((f) => active.onSkip?.(f.index))
+                                }
+                                hitSlop={8}
+                                style={styles.skip}
+                                accessibilityLabel={`Skip ${group.folder}`}
+                              >
+                                <Icon name="x" size={16} color={colors.faint} />
+                              </Pressable>
+                            ) : null}
+                          </View>
                         </View>
                       )}
                       {folderOpen &&
@@ -521,7 +591,9 @@ function DownloadsScreenView({
                                 />
                               ) : (
                                 <Text style={styles.fileMeta}>
-                                  {off ? 'Skipped' : bytes(file.size)}
+                                  {off
+                                    ? `Skipped · ${bytes(file.size)}`
+                                    : bytes(file.size)}
                                 </Text>
                               )}
                             </View>
@@ -535,14 +607,26 @@ function DownloadsScreenView({
                                 <Icon name="plus" size={16} color={colors.accent} />
                               </Pressable>
                             ) : done ? (
-                              <Pressable
-                                onPress={() => active.onPlayFile?.(file)}
-                                hitSlop={8}
-                                style={styles.skip}
-                                accessibilityLabel={`Play ${file.name}`}
-                              >
-                                <Icon name="play" size={16} color={colors.accent} />
-                              </Pressable>
+                              <View style={styles.fileActions}>
+                                <Pressable
+                                  onPress={() => active.onPlayFile?.(file)}
+                                  hitSlop={8}
+                                  style={styles.skip}
+                                  accessibilityLabel={`Play ${file.name}`}
+                                >
+                                  <Icon name="play" size={16} color={colors.accent} />
+                                </Pressable>
+                                <Pressable
+                                  onPress={() =>
+                                    askDeleteNames([file.name], file.name)
+                                  }
+                                  hitSlop={8}
+                                  style={styles.skip}
+                                  accessibilityLabel={`Delete ${file.name}`}
+                                >
+                                  <Icon name="trash-2" size={16} color={colors.faint} />
+                                </Pressable>
+                              </View>
                             ) : (
                               <Pressable
                                 onPress={() => active.onSkip?.(file.index)}
@@ -580,46 +664,89 @@ function DownloadsScreenView({
             </View>
           )
         }
-        renderItem={({ item }) => {
-          const at = parseEpisode(item.name);
-          const title = showTitle(item.name, item.titleName);
-          const ep = at
-            ? at.season === 0
-              ? `Special ${at.episode}`
-              : `Episode ${at.episode}`
-            : null;
-          return (
-            <Pressable
-              onPress={() => onPlayFile(item)}
-              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-            >
-              <Thumb
-                name={item.titleName ?? item.name}
-                poster={item.poster ?? undefined}
-                width={44}
-                height={66}
-              />
-              <View style={styles.rowBody}>
-                <Text numberOfLines={1} style={styles.rowName}>
-                  {title}
-                </Text>
-                <Text style={styles.rowMeta}>
-                  {[ep, item.size > 0 ? bytes(item.size) : null, ago(item.at)]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </Text>
-              </View>
-              <View style={styles.playMark}>
-                <Icon name="play" size={14} color={colors.accent} />
-              </View>
+        renderItem={({ item: group }) => {
+          const row = (entry: DownloadEntry, nested?: boolean) => {
+            const at = parseEpisode(entry.name);
+            const title = showTitle(entry.name, entry.titleName);
+            const ep = at
+              ? at.season === 0
+                ? `Special ${at.episode}`
+                : `Episode ${at.episode}`
+              : null;
+            return (
               <Pressable
-                onPress={() => askDelete(item)}
-                hitSlop={8}
-                accessibilityLabel={`Delete ${item.name}`}
+                key={`${entry.name}-${entry.at}`}
+                onPress={() => onPlayFile(entry)}
+                style={({ pressed }) => [
+                  styles.row,
+                  nested && styles.nestedRow,
+                  pressed && styles.rowPressed,
+                ]}
               >
-                <Icon name="trash-2" size={16} color={colors.faint} />
+                <Thumb
+                  name={entry.titleName ?? entry.name}
+                  poster={entry.poster ?? undefined}
+                  width={44}
+                  height={66}
+                />
+                <View style={styles.rowBody}>
+                  <Text numberOfLines={1} style={styles.rowName}>
+                    {nested && ep ? ep : title}
+                  </Text>
+                  <Text style={styles.rowMeta}>
+                    {[
+                      !nested ? ep : null,
+                      entry.size > 0 ? bytes(entry.size) : null,
+                      ago(entry.at),
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </Text>
+                </View>
+                <View style={styles.playMark}>
+                  <Icon name="play" size={14} color={colors.accent} />
+                </View>
+                <Pressable
+                  onPress={() => askDelete(entry)}
+                  hitSlop={8}
+                  accessibilityLabel={`Delete ${entry.name}`}
+                >
+                  <Icon name="trash-2" size={16} color={colors.faint} />
+                </Pressable>
               </Pressable>
-            </Pressable>
+            );
+          };
+
+          if (group.items.length === 1) return row(group.items[0]);
+
+          const season = seasonLabel(group.season);
+          const label = [group.title, season].filter(Boolean).join(' · ');
+          return (
+            <View style={styles.seasonCard}>
+              <View style={styles.seasonHead}>
+                <View style={styles.rowBody}>
+                  <Text numberOfLines={1} style={styles.rowName}>
+                    {group.title}
+                  </Text>
+                  <Text style={styles.rowMeta}>
+                    {[season, `${group.items.length} episodes`].filter(Boolean).join(' · ')}
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={() =>
+                    askDeleteNames(
+                      group.items.map((entry) => entry.name),
+                      label
+                    )
+                  }
+                  hitSlop={8}
+                  accessibilityLabel={`Delete ${label}`}
+                >
+                  <Icon name="trash-2" size={16} color={colors.faint} />
+                </Pressable>
+              </View>
+              {group.items.map((entry) => row(entry, true))}
+            </View>
           );
         }}
         ListFooterComponent={null}

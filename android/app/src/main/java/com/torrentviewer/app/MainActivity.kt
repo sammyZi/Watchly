@@ -55,8 +55,7 @@ class MainActivity : ReactActivity() {
 
   override fun onDestroy() {
     if (isFinishing) {
-      // Swipe-away skips JS stop; the download notification would otherwise stick.
-      (getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager).cancelAll()
+      expo.modules.torrentstream.TorrentStreamModule.dismissNotify(this)
     }
     super.onDestroy()
   }

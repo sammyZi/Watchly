@@ -3,6 +3,7 @@ package expo.modules.torrentstream
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.Service
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -206,6 +207,9 @@ class PlayOptions : Record {
 
   /** When >= 0, fetch every video in this season, not just `index`. */
   @Field var season: Int = -1
+
+  /** Public Downloads/Watchly/<this>/filename — a show + season label. */
+  @Field var saveFolder: String = ""
 }
 
 class TorrentStreamModule : Module() {
@@ -223,6 +227,8 @@ class TorrentStreamModule : Module() {
    *  whole torrent: the file priorities set in play() exclude every other file
    *  in it, download or not. */
   private var fullFile = false
+  /** Downloads/Watchly/<saveFolder>/ — set by play() for download mode. */
+  private var saveFolder = ""
   private var firstPiece = 0
   private var lastPiece = 0
   /** Where the player is going to start reading — the resume point, not the
@@ -250,9 +256,13 @@ class TorrentStreamModule : Module() {
   private var subtitleFiles = emptyList<String>()
   /** Video + matching sidecar subs — the only files whose pieces are wanted. */
   private var wantedFiles = intArrayOf()
+  /** Wanted videos already copied into Downloads while the torrent is still up. */
+  private val savedFiles = ConcurrentHashMap.newKeySet<Int>()
 
   /** User paused the transfer from the Downloads UI. */
   private var userPaused = false
+  /** Bumped on stop() so an in-flight play() does not put the torrent back. */
+  @Volatile private var playGen = 0
   /** Show an ongoing notification while downloading (Download mode). */
   private var showNotify = false
   private var lastNotifPct = -1
@@ -314,9 +324,32 @@ class TorrentStreamModule : Module() {
   private val sessionFile: File
     get() = File(cacheRoot, "session.dat")
 
+  private fun wantedStore(hex: String): File {
+    val root = runCatching { cacheRoot }.getOrNull()
+      ?: File((appCtx ?: appContext.reactContext)!!.filesDir, "torrent-cache").apply { mkdirs() }
+    return File(root, "wanted-$hex")
+  }
+
+  private fun persistWanted() {
+    val hex = infoHashHex ?: return
+    runCatching { wantedStore(hex).writeText(wantedFiles.joinToString(",")) }
+  }
+
+  private fun loadWanted(hex: String): List<Int> {
+    val f = runCatching { wantedStore(hex) }.getOrNull() ?: return emptyList()
+    if (!f.exists()) return emptyList()
+    return f.readText().split(',').mapNotNull { it.trim().toIntOrNull() }
+  }
+
+  private fun forgetWanted(hex: String?) {
+    hex ?: return
+    runCatching { wantedStore(hex).delete() }
+  }
+
   override fun definition() = ModuleDefinition {
     Name("TorrentStream")
     Events("log", "progress", "ready", "error")
+    current = this@TorrentStreamModule
 
     /** Take a private copy of a shared source; returns a path safe to keep. */
     AsyncFunction("importSource") { uri: String -> importSource(uri) }
@@ -388,8 +421,7 @@ class TorrentStreamModule : Module() {
           )
           return@mapNotNull null
         }
-        val outName = if (i == fileIndex) name else ti.files().fileName(i)
-        saveToDownloads(src, outName)
+        saveToDownloads(src, rel)
       }
       if (uris.isEmpty()) {
         throw CodedException("No finished files on disk yet")
@@ -398,10 +430,19 @@ class TorrentStreamModule : Module() {
       notifyComplete(if (uris.size == 1) name else "${uris.size} files")
       showNotify = false
       clearDownloadNotification()
+      forgetWanted(infoHashHex)
       teardown()
       wipeStreamCache()
       log("copyTo: torn down")
       uris
+    }
+
+    /**
+     * Copy every wanted video that is complete on disk into Downloads.
+     * Leaves the torrent running so later episodes can keep fetching.
+     */
+    AsyncFunction("saveReady") {
+      saveReadyFiles()
     }
 
     /** `file://` for a finished episode still in the torrent cache. */
@@ -525,7 +566,8 @@ class TorrentStreamModule : Module() {
     AsyncFunction("skipFile") { index: Int ->
       wantedFiles = wantedFiles.filter { it != index }.toIntArray()
       val h = handle
-      if (h != null && h.isValid) wantOnly(h, wantedFiles)
+      if (h != null && h.isValid) applyFocus(h)
+      persistWanted()
       log("skip file $index — still wanting ${wantedFiles.size}")
       null
     }
@@ -534,7 +576,8 @@ class TorrentStreamModule : Module() {
     AsyncFunction("includeFile") { index: Int ->
       if (index !in wantedFiles) wantedFiles += index
       val h = handle
-      if (h != null && h.isValid) wantOnly(h, wantedFiles)
+      if (h != null && h.isValid) applyFocus(h)
+      persistWanted()
       log("include file $index — wanting ${wantedFiles.size}")
       null
     }
@@ -543,13 +586,16 @@ class TorrentStreamModule : Module() {
     AsyncFunction("setNotify") { enabled: Boolean ->
       appContext.reactContext?.let { rememberCtx(it) }
       showNotify = enabled
-      if (!enabled) clearDownloadNotification()
-      else {
+      if (!enabled) {
+        clearDownloadNotification()
+        watchTask(false)
+      } else {
         ensureNotifyChannel()
         lastNotifPct = -1
         lastNotifPaused = null
         lastNotifRate = -1
         updateDownloadNotification()
+        watchTask(true)
       }
     }
 
@@ -592,9 +638,26 @@ class TorrentStreamModule : Module() {
     }
 
     AsyncFunction("stop") {
+      playGen++
       showNotify = false
+      userPaused = true
       clearDownloadNotification()
+      forgetWanted(infoHashHex)
+      val h = handle?.takeIf { it.isValid }
+      if (h != null) {
+        runCatching { h.pause() }
+        info?.let { ti ->
+          runCatching {
+            h.prioritizeFiles(Array(ti.files().numFiles()) { Priority.IGNORE })
+          }
+          runCatching {
+            h.prioritizePieces(Array(ti.numPieces()) { Priority.IGNORE })
+          }
+        }
+      }
       teardown()
+      wipeStreamCache()
+      log("stop: torrent removed")
     }
 
     /** Wipe piece data under cache/torrents (not public Downloads or meta/peers). */
@@ -607,6 +670,7 @@ class TorrentStreamModule : Module() {
     OnDestroy {
       showNotify = false
       clearDownloadNotification()
+      watchTask(false)
       teardown()
       // Force-kill / process death often skips JS stop — drop video pieces here.
       if (removeFilesAfterStop) wipeStreamCache()
@@ -1123,13 +1187,15 @@ class TorrentStreamModule : Module() {
     return hit.ifEmpty { videos }
   }
 
-  private fun play(uri: String, index: Int, options: PlayOptions, extraFiles: String = "") {
+  private fun play(uri: String, index: Int, options: PlayOptions, extraFiles: String = ""): List<Int> {
+    val gen = ++playGen
     val startedAt = System.currentTimeMillis()
     ensureSession()
 
     // Resolve before tearing down, so teardown knows whether the torrent it is
     // about to drop is the one we are about to play.
     val ti = resolve(uri, 60)
+    if (gen != playGen) return emptyList()
     // Metadata that outlived its torrent answers with garbage rather than
     // failing, and the first thing to notice is a division a few lines down.
     // Say so here instead.
@@ -1159,6 +1225,7 @@ class TorrentStreamModule : Module() {
       )
     }
     teardown(keep = ti.infoHash().toHex())
+    if (gen != playGen) return emptyList()
 
     // Never less than a piece: nothing is readable until one completes.
     prepareBytes = maxOf(options.prepareMb.toLong() * 1024 * 1024, ti.pieceLength().toLong())
@@ -1178,8 +1245,10 @@ class TorrentStreamModule : Module() {
     infoHashHex = ti.infoHash().toHex()
     fileIndex = index
     fullFile = options.fullFile
+    saveFolder = options.saveFolder
     announcedReady = false
     peerSaveTick = 0
+    savedFiles.clear()
     ticks = 0
     zoneStarts = emptyList()
     zoneWidth = -1
@@ -1191,7 +1260,8 @@ class TorrentStreamModule : Module() {
       .split(',')
       .mapNotNull { it.trim().toIntOrNull() }
     val fromSeason =
-      if (options.season >= 0) seasonVideos(ti, options.season) else emptyList()
+      if (options.season >= 0 && extra.isEmpty()) seasonVideos(ti, options.season)
+      else emptyList()
     val videos = (listOf(index) + extra + fromSeason)
       .distinct()
       .filter { it in 0 until files.numFiles() }
@@ -1225,6 +1295,7 @@ class TorrentStreamModule : Module() {
     subtitleFiles = subHits.map { File(saveDir, files.filePath(it)).absolutePath }
     wantedFiles = (videos + subHits).toIntArray()
     wantedFiles.forEach { priorities[it] = Priority.DEFAULT }
+    persistWanted()
     if (subHits.isNotEmpty()) {
       log("play: found ${subHits.size} subtitle file(s) alongside the video")
     }
@@ -1296,13 +1367,42 @@ class TorrentStreamModule : Module() {
         "— setup took ${System.currentTimeMillis() - startedAt}ms"
     )
 
-    // File priorities alone are not enough: a magnet/inspect torrent already
-    // has every piece wanted, and sequential download then walks the pack from
-    // episode 1. Pin the picker to this file's pieces.
-    wantOnly(h, wantedFiles)
+    // Pin the picker to the current file's pieces — a season download
+    // fetches one episode at a time, in order.
+    applyFocus(h)
 
     readyAt = System.currentTimeMillis()
     startPolling()
+    return videos
+  }
+
+  private fun isVideoFile(i: Int, files: org.libtorrent4j.FileStorage) =
+    files.filePath(i).substringAfterLast('.', "").lowercase() in VIDEO
+
+  /** Next unfinished wanted video (+ its sidecar subs). One file at a time. */
+  private fun sequentialFocus(): IntArray {
+    val ti = info ?: return wantedFiles
+    val files = ti.files()
+    val next = wantedFiles
+      .filter { i ->
+        i in 0 until files.numFiles() && isVideoFile(i, files) && i !in savedFiles
+      }
+      .minOrNull() ?: return intArrayOf()
+    val dir = files.filePath(next).replace("\\", "/").substringBeforeLast("/", "")
+    val stem = files.fileName(next).substringBeforeLast('.').lowercase()
+    val subs = wantedFiles.filter { i ->
+      i != next &&
+        i in 0 until files.numFiles() &&
+        files.filePath(i).substringAfterLast('.', "").lowercase() in SUBTITLE &&
+        files.filePath(i).replace("\\", "/").substringBeforeLast("/", "") == dir &&
+        files.fileName(i).substringBeforeLast('.').lowercase()
+          .let { it == stem || it.startsWith("$stem.") }
+    }
+    return (listOf(next) + subs).toIntArray()
+  }
+
+  private fun applyFocus(h: TorrentHandle) {
+    wantOnly(h, if (fullFile) sequentialFocus() else wantedFiles)
   }
 
   /**
@@ -1417,9 +1517,8 @@ class TorrentStreamModule : Module() {
       }
       // Inspect/magnet leftovers can creep back in; keep the picker on this file.
       if (ticks % 10 == 1) {
-        val wanted = runCatching { h.status().totalWanted() }.getOrNull() ?: 0
-        val fileBytes = ti.files().fileSize(fileIndex)
-        if (fileBytes > 0 && wanted > fileBytes * 2) wantOnly(h, wantedFiles)
+        val h2 = handle?.takeIf { it.isValid }
+        if (h2 != null) applyFocus(h2)
       }
       session.postSessionStats()
       if (ticks % 2 == 0) reportProgress(h, 100)
@@ -1781,6 +1880,7 @@ class TorrentStreamModule : Module() {
     zoneRushedTail = false
     subtitleFiles = emptyList()
     wantedFiles = intArrayOf()
+    savedFiles.clear()
     handle = null
     info = null
     infoHashHex = null
@@ -1814,6 +1914,14 @@ class TorrentStreamModule : Module() {
   }
 
   /* ---------------------------------------------------------- notifications */
+
+  private fun watchTask(on: Boolean) {
+    val ctx = appContext.reactContext ?: appCtx ?: return
+    val intent = Intent(ctx, DownloadTaskWatch::class.java)
+    runCatching {
+      if (on) ctx.startService(intent) else ctx.stopService(intent)
+    }
+  }
 
   private fun rememberCtx(ctx: Context) {
     appCtx = ctx.applicationContext
@@ -1947,11 +2055,105 @@ class TorrentStreamModule : Module() {
     nm.cancel(NOTIF_ID + 1)
   }
 
-  /** App-owned Downloads dir — always writable, no runtime permission. */
-  private fun appDownloadsDir(): File {
+  /** Public Downloads/Watchly — visible in the system Files app. */
+  private fun watchlyDir(): File {
+    val pub = File(
+      Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+      "Watchly"
+    )
+    try {
+      pub.mkdirs()
+      if (pub.exists() && pub.canWrite()) return pub
+    } catch (_: Exception) {}
     val ctx = appContext.reactContext!!
-    return (ctx.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-      ?: File(ctx.filesDir, "Download")).apply { mkdirs() }
+    return File(
+      ctx.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: ctx.filesDir,
+      "Watchly"
+    ).apply { mkdirs() }
+  }
+
+  private fun safeName(name: String) =
+    name.replace(Regex("[\\\\/:*?\"<>|]+"), "_").trim().ifBlank { "download" }
+
+  private fun seasonFolderOf(name: String): String? {
+    val n =
+      Regex("""[Ss](\d{1,2})[Ee]\d""").find(name)?.groupValues?.get(1)?.toIntOrNull()
+        ?: Regex("""Season[. _-]?(\d{1,2})""", RegexOption.IGNORE_CASE)
+          .find(name)?.groupValues?.get(1)?.toIntOrNull()
+    return when (n) {
+      null -> null
+      0 -> "Specials"
+      else -> "Season $n"
+    }
+  }
+
+  /**
+   * Downloads/Watchly/<show>/<Season 1>/file.mkv
+   * Keeps the torrent's own folders (minus a duplicate torrent-name root).
+   */
+  private fun downloadDest(relPath: String): File {
+    val parts = relPath.replace('\\', '/').split('/').filter { it.isNotBlank() }
+      .map { safeName(it) }
+    val torrentRoot = safeName(info?.name() ?: "")
+    var rest =
+      if (parts.size > 1 && parts.first().equals(torrentRoot, ignoreCase = true)) {
+        parts.drop(1)
+      } else {
+        parts
+      }
+    if (rest.size <= 1) {
+      val season = seasonFolderOf(rest.lastOrNull() ?: "")
+      if (season != null) rest = listOf(season) + rest
+    }
+    val show = safeName(saveFolder.ifBlank { torrentRoot.ifBlank { "Download" } })
+    return (listOf(show) + rest).fold(watchlyDir()) { dir, part -> File(dir, part) }
+  }
+
+  /**
+   * Copy one finished file into Downloads without removing the torrent cache
+   * copy — libtorrent still needs that path for the rest of the season.
+   */
+  private fun copyKeep(src: File, name: String): String {
+    val dest = downloadDest(name)
+    dest.parentFile?.mkdirs()
+    if (dest.exists() && dest.length() >= src.length() * 99 / 100 && dest.length() > 0) {
+      return "file://${dest.absolutePath}"
+    }
+    src.inputStream().use { input ->
+      dest.outputStream().use { input.copyTo(it) }
+    }
+    return "file://${dest.absolutePath}"
+  }
+
+  private fun saveReadyFiles(): List<Map<String, Any>> {
+    if (!fullFile) return emptyList()
+    val ti = info ?: return emptyList()
+    val files = ti.files()
+    val videos = wantedFiles.filter { i ->
+      i in 0 until files.numFiles() &&
+        files.filePath(i).substringAfterLast('.', "").lowercase() in VIDEO
+    }
+    val out = mutableListOf<Map<String, Any>>()
+    for (i in videos) {
+      if (i in savedFiles) continue
+      val expected = files.fileSize(i)
+      val src = File(saveDir, files.filePath(i))
+      if (!src.exists() || src.length() < expected * 99 / 100) continue
+      if (!savedFiles.add(i)) continue
+      val name = files.fileName(i)
+      val uri = try {
+        copyKeep(src, files.filePath(i))
+      } catch (e: Exception) {
+        savedFiles.remove(i)
+        log("saveReady: copy failed $name — ${e.message}")
+        continue
+      }
+      log("saveReady: $name")
+      out.add(mapOf("index" to i, "name" to name, "uri" to uri, "size" to expected))
+    }
+    val h = handle?.takeIf { it.isValid }
+    if (h != null && out.isNotEmpty()) applyFocus(h)
+    return out
   }
 
   /**
@@ -1959,8 +2161,7 @@ class TorrentStreamModule : Module() {
    * volume (the normal case) so a 500MB+ finish is instant; copy otherwise.
    */
   private fun saveToDownloads(src: File, name: String): String {
-    val safe = name.replace(Regex("[\\\\/]+"), "_").ifBlank { "download" }
-    val dest = File(appDownloadsDir(), safe)
+    val dest = downloadDest(name)
     log("copyTo: dest=${dest.absolutePath}")
     if (dest.exists()) {
       val removed = dest.delete()
@@ -1995,21 +2196,42 @@ class TorrentStreamModule : Module() {
     return "file://${dest.absolutePath}"
   }
 
-  private fun findDownload(fileName: String): String? {
-    val safe = fileName.replace(Regex("[\\\\/]+"), "_")
-    val private = File(appDownloadsDir(), safe)
-    if (private.exists()) return "file://${private.absolutePath}"
+  private fun locateDownload(fileName: String): File? {
+    val safe = safeName(fileName.substringAfterLast('/').substringAfterLast('\\'))
+    fun walk(dir: File): File? {
+      dir.listFiles()?.forEach { child ->
+        if (child.isFile && child.name == safe) return child
+        if (child.isDirectory) walk(child)?.let { return it }
+      }
+      return null
+    }
+    walk(watchlyDir())?.let { return it }
     val pub = File(
       Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
       safe
     )
-    if (pub.exists()) return "file://${pub.absolutePath}"
+    if (pub.exists()) return pub
     return null
   }
 
+  private fun findDownload(fileName: String): String? =
+    locateDownload(fileName)?.let { "file://${it.absolutePath}" }
+
   private fun deleteDownloadFile(fileName: String) {
-    val safe = fileName.replace(Regex("[\\\\/]+"), "_")
-    File(appDownloadsDir(), safe).delete()
+    val safe = safeName(fileName)
+    val found = locateDownload(fileName)
+    if (found != null) {
+      val stem = found.name.substringBeforeLast('.')
+      found.parentFile?.listFiles()?.forEach { child ->
+        if (child.isFile &&
+          child.name.substringBeforeLast('.').let { it == stem || it.startsWith("$stem.") }
+        ) {
+          child.delete()
+        }
+      }
+      found.delete()
+      pruneEmptyDirs(found.parentFile)
+    }
     File(
       Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
       safe
@@ -2021,6 +2243,30 @@ class TorrentStreamModule : Module() {
         "${MediaStore.MediaColumns.DISPLAY_NAME}=?",
         arrayOf(safe)
       )
+    }
+  }
+
+  /** Drop empty Season / show folders left after a file delete. Stops at Watchly. */
+  private fun pruneEmptyDirs(start: File?) {
+    val root = try {
+      watchlyDir().canonicalFile
+    } catch (_: Exception) {
+      watchlyDir()
+    }
+    var cur = start
+    while (cur != null) {
+      val dir = try {
+        cur.canonicalFile
+      } catch (_: Exception) {
+        cur
+      }
+      if (dir == root || !dir.path.startsWith(root.path + File.separator)) break
+      if (!dir.isDirectory) break
+      val kids = dir.listFiles()
+      if (kids != null && kids.isNotEmpty()) break
+      val parent = dir.parentFile
+      dir.delete()
+      cur = parent
     }
   }
 
@@ -2041,5 +2287,30 @@ class TorrentStreamModule : Module() {
         "paused" to userPaused
       )
     )
+  }
+
+  companion object {
+    @Volatile
+    private var current: TorrentStreamModule? = null
+
+    @JvmStatic
+    fun dismissNotify(ctx: Context) {
+      current?.showNotify = false
+      val nm = ctx.applicationContext
+        .getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+      nm.cancel(NOTIF_ID)
+      nm.cancel(NOTIF_ID + 1)
+      runCatching { ctx.stopService(Intent(ctx, DownloadTaskWatch::class.java)) }
+    }
+  }
+}
+
+/** Exists so swipe-away from Recents can drop the download tray icon. */
+class DownloadTaskWatch : Service() {
+  override fun onBind(intent: Intent?) = null
+  override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) = START_NOT_STICKY
+  override fun onTaskRemoved(rootIntent: Intent?) {
+    TorrentStreamModule.dismissNotify(this)
+    stopSelf()
   }
 }

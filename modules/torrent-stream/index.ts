@@ -51,6 +51,8 @@ export type PlayOptions = {
   fileList?: string;
   /** When >= 0, native fetches every video in this season. */
   season?: number;
+  /** Show name for Downloads/Watchly/<this>/Season 1/. */
+  saveFolder?: string;
 };
 
 type TorrentStream = {
@@ -62,8 +64,8 @@ type TorrentStream = {
   importSource(uri: string): Promise<string>;
   /** Resolve metadata and list the files inside. Slow for cold magnets. */
   inspect(uri: string, timeoutSec: number): Promise<TorrentMeta>;
-  /** Start streaming one file from the torrent. */
-  play(uri: string, fileIndex: number, options: PlayOptions, extraFiles: string): Promise<void>;
+  /** Start streaming one file from the torrent. Returns the indexes actually wanted. */
+  play(uri: string, fileIndex: number, options: PlayOptions, extraFiles: string): Promise<number[]>;
   /**
    * Open the running stream in another installed player, resuming at
    * `positionSeconds`. The torrent keeps running — the other app reads from the
@@ -74,6 +76,8 @@ type TorrentStream = {
   /** Copy the currently-downloaded file to the public Downloads folder.
    *  Returns a `file://` URI for the saved file. */
   copyTo(fileIndex: number, fileName: string): Promise<string | string[]>;
+  /** Copy finished wanted videos into Downloads without stopping the torrent. */
+  saveReady(): Promise<{ index: number; name: string; uri: string; size: number }[]>;
   /** `file://` URI for a finished episode still in the torrent cache. */
   fileUri(index: number): Promise<string>;
   /** `file://` URI for a finished file in public Downloads/. */

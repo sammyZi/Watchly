@@ -292,6 +292,7 @@ function ShellApp({
   const [torrentMode, setTorrentMode] = useState<'stream' | 'download' | null>(null);
   /** Title being browsed. Sits above the tabs, like a pushed route would. */
   const [detail, setDetail] = useState<Title | null>(null);
+  const detailAfterDownload = useRef<Title | null>(null);
   /** Shelf opened from a "See all" — under `detail`, so a title picked from the
    *  grid comes back to the grid rather than to the home page. */
   const [shelf, setShelf] = useState<Shelf | null>(null);
@@ -361,6 +362,7 @@ function ShellApp({
         auto?: string | boolean;
         fullFile?: boolean;
         fileIndices?: number[];
+        queueIndices?: number[];
         season?: number;
       }
     ) => {
@@ -387,10 +389,15 @@ function ShellApp({
       if (!found) return;
 
       if (fileIndex != null) {
+        const pack = found.files.filter((f) => f.isVideo).map((f) => f.index);
         play(
           fileIndex,
           opts?.keepProgress ? 0 : resumeRatio(fresh, fileIndex),
-          opts
+          {
+            ...opts,
+            queueIndices:
+              opts?.queueIndices ?? (pack.length > 1 ? pack : undefined),
+          }
         );
         return;
       }
@@ -777,7 +784,7 @@ function ShellApp({
           keepProgress: true,
           fullFile: true,
           fileIndices: job.fileIndices,
-          season: job.season,
+          queueIndices: job.queueIndices,
         }
       );
     },
@@ -831,111 +838,79 @@ function ShellApp({
     [open, enableDownloadNotify]
   );
 
-  // Auto-save when a download hits 100%. Logs every step — if it sticks on
-  // "Saving to Downloads…", Metro will show where it died.
-  //
-  // Name usually arrives on native `ready`. Full-file downloads used to skip
-  // that event, so fileName stayed null and this never ran — fall back to meta.
-  const downloadDoneRef = useRef(false);
+  // Copy each finished episode into Downloads as soon as its pieces are on
+  // disk. The torrent stays up until every still-wanted file is saved.
+  const [savedFileIds, setSavedFileIds] = useState<number[]>([]);
+  const savedRef = useRef(new Set<number>());
+  const wantedRef = useRef(wantedIndices);
+  wantedRef.current = wantedIndices;
   useEffect(() => {
-    if (torrentMode !== 'download') {
-      downloadDoneRef.current = false;
-      return;
-    }
+    savedRef.current = new Set();
+    setSavedFileIds([]);
+  }, [torrentMode, item?.uri]);
+  useEffect(() => {
+    if (torrentMode !== 'download') return;
     if (phase !== 'playing') return;
-    if (!wantedIndices.length) return;
-    const name =
-      fileName ??
-      meta?.files.find((f) => f.index === playingIndex)?.name ??
-      item?.files?.find((f) => f.index === playingIndex)?.name ??
-      null;
-    if (!name || playingIndex == null) return;
-    const pct = progress?.progress ?? 0;
-    const done =
-      pct >= 99.5 ||
-      progress?.state === 'FINISHED' ||
-      progress?.state === 'SEEDING';
-    if (!done) return;
 
     let alive = true;
-    const size =
-      meta?.files.find((f) => f.index === playingIndex)?.size ??
-      item?.files?.find((f) => f.index === playingIndex)?.size ??
-      0;
+    let finishing = false;
+    const poster = item?.poster;
+    const titleName = item?.titleName;
 
-    const save = () => {
-      if (!alive || downloadDoneRef.current) return;
-      downloadDoneRef.current = true;
-      const started = Date.now();
-      console.log('[download] copyTo…', {
-        fileName: name,
-        playingIndex,
-        pct,
-        state: progress?.state,
-        size,
-      });
-      TorrentStream.copyTo(playingIndex, name)
-        .then((dest) => {
-          const paths = Array.isArray(dest) ? dest : [dest];
-          console.log('[download] copyTo ok', { paths, ms: Date.now() - started });
-          return Promise.all(
-            paths.map((path) => {
-              const file = path.split(/[/\\]/).pop() ?? name;
-              const bytes =
-                meta?.files.find((f) => f.name === file)?.size ??
-                item?.files?.find((f) => f.name === file)?.size ??
-                size;
-              return recordDownload(file, bytes, path, {
-                poster: item?.poster,
-                titleName: item?.titleName,
-              });
-            })
-          );
-        })
-        .then(() => {
-          console.log('[download] done — stop torrent');
-          TorrentStream.setNotify(false).catch(() => {});
-          clearDownloadJob().catch(() => {});
-          reset();
-          setTorrentMode(null);
-          setTab('downloads');
+    const finish = () => {
+      if (finishing) return;
+      finishing = true;
+      console.log('[download] all saved — stop torrent');
+      TorrentStream.setNotify(false).catch(() => {});
+      clearDownloadJob().catch(() => {});
+      reset();
+      TorrentStream.stop()
+        .then(() => TorrentStream.clearCache())
+        .catch(() => {});
+      setTorrentMode(null);
+      const back = detailAfterDownload.current;
+      detailAfterDownload.current = null;
+      if (back) setDetail(back);
+      else setTab('downloads');
+    };
+
+    const tick = () => {
+      if (!alive || finishing) return;
+      TorrentStream.saveReady()
+        .then((rows) => {
+          if (!alive) return;
+          let added = false;
+          for (const row of rows) {
+            if (savedRef.current.has(row.index)) continue;
+            savedRef.current.add(row.index);
+            added = true;
+            console.log('[download] saved', row.name);
+            void recordDownload(row.name, Number(row.size), row.uri, {
+              poster,
+              titleName,
+            });
+          }
+          if (added) setSavedFileIds([...savedRef.current]);
+          const wanted = wantedRef.current;
+          const leftover = queueIndices.filter((i) => !savedRef.current.has(i));
+          if (!wanted.length || !wanted.every((i) => savedRef.current.has(i))) {
+            return;
+          }
+          if (leftover.length === 0) finish();
+          else TorrentStream.pause().catch(() => {});
         })
         .catch((e: any) => {
-          downloadDoneRef.current = false;
-          console.warn('[download] save failed', {
-            message: String(e?.message ?? e),
-            code: e?.code,
-            ms: Date.now() - started,
-          });
+          console.warn('[download] saveReady', String(e?.message ?? e));
         });
     };
 
-    save();
-    // Keep retrying while stuck at 100% — a single failed attempt used to
-    // leave the card on "Saving…" forever because progress never changes.
-    const retry = setInterval(() => {
-      if (!alive) return;
-      if (downloadDoneRef.current) return;
-      console.log('[download] retry');
-      save();
-    }, 3000);
-
+    tick();
+    const id = setInterval(tick, 3000);
     return () => {
       alive = false;
-      clearInterval(retry);
+      clearInterval(id);
     };
-  }, [
-    progress?.progress,
-    progress?.state,
-    torrentMode,
-    phase,
-    fileName,
-    playingIndex,
-    wantedIndices.length,
-    meta,
-    item,
-    reset,
-  ]);
+  }, [torrentMode, phase, item?.poster, item?.titleName, reset, queueIndices]);
 
   if (localPlay) {
     return (
@@ -1198,6 +1173,7 @@ function ShellApp({
         onDownload={(magnet, tag, season) => {
           setTorrentMode('download');
           setTab('downloads');
+          detailAfterDownload.current = detail;
           setDetail(null);
           setShelf(null);
           enableDownloadNotify();
@@ -1299,6 +1275,7 @@ function ShellApp({
                           meta?.files.find((m) => m.index === f.index)?.path,
                       })),
                     wanted: [...wanted],
+                    saved: savedFileIds,
                     poster:
                       item?.poster ??
                       history.find(
@@ -1314,10 +1291,13 @@ function ShellApp({
                       TorrentStream.resume().catch(() => {});
                     },
                     onCancel: () => {
+                      detailAfterDownload.current = null;
                       TorrentStream.setNotify(false).catch(() => {});
                       clearDownloadJob().catch(() => {});
                       reset();
-                      TorrentStream.clearCache().catch(() => {});
+                      TorrentStream.stop()
+                        .then(() => TorrentStream.clearCache())
+                        .catch(() => {});
                       setTorrentMode(null);
                     },
                     onSkip: (index: number) => {
@@ -1325,6 +1305,7 @@ function ShellApp({
                     },
                     onInclude: (index: number) => {
                       includeFile(index);
+                      TorrentStream.resume().catch(() => {});
                     },
                     onPlayFile: (file) => {
                       TorrentStream.fileUri(file.index)

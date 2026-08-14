@@ -7,6 +7,7 @@ import type { Item } from '../lib/history';
 import { saveDownloadJob } from '../lib/downloadJob';
 import { withTrackers } from '../lib/magnet';
 import type { Settings } from '../lib/settings';
+import { searchableName } from '../lib/title';
 
 /**
  * idle      nothing running
@@ -55,10 +56,13 @@ export function useTorrent(settings: Settings) {
   const lastState = useRef<string | null>(null);
   const itemRef = useRef<Item | null>(null);
   itemRef.current = item;
+  const metaRef = useRef<TorrentMeta | null>(null);
+  metaRef.current = meta;
   // Progress ticks once a second. Once the player is up that re-render makes
   // controls feel laggy — mute it for streaming. Download mode needs every tick.
   const streaming = useRef(false);
   const keepProgress = useRef(false);
+  const queueRef = useRef<number[]>([]);
 
   useEffect(() => {
     const subs = [
@@ -160,6 +164,7 @@ export function useTorrent(settings: Settings) {
         keepProgress?: boolean;
         fullFile?: boolean;
         fileIndices?: number[];
+        queueIndices?: number[];
         season?: number;
       }
     ) => {
@@ -174,16 +179,25 @@ export function useTorrent(settings: Settings) {
       keepProgress.current = !!opts?.keepProgress;
       setPlayingIndex(fileIndex);
       const indices = opts?.fileIndices?.length ? opts.fileIndices : [fileIndex];
+      const pack = (itemRef.current?.files ?? metaRef.current?.files ?? [])
+        .filter((f) => f.isVideo)
+        .map((f) => f.index);
+      const queue = opts?.queueIndices?.length
+        ? opts.queueIndices
+        : pack.length > 1
+          ? pack
+          : indices;
       setWantedIndices(indices);
-      setQueueIndices(indices);
+      setQueueIndices(queue);
+      queueRef.current = queue;
       setPhase('playing');
       if (opts?.fullFile) {
         const it = itemRef.current;
         saveDownloadJob({
           uri,
           fileIndex,
-          fileIndices: opts.fileIndices?.length ? opts.fileIndices : [fileIndex],
-          season: opts.season,
+          fileIndices: indices,
+          queueIndices: queue,
           title: it?.title,
           titleName: it?.titleName,
           poster: it?.poster,
@@ -207,9 +221,22 @@ export function useTorrent(settings: Settings) {
           fullFile: !!opts?.fullFile,
           fileList: (opts?.fileIndices ?? []).join(','),
           season: opts?.season ?? -1,
+          saveFolder: opts?.fullFile
+            ? itemRef.current?.titleName ||
+              searchableName(
+                itemRef.current?.torrentName ||
+                  itemRef.current?.title ||
+                  ''
+              ) ||
+              ''
+            : '',
         },
         (opts?.fileIndices ?? []).join(',')
-      ).catch((e: any) => {
+      ).then((wanted) => {
+        if (Array.isArray(wanted) && wanted.length) {
+          setWantedIndices(wanted);
+        }
+      }).catch((e: any) => {
         console.warn('[torrent] play failed', e?.message ?? e);
         setError(String(e?.message ?? e));
         setPhase('idle');
@@ -230,6 +257,7 @@ export function useTorrent(settings: Settings) {
         keepProgress?: boolean;
         fullFile?: boolean;
         fileIndices?: number[];
+        queueIndices?: number[];
         season?: number;
       }
     ) => {
@@ -250,10 +278,17 @@ export function useTorrent(settings: Settings) {
           })),
         });
       }
+      const pack = (next.files ?? [])
+        .filter((f) => f.isVideo)
+        .map((f) => f.index);
       play(
         fileIndex,
         opts?.keepProgress ? 0 : resumeRatio(next, fileIndex),
-        opts
+        {
+          ...opts,
+          queueIndices:
+            opts?.queueIndices ?? (pack.length > 1 ? pack : undefined),
+        }
       );
     },
     [play, settings.addTrackers]
@@ -267,6 +302,7 @@ export function useTorrent(settings: Settings) {
       uri,
       fileIndex: next[0],
       fileIndices: next,
+      queueIndices: queueRef.current.length ? queueRef.current : next,
       title: it?.title,
       titleName: it?.titleName,
       poster: it?.poster,
