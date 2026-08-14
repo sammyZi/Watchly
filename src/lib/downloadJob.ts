@@ -7,6 +7,8 @@ export type DownloadJob = {
   uri: string;
   fileIndex: number;
   fileIndices: number[];
+  /** Full pack list so skipped episodes still show after a restart. */
+  queueIndices?: number[];
   season?: number;
   title?: string;
   titleName?: string;
