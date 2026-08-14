@@ -239,7 +239,7 @@ export function HistoryRow({
             <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={14} color={colors.faint} />
           </Pressable>
           {!!onDownloadSeason && (
-            <Pressable onPress={onDownloadSeason} hitSlop={8} style={styles.downloadBtn}>
+            <Pressable onPress={() => onDownloadSeason()} hitSlop={8} style={styles.downloadBtn}>
               <Icon name="download" size={14} color={colors.accent} />
             </Pressable>
           )}

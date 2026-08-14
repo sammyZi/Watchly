@@ -22,7 +22,7 @@ import { loadTitle, reviewLinks, type Episode, type Title } from '../lib/meta';
 import { useOnline } from '../lib/net';
 import { onList, type List, type Saved } from '../lib/saved';
 import { WATCHED } from '../lib/watched';
-import { episodeTag, health, searchEpisode, searchTorrents, type Hit } from '../lib/search';
+import { episodeTag, health, searchEpisode, searchTorrents, seasonsIn, type Hit } from '../lib/search';
 import {
   fadeToBg,
   font,
@@ -522,10 +522,20 @@ export function DetailScreen({
   /** Hands the caller everything it needs to open the right file straight away. */
   const start = (magnet: string, startOver = false) =>
     onPlay(magnet, picked?.id, tag, startOver);
-  const save = (magnet: string) => onDownload(magnet, tag);
+  const [saving, setSaving] = useState(false);
+  const wait = busy || saving;
+  const save = (magnet: string) => {
+    setSaving(true);
+    onDownload(magnet, tag);
+  };
   const saveSeason = async () => {
     if (season == null) return;
-    const isPack = (h: Hit) => h.scope === 'season' || h.scope === 'complete';
+    setSaving(true);
+    const isPack = (h: Hit) => {
+      if (h.scope !== 'season' && h.scope !== 'complete') return false;
+      const claims = seasonsIn(h.name);
+      return claims.length === 0 || claims.includes(season);
+    };
     let pack =
       (shown ?? []).find(isPack) ?? (sources ?? []).find(isPack);
     if (!pack) {
@@ -533,9 +543,12 @@ export function DetailScreen({
       const hits = await searchTorrents(title.title, undefined, {
         suffix: `S${season2}`,
       }).catch(() => [] as Hit[]);
-      pack = hits.find(isPack) ?? hits.find((h) => h.scope !== 'episode');
+      pack = hits.find(isPack);
     }
-    if (!pack) return;
+    if (!pack) {
+      setSaving(false);
+      return;
+    }
     onDownload(pack.magnet, undefined, season);
   };
 
@@ -714,17 +727,17 @@ export function DetailScreen({
             list below is for when that is not the one you wanted. */}
         <View style={styles.actions}>
           <Pressable
-            disabled={!best || busy}
+            disabled={!best || wait}
             onPress={() => best && start(best.magnet)}
             style={({ pressed }) => [
               styles.play,
-              (!best || busy) && styles.playOff,
+              (!best || wait) && styles.playOff,
               pressed && styles.pressed,
             ]}
           >
             <Icon name="play" size={17} color={colors.onAccent} />
             <Text style={styles.playText}>
-              {busy
+              {wait
                 ? 'Opening…'
                 : !best
                   ? 'Finding releases…'
@@ -739,12 +752,12 @@ export function DetailScreen({
           {/* Only worth offering once there is a resume point to ignore. */}
           {canResume && (
             <Pressable
-              disabled={!best || busy}
+              disabled={!best || wait}
               onPress={() => best && start(best.magnet, true)}
               accessibilityLabel="Start over"
               style={({ pressed }) => [
                 styles.download,
-                (!best || busy) && styles.downloadOff,
+                (!best || wait) && styles.downloadOff,
                 pressed && styles.pressed,
               ]}
             >
@@ -755,32 +768,42 @@ export function DetailScreen({
           {/* Same release, kept rather than streamed — the Downloads tab takes
               over from here. */}
           <Pressable
-            disabled={!best || busy}
+            disabled={!best || wait}
             onPress={() => best && save(best.magnet)}
             accessibilityLabel="Download"
             style={({ pressed }) => [
               styles.download,
-              (!best || busy) && styles.downloadOff,
+              (!best || wait) && styles.downloadOff,
               pressed && styles.pressed,
             ]}
           >
-            <Icon name="download" size={18} color={colors.text} />
+            {saving ? (
+              <ActivityIndicator color={colors.text} />
+            ) : (
+              <Icon name="download" size={18} color={colors.text} />
+            )}
           </Pressable>
         </View>
 
         {title.kind === 'tv' && season != null && (
           <Pressable
-            disabled={!best || busy}
+            disabled={!best || wait}
             onPress={saveSeason}
             style={({ pressed }) => [
               styles.seasonDl,
-              (!best || busy) && styles.downloadOff,
+              (!best || wait) && styles.downloadOff,
               pressed && styles.pressed,
             ]}
           >
-            <Icon name="download" size={15} color={colors.text} />
+            {saving ? (
+              <ActivityIndicator color={colors.text} />
+            ) : (
+              <Icon name="download" size={15} color={colors.text} />
+            )}
             <Text style={styles.seasonDlText}>
-              Download season {season === 0 ? 'specials' : season}
+              {saving
+                ? 'Starting download…'
+                : `Download season ${season === 0 ? 'specials' : season}`}
             </Text>
           </Pressable>
         )}
@@ -1013,10 +1036,12 @@ export function DetailScreen({
             <ActivityIndicator color={colors.accent} style={styles.spin} />
           )}
 
-          {busy && (
+          {wait && (
             <View style={styles.opening}>
               <ActivityIndicator color={colors.accent} size="small" />
-              <Text style={styles.openingText}>Reading torrent…</Text>
+              <Text style={styles.openingText}>
+                {saving ? 'Starting download…' : 'Reading torrent…'}
+              </Text>
             </View>
           )}
 
