@@ -418,7 +418,11 @@ function DownloadsScreenView({
   const savedBytes = onQueue
     .filter((f) => savedSet.has(f.index))
     .reduce((s, f) => s + f.size, 0);
-  const currentBytes = current ? (current.size * pct) / 100 : 0;
+  const currentBytes = current
+    ? (current.size * pct) / 100
+    : queue
+      ? 0
+      : (totalSize * pct) / 100;
   const haveBytes = savedBytes + currentBytes;
   const overallPct =
     totalSize > 0 ? Math.min(100, (haveBytes / totalSize) * 100) : pct;
