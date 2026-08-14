@@ -240,6 +240,12 @@ function DownloadsScreenView({
     fileName: { ...type.body, fontFamily: font.medium, color: c.text },
     fileNameOff: { color: c.faint },
     fileMeta: { ...type.meta, color: c.faint },
+    fileBar: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: 8,
+    },
+    filePct: { ...type.meta, fontFamily: font.medium, color: c.muted, minWidth: 32, textAlign: 'right' as const },
     skip: {
       width: 32,
       height: 32,
@@ -323,7 +329,7 @@ function DownloadsScreenView({
   const askDeleteNames = (names: string[], label: string) =>
     setConfirm({
       title: names.length > 1 ? 'Delete downloads?' : 'Delete download?',
-      message: `${label} will be removed from this list and from Downloads.`,
+      message: `${label} will be removed from this list and from Movies.`,
       icon: 'trash-2',
       confirmLabel: 'Delete',
       destructive: true,
@@ -364,7 +370,12 @@ function DownloadsScreenView({
     : [];
   const current = queued
     .filter((f) => f.label === 'Queued')
-    .sort((a, b) => a.index - b.index)[0];
+    .sort((a, b) => {
+      const ea = parseEpisode(a.name);
+      const eb = parseEpisode(b.name);
+      if (ea && eb) return ea.season - eb.season || ea.episode - eb.episode;
+      return a.index - b.index;
+    })[0];
   const marked = queued.map((f) =>
     current && f.index === current.index
       ? { ...f, done: pct, label: 'Downloading' as const }
@@ -373,24 +384,19 @@ function DownloadsScreenView({
   const groups = groupByFolder(marked);
   const doneCount = marked.filter((f) => f.label === 'Done').length;
   const onQueue = queue?.filter((f) => wantedSet.has(f.index)) ?? [];
-  const showSize = current?.size || active?.size || 0;
-  const remaining = showSize > 0 ? Math.max(0, showSize * (1 - pct / 100)) : 0;
-  const one = active?.queue?.[0];
-  const ep = one && !queue ? fileTitle(one.name) : null;
+  const totalSize =
+    onQueue.reduce((s, f) => s + f.size, 0) || active?.size || 0;
+  const savedBytes = onQueue
+    .filter((f) => savedSet.has(f.index))
+    .reduce((s, f) => s + f.size, 0);
+  const currentBytes = current ? (current.size * pct) / 100 : 0;
+  const haveBytes = savedBytes + currentBytes;
+  const overallPct =
+    totalSize > 0 ? Math.min(100, (haveBytes / totalSize) * 100) : pct;
+  const remaining = Math.max(0, totalSize - haveBytes);
   const headline = active ? showTitle(active.name) : '';
   const stage = stageLabel(active?.progress?.state, paused);
-  const sub =
-    paused
-      ? onQueue.length
-        ? `${stage} · ${doneCount} of ${onQueue.length} saved`
-        : stage
-      : pct >= 100
-        ? 'Saving to device…'
-        : queue
-          ? `${stage} · ${doneCount} of ${onQueue.length || queue.length}`
-          : ep && parseEpisode(one!.name)
-            ? `${stage} · ${ep}`
-            : stage;
+  const sub = paused ? stage : pct >= 100 ? 'Saving to device…' : stage;
 
   return (
     <Screen title="Downloads" icon="download">
@@ -404,25 +410,38 @@ function DownloadsScreenView({
                   poster={active.poster ?? undefined}
                   width={80}
                   height={120}
-                  progress={pct}
+                  progress={overallPct}
                 />
                 <View style={styles.heroBody}>
                   <Text numberOfLines={2} style={styles.name}>
                     {headline}
                   </Text>
-                  <Text style={[styles.stage, paused && styles.stagePaused]}>
-                    {sub}
-                  </Text>
-                  <ProgressBar value={pct} height={6} />
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.stage, paused && styles.stagePaused, { flex: 1 }]}
+                    >
+                      {sub}
+                    </Text>
+                    {queue ? (
+                      <Text
+                        numberOfLines={1}
+                        style={[styles.stage, paused && styles.stagePaused]}
+                      >
+                        {doneCount} of {onQueue.length || queue.length}
+                      </Text>
+                    ) : null}
+                  </View>
+                  <ProgressBar value={overallPct} height={6} />
                   <Text style={styles.metaLine}>
-                    {showSize > 0
-                      ? `${bytes(showSize * (pct / 100))} of ${bytes(showSize)}`
+                    {totalSize > 0
+                      ? `${bytes(haveBytes)} of ${bytes(totalSize)}`
                       : 'Starting…'}
                     {paused
                       ? ' · Paused'
                       : ` · ${speed(rate)} · ${eta(remaining, rate)}`}
                   </Text>
-                  <Text style={styles.pct}>{Math.round(pct)}%</Text>
+                  <Text style={styles.pct}>{Math.round(overallPct)}%</Text>
                 </View>
               </View>
 
@@ -584,11 +603,23 @@ function DownloadsScreenView({
                                 {file.name}
                               </Marquee>
                               {on || done ? (
-                                <ProgressBar
-                                  value={file.done}
-                                  height={3}
-                                  color={done ? colors.good : colors.accent}
-                                />
+                                <View style={styles.fileBar}>
+                                  <ProgressBar
+                                    value={file.done}
+                                    height={3}
+                                    color={done ? colors.good : colors.accent}
+                                    style={{ flex: 1 }}
+                                  />
+                                  <Text
+                                    style={[
+                                      styles.filePct,
+                                      done && { color: colors.good },
+                                      on && { color: colors.accent },
+                                    ]}
+                                  >
+                                    {Math.round(file.done)}%
+                                  </Text>
+                                </View>
                               ) : (
                                 <Text style={styles.fileMeta}>
                                   {off

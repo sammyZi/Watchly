@@ -162,5 +162,5 @@ export function seasonFiles(files: Filed[], season?: number): number[] {
     const hay = `${f.path ?? ''} ${f.name}`;
     return seasonsIn(hay).includes(season);
   });
-  return (hit.length ? hit : videos).map((f) => f.index);
+  return (hit.length ? hit : videos).slice().sort(fileOrder).map((f) => f.index);
 }

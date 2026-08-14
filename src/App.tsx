@@ -1292,13 +1292,10 @@ function ShellApp({
                     },
                     onCancel: () => {
                       detailAfterDownload.current = null;
+                      setTorrentMode(null);
                       TorrentStream.setNotify(false).catch(() => {});
                       clearDownloadJob().catch(() => {});
                       reset();
-                      TorrentStream.stop()
-                        .then(() => TorrentStream.clearCache())
-                        .catch(() => {});
-                      setTorrentMode(null);
                     },
                     onSkip: (index: number) => {
                       skipFile(index);

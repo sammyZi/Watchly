@@ -20,6 +20,7 @@ import org.libtorrent4j.AlertListener
 import org.libtorrent4j.AnnounceEntry
 import org.libtorrent4j.PeerInfo
 import org.libtorrent4j.Priority
+import org.libtorrent4j.SessionHandle
 import org.libtorrent4j.SessionManager
 import org.libtorrent4j.SessionParams
 import org.libtorrent4j.SettingsPack
@@ -208,7 +209,7 @@ class PlayOptions : Record {
   /** When >= 0, fetch every video in this season, not just `index`. */
   @Field var season: Int = -1
 
-  /** Public Downloads/Watchly/<this>/filename — a show + season label. */
+  /** Public Movies/Watchly/<this>/filename — a show + season label. */
   @Field var saveFolder: String = ""
 }
 
@@ -227,7 +228,7 @@ class TorrentStreamModule : Module() {
    *  whole torrent: the file priorities set in play() exclude every other file
    *  in it, download or not. */
   private var fullFile = false
-  /** Downloads/Watchly/<saveFolder>/ — set by play() for download mode. */
+  /** Movies/Watchly/<saveFolder>/ — set by play() for download mode. */
   private var saveFolder = ""
   private var firstPiece = 0
   private var lastPiece = 0
@@ -641,10 +642,13 @@ class TorrentStreamModule : Module() {
       playGen++
       showNotify = false
       userPaused = true
+      watchTask(false)
       clearDownloadNotification()
       forgetWanted(infoHashHex)
       val h = handle?.takeIf { it.isValid }
+      handle = null
       if (h != null) {
+        runCatching { h.unsetFlags(TorrentFlags.AUTO_MANAGED) }
         runCatching { h.pause() }
         info?.let { ti ->
           runCatching {
@@ -654,6 +658,7 @@ class TorrentStreamModule : Module() {
             h.prioritizePieces(Array(ti.numPieces()) { Priority.IGNORE })
           }
         }
+        runCatching { session.remove(h, SessionHandle.DELETE_FILES) }
       }
       teardown()
       wipeStreamCache()
@@ -1379,6 +1384,28 @@ class TorrentStreamModule : Module() {
   private fun isVideoFile(i: Int, files: org.libtorrent4j.FileStorage) =
     files.filePath(i).substringAfterLast('.', "").lowercase() in VIDEO
 
+  /** S01E02 before S01E03, even when the torrent lists them out of order. */
+  private fun episodeOrd(name: String, index: Int): Long {
+    val m =
+      Regex("""(?i)s(\d{1,2})[ ._-]*e(\d{1,2})""").find(name)
+        ?: Regex("""(?i)\b(\d{1,2})x(\d{1,2})\b""").find(name)
+    return if (m != null) m.groupValues[1].toLong() * 1000 + m.groupValues[2].toLong()
+    else 1_000_000L + index
+  }
+
+  /** Pieces hashed on disk — not File.length(), which is full-size for sparse files. */
+  private fun fileComplete(h: TorrentHandle, ti: TorrentInfo, index: Int): Boolean {
+    val expected = ti.files().fileSize(index)
+    if (expected <= 0) return false
+    val progress = runCatching { h.fileProgress(TorrentHandle.PIECE_GRANULARITY) }.getOrNull()
+    if (progress != null && index in progress.indices) {
+      return progress[index] >= expected * 99L / 100L
+    }
+    val status = runCatching { h.status() }.getOrNull() ?: return false
+    val wanted = status.totalWanted()
+    return wanted > 0 && status.totalWantedDone() >= wanted * 99 / 100
+  }
+
   /** Next unfinished wanted video (+ its sidecar subs). One file at a time. */
   private fun sequentialFocus(): IntArray {
     val ti = info ?: return wantedFiles
@@ -1387,7 +1414,7 @@ class TorrentStreamModule : Module() {
       .filter { i ->
         i in 0 until files.numFiles() && isVideoFile(i, files) && i !in savedFiles
       }
-      .minOrNull() ?: return intArrayOf()
+      .minByOrNull { episodeOrd(files.fileName(it), it) } ?: return intArrayOf()
     val dir = files.filePath(next).replace("\\", "/").substringBeforeLast("/", "")
     val stem = files.fileName(next).substringBeforeLast('.').lowercase()
     val subs = wantedFiles.filter { i ->
@@ -1453,16 +1480,17 @@ class TorrentStreamModule : Module() {
     val handler = Handler(thread.looper)
     pollThread = thread
     poller = handler
+    val gen = playGen
 
     val tick = object : Runnable {
       override fun run() {
+        if (gen != playGen) return
         try {
           pump()
         } catch (e: Exception) {
           Log.w(TAG, "poll failed", e)
         }
-        // Faster while waiting for the first frame so ready fires the tick the
-        // opening piece lands; twice a second is enough once the player is up.
+        if (gen != playGen) return
         handler.postDelayed(this, if (announcedReady) 500 else 200)
       }
     }
@@ -1470,6 +1498,7 @@ class TorrentStreamModule : Module() {
   }
 
   private fun pump() {
+    val gen = playGen
     val h = handle ?: return
     val ti = info ?: return
     if (!h.isValid) return
@@ -1517,6 +1546,7 @@ class TorrentStreamModule : Module() {
       }
       // Inspect/magnet leftovers can creep back in; keep the picker on this file.
       if (ticks % 10 == 1) {
+        if (gen != playGen) return
         val h2 = handle?.takeIf { it.isValid }
         if (h2 != null) applyFocus(h2)
       }
@@ -2055,10 +2085,10 @@ class TorrentStreamModule : Module() {
     nm.cancel(NOTIF_ID + 1)
   }
 
-  /** Public Downloads/Watchly — visible in the system Files app. */
+  /** Public Movies/Watchly — visible in the system Files app. */
   private fun watchlyDir(): File {
     val pub = File(
-      Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+      Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
       "Watchly"
     )
     try {
@@ -2067,44 +2097,38 @@ class TorrentStreamModule : Module() {
     } catch (_: Exception) {}
     val ctx = appContext.reactContext!!
     return File(
-      ctx.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: ctx.filesDir,
+      ctx.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: ctx.filesDir,
       "Watchly"
     ).apply { mkdirs() }
+  }
+
+  /** Movies/Watchly plus leftover Downloads/Watchly from earlier builds. */
+  private fun watchlyRoots(): List<File> {
+    val old = File(
+      Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+      "Watchly"
+    )
+    return listOf(watchlyDir(), old)
   }
 
   private fun safeName(name: String) =
     name.replace(Regex("[\\\\/:*?\"<>|]+"), "_").trim().ifBlank { "download" }
 
-  private fun seasonFolderOf(name: String): String? {
-    val n =
-      Regex("""[Ss](\d{1,2})[Ee]\d""").find(name)?.groupValues?.get(1)?.toIntOrNull()
-        ?: Regex("""Season[. _-]?(\d{1,2})""", RegexOption.IGNORE_CASE)
-          .find(name)?.groupValues?.get(1)?.toIntOrNull()
-    return when (n) {
-      null -> null
-      0 -> "Specials"
-      else -> "Season $n"
-    }
-  }
-
   /**
-   * Downloads/Watchly/<show>/<Season 1>/file.mkv
+   * Movies/Watchly/<show>/<torrent folders>/file.mkv
    * Keeps the torrent's own folders (minus a duplicate torrent-name root).
+   * Does not invent a Season N folder.
    */
   private fun downloadDest(relPath: String): File {
     val parts = relPath.replace('\\', '/').split('/').filter { it.isNotBlank() }
       .map { safeName(it) }
     val torrentRoot = safeName(info?.name() ?: "")
-    var rest =
+    val rest =
       if (parts.size > 1 && parts.first().equals(torrentRoot, ignoreCase = true)) {
         parts.drop(1)
       } else {
         parts
       }
-    if (rest.size <= 1) {
-      val season = seasonFolderOf(rest.lastOrNull() ?: "")
-      if (season != null) rest = listOf(season) + rest
-    }
     val show = safeName(saveFolder.ifBlank { torrentRoot.ifBlank { "Download" } })
     return (listOf(show) + rest).fold(watchlyDir()) { dir, part -> File(dir, part) }
   }
@@ -2116,9 +2140,7 @@ class TorrentStreamModule : Module() {
   private fun copyKeep(src: File, name: String): String {
     val dest = downloadDest(name)
     dest.parentFile?.mkdirs()
-    if (dest.exists() && dest.length() >= src.length() * 99 / 100 && dest.length() > 0) {
-      return "file://${dest.absolutePath}"
-    }
+    if (dest.exists()) dest.delete()
     src.inputStream().use { input ->
       dest.outputStream().use { input.copyTo(it) }
     }
@@ -2127,33 +2149,33 @@ class TorrentStreamModule : Module() {
 
   private fun saveReadyFiles(): List<Map<String, Any>> {
     if (!fullFile) return emptyList()
+    val gen = playGen
+    val h = handle?.takeIf { it.isValid } ?: return emptyList()
     val ti = info ?: return emptyList()
     val files = ti.files()
-    val videos = wantedFiles.filter { i ->
-      i in 0 until files.numFiles() &&
-        files.filePath(i).substringAfterLast('.', "").lowercase() in VIDEO
+    val focus = sequentialFocus()
+    val i = focus.firstOrNull { isVideoFile(it, files) } ?: return emptyList()
+    if (i in savedFiles) return emptyList()
+    if (!fileComplete(h, ti, i)) return emptyList()
+    val expected = files.fileSize(i)
+    val src = File(saveDir, files.filePath(i))
+    if (!src.exists()) return emptyList()
+    if (!savedFiles.add(i)) return emptyList()
+    val name = files.fileName(i)
+    val uri = try {
+      copyKeep(src, files.filePath(i))
+    } catch (e: Exception) {
+      savedFiles.remove(i)
+      log("saveReady: copy failed $name — ${e.message}")
+      return emptyList()
     }
-    val out = mutableListOf<Map<String, Any>>()
-    for (i in videos) {
-      if (i in savedFiles) continue
-      val expected = files.fileSize(i)
-      val src = File(saveDir, files.filePath(i))
-      if (!src.exists() || src.length() < expected * 99 / 100) continue
-      if (!savedFiles.add(i)) continue
-      val name = files.fileName(i)
-      val uri = try {
-        copyKeep(src, files.filePath(i))
-      } catch (e: Exception) {
-        savedFiles.remove(i)
-        log("saveReady: copy failed $name — ${e.message}")
-        continue
-      }
-      log("saveReady: $name")
-      out.add(mapOf("index" to i, "name" to name, "uri" to uri, "size" to expected))
+    if (gen != playGen) {
+      savedFiles.remove(i)
+      return emptyList()
     }
-    val h = handle?.takeIf { it.isValid }
-    if (h != null && out.isNotEmpty()) applyFocus(h)
-    return out
+    log("saveReady: $name")
+    applyFocus(h)
+    return listOf(mapOf("index" to i, "name" to name, "uri" to uri, "size" to expected))
   }
 
   /**
@@ -2205,7 +2227,7 @@ class TorrentStreamModule : Module() {
       }
       return null
     }
-    walk(watchlyDir())?.let { return it }
+    for (root in watchlyRoots()) walk(root)?.let { return it }
     val pub = File(
       Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
       safe
@@ -2248,10 +2270,12 @@ class TorrentStreamModule : Module() {
 
   /** Drop empty Season / show folders left after a file delete. Stops at Watchly. */
   private fun pruneEmptyDirs(start: File?) {
-    val root = try {
-      watchlyDir().canonicalFile
-    } catch (_: Exception) {
-      watchlyDir()
+    val roots = watchlyRoots().map {
+      try {
+        it.canonicalFile
+      } catch (_: Exception) {
+        it
+      }
     }
     var cur = start
     while (cur != null) {
@@ -2260,7 +2284,8 @@ class TorrentStreamModule : Module() {
       } catch (_: Exception) {
         cur
       }
-      if (dir == root || !dir.path.startsWith(root.path + File.separator)) break
+      val root = roots.firstOrNull { dir == it || dir.path.startsWith(it.path + File.separator) }
+      if (root == null || dir == root) break
       if (!dir.isDirectory) break
       val kids = dir.listFiles()
       if (kids != null && kids.isNotEmpty()) break

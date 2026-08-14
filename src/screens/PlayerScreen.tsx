@@ -321,7 +321,7 @@ export function PlayerScreen({
       const path = await TorrentStream.copyTo(fileIndex, name);
       const dest = Array.isArray(path) ? path[0] : path;
       recordDownload(name, 0, dest);
-      warn(`Saved to Downloads/${name}`);
+      warn(`Saved to Movies/${name}`);
     } catch (e: any) {
       warn(String(e?.message ?? e));
     }
