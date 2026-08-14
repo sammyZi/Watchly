@@ -54,7 +54,7 @@ class MainActivity : ReactActivity() {
   }
 
   override fun onDestroy() {
-    if (isFinishing) {
+    if (isFinishing && !expo.modules.torrentstream.TorrentStreamModule.keepAlive()) {
       expo.modules.torrentstream.TorrentStreamModule.dismissNotify(this)
     }
     super.onDestroy()
