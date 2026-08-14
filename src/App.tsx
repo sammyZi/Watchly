@@ -40,6 +40,7 @@ import { DEFAULTS, loadSettings, saveSettings, type Settings } from './lib/setti
 import {
   clearDownloadJob,
   loadDownloadJob,
+  saveDownloadJob,
   type DownloadJob,
 } from './lib/downloadJob';
 import { linkEpisode, loadEpisodeLinks, type EpisodeLinks } from './lib/watched';
@@ -762,8 +763,15 @@ function ShellApp({
     TorrentStream.setNotify(true).catch(() => {});
   }, []);
 
+  const [savedFileIds, setSavedFileIds] = useState<number[]>([]);
+  const savedRef = useRef(new Set<number>());
+  const wantedRef = useRef(wantedIndices);
+  wantedRef.current = wantedIndices;
+
   const startJob = useCallback(
     (job: DownloadJob) => {
+      savedRef.current = new Set(job.savedIndices ?? []);
+      setSavedFileIds([...(job.savedIndices ?? [])]);
       setTorrentMode('download');
       setTab('downloads');
       setDetail(null);
@@ -808,6 +816,8 @@ function ShellApp({
    *  `enableDownloadNotify`, which is defined just above. */
   const downloadFile = useCallback(
     (target: Item, index: number) => {
+      savedRef.current = new Set();
+      setSavedFileIds([]);
       setTorrentMode('download');
       setTab('downloads');
       setDetail(null);
@@ -824,6 +834,8 @@ function ShellApp({
         ? indices
         : seasonFiles(target.files ?? []);
       if (!list.length) return;
+      savedRef.current = new Set();
+      setSavedFileIds([]);
       setTorrentMode('download');
       setTab('downloads');
       setDetail(null);
@@ -838,16 +850,14 @@ function ShellApp({
     [open, enableDownloadNotify]
   );
 
-  // Copy each finished episode into Downloads as soon as its pieces are on
+  // Copy each finished episode into Movies as soon as its pieces are on
   // disk. The torrent stays up until every still-wanted file is saved.
-  const [savedFileIds, setSavedFileIds] = useState<number[]>([]);
-  const savedRef = useRef(new Set<number>());
-  const wantedRef = useRef(wantedIndices);
-  wantedRef.current = wantedIndices;
   useEffect(() => {
-    savedRef.current = new Set();
-    setSavedFileIds([]);
-  }, [torrentMode, item?.uri]);
+    if (torrentMode !== 'download') {
+      savedRef.current = new Set();
+      setSavedFileIds([]);
+    }
+  }, [torrentMode]);
   useEffect(() => {
     if (torrentMode !== 'download') return;
     if (phase !== 'playing') return;
@@ -881,8 +891,9 @@ function ShellApp({
           if (!alive) return;
           let added = false;
           for (const row of rows) {
-            if (savedRef.current.has(row.index)) continue;
-            savedRef.current.add(row.index);
+            const index = Number(row.index);
+            if (savedRef.current.has(index)) continue;
+            savedRef.current.add(index);
             added = true;
             console.log('[download] saved', row.name);
             void recordDownload(row.name, Number(row.size), row.uri, {
@@ -890,7 +901,11 @@ function ShellApp({
               titleName,
             });
           }
-          if (added) setSavedFileIds([...savedRef.current]);
+          if (added) {
+            const ids = [...savedRef.current];
+            setSavedFileIds(ids);
+            saveDownloadJob({ savedIndices: ids }).catch(() => {});
+          }
           const wanted = wantedRef.current;
           const leftover = queueIndices.filter((i) => !savedRef.current.has(i));
           if (!wanted.length || !wanted.every((i) => savedRef.current.has(i))) {

@@ -9,6 +9,8 @@ export type DownloadJob = {
   fileIndices: number[];
   /** Full pack list so skipped episodes still show after a restart. */
   queueIndices?: number[];
+  /** Indexes already copied to Movies — skip these after a restart. */
+  savedIndices?: number[];
   season?: number;
   title?: string;
   titleName?: string;
@@ -26,8 +28,11 @@ export async function loadDownloadJob(): Promise<DownloadJob | null> {
   }
 }
 
-export async function saveDownloadJob(job: DownloadJob) {
-  await AsyncStorage.setItem(KEY, JSON.stringify(job));
+export async function saveDownloadJob(job: Partial<DownloadJob>) {
+  const prev = await loadDownloadJob();
+  const next = { ...prev, ...job };
+  if (!next.uri) return;
+  await AsyncStorage.setItem(KEY, JSON.stringify(next));
 }
 
 export async function clearDownloadJob() {
