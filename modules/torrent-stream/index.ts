@@ -23,6 +23,9 @@ export type Progress = {
   dhtNodes: number;
   state: string; // libtorrent state, e.g. DOWNLOADING_METADATA
   paused?: boolean;
+  /** Set on download-mode ticks so JS can tell torrents apart. */
+  uri?: string;
+  id?: string;
 };
 
 export type PlayOptions = {
@@ -77,9 +80,9 @@ type TorrentStream = {
    *  Returns a `file://` URI for the saved file. */
   copyTo(fileIndex: number, fileName: string): Promise<string | string[]>;
   /** Copy finished wanted videos into Downloads without stopping the torrent. */
-  saveReady(): Promise<{ index: number; name: string; uri: string; size: number }[]>;
+  saveReady(): Promise<{ index: number; name: string; uri: string; size: number; id?: string }[]>;
   /** `file://` URI for a finished episode still in the torrent cache. */
-  fileUri(index: number): Promise<string>;
+  fileUri(index: number, id?: string): Promise<string>;
   /** `file://` URI for a finished file in public Downloads/. */
   downloadUri(fileName: string): Promise<string>;
   /** Delete a finished file from public Downloads/. */
@@ -96,6 +99,11 @@ type TorrentStream = {
   pause(): Promise<void>;
   /** Resume a paused transfer. */
   resume(): Promise<void>;
+  pauseDownload(id: string): Promise<void>;
+  resumeDownload(id: string): Promise<void>;
+  stopDownload(id: string): Promise<void>;
+  skipDownload(id: string, index: number): Promise<void>;
+  includeDownload(id: string, index: number): Promise<void>;
   /** Stop fetching one file; the rest of a season download continues. */
   skipFile(index: number): Promise<void>;
   /** Put a skipped file back into a season download. */

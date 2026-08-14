@@ -56,19 +56,30 @@ export async function loadDownloadJob(): Promise<DownloadJob | null> {
 
 export async function saveDownloadJob(job: Partial<DownloadJob>) {
   const jobs = await readQueue();
-  if (!jobs.length) {
-    if (!job.uri) return;
-    await writeQueue([{ fileIndices: [], ...job } as DownloadJob]);
+  const uri = job.uri;
+  if (!uri) {
+    if (!jobs.length) {
+      return;
+    }
+    jobs[0] = { ...jobs[0], ...job };
+    await writeQueue(jobs);
     return;
   }
-  jobs[0] = { ...jobs[0], ...job };
+  const i = jobs.findIndex((j) => j.uri === uri);
+  if (i < 0) {
+    jobs.push({ fileIndices: [], ...job } as DownloadJob);
+  } else {
+    jobs[i] = { ...jobs[i], ...job };
+  }
   await writeQueue(jobs);
 }
 
 export async function enqueueDownload(job: DownloadJob) {
-  const jobs = await readQueue();
-  jobs.push(job);
-  await writeQueue(jobs);
+  await saveDownloadJob(job);
+}
+
+export async function removeDownload(uri: string) {
+  await writeQueue((await readQueue()).filter((j) => j.uri !== uri));
 }
 
 /** Drop the active job. Returns the next one, if any. */
