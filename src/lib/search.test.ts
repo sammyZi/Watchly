@@ -1,6 +1,6 @@
 // node --experimental-strip-types src/lib/search.test.ts
 import assert from 'node:assert';
-import { aliasOf, episodeTag, merge, namesTitle, parseEpisode, seasonsIn, health, kindOf, quality, rank, scopeOf, toHits, toTorrentioHits, type Hit } from './search.ts';
+import { aliasOf, episodeTag, merge, namesTitle, parseEpisode, seasonsIn, health, kindOf, quality, rank, rankEpisode, scopeOf, toCsvHits, toEztvHits, toHits, toTorrentioHits, toYtsHits, type Hit } from './search.ts';
 
 const row = (over: Record<string, string | number> = {}) => ({
   id: '1',
@@ -84,6 +84,19 @@ assert.deepEqual(
   ['exact', 'partial']
 );
 
+assert.deepEqual(
+  rankEpisode(
+    [
+      hit({ id: 'all', name: 'Show S01-S05', seeders: 99, scope: 'complete' }),
+      hit({ id: 'ep', name: 'Show S01E02 1080p', seeders: 80, scope: 'episode' }),
+      hit({ id: 'pack', name: 'Show S01 COMPLETE', seeders: 40, scope: 'season' }),
+    ],
+    '',
+    1
+  ).map((h) => h.id),
+  ['pack', 'ep', 'all']
+);
+
 assert.equal(episodeTag(1, 2), 'S01E02');
 assert.equal(episodeTag(10, 11), 'S10E11');
 
@@ -94,6 +107,7 @@ assert.equal(scopeOf('Ted.Lasso.S01.COMPLETE.720p.WEBRip'), 'season');
 assert.equal(scopeOf('Ted Lasso (2020) Season 1 S01 1080p'), 'season');
 assert.equal(scopeOf('Ted Lasso Seasons 1-3 COMPLETE 1080p'), 'complete');
 assert.equal(scopeOf('Ted Lasso Complete Series 1080p'), 'complete');
+assert.equal(scopeOf('Prison Break [S01-S05] 1080p'), 'complete');
 assert.equal(scopeOf('Some.Film.2024.1080p.BluRay'), 'episode');
 // An episode marker wins over anything else in the name.
 assert.equal(scopeOf('Show Complete Series S02E05'), 'episode');
@@ -178,5 +192,35 @@ assert.ok(namesTitle('Dune (2021) [1080p] [WEBRip]', aliasOf('Dune: Part One')!)
 // Every word has to be there, and as a word.
 assert.ok(!namesTitle('The Matrix Reloaded 2003', 'The Matrix Revolutions'));
 assert.ok(namesTitle('The.Matrix.1999.1080p', 'The Matrix'));
+
+const [yts] = toYtsHits([
+  {
+    title_long: 'The Matrix (1999)',
+    imdb_code: 'tt0133093',
+    torrents: [
+      { hash: 'C39FE3EEFBDB62DA9C27EB6398FF4A7D2E26E7AB', quality: '1080p', type: 'bluray', seeds: 40, peers: 3, size_bytes: 2000 },
+      { hash: 'nope', quality: '720p', seeds: 1 },
+    ],
+  },
+]);
+assert.equal(yts.id, 'c39fe3eefbdb62da9c27eb6398ff4a7d2e26e7ab');
+assert.equal(yts.seeders, 40);
+assert.equal(yts.quality, '1080p');
+assert.ok(yts.name.includes('1080p'));
+
+const [eztv] = toEztvHits([
+  { hash: 'C39FE3EEFBDB62DA9C27EB6398FF4A7D2E26E7AB', title: 'Show.S01E02.1080p', seeds: 12, peers: 2, size_bytes: 500 },
+  { hash: 'bad', title: 'Nope' },
+]);
+assert.equal(eztv.kind, 'tv');
+assert.equal(eztv.scope, 'episode');
+assert.equal(eztv.seeders, 12);
+
+const [csv] = toCsvHits([
+  { infohash: 'C39FE3EEFBDB62DA9C27EB6398FF4A7D2E26E7AB', name: 'The.Matrix.1999.1080p', seeders: 9, leechers: 1, size_bytes: 3000 },
+  { infohash: 'bad', name: 'Nope' },
+]);
+assert.equal(csv.id, 'c39fe3eefbdb62da9c27eb6398ff4a7d2e26e7ab');
+assert.equal(csv.seeders, 9);
 
 console.log('ok');

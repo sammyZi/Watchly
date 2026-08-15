@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -397,6 +397,42 @@ function CastCard({ name }: { name: string }) {
   );
 }
 
+/** Torrentio's 💾 is the one file; a pack's torrent is that times its episodes. */
+function torrentBytes(hit: Hit, episodes: Episode[], season: number | null): number {
+  if (hit.scope === 'episode' || !hit.size) return hit.size;
+  const claims = seasonsIn(hit.name);
+  const n = (
+    claims.length
+      ? episodes.filter((e) => claims.includes(e.season))
+      : hit.scope === 'complete'
+        ? episodes
+        : episodes.filter((e) => e.season === season)
+  ).length;
+  return n > 1 ? hit.size * n : hit.size;
+}
+
+function guessEpisode(imdb: string, progress?: Record<string, number>): Episode {
+  const prefix = `${imdb}:`;
+  const rows = Object.entries(progress ?? {})
+    .flatMap(([id, pct]) => {
+      if (!id.startsWith(prefix)) return [];
+      const [season, episode] = id.slice(prefix.length).split(':').map(Number);
+      if (!Number.isFinite(season) || !Number.isFinite(episode)) return [];
+      return [{ id, season, episode, pct }];
+    })
+    .sort((a, b) => a.season - b.season || a.episode - b.episode);
+  const next = rows.find((r) => r.pct < WATCHED) ?? rows[0];
+  return {
+    id: next?.id ?? `${imdb}:1:1`,
+    season: next?.season ?? 1,
+    episode: next?.episode ?? 1,
+    name: '',
+    overview: null,
+    thumbnail: null,
+    released: null,
+  };
+}
+
 /**
  * One title: the artwork and the facts up top, the releases that can actually
  * play it underneath.
@@ -455,8 +491,10 @@ export function DetailScreen({
   /** Both loads below re-run when the connection comes back. */
   const online = useOnline();
   const abort = useRef<AbortController | null>(null);
+  const searchGen = useRef(0);
   const scroller = useRef<ScrollView>(null);
-  /** Where the release list starts, so tapping an episode can bring it up. */
+  /** Play button — tapping an episode scrolls here, not down to releases. */
+  const playY = useRef(0);
   const sourcesY = useRef(0);
 
   // A `seed` can outlive the shape that built it — one held in App state across
@@ -466,12 +504,20 @@ export function DetailScreen({
   const genres = title.genres ?? [];
   const directors = title.directors ?? [];
 
-  const seasons = [...new Set(episodes.map((e) => e.season))];
-  const [season, setSeason] = useState<number | null>(null);
-  /** Which episode the releases below are for. Null on a film. */
-  const [picked, setPicked] = useState<Episode | null>(null);
+  /** Guess S01E01 (or the next unfinished) so releases start before Cinemeta. */
+  const [picked, setPicked] = useState<Episode | null>(() =>
+    seed.kind === 'tv' ? guessEpisode(seed.imdb, progress) : null
+  );
+  const [season, setSeason] = useState<number | null>(() =>
+    seed.kind === 'tv' ? (picked?.season ?? 1) : null
+  );
   /** The whole season, rather than the first page of it. */
   const [wholeSeason, setWholeSeason] = useState(false);
+  const seasons = episodes.length
+    ? [...new Set(episodes.map((e) => e.season))]
+    : season != null
+      ? [season]
+      : [];
 
   const inSeason = episodes.filter((e) => e.season === season);
   // A season of 100 anime episodes buries everything under it — the rest of
@@ -580,21 +626,18 @@ export function DetailScreen({
     setSeason(which);
     setWholeSeason(false);
     const next = nextIn(which);
-    // Defer the episode pick (and its torrent search) so the season chips
-    // paint before the index is hit.
-    if (next) startTransition(() => setPicked(next));
+    if (next) setPicked(next);
   };
 
-  // Open on the first episode not yet finished — carrying on is the common
-  // case, and it gives the Play button something to mean on a series.
+  // Swap the S01E01 guess for the real next episode once Cinemeta arrives.
   useEffect(() => {
-    if (title.kind !== 'tv' || !episodes.length || picked) return;
+    if (title.kind !== 'tv' || !episodes.length) return;
     const next =
       episodes.find((e) => e.season > 0 && (progress?.[e.id] ?? 0) < WATCHED) ??
       episodes[0];
-    setPicked(next);
-    setSeason(next.season);
-  }, [title, picked, progress]);
+    setPicked((cur) => (cur?.name ? cur : next));
+    if (!picked?.name) setSeason(next.season);
+  }, [title.kind, title.episodes, progress]);
 
   // Releases are found by name, not by id: the index's own IMDb tagging is
   // patchy, and a title search returns the rips that were never tagged too.
@@ -602,26 +645,42 @@ export function DetailScreen({
   // Do not wipe `sources` while flipping seasons — that relayouts the whole
   // page. Debounce so a swipe across S1–S4 only fetches the last one.
   useEffect(() => {
+    const key = pickKey;
+    const mine = ++searchGen.current;
     const ctrl = new AbortController();
     abort.current = ctrl;
     const delay = sourceKey == null ? 0 : 280;
     const timer = setTimeout(() => {
       setError(null);
+      const t0 = Date.now();
+      console.log('[releases] detail start', title.title, key);
       const wanted = picked
-        ? searchEpisode(title.title, picked.season, picked.episode, ctrl.signal)
+        ? searchEpisode(
+            title.title,
+            picked.season,
+            picked.episode,
+            ctrl.signal,
+            title.imdb
+          )
         : searchTorrents(title.title, ctrl.signal, {
             year: title.kind === 'movie' ? title.year : null,
+            imdb: title.imdb,
           });
       wanted
         .then((hits) => {
-          if (ctrl.signal.aborted) return;
+          if (mine !== searchGen.current) {
+            console.log('[releases] detail stale', title.title, Date.now() - t0, 'ms n=', hits.length);
+            return;
+          }
+          console.log('[releases] detail done', title.title, Date.now() - t0, 'ms n=', hits.length);
           setSources(hits);
-          setSourceKey(pickKey);
+          setSourceKey(key);
         })
         .catch((e) => {
-          if (ctrl.signal.aborted) return;
+          if (mine !== searchGen.current) return;
+          console.log('[releases] detail FAIL', title.title, Date.now() - t0, 'ms', e);
           setSources([]);
-          setSourceKey(pickKey);
+          setSourceKey(key);
           setError(String(e?.message ?? e));
         });
     }, delay);
@@ -629,7 +688,7 @@ export function DetailScreen({
       clearTimeout(timer);
       ctrl.abort();
     };
-  }, [title.title, title.year, title.kind, title.imdb, picked, pickKey, online]);
+  }, [title.imdb, title.kind, pickKey]);
 
   return (
     <View style={styles.page}>
@@ -725,7 +784,10 @@ export function DetailScreen({
 
         {/* The one thing most people want: start the healthiest release. The
             list below is for when that is not the one you wanted. */}
-        <View style={styles.actions}>
+        <View
+          style={styles.actions}
+          onLayout={(e) => (playY.current = e.nativeEvent.layout.y)}
+        >
           <Pressable
             disabled={!best || wait}
             onPress={() => best && start(best.magnet)}
@@ -924,7 +986,7 @@ export function DetailScreen({
                     // bringing that list into view is the whole point of the tap.
                     onPress={() => {
                       setPicked(ep);
-                      scroller.current?.scrollTo({ y: sourcesY.current, animated: true });
+                      scroller.current?.scrollTo({ y: Math.max(0, playY.current - 12), animated: true });
                     }}
                     style={({ pressed }) => [
                       styles.episode,
@@ -1058,7 +1120,7 @@ export function DetailScreen({
             const tone = HEALTH[health(hit.seeders)];
             return (
               <Pressable
-                key={hit.id}
+                key={`${hit.id}:${i}`}
                 onPress={() => start(hit.magnet)}
                 style={({ pressed }) => [styles.source, pressed && styles.pressed]}
               >
@@ -1071,7 +1133,7 @@ export function DetailScreen({
                       bit you are choosing between, so it comes to you. */}
                   <Marquee style={styles.sourceName}>{hit.name}</Marquee>
                   <Text style={styles.sourceMeta}>
-                    {bytes(hit.size)}
+                    {bytes(torrentBytes(hit, episodes, season))}
                     {hit.quality ? ` · ${hit.quality}` : ''}
                     {picked && hit.scope !== 'episode'
                       ? ` · ${hit.scope === 'season' ? 'season pack' : 'complete series'}`
