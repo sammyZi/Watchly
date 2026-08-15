@@ -48,15 +48,22 @@ async function probe() {
  * fine and the service is not, and calling that "no internet" would raise a
  * banner that nothing can ever clear.
  */
-export async function net(url: string, init?: RequestInit): Promise<Response> {
+export async function net(
+  url: string,
+  init?: RequestInit,
+  /** Indexer misses are not "you are offline" — they must not flip the banner. */
+  quiet = false
+): Promise<Response> {
   try {
     const res = await fetch(url, init);
     set(true);
     return res;
   } catch (e) {
-    // An aborted request threw because we cancelled it, not because the
-    // network went away.
-    if (!init?.signal?.aborted) {
+    const aborted =
+      !!init?.signal?.aborted ||
+      (e instanceof Error && (e.name === 'AbortError' || /abort/i.test(e.message)));
+    // An abort, or a single index being down, is not a lost connection.
+    if (!aborted && !quiet) {
       set(false);
       probe();
     }
