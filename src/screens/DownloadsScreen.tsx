@@ -10,7 +10,7 @@ import { Thumb } from '../components/Thumb';
 import { ProgressBar } from '../components/ProgressBar';
 import { Screen } from '../components/Screen';
 import { ago, bytes, speed } from '../lib/format';
-import { parseEpisode } from '../lib/search';
+import { parseEpisode, seasonsIn } from '../lib/search';
 import { searchableName } from '../lib/title';
 import { font, radius, space, TAB_INSET, type, useColors, useThemedStyles } from '../theme';
 
@@ -189,8 +189,8 @@ function DownloadsScreenView({
   const colors = useColors();
   const styles = useThemedStyles((c) => ({
     flex: { flex: 1 },
-    pinned: { paddingHorizontal: space.xl, paddingBottom: space.md },
-    body: { paddingHorizontal: space.xl, paddingBottom: TAB_INSET, gap: space.md },
+    pinned: { paddingBottom: space.md },
+    body: { paddingHorizontal: space.lg, paddingBottom: TAB_INSET, gap: space.md },
     head: { paddingBottom: space.sm },
     card: {
       backgroundColor: c.surface,
@@ -435,6 +435,9 @@ function DownloadsScreenView({
     totalSize > 0 ? Math.min(100, (haveBytes / totalSize) * 100) : pct;
   const remaining = Math.max(0, totalSize - haveBytes);
   const headline = showTitle(active.name);
+  const season = current
+    ? parseEpisode(current.name)?.season
+    : (parseEpisode(active.name)?.season ?? seasonsIn(active.name)[0]);
   const stage = stageLabel(active.progress?.state, paused);
   const sub = paused ? stage : pct >= 100 ? 'Saving to device…' : stage;
   const starting = !paused && pct < 1;
@@ -470,7 +473,15 @@ function DownloadsScreenView({
                         numberOfLines={1}
                         style={[styles.stage, paused && styles.stagePaused]}
                       >
+                        {season != null ? `${seasonLabel(season)} · ` : ''}
                         {doneCount} of {onQueue.length || queue.length}
+                      </Text>
+                    ) : season != null ? (
+                      <Text
+                        numberOfLines={1}
+                        style={[styles.stage, paused && styles.stagePaused]}
+                      >
+                        {seasonLabel(season)}
                       </Text>
                     ) : null}
                   </View>
@@ -622,7 +633,6 @@ function DownloadsScreenView({
   return (
     <Screen title="Downloads" icon="download">
       <View style={styles.flex}>
-        {actives.map(renderActive)}
       <FlatList
         style={styles.flex}
         data={groupSaved(items)}
@@ -633,6 +643,7 @@ function DownloadsScreenView({
         ItemSeparatorComponent={() => <View style={{ height: space.sm }} />}
         ListHeaderComponent={
           <View style={styles.head}>
+            {actives.map(renderActive)}
             {items.length > 0 && (
               <Text style={styles.heading}>Saved</Text>
             )}
