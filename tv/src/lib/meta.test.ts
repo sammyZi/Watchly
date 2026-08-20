@@ -60,7 +60,7 @@ assert.deepEqual(
 assert.equal(titles[0].runtime, '136 min');
 
 // Review links: IMDb is exact, the rest are searches carrying title and year.
-const links = reviewLinks({ ...toMeta({ name: 'The Matrix', year: '1999' }), imdb: 'tt0133093', kind: 'movie', backdrop: null, runtime: null });
+const links = reviewLinks({ ...toMeta({ name: 'The Matrix', year: '1999' }), imdb: 'tt0133093', kind: 'movie', backdrop: null, runtime: null, episodes: [] });
 assert.deepEqual(links.map((l) => l.label), ['IMDb', 'Rotten Tomatoes', 'Metacritic', 'Letterboxd']);
 assert.equal(links[0].url, 'https://www.imdb.com/title/tt0133093/reviews');
 assert.ok(links[1].url.endsWith('search?search=The%20Matrix%201999'));

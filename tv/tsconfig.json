@@ -1,0 +1,9 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    // src/lib imports carry the .ts extension so `node --experimental-strip-types`
+    // can run the tests in there directly.
+    "allowImportingTsExtensions": true
+  }
+}

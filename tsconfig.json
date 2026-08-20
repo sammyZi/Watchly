@@ -5,5 +5,7 @@
     // src/lib imports carry the .ts extension so `node --experimental-strip-types`
     // can run the tests in there directly.
     "allowImportingTsExtensions": true
-  }
+  },
+  // tv/ is its own project with its own tsconfig — see tv/README.md.
+  "exclude": ["tv"]
 }
