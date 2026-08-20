@@ -13,6 +13,12 @@
        which is what makes a TV eligible to install it at all. -->
   <uses-feature android:name="android.software.leanback" android:required="true"/>
   <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
+  <!-- A television reports neither orientation feature. Any activity declaring
+       android:screenOrientation implies one as *required*, and the set-top box
+       then refuses the install with "this app isn't compatible with your TV" —
+       so both are declared unnecessary outright. -->
+  <uses-feature android:name="android.hardware.screen.landscape" android:required="false"/>
+  <uses-feature android:name="android.hardware.screen.portrait" android:required="false"/>
   <uses-feature android:name="android.hardware.faketouch" android:required="false"/>
   <uses-feature android:name="android.hardware.camera" android:required="false"/>
   <uses-feature android:name="android.hardware.location.gps" android:required="false"/>
@@ -30,7 +36,7 @@
     <meta-data android:name="expo.modules.updates.ENABLE_BSDIFF_PATCH_SUPPORT" android:value="true"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH" android:value="ALWAYS"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>
-    <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode|smallestScreenSize|assetsPaths" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true" android:screenOrientation="landscape">
+    <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode|smallestScreenSize|assetsPaths" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true" android:screenOrientation="unspecified">
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>
         <!-- LEANBACK_LAUNCHER is the one the TV home screen reads. LAUNCHER is
