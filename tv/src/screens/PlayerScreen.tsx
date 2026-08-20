@@ -51,13 +51,24 @@ function delta(seconds: number) {
   return `${sign}${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
 }
 
+/**
+ * libVLC's fit modes, named and ordered as the phone app names them.
+ *
+ * Stretch distorts the picture to the screen; crop keeps its shape and cuts
+ * the overhang. Both are here because they are the two different things people
+ * mean by "fill", and stretch is the one reached for first.
+ *
+ * The names are libVLC's own enum constants — the native side does
+ * `MediaPlayer.ScaleType.valueOf(name)` and falls back to best fit — so these
+ * strings have to match exactly.
+ */
 const SCALES: { value: VlcScaleType; label: string }[] = [
   { value: 'SURFACE_BEST_FIT', label: 'Best fit' },
-  { value: 'SURFACE_FIT_SCREEN', label: 'Fit screen (crop)' },
-  { value: 'SURFACE_FILL', label: 'Stretch to fill' },
+  { value: 'SURFACE_FILL', label: 'Stretch' },
+  { value: 'SURFACE_FIT_SCREEN', label: 'Crop' },
   { value: 'SURFACE_16_9', label: '16:9' },
   { value: 'SURFACE_4_3', label: '4:3' },
-  { value: 'SURFACE_ORIGINAL', label: 'Original size' },
+  { value: 'SURFACE_ORIGINAL', label: 'Original' },
 ];
 
 type Panel = 'subtitles' | 'audio' | 'speed' | 'aspect' | 'find' | null;
