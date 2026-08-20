@@ -39,6 +39,8 @@ export type Colors = {
   scrim: string;
   /** Floating tab capsule fill (with alpha). */
   tabBar: string;
+  /** Ring drawn around whatever the D-pad is currently on. */
+  focus: string;
 };
 
 export const darkColors: Colors = {
@@ -61,6 +63,7 @@ export const darkColors: Colors = {
   warnSoft: '#2b2011',
   scrim: '#000000cc',
   tabBar: '#181d28d9',
+  focus: '#ffffff',
 };
 
 export const lightColors: Colors = {
@@ -83,6 +86,7 @@ export const lightColors: Colors = {
   warnSoft: '#fff4e0',
   scrim: '#00000099',
   tabBar: '#fde8eaeb',
+  focus: '#12141a',
 };
 
 /** @deprecated Prefer useColors() — static snapshot for rare non-React helpers. */
@@ -90,7 +94,7 @@ export let colors: Colors = darkColors;
 
 export const hues = ['#d42f37', '#7c5cff', '#00b8d4', '#f5a623', '#38c172'];
 
-export const TAB_INSET = 96;
+export const TAB_INSET = 132;
 
 export const font = {
   regular: 'NotoSans_400Regular',
@@ -99,23 +103,32 @@ export const font = {
   bold: 'NotoSans_700Bold',
 };
 
-export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 };
+export const space = { xs: 6, sm: 12, md: 18, lg: 24, xl: 36, xxl: 48 };
 
-export const radius = { sm: 8, md: 12, lg: 18, pill: 999 };
+export const radius = { sm: 10, md: 16, lg: 24, pill: 999 };
+
+/**
+ * Overscan. Televisions crop the edges of the picture by a few percent and
+ * every set does it differently, so nothing readable goes nearer the edge
+ * than this.
+ */
+export const SAFE = { x: 48, y: 27 };
 
 export const type = {
-  display: { fontFamily: font.bold, fontSize: 21, letterSpacing: -0.3 },
-  title: { fontFamily: font.medium, fontSize: 15, lineHeight: 22 },
-  body: { fontFamily: font.regular, fontSize: 14, lineHeight: 21 },
-  label: { fontFamily: font.medium, fontSize: 13 },
-  meta: { fontFamily: font.regular, fontSize: 12, lineHeight: 17 },
+  display: { fontFamily: font.bold, fontSize: 34, letterSpacing: -0.4 },
+  title: { fontFamily: font.medium, fontSize: 22, lineHeight: 30 },
+  body: { fontFamily: font.regular, fontSize: 19, lineHeight: 28 },
+  label: { fontFamily: font.medium, fontSize: 18 },
+  meta: { fontFamily: font.regular, fontSize: 16, lineHeight: 23 },
   overline: {
     fontFamily: font.medium,
-    fontSize: 11,
-    letterSpacing: 0.8,
+    fontSize: 14,
+    letterSpacing: 1,
     textTransform: 'uppercase' as const,
   },
-  numeric: { fontFamily: font.bold, fontSize: 40, letterSpacing: -1 },
+  numeric: { fontFamily: font.bold, fontSize: 54, letterSpacing: -1 },
+  /** The one thing bigger than everything: a hero title over artwork. */
+  hero: { fontFamily: font.bold, fontSize: 52, letterSpacing: -1.2, lineHeight: 60 },
 };
 
 export const shadow = {

@@ -9,8 +9,6 @@ import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
 import com.facebook.react.defaults.DefaultReactActivityDelegate
 
-import androidx.mediarouter.media.MediaRouter
-
 import com.reactnative.googlecast.api.RNGCCastContext
 
 import expo.modules.ReactActivityDelegateWrapper
@@ -32,25 +30,9 @@ class MainActivity : ReactActivity() {
     preferHighRefreshRate()
   }
 
-  /**
-   * Nothing to handle — registering it is the point.
-   *
-   * MediaRouter only scans the network while some callback has asked it to.
-   * Normally that is Cast's own MediaRouteButton; this app draws its own cast
-   * control, so without this the router stays passive, finds no receivers, and
-   * the cast dialog opens onto an empty list.
-   */
-  private val routeCallback = object : MediaRouter.Callback() {}
-
   override fun onResume() {
     super.onResume()
     preferHighRefreshRate()
-  }
-
-  override fun onPause() {
-    // Active scanning is expensive; it belongs to the foreground only.
-    runCatching { MediaRouter.getInstance(this).removeCallback(routeCallback) }
-    super.onPause()
   }
 
   override fun onDestroy() {
@@ -58,20 +40,6 @@ class MainActivity : ReactActivity() {
       expo.modules.torrentstream.TorrentStreamModule.dismissNotify(this)
     }
     super.onDestroy()
-  }
-
-  private fun startCastDiscovery() {
-    runCatching {
-      val castContext = RNGCCastContext.getSharedInstance(this) ?: return
-      // Null until the cast context finishes initialising — nothing to scan for
-      // yet, and onResume runs again on the way back from anywhere.
-      val selector = castContext.mergedSelector ?: return
-      MediaRouter.getInstance(this).addCallback(
-        selector,
-        routeCallback,
-        MediaRouter.CALLBACK_FLAG_REQUEST_DISCOVERY
-      )
-    }
   }
 
   /** Prefer the panel's highest mode up to 120Hz when the device offers it. */

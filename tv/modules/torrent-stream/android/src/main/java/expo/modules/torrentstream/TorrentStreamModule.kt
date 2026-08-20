@@ -214,6 +214,15 @@ class PlayOptions : Record {
 
   /** Public Movies/Watchly/<this>/filename — a show + season label. */
   @Field var saveFolder: String = ""
+
+  /**
+   * Megabytes of the streamed file allowed on disk before it rolls over.
+   *
+   * A television has single-digit gigabytes free and a 4K film is tens of them,
+   * so the stream cannot simply accumulate. Zero disables the cap. See
+   * `rollCache` for what happens when it is reached.
+   */
+  @Field var cacheCapMb: Int = 0
 }
 
 class TorrentStreamModule : Module() {
@@ -244,6 +253,11 @@ class TorrentStreamModule : Module() {
   private var readyAt = 0L
   /** Last piece of the container header region. */
   private var headEndPiece = 0
+  /** Bytes of the streamed file allowed on disk; 0 lets it grow to full size. */
+  private var cacheCapBytes = 0L
+  /** Tick of the last roll, so a cap set too low cannot thrash. */
+  private var lastRollTick = -1000
+
   /** Starts of the currently applied readahead zones; empty until first apply. */
   private var zoneStarts = emptyList<Int>()
   private var zoneWidth = -1
@@ -1353,6 +1367,8 @@ class TorrentStreamModule : Module() {
       if (options.windowPieces > 0) options.windowPieces
       else maxOf(2, (WINDOW_BYTES / ti.pieceLength()).toInt())
     removeFilesAfterStop = options.removeFilesAfterStop
+    cacheCapBytes = options.cacheCapMb.toLong() * 1024 * 1024
+    lastRollTick = -1000
     info = ti
     infoHashHex = ti.infoHash().toHex()
     fileIndex = index
@@ -1858,6 +1874,10 @@ class TorrentStreamModule : Module() {
       return
     }
 
+    // Disk is finite and a 4K file is not. A roll replaces the handle, so
+    // everything below would be working on a dead one — pick it up next tick.
+    if (ticks % 4 == 0 && rollCache(h, ti)) return
+
     // One window per live reader, lowest offset first — that is the playback
     // connection, and it gets the tightest deadlines.
     //
@@ -2026,6 +2046,100 @@ class TorrentStreamModule : Module() {
         }
       ))
     }
+  }
+
+  /**
+   * Free the disk by starting the file over from where the viewer is.
+   *
+   * A 4K film is tens of gigabytes and a television has single digits free, so
+   * a stream cannot accumulate the way it does on a phone. libtorrent has no
+   * way to forget one piece — priorities decide what to *fetch*, never what to
+   * drop — so the only lever is to remove the torrent, delete its data, and add
+   * it again: have-state resets, the sparse file is recreated empty, and the
+   * zone re-aims at wherever the readers are on the next tick.
+   *
+   * Playback survives it. The player's HTTP connection stays open, because the
+   * server blocks on `available` — false for every piece until the ones under
+   * the playhead arrive again — then reopens the file and carries on. Seeking
+   * backwards still works too: it moves a reader, the zone follows it, and
+   * those pieces are fetched again rather than read as holes.
+   *
+   * ponytail: one rebuffer per roll, so the cap wants to be as large as the
+   * disk allows. Evicting continuously instead needs FALLOC_FL_PUNCH_HOLE
+   * through JNI, and libtorrent would then seed the zeros it still believes are
+   * pieces — upgrade path only if the stall becomes the thing people notice.
+   *
+   * @return true when the handle was replaced, which makes the caller's stale.
+   */
+  private fun rollCache(h: TorrentHandle, ti: TorrentInfo): Boolean {
+    if (cacheCapBytes <= 0L || !announcedReady) return false
+    // ~30s of ticks. A cap set below the readahead window would otherwise roll
+    // on every pass and the viewer would never get a frame.
+    if (ticks - lastRollTick < 60) return false
+
+    val status = runCatching { h.status() }.getOrNull() ?: return false
+    val onDisk = status.totalDone()
+    // A cap guessed too high still must not walk into the hard out-of-space
+    // stop, which kills the stream outright.
+    val low = saveDir.usableSpace < FREE_SPACE_MIN * 2
+    if (onDisk < cacheCapBytes && !low) return false
+
+    // No reader means no playhead to restart from, and rolling would only throw
+    // the buffer away.
+    val at = readers.values.minOrNull() ?: return false
+    lastRollTick = ticks
+    log(
+      "roll: ${onDisk / 1024 / 1024}MB on disk, cap ${cacheCapBytes / 1024 / 1024}MB, " +
+        "${saveDir.usableSpace / 1024 / 1024}MB free — restarting at byte $at"
+    )
+
+    // Keep the swarm across the gap: these are dialled immediately by the new
+    // handle, so what the viewer waits for is a re-fetch, not a re-discovery.
+    persistPeers()
+    val peers = loadPeers(infoHashHex ?: ti.infoHash().toHex())
+    runCatching { h.clearPieceDeadlines() }
+    deadlined.clear()
+
+    // Removed first and deleted by hand rather than with DELETE_FILES: that
+    // flag unlinks asynchronously, and the replacement torrent would be writing
+    // into the same paths while libtorrent was still deleting them.
+    runCatching { session.remove(h) }
+    var waited = 0
+    while (session.find(ti.infoHash()) != null && waited < 5_000) {
+      Thread.sleep(50)
+      waited += 50
+    }
+    val files = ti.files()
+    File(saveDir, ti.name()).deleteRecursively()
+    for (i in 0 until files.numFiles()) File(saveDir, files.filePath(i)).delete()
+
+    val priorities = Array(files.numFiles()) { Priority.IGNORE }
+    wantedFiles.forEach { if (it in priorities.indices) priorities[it] = Priority.DEFAULT }
+    session.download(ti, saveDir, null, priorities, peers, TorrentFlags.SEQUENTIAL_DOWNLOAD)
+    val next = awaitHandle(ti)
+    if (next == null) {
+      log("roll: torrent did not come back")
+      sendEvent("error", mapOf("message" to "The stream ran out of space and could not restart."))
+      return true
+    }
+    // Same reasoning as play(): piece deadlines do the ordering, not sequential
+    // mode, which hands piece 0 to whichever peer happens to be slowest.
+    next.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
+    val existing = runCatching { next.trackers().map { it.url() } }.getOrDefault(emptyList())
+    TRACKERS.filterNot { it in existing }.forEach {
+      runCatching { next.addTracker(AnnounceEntry(it)) }
+    }
+    next.forceReannounce()
+    next.forceDHTAnnounce()
+
+    handle = next
+    // The applied zone describes a file that no longer exists; the next tick
+    // re-derives it from the readers.
+    zoneStarts = emptyList()
+    zoneWidth = -1
+    zoneRushedTail = false
+    server?.reopen()
+    return true
   }
 
   /**
@@ -2244,6 +2358,8 @@ class TorrentStreamModule : Module() {
     announcedReady = false
     peerSaveTick = 0
     fullFile = false
+    cacheCapBytes = 0L
+    lastRollTick = -1000
     if (downloads.isNotEmpty() && poller == null) startPolling()
   }
 

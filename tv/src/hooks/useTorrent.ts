@@ -4,10 +4,8 @@ import TorrentStream, {
   type TorrentMeta,
 } from '../../modules/torrent-stream';
 import type { Item } from '../lib/history';
-import { saveDownloadJob } from '../lib/downloadJob';
 import { withTrackers } from '../lib/magnet';
 import type { Settings } from '../lib/settings';
-import { searchableName } from '../lib/title';
 
 /**
  * idle      nothing running
@@ -164,7 +162,6 @@ export function useTorrent(settings: Settings) {
       startRatio = 0,
       opts?: {
         keepProgress?: boolean;
-        fullFile?: boolean;
         fileIndices?: number[];
         queueIndices?: number[];
         season?: number;
@@ -186,21 +183,6 @@ export function useTorrent(settings: Settings) {
       setQueueIndices(queue);
       queueRef.current = queue;
       setPhase('playing');
-      if (opts?.fullFile) {
-        const it = itemRef.current;
-        saveDownloadJob({
-          uri,
-          fileIndex,
-          fileIndices: indices,
-          queueIndices: queue,
-          season: opts.season,
-          title: it?.title,
-          titleName: it?.titleName,
-          poster: it?.poster,
-          imdb: it?.imdb,
-          kind: it?.kind,
-        }).catch(() => {});
-      }
       console.log('[torrent] play', {
         index: fileIndex,
         season: opts?.season ?? -1,
@@ -212,20 +194,16 @@ export function useTorrent(settings: Settings) {
         fileIndex,
         {
           prepareMb: settings.prepareMb,
-          removeFilesAfterStop: opts?.fullFile ? false : settings.removeFilesAfterStop,
+          // Nothing is ever kept on a TV — there is no downloads feature to
+          // keep it for, and the disk is the scarce thing here.
+          removeFilesAfterStop: true,
           startRatio,
-          fullFile: !!opts?.fullFile,
+          fullFile: false,
           fileList: (opts?.fileIndices ?? []).join(','),
           season: opts?.season ?? -1,
-          saveFolder: opts?.fullFile
-            ? itemRef.current?.titleName ||
-              searchableName(
-                itemRef.current?.torrentName ||
-                  itemRef.current?.title ||
-                  ''
-              ) ||
-              ''
-            : '',
+          saveFolder: '',
+          // The rolling cache. Without this a 4K stream fills the TV and stops.
+          cacheCapMb: settings.cacheCapMb,
         },
         (opts?.fileIndices ?? []).join(',')
       ).then((wanted) => {
@@ -238,7 +216,7 @@ export function useTorrent(settings: Settings) {
         setPhase('idle');
       });
     },
-    [settings.prepareMb, settings.removeFilesAfterStop]
+    [settings.prepareMb, settings.cacheCapMb]
   );
 
   /**
@@ -251,7 +229,6 @@ export function useTorrent(settings: Settings) {
       fileIndex: number,
       opts?: {
         keepProgress?: boolean;
-        fullFile?: boolean;
         fileIndices?: number[];
         queueIndices?: number[];
         season?: number;
@@ -283,40 +260,15 @@ export function useTorrent(settings: Settings) {
     [play, settings.addTrackers]
   );
 
-  const persistWanted = (next: number[]) => {
-    const uri = source.current;
-    if (!uri || !next.length) return;
-    const it = itemRef.current;
-    saveDownloadJob({
-      uri,
-      fileIndex: next[0],
-      fileIndices: next,
-      queueIndices: queueRef.current.length ? queueRef.current : next,
-      title: it?.title,
-      titleName: it?.titleName,
-      poster: it?.poster,
-      imdb: it?.imdb,
-      kind: it?.kind,
-    }).catch(() => {});
-  };
-
   const skipFile = useCallback((index: number) => {
-    setWantedIndices((prev) => {
-      const next = prev.filter((i) => i !== index);
-      persistWanted(next);
-      return next;
-    });
+    setWantedIndices((prev) => prev.filter((i) => i !== index));
     TorrentStream.skipFile(index).catch((e: any) =>
       console.warn('[torrent] skip failed', e?.message ?? e)
     );
   }, []);
 
   const includeFile = useCallback((index: number) => {
-    setWantedIndices((prev) => {
-      const next = prev.includes(index) ? prev : [...prev, index];
-      persistWanted(next);
-      return next;
-    });
+    setWantedIndices((prev) => (prev.includes(index) ? prev : [...prev, index]));
     TorrentStream.includeFile(index).catch((e: any) =>
       console.warn('[torrent] include failed', e?.message ?? e)
     );
