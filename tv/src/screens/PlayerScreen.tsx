@@ -325,7 +325,15 @@ export function PlayerScreen({
   const [panel, setPanel] = useState<Panel>(null);
   const [tracks, setTracks] = useState<VlcTracks | null>(null);
   const [subtitle, setSubtitle] = useState<number | null>(null);
+  /**
+   * Null until the viewer picks one, which leaves libVLC's own choice alone —
+   * the native side treats null as "don't touch". It must never be seeded from
+   * the reported id: that is -1 ("Disable") until VLC has settled on a track,
+   * and setting -1 back turns the sound off for the rest of the film.
+   */
   const [audio, setAudio] = useState<number | null>(null);
+  /** What VLC chose by itself, for labelling only. */
+  const [defaultAudio, setDefaultAudio] = useState<number | null>(null);
   const [rate, setRate] = useState(1);
   const [scale, setScale] = useState<VlcScaleType>('SURFACE_BEST_FIT');
   const [note, setNote] = useState<string | null>(null);
@@ -594,7 +602,10 @@ export function PlayerScreen({
     subtitle == null
       ? 'Off'
       : tracks?.subtitles?.find((t) => t.id === subtitle)?.name ?? 'On';
-  const audioName = tracks?.audio?.find((t) => t.id === audio)?.name;
+  // Falls back to whatever VLC settled on, so the chip reads the truth rather
+  // than blank just because nobody has chosen anything.
+  const activeAudio = audio ?? defaultAudio;
+  const audioName = tracks?.audio?.find((t) => t.id === activeAudio)?.name;
   const scaleName = SCALES.find((s) => s.value === scale)?.label ?? 'Best fit';
 
   // While the ‹ › keys are walking, the bar shows where they have got to
@@ -644,9 +655,9 @@ export function PlayerScreen({
           onBuffering={({ nativeEvent }) => setBuffering(nativeEvent.isBuffering)}
           onTracks={({ nativeEvent }) => {
             setTracks(nativeEvent);
-            // libVLC picks an audio track itself; adopt it rather than
-            // overriding, or the first frame plays silent.
-            setAudio((prev) => prev ?? nativeEvent.audioId ?? nativeEvent.defaultAudio ?? null);
+            // Recorded to label the list, never fed back as the selection.
+            const picked = nativeEvent.defaultAudio ?? nativeEvent.audioId;
+            if (picked != null && picked >= 0) setDefaultAudio(picked);
           }}
           onEnded={onEnded}
           onFailed={({ nativeEvent }) => {
@@ -692,7 +703,19 @@ export function PlayerScreen({
             show('transport');
           }}
           scale={1}
-          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+          // No ring. Focusable draws one on whatever holds focus, and this
+          // target is the whole screen — so with the bar down it framed the
+          // picture in a white rounded rectangle for the entire film.
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            borderWidth: 0,
+            borderRadius: 0,
+          }}
+          focusedStyle={{ borderColor: 'transparent' }}
         >
           <View style={{ flex: 1 }} />
         </Focusable>
@@ -833,7 +856,7 @@ export function PlayerScreen({
         <Sheet
           title="Audio"
           options={audioOptions}
-          value={audio}
+          value={activeAudio}
           empty="No audio tracks reported yet."
           onPick={(id) => {
             setAudio(id);
