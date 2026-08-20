@@ -16,9 +16,28 @@ import { asTitle, type Saved } from '../lib/saved';
 import { useOnline } from '../lib/net';
 import { clock } from '../lib/format';
 import { parseEpisode } from '../lib/search';
-import { font, radius, SAFE, space, type, useColors, useThemedStyles } from '../theme';
+import {
+  GUTTER,
+  SAFE,
+  fadeRight,
+  fadeToBg,
+  font,
+  radius,
+  space,
+  type,
+  useColors,
+  useThemedStyles,
+} from '../theme';
 
-type Shelf = { title: string; kind: 'movie' | 'tv'; genre?: string };
+type Shelf = {
+  title: string;
+  kind: 'movie' | 'tv';
+  genre?: string;
+  /** Why this shelf is here. Only set on shelves the app inferred. */
+  note?: string;
+  /** Landscape backdrop cards — the lead recommendation only. */
+  wide?: boolean;
+};
 
 const SHELVES: Shelf[] = [
   { title: 'Trending films', kind: 'movie' },
@@ -57,24 +76,37 @@ function resumeStamp(item: Item): string | null {
  */
 function Hero({ title }: { title: Title | null }) {
   const styles = useThemedStyles((c) => ({
-    wrap: { height: 420, justifyContent: 'flex-end' as const, marginBottom: space.lg },
+    // 250 of the 540dp a television gives you, which is what it takes to leave
+    // a whole poster *and its title* above the fold. The first rail being fully
+    // visible is the only thing telling the viewer the page continues.
+    wrap: { height: 250, justifyContent: 'flex-end' as const, marginBottom: space.md },
     art: { position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0 },
-    veil: {
+    // Two gradients rather than a flat wash: the artwork stays legible on the
+    // right, the words stay legible on the left, and the bottom edge dissolves
+    // into the page instead of ending on a line.
+    veilX: {
       position: 'absolute' as const,
       top: 0,
       left: 0,
       right: 0,
       bottom: 0,
-      backgroundColor: c.bg,
-      opacity: 0.72,
+      experimental_backgroundImage: fadeRight(c.bg),
     },
-    body: { paddingHorizontal: SAFE.x, paddingBottom: space.lg, maxWidth: 1000 },
+    veilY: {
+      position: 'absolute' as const,
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      experimental_backgroundImage: fadeToBg(c.bg, 0.15),
+    },
+    body: { paddingLeft: GUTTER, paddingBottom: space.lg, maxWidth: 620 },
     name: { ...type.hero, color: c.text },
-    facts: { ...type.label, color: c.muted, marginTop: space.sm },
-    plot: { ...type.body, color: c.muted, marginTop: space.md },
+    facts: { ...type.label, color: c.muted, marginTop: space.xs },
+    plot: { ...type.body, color: c.muted, marginTop: space.sm },
   }));
 
-  if (!title) return <View style={{ height: 120 }} />;
+  if (!title) return <View style={{ height: 90 }} />;
 
   const facts = [
     title.year,
@@ -94,7 +126,8 @@ function Hero({ title }: { title: Title | null }) {
           resizeMode="cover"
         />
       )}
-      <View style={styles.veil} />
+      <View style={styles.veilY} />
+      <View style={styles.veilX} />
       <View style={styles.body}>
         <Text style={styles.name} numberOfLines={2}>
           {title.title}
@@ -121,7 +154,7 @@ function ResumeRail({
   first?: boolean;
 }) {
   const styles = useThemedStyles((c) => ({
-    wrap: { marginBottom: space.xl, paddingHorizontal: SAFE.x },
+    wrap: { marginBottom: space.lg, paddingLeft: GUTTER, paddingRight: SAFE.x },
     heading: {
       ...type.title,
       fontFamily: font.semibold,
@@ -130,15 +163,23 @@ function ResumeRail({
     },
     row: { flexDirection: 'row' as const, gap: space.md },
     card: {
-      width: 330,
-      height: 186,
+      width: 236,
+      height: 133,
       borderRadius: radius.md,
       overflow: 'hidden' as const,
       backgroundColor: c.surface,
       justifyContent: 'flex-end' as const,
     },
     art: { position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0 },
-    strip: { padding: space.md, backgroundColor: c.scrim },
+    strip: {
+      paddingHorizontal: space.sm,
+      paddingBottom: space.sm,
+      paddingTop: space.xl,
+      // Faded rather than a filled block: a hard scrim edge cuts straight
+      // across the artwork and reads as a rendering fault.
+      experimental_backgroundImage:
+        'linear-gradient(to top, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.68) 55%, rgba(0,0,0,0) 100%)',
+    },
     name: { ...type.label, color: '#ffffff' },
     stamp: { ...type.meta, color: '#cbd2e0', marginTop: 2 },
   }));
@@ -233,7 +274,15 @@ export function HomeScreen({
       if (!live) return;
       setPicks(
         found.map(({ genre, kind }, i) => ({
-          title: i === 0 ? 'Recommended for you' : `Because you like ${genre}`,
+          title: i === 0 ? 'Recommended for you' : `More ${genre.toLowerCase()}`,
+          // The lead pick says what it is reading from and gets the wider
+          // cards, so a shelf the app chose does not look like one more chart
+          // it happened to fetch.
+          note:
+            i === 0
+              ? `From the ${genre.toLowerCase()} you have been watching`
+              : undefined,
+          wide: i === 0,
           kind,
           genre,
         }))
@@ -244,7 +293,7 @@ export function HomeScreen({
     };
   }, [history, saved, online]);
 
-  const chosen = useMemo(
+  const chosen = useMemo<Shelf[]>(
     () =>
       genres.map((genre) => ({
         title: genre === ANIME_GENRE ? 'Anime' : genre,
@@ -281,14 +330,25 @@ export function HomeScreen({
     [saved]
   );
 
+  // The hero follows focus, but focus starts on the Continue watching card —
+  // which is an Item, not a Title, and has no backdrop to show. Without a
+  // fallback the page opens on a blank third of a screen.
+  const lead = useMemo(() => {
+    for (const shelf of shelves) {
+      const list = loaded[shelfKey(shelf)];
+      if (list?.length) return list[0];
+    }
+    return watchlist[0] ?? null;
+  }, [shelves, loaded, watchlist]);
+
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.bg }}
       contentContainerStyle={{ paddingBottom: SAFE.y * 3 }}
     >
-      <Hero title={hero} />
+      <Hero title={hero ?? lead} />
       <ResumeRail items={resumable} onPick={onResume} first={resumable.length > 0} />
-      <View style={{ paddingHorizontal: SAFE.x }}>
+      <View style={{ paddingLeft: GUTTER, paddingRight: SAFE.x }}>
         {!!watchlist.length && (
           <Rail
             heading="Your list"
@@ -302,6 +362,8 @@ export function HomeScreen({
           <Rail
             key={shelfKey(shelf)}
             heading={shelf.title}
+            note={shelf.note}
+            wide={shelf.wide}
             titles={loaded[shelfKey(shelf)] ?? []}
             onPick={onPickTitle}
             onFocusItem={setHero}

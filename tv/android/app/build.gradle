@@ -105,7 +105,10 @@ android {
         abi {
             enable true
             reset()
-            include 'arm64-v8a', 'armeabi-v7a'
+            // Driven by reactNativeArchitectures (gradle.properties) so that
+            // building for a television emulator is a flag rather than an edit:
+            //   npx expo run:android -- -PreactNativeArchitectures=x86
+            include(*(project.property('reactNativeArchitectures').split(',')))
             universalApk false
         }
     }

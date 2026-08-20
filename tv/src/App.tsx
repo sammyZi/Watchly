@@ -15,72 +15,145 @@ import { SearchScreen } from './screens/SearchScreen';
 import { DetailScreen } from './screens/DetailScreen';
 import { PlayerScreen } from './screens/PlayerScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
+import { LibraryScreen } from './screens/LibraryScreen';
 import { resumeRatio, useTorrent } from './hooks/useTorrent';
 import {
+  clearHistory,
+  drop,
   loadHistory,
+  patch,
   put,
   setDuration,
+  setFileSubs,
   setPosition,
   type Item,
+  type SavedSub,
 } from './lib/history';
 import { loadSaved, toggleSaved, type List, type Saved } from './lib/saved';
 import { loadTitle, type Episode, type Title } from './lib/meta';
+import type { TorrentMeta } from '../modules/torrent-stream';
 import { episodeTag, type Hit } from './lib/search';
 import { pickFile } from './lib/pick';
 import { DEFAULTS, loadSettings, saveSettings, type Settings } from './lib/settings';
-import { ThemeProvider, font, radius, space, type, useColors, useThemedStyles } from './theme';
+import {
+  NAV_OPEN_W,
+  NAV_W,
+  SAFE,
+  ThemeProvider,
+  fadeRight,
+  font,
+  radius,
+  space,
+  type,
+  useColors,
+  useThemedStyles,
+} from './theme';
 
 SplashScreen.preventAutoHideAsync();
 
-type Tab = 'home' | 'search' | 'settings';
+type Tab = 'home' | 'search' | 'library' | 'settings';
 
 const TABS: { key: Tab; label: string; icon: IconName }[] = [
   { key: 'home', label: 'Home', icon: 'home' },
   { key: 'search', label: 'Search', icon: 'search' },
+  { key: 'library', label: 'Library', icon: 'clock' },
   { key: 'settings', label: 'Settings', icon: 'sliders' },
 ];
 
-const RAIL_W = 210;
-
 /**
- * The left rail.
+ * The navigation rail.
  *
- * A television reads left to right from a fixed seat, so navigation lives down
- * the side where the D-pad can reach it with one press from anywhere on the
- * page — a bottom bar would be four presses down through a rail of posters.
+ * Floats over the page rather than taking a column out of it, so a backdrop can
+ * run the full width of the television behind it — and collapses to icons the
+ * moment focus leaves, because a fifth of a 960dp canvas is far too much to
+ * spend on three words.
+ *
+ * It lives down the left because the D-pad reaches it with one press from
+ * anywhere on a page of rails; a bottom bar would be four presses down through
+ * the posters.
  */
 function Nav({ tab, onChange }: { tab: Tab; onChange: (tab: Tab) => void }) {
   const colors = useColors();
+  // Counted, not a boolean: blur of the item being left fires before focus of
+  // the one being entered, and a boolean makes the rail flicker shut between
+  // every pair of items.
+  const held = useRef(0);
+  const [open, setOpen] = useState(false);
+
   const styles = useThemedStyles((c) => ({
     rail: {
-      width: RAIL_W,
-      paddingVertical: space.xxl,
-      paddingLeft: space.lg,
-      backgroundColor: c.bg,
-      gap: space.sm,
+      position: 'absolute' as const,
+      top: 0,
+      left: 0,
+      bottom: 0,
+      paddingTop: SAFE.y,
+      paddingLeft: space.md,
+      gap: space.xs,
+      zIndex: 2,
     },
-    mark: { ...type.display, color: c.accent, marginBottom: space.xl, paddingLeft: space.md },
+    // Drawn wider than the rail itself, and wider again once it opens: the
+    // labels sit over a backdrop, and a fade that stops at the rail's own edge
+    // leaves "Search" reading straight across a hero title.
+    veil: {
+      position: 'absolute' as const,
+      top: 0,
+      bottom: 0,
+      left: 0,
+      experimental_backgroundImage: fadeRight(c.bg),
+    },
+    mark: {
+      ...type.title,
+      fontFamily: font.bold,
+      color: c.accent,
+      marginBottom: space.xl,
+      paddingLeft: space.sm,
+    },
     item: {
       flexDirection: 'row' as const,
       alignItems: 'center' as const,
       gap: space.md,
-      paddingHorizontal: space.md,
-      height: 60,
+      paddingHorizontal: space.sm,
+      height: 44,
       borderRadius: radius.md,
     },
+    markGap: { height: type.title.lineHeight + space.xl },
     label: { ...type.label, color: c.faint },
   }));
 
   return (
-    <View style={styles.rail}>
-      <Text style={styles.mark}>Watchly</Text>
+    <View style={[styles.rail, { width: open ? NAV_OPEN_W : NAV_W }]}>
+      <View
+        style={[styles.veil, { width: open ? NAV_OPEN_W * 2.4 : NAV_W * 1.6 }]}
+        pointerEvents="none"
+      />
+      {open ? (
+        <Text style={styles.mark} numberOfLines={1}>
+          Watchly
+        </Text>
+      ) : (
+        // Closed, the icons are the whole rail — a single letter floating above
+        // them reads as a rendering fault rather than a wordmark.
+        <View style={styles.markGap} />
+      )}
       {TABS.map((t) => {
         const on = t.key === tab;
         return (
           <Focusable
             key={t.key}
             onPress={() => onChange(t.key)}
-            scale={1.02}
+            onFocus={() => {
+              held.current += 1;
+              setOpen(true);
+            }}
+            onBlur={() => {
+              held.current -= 1;
+              // Settles on the next frame, by which time the sibling being
+              // entered has already counted itself in.
+              setTimeout(() => {
+                if (held.current <= 0) setOpen(false);
+              }, 0);
+            }}
+            scale={1}
             style={styles.item}
             focusedStyle={{ backgroundColor: colors.focus }}
           >
@@ -88,16 +161,19 @@ function Nav({ tab, onChange }: { tab: Tab; onChange: (tab: Tab) => void }) {
               const tint = focused ? colors.bg : on ? colors.accent : colors.faint;
               return (
                 <>
-                  <Icon name={t.icon} size={24} color={tint} />
-                  <Text
-                    style={[
-                      styles.label,
-                      { color: tint },
-                      on && { fontFamily: font.semibold },
-                    ]}
-                  >
-                    {t.label}
-                  </Text>
+                  <Icon name={t.icon} size={20} color={tint} />
+                  {open && (
+                    <Text
+                      style={[
+                        styles.label,
+                        { color: tint },
+                        on && { fontFamily: font.semibold },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {t.label}
+                    </Text>
+                  )}
                 </>
               );
             }}
@@ -189,6 +265,32 @@ function Shell({
   );
 
   /**
+   * Record what is inside the torrent.
+   *
+   * Continue watching needs this: resuming skips the metadata fetch entirely
+   * and hands the stored list straight to the engine, so an entry without one
+   * has no file to resume.
+   */
+  const rememberFiles = useCallback(
+    async (uri: string, found: TorrentMeta, index: number) => {
+      const items = await patch(uri, {
+        torrentName: found.name,
+        lastFileIndex: index,
+        files: found.files.map(({ index: i, name, path, size, isVideo, isSubtitle }) => ({
+          index: i,
+          name,
+          path,
+          size,
+          isVideo,
+          isSubtitle,
+        })),
+      });
+      setHistory(items);
+    },
+    []
+  );
+
+  /**
    * A chosen release becomes a stream.
    *
    * `tag` names the episode inside a season pack; `pickFile` uses it to choose
@@ -216,25 +318,58 @@ function Shell({
       if (!found) return;
       const index = pickFile(found.files, tag);
       if (index == null) return;
+
+      await rememberFiles(next.uri, found, index);
       play(index, resumeRatio(fresh, index));
     },
-    [inspect, play]
+    [inspect, play, rememberFiles]
   );
 
-  /** Continue watching: the file list is already known, so skip inspect. */
+  /**
+   * Continue watching, from the home page or the library.
+   *
+   * The fast path hands the stored file list straight to the engine. Entries
+   * written before that list was recorded have none — and silently doing
+   * nothing is the worst thing a card can do — so those fall back to resolving
+   * the torrent the long way, and record the list on the way through.
+   */
   const resume = useCallback(
-    (target: Item) => {
-      const index = target.lastFileIndex;
-      if (index == null || !target.files?.length) return;
-      playKnown(target, index);
+    async (target: Item) => {
+      const known = target.lastFileIndex;
+      if (known != null && target.files?.length) {
+        playKnown(target, known);
+        return;
+      }
+
+      const found = await inspect(target);
+      if (!found) return;
+      const index = known ?? pickFile(found.files);
+      if (index == null) return;
+      await rememberFiles(target.uri, found, index);
+      play(index, resumeRatio(target, index));
     },
-    [playKnown]
+    [inspect, play, playKnown, rememberFiles]
   );
 
   const exit = useCallback(() => {
     reset();
     loadHistory().then(setHistory);
   }, [reset]);
+
+  const removeItem = useCallback((target: Item) => {
+    drop(target.uri).then(setHistory);
+  }, []);
+
+  const clearAll = useCallback(() => {
+    clearHistory().then(setHistory);
+  }, []);
+
+  const saveSubs = useCallback(
+    (subs: SavedSub[]) => {
+      if (item) setFileSubs(item, playingIndex, subs);
+    },
+    [item, playingIndex]
+  );
 
   const savePosition = useCallback(
     (seconds: number) => {
@@ -262,8 +397,13 @@ function Shell({
       <PlayerScreen
         url={url}
         name={fileName ?? item?.titleName ?? item?.title ?? ''}
+        searchName={item?.titleName}
+        imdb={item?.imdb}
+        kind={item?.kind}
         startAt={startAt}
         subtitleFiles={subtitleFiles}
+        savedSubs={item?.subtitles?.[playingIndex]}
+        onSaveSubs={saveSubs}
         progress={progress}
         onPosition={savePosition}
         onDuration={saveDuration}
@@ -274,8 +414,7 @@ function Shell({
   }
 
   return (
-    <View style={{ flex: 1, flexDirection: 'row', backgroundColor: colors.bg }}>
-      <Nav tab={tab} onChange={(next) => { setDetail(null); setTab(next); }} />
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <View style={{ flex: 1 }}>
         {detail ? (
           <DetailScreen
@@ -294,10 +433,25 @@ function Shell({
           />
         ) : tab === 'search' ? (
           <SearchScreen onPickTitle={openTitle} />
+        ) : tab === 'library' ? (
+          <LibraryScreen
+            history={history}
+            onResume={resume}
+            onRemove={removeItem}
+            onClear={clearAll}
+          />
         ) : (
           <SettingsScreen settings={settings} onChange={onChangeSettings} />
         )}
       </View>
+      {/* Last, so it paints over the backdrop rather than beside it. */}
+      <Nav
+        tab={tab}
+        onChange={(next) => {
+          setDetail(null);
+          setTab(next);
+        }}
+      />
     </View>
   );
 }

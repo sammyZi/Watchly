@@ -186,6 +186,14 @@ private const val FREE_SPACE_MIN = 512L * 1024 * 1024
  */
 private const val REWIND_BYTES = 32L * 1024 * 1024
 
+/**
+ * Reader id for a seek the player has not made yet.
+ *
+ * Real readers are keyed by the HTTP server's connection generation, which
+ * counts up from zero, so a negative id cannot collide with one.
+ */
+private const val SEEK_READER = -1L
+
 class PlayOptions : Record {
   /** MB of the file head buffered before the player is handed the URL. The
    *  server blocks on data that has not arrived, so one piece is enough — the
@@ -665,6 +673,26 @@ class TorrentStreamModule : Module() {
     }
 
     /** Drop one file from a season download. Remaining files keep going. */
+    /**
+     * Aim the prefetch window at a point in the file before anyone reads it.
+     *
+     * Resuming an hour into a film otherwise fetches the head first: the engine
+     * has no reader to follow until the player has opened a connection, and the
+     * player will not open one at the resume point until it has read the
+     * container header. That is a buffer the viewer waits through and then
+     * seeks straight past. Seeding a reader here puts the window where playback
+     * is about to be.
+     */
+    AsyncFunction("setPosition") { ratio: Double ->
+      val ti = info
+      if (ti == null || fileIndex < 0) return@AsyncFunction
+      val size = ti.files().fileSize(fileIndex)
+      if (size <= 0) return@AsyncFunction
+      val offset = (size * ratio.coerceIn(0.0, 0.999)).toLong()
+      readers[SEEK_READER] = offset
+      log("seek: aiming window at ${(ratio * 100).toInt()}% (byte $offset)")
+    }
+
     AsyncFunction("skipFile") { index: Int ->
       wantedFiles = wantedFiles.filter { it != index }.toIntArray()
       val h = handle
@@ -1877,6 +1905,11 @@ class TorrentStreamModule : Module() {
     // Disk is finite and a 4K file is not. A roll replaces the handle, so
     // everything below would be working on a dead one — pick it up next tick.
     if (ticks % 4 == 0 && rollCache(h, ti)) return
+
+    // A seeded seek is a stand-in for a reader that has not connected yet.
+    // Once one has, it is the truth and the stand-in only holds a second window
+    // open on a region nobody is reading.
+    if (readers.keys.any { it >= 0L }) readers.remove(SEEK_READER)
 
     // One window per live reader, lowest offset first — that is the playback
     // connection, and it gets the tightest deadlines.
