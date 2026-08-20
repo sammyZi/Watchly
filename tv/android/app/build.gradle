@@ -107,8 +107,20 @@ android {
             reset()
             // Driven by reactNativeArchitectures (gradle.properties) so that
             // building for a television emulator is a flag rather than an edit:
-            //   npx expo run:android -- -PreactNativeArchitectures=x86
-            include(*(project.property('reactNativeArchitectures').split(',')))
+            //   ./gradlew assembleDebug -PreactNativeArchitectures=x86
+            //
+            // Pass it as -P, never as ORG_GRADLE_PROJECT_* in the environment:
+            // the daemon keeps the environment it was started with, so an
+            // emulator-only ABI leaks into every later build in the same
+            // session — including a release one. Trimmed because a stray space
+            // makes an ABI that matches nothing, and the resulting
+            // "[CXX1201] ABIs [x86 ] are not supported" names an ABI that is
+            // plainly in the supported list.
+            def abis = project.property('reactNativeArchitectures')
+                .split(',')
+                .collect { it.trim() }
+                .findAll { it }
+            include(*abis)
             universalApk false
         }
     }
