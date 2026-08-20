@@ -3,6 +3,10 @@ import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
+
+import com.facebook.react.bridge.Arguments
+import com.facebook.react.modules.core.DeviceEventManagerModule
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
@@ -81,6 +85,58 @@ class MainActivity : ReactActivity() {
               mainComponentName,
               fabricEnabled
           ){})
+  }
+
+  /**
+   * Forward the remote's transport keys to JavaScript.
+   *
+   * Core React Native has no TV key API at all — `TVEventHandler` only exists
+   * in the react-native-tvos fork — so without this the player could never hear
+   * the ‹ › keys, and seeking would be reachable only by arrowing onto an
+   * on-screen button first.
+   *
+   * Media keys are swallowed, because nothing else in this app wants them. The
+   * D-pad is only *reported*: focus navigation still has to work on every other
+   * screen, so those events must fall through to the focus system untouched.
+   */
+  override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    val name = when (event.keyCode) {
+      KeyEvent.KEYCODE_MEDIA_REWIND -> "rewind"
+      KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> "forward"
+      KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+      KeyEvent.KEYCODE_MEDIA_PLAY,
+      KeyEvent.KEYCODE_MEDIA_PAUSE -> "playPause"
+      KeyEvent.KEYCODE_MEDIA_NEXT -> "next"
+      KeyEvent.KEYCODE_MEDIA_PREVIOUS -> "previous"
+      KeyEvent.KEYCODE_DPAD_LEFT -> "left"
+      KeyEvent.KEYCODE_DPAD_RIGHT -> "right"
+      KeyEvent.KEYCODE_DPAD_UP -> "up"
+      KeyEvent.KEYCODE_DPAD_DOWN -> "down"
+      else -> null
+    }
+
+    if (name != null && event.action == KeyEvent.ACTION_DOWN) {
+      emitKey(name, event.repeatCount)
+      val navigational =
+        name == "left" || name == "right" || name == "up" || name == "down"
+      if (!navigational) return true
+    }
+    return super.dispatchKeyEvent(event)
+  }
+
+  /** Best effort — before the bridge is up there is no one to tell. */
+  private fun emitKey(name: String, repeat: Int) {
+    runCatching {
+      val context =
+        (application as MainApplication).reactHost.currentReactContext ?: return
+      val payload = Arguments.createMap().apply {
+        putString("key", name)
+        putInt("repeat", repeat)
+      }
+      context
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit("tvKey", payload)
+    }
   }
 
   /**

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Image, ScrollView, Text, View } from 'react-native';
 import { Focusable } from '../components/Focusable';
 import { Icon } from '../components/Icon';
@@ -13,7 +13,32 @@ import {
   type Hit,
 } from '../lib/search';
 import { bytes } from '../lib/format';
-import { font, radius, SAFE, space, type, useColors, useThemedStyles } from '../theme';
+import {
+  GUTTER,
+  SAFE,
+  fadeRight,
+  fadeToBg,
+  font,
+  radius,
+  space,
+  type,
+  useColors,
+  useThemedStyles,
+} from '../theme';
+
+/**
+ * Highest first, which is the order people actually choose in.
+ *
+ * These are the exact strings `quality()` returns — it normalises 2160p/UHD/4K
+ * down to "4K", so listing "2160p" here matched nothing and sorted the best
+ * releases to the end of the row.
+ */
+const QUALITY_ORDER = ['4K', '1080p', '720p', 'CAM'];
+
+const qualityRank = (q: string) => {
+  const i = QUALITY_ORDER.indexOf(q);
+  return i === -1 ? QUALITY_ORDER.length : i;
+};
 
 /** Swarm health as a word — a seeder count means nothing across a room. */
 const HEALTH_LABEL: Record<ReturnType<typeof health>, string> = {
@@ -65,7 +90,7 @@ function Source({
         : colors.danger;
 
   return (
-    <Focusable first={first} onPress={onPress} scale={1.01} style={styles.row}>
+    <Focusable invert first={first} onPress={onPress} scale={1.01} style={styles.row}>
       {(focused) => (
         <>
           <View style={{ flex: 1 }}>
@@ -108,21 +133,28 @@ export function DetailScreen({
   const colors = useColors();
   const styles = useThemedStyles((c) => ({
     screen: { flex: 1, backgroundColor: c.bg },
-    art: { position: 'absolute' as const, top: 0, left: 0, right: 0, height: 560 },
-    veil: {
+    art: { position: 'absolute' as const, top: 0, left: 0, right: 0, height: 340 },
+    veilY: {
       position: 'absolute' as const,
       top: 0,
       left: 0,
       right: 0,
-      height: 560,
-      backgroundColor: c.bg,
-      opacity: 0.76,
+      height: 340,
+      experimental_backgroundImage: fadeToBg(c.bg, 0.2),
     },
-    body: { paddingHorizontal: SAFE.x, paddingTop: SAFE.y * 2, paddingBottom: SAFE.y * 3 },
-    name: { ...type.hero, color: c.text, maxWidth: 1100 },
-    facts: { ...type.label, color: c.muted, marginTop: space.sm },
-    plot: { ...type.body, color: c.muted, marginTop: space.md, maxWidth: 900 },
-    people: { ...type.meta, color: c.faint, marginTop: space.sm, maxWidth: 900 },
+    veilX: {
+      position: 'absolute' as const,
+      top: 0,
+      left: 0,
+      right: 0,
+      height: 340,
+      experimental_backgroundImage: fadeRight(c.bg),
+    },
+    body: { paddingLeft: GUTTER, paddingRight: SAFE.x, paddingTop: SAFE.y, paddingBottom: SAFE.y * 3 },
+    name: { ...type.hero, color: c.text, maxWidth: 660 },
+    facts: { ...type.label, color: c.muted, marginTop: space.xs },
+    plot: { ...type.body, color: c.muted, marginTop: space.sm, maxWidth: 620 },
+    people: { ...type.meta, color: c.faint, marginTop: space.xs, maxWidth: 620 },
     buttons: { flexDirection: 'row' as const, gap: space.md, marginTop: space.xl },
     section: {
       ...type.title,
@@ -133,8 +165,8 @@ export function DetailScreen({
     },
     chips: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: space.sm },
     chip: {
-      paddingHorizontal: space.lg,
-      height: 52,
+      paddingHorizontal: space.md,
+      height: 40,
       justifyContent: 'center' as const,
       borderRadius: radius.pill,
       backgroundColor: c.control,
@@ -182,6 +214,22 @@ export function DetailScreen({
   const [episode, setEpisode] = useState<Episode | null>(null);
   const [hits, setHits] = useState<Hit[] | null>(null);
   const [busy, setBusy] = useState(false);
+  /** null means every quality — the ranked list as the indexes returned it. */
+  const [quality, setQuality] = useState<string | null>(null);
+
+  // Only the qualities actually on offer. A 720p chip that filters to nothing
+  // is worse than no chip.
+  const qualities = useMemo(() => {
+    const seen = new Set(
+      (hits ?? []).map((h) => h.quality).filter((q): q is string => !!q)
+    );
+    return [...seen].sort((a, b) => qualityRank(a) - qualityRank(b));
+  }, [hits]);
+
+  const shown = useMemo(
+    () => (quality ? (hits ?? []).filter((h) => h.quality === quality) : hits ?? []),
+    [hits, quality]
+  );
 
   const episodes = useMemo(
     () => (title.episodes ?? []).filter((e) => e.season === season),
@@ -193,6 +241,7 @@ export function DetailScreen({
     async (ep?: Episode) => {
       setBusy(true);
       setHits(null);
+      setQuality(null);
       setEpisode(ep ?? null);
       try {
         const found = ep
@@ -213,12 +262,20 @@ export function DetailScreen({
 
   // A film has exactly one thing to look for, so look for it on arrival rather
   // than making someone press a button that could not have meant anything else.
+  //
+  // Keyed on the id already searched, because `title` is replaced the moment
+  // loadTitle answers — without this the effect re-runs on that swap and every
+  // film is searched for twice.
+  const searched = useRef<string | null>(null);
   useEffect(() => {
-    if (title.kind === 'movie') findSources();
-    else {
+    if (title.kind !== 'movie') {
       setHits(null);
       setEpisode(null);
+      return;
     }
+    if (searched.current === title.imdb) return;
+    searched.current = title.imdb;
+    findSources();
   }, [title.imdb, title.kind, findSources]);
 
   const facts = [
@@ -236,7 +293,8 @@ export function DetailScreen({
   return (
     <View style={styles.screen}>
       {!!art && <Image source={{ uri: art }} style={styles.art} resizeMode="cover" />}
-      <View style={styles.veil} />
+      <View style={styles.veilY} />
+      <View style={styles.veilX} />
       <ScrollView contentContainerStyle={styles.body}>
         <Text style={styles.name} numberOfLines={2}>
           {title.title}
@@ -251,13 +309,18 @@ export function DetailScreen({
 
         <View style={styles.buttons}>
           {title.kind === 'movie' && (
+            // Never disabled, even while the search is still out. A disabled
+            // view is not a focus candidate, so `first` would be ignored and the
+            // remote would start on "Add to list" — then stay there, because
+            // nothing moves focus back once the sources land.
             <TvButton
               first
               icon="play"
               variant="solid"
-              label={hits?.length ? 'Play' : busy ? 'Finding…' : 'Play'}
-              disabled={!hits?.length}
-              onPress={() => hits?.[0] && onStream(hits[0], title)}
+              label={busy ? 'Finding sources' : shown.length ? 'Play' : 'No sources'}
+              onPress={() => {
+                if (shown.length) onStream(shown[0], title);
+              }}
             />
           )}
           <TvButton
@@ -276,6 +339,7 @@ export function DetailScreen({
                 const on = s === season;
                 return (
                   <Focusable
+                    invert
                     key={s}
                     onPress={() => {
                       setSeason(s);
@@ -304,6 +368,7 @@ export function DetailScreen({
             <Text style={styles.section}>Episodes</Text>
             {episodes.map((ep) => (
               <Focusable
+                invert
                 key={ep.id}
                 onPress={() => findSources(ep)}
                 scale={1.01}
@@ -342,6 +407,34 @@ export function DetailScreen({
         <Text style={styles.section}>
           {episode ? `Sources for ${episodeTag(episode.season, episode.episode)}` : 'Sources'}
         </Text>
+        {!busy && qualities.length > 1 && (
+          <View style={[styles.chips, { marginBottom: space.md }]}>
+            {[null, ...qualities].map((q) => {
+              const on = q === quality;
+              return (
+                <Focusable
+                  invert
+                  key={q ?? 'all'}
+                  onPress={() => setQuality(q)}
+                  scale={1.04}
+                  style={[styles.chip, on && styles.chipOn]}
+                >
+                  {(focused) => (
+                    <Text
+                      style={[
+                        styles.chipText,
+                        on && { color: colors.onAccent, fontFamily: font.semibold },
+                        focused && { color: colors.bg },
+                      ]}
+                    >
+                      {q ?? 'All'}
+                    </Text>
+                  )}
+                </Focusable>
+              );
+            })}
+          </View>
+        )}
         {busy && <ActivityIndicator color={colors.accent} size="large" />}
         {!busy && hits?.length === 0 && (
           <Text style={styles.note}>
@@ -351,7 +444,7 @@ export function DetailScreen({
         {!busy && !hits && title.kind === 'tv' && (
           <Text style={styles.note}>Choose an episode to see what is available.</Text>
         )}
-        {hits?.slice(0, 12).map((hit, i) => (
+        {shown.slice(0, 12).map((hit, i) => (
           <Source
             key={hit.id}
             hit={hit}

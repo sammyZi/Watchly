@@ -103,32 +103,49 @@ export const font = {
   bold: 'NotoSans_700Bold',
 };
 
-export const space = { xs: 6, sm: 12, md: 18, lg: 24, xl: 36, xxl: 48 };
+export const space = { xs: 4, sm: 8, md: 14, lg: 20, xl: 28, xxl: 40 };
 
-export const radius = { sm: 10, md: 16, lg: 24, pill: 999 };
+export const radius = { sm: 8, md: 12, lg: 18, pill: 999 };
 
 /**
  * Overscan. Televisions crop the edges of the picture by a few percent and
  * every set does it differently, so nothing readable goes nearer the edge
  * than this.
  */
-export const SAFE = { x: 48, y: 27 };
+export const SAFE = { x: 28, y: 20 };
 
+/**
+ * The collapsed navigation rail, and the gutter every screen leaves for it.
+ *
+ * The rail floats over the page rather than taking a column out of it, so that
+ * a backdrop can run the full width of the television behind it.
+ */
+export const NAV_W = 68;
+export const NAV_OPEN_W = 210;
+export const GUTTER = NAV_W + SAFE.x;
+
+/**
+ * Sized for the canvas a television actually reports, which is much smaller
+ * than the panel: 3840x2160 at density 640 is 960x540dp, and 1920x1080 at
+ * density 320 is the same. Doubling phone type for "ten feet" overflows that
+ * canvas — three posters to a row instead of six. These are close to Leanback's
+ * own figures, nudged up for viewing distance.
+ */
 export const type = {
-  display: { fontFamily: font.bold, fontSize: 34, letterSpacing: -0.4 },
-  title: { fontFamily: font.medium, fontSize: 22, lineHeight: 30 },
-  body: { fontFamily: font.regular, fontSize: 19, lineHeight: 28 },
-  label: { fontFamily: font.medium, fontSize: 18 },
-  meta: { fontFamily: font.regular, fontSize: 16, lineHeight: 23 },
+  display: { fontFamily: font.bold, fontSize: 26, letterSpacing: -0.4 },
+  title: { fontFamily: font.medium, fontSize: 18, lineHeight: 25 },
+  body: { fontFamily: font.regular, fontSize: 15, lineHeight: 22 },
+  label: { fontFamily: font.medium, fontSize: 15 },
+  meta: { fontFamily: font.regular, fontSize: 13, lineHeight: 18 },
   overline: {
     fontFamily: font.medium,
-    fontSize: 14,
+    fontSize: 11,
     letterSpacing: 1,
     textTransform: 'uppercase' as const,
   },
-  numeric: { fontFamily: font.bold, fontSize: 54, letterSpacing: -1 },
+  numeric: { fontFamily: font.bold, fontSize: 40, letterSpacing: -1 },
   /** The one thing bigger than everything: a hero title over artwork. */
-  hero: { fontFamily: font.bold, fontSize: 52, letterSpacing: -1.2, lineHeight: 60 },
+  hero: { fontFamily: font.bold, fontSize: 38, letterSpacing: -1, lineHeight: 44 },
 };
 
 export const shadow = {
@@ -148,6 +165,15 @@ function hexToRgb(hex: string): string {
 export function fadeToBg(bg: string, from = 0.35) {
   const rgb = hexToRgb(bg);
   return `linear-gradient(to bottom, rgba(${rgb},0) 0%, rgba(${rgb},${from}) 45%, rgba(${rgb},0.92) 82%, rgb(${rgb}) 100%)`;
+}
+
+/** Solid at the left, clear by halfway — keeps hero prose off the artwork. */
+export function fadeRight(bg: string) {
+  const rgb = hexToRgb(bg);
+  return (
+    `linear-gradient(to right, rgb(${rgb}) 0%, rgba(${rgb},0.86) 28%, ` +
+    `rgba(${rgb},0.35) 62%, rgba(${rgb},0) 100%)`
+  );
 }
 
 export function fadeUp(bg: string) {

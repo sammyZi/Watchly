@@ -1,31 +1,37 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, Text, TextInput, View } from 'react-native';
 import { Focusable } from '../components/Focusable';
 import { Icon } from '../components/Icon';
 import { Poster } from '../components/Ui';
 import { searchTitles, uniqueById, type Title } from '../lib/meta';
 import { clearSearches, loadSearches, rememberSearch } from '../lib/searches';
-import { font, radius, SAFE, space, type, useColors, useThemedStyles } from '../theme';
+import { GUTTER, SAFE, font, radius, space, type, useColors, useThemedStyles } from '../theme';
+
+/** Long enough that "th" does not fetch the whole catalogue. */
+const MIN_QUERY = 2;
+/** Roughly one unhurried keystroke on a remote. */
+const DEBOUNCE_MS = 400;
 
 /**
  * Search on a remote.
  *
  * The field opens the television's own keyboard when it takes focus, which is
- * slow to type on however it is drawn — so recent searches are given as much
- * room as the results, and both films and series are fetched at once rather
- * than making anyone choose a category first.
+ * slow to type on however it is drawn — so results arrive as the letters do,
+ * rather than making anyone find the enter key to see anything. Recent searches
+ * get as much room as the results, and both films and series are fetched at
+ * once rather than making anyone choose a category first.
  */
 export function SearchScreen({ onPickTitle }: { onPickTitle: (title: Title) => void }) {
   const colors = useColors();
   const styles = useThemedStyles((c) => ({
     screen: { flex: 1, backgroundColor: c.bg },
-    body: { paddingHorizontal: SAFE.x, paddingTop: SAFE.y, paddingBottom: SAFE.y * 3 },
+    body: { paddingLeft: GUTTER, paddingRight: SAFE.x, paddingTop: SAFE.y, paddingBottom: SAFE.y * 3 },
     heading: { ...type.display, color: c.text, marginBottom: space.lg },
     field: {
       flexDirection: 'row' as const,
       alignItems: 'center' as const,
       gap: space.md,
-      height: 74,
+      height: 56,
       paddingHorizontal: space.lg,
       borderRadius: radius.md,
       backgroundColor: c.control,
@@ -41,7 +47,7 @@ export function SearchScreen({ onPickTitle }: { onPickTitle: (title: Title) => v
     recents: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: space.md },
     recent: {
       paddingHorizontal: space.lg,
-      height: 54,
+      height: 40,
       justifyContent: 'center' as const,
       borderRadius: radius.pill,
       backgroundColor: c.control,
@@ -60,24 +66,54 @@ export function SearchScreen({ onPickTitle }: { onPickTitle: (title: Title) => v
     loadSearches().then(setRecents);
   }, []);
 
-  const run = useCallback(async (text: string) => {
-    const q = text.trim();
-    if (!q) return;
-    setBusy(true);
-    setQuery(q);
-    try {
-      // Both catalogues at once. Asking someone with a remote to pick "film or
-      // series" before they have typed anything is a screen for nothing.
-      const [films, series] = await Promise.all([
-        searchTitles(q, 'movie').catch(() => [] as Title[]),
-        searchTitles(q, 'tv').catch(() => [] as Title[]),
-      ]);
-      setResults(uniqueById([...films, ...series]));
-      setRecents(await rememberSearch(q));
-    } finally {
+  /**
+   * Which query the visible results belong to.
+   *
+   * Two requests are usually in flight while someone is typing, and they do not
+   * come back in order — without this, the answer for "ince" can land after the
+   * answer for "inception" and replace it.
+   */
+  const latest = useRef('');
+
+  const run = useCallback(
+    async (text: string, opts?: { remember?: boolean }) => {
+      const q = text.trim();
+      if (!q) return;
+      latest.current = q;
+      setBusy(true);
+      try {
+        // Both catalogues at once. Asking someone with a remote to pick "film
+        // or series" before they have typed anything is a screen for nothing.
+        const [films, series] = await Promise.all([
+          searchTitles(q, 'movie').catch(() => [] as Title[]),
+          searchTitles(q, 'tv').catch(() => [] as Title[]),
+        ]);
+        if (latest.current !== q) return;
+        setResults(uniqueById([...films, ...series]));
+        // Only a deliberate submit is worth remembering — every prefix on the
+        // way to "interstellar" is not a search anyone wants offered back.
+        if (opts?.remember) setRecents(await rememberSearch(q));
+      } finally {
+        if (latest.current === q) setBusy(false);
+      }
+    },
+    []
+  );
+
+  // Search as the letters arrive. The remote's keyboard is slow enough that
+  // waiting for a submit means staring at an empty screen through the whole
+  // word.
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < MIN_QUERY) {
+      latest.current = '';
+      setResults(null);
       setBusy(false);
+      return;
     }
-  }, []);
+    const timer = setTimeout(() => run(q), DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [query, run]);
 
   return (
     <View style={styles.screen}>
@@ -90,7 +126,7 @@ export function SearchScreen({ onPickTitle }: { onPickTitle: (title: Title) => v
             style={styles.input}
             value={query}
             onChangeText={setQuery}
-            onSubmitEditing={() => run(query)}
+            onSubmitEditing={() => run(query, { remember: true })}
             placeholder="Film or series"
             placeholderTextColor={colors.faint}
             returnKeyType="search"
@@ -104,7 +140,13 @@ export function SearchScreen({ onPickTitle }: { onPickTitle: (title: Title) => v
             <Text style={styles.section}>Recent</Text>
             <View style={styles.recents}>
               {recents.map((r) => (
-                <Focusable key={r} onPress={() => run(r)} scale={1.04} style={styles.recent}>
+                <Focusable
+                  invert
+                  key={r}
+                  onPress={() => setQuery(r)}
+                  scale={1.04}
+                  style={styles.recent}
+                >
                   {(focused) => (
                     <Text style={[styles.recentText, focused && { color: colors.bg }]}>
                       {r}
@@ -113,6 +155,7 @@ export function SearchScreen({ onPickTitle }: { onPickTitle: (title: Title) => v
                 </Focusable>
               ))}
               <Focusable
+                invert
                 onPress={() => clearSearches().then(setRecents)}
                 scale={1.04}
                 style={styles.recent}

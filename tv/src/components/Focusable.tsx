@@ -18,21 +18,32 @@ export function Focusable({
   children,
   onPress,
   onFocus,
+  onBlur,
   style,
   focusedStyle,
   first,
   scale = 1.05,
+  invert,
   disabled,
 }: {
   children: ReactNode | ((focused: boolean) => ReactNode);
   onPress?: () => void;
   /** Fires when the D-pad arrives — rails use it to preview what is selected. */
   onFocus?: () => void;
+  onBlur?: () => void;
   style?: StyleProp<ViewStyle>;
   focusedStyle?: StyleProp<ViewStyle>;
   /** Where focus should start when this screen appears. Exactly one per screen. */
   first?: boolean;
   scale?: number;
+  /**
+   * Fill with the focus colour while focused.
+   *
+   * Anything that darkens its own text on focus needs this, or the text turns
+   * black on a dark chip and vanishes. Image cards deliberately do not use it:
+   * over artwork a ring is enough, and a fill would only show as a halo.
+   */
+  invert?: boolean;
   disabled?: boolean;
 }) {
   const colors = useColors();
@@ -48,7 +59,10 @@ export function Focusable({
         setFocused(true);
         onFocus?.();
       }}
-      onBlur={() => setFocused(false)}
+      onBlur={() => {
+        setFocused(false);
+        onBlur?.();
+      }}
       style={[
         {
           borderWidth: 3,
@@ -57,6 +71,7 @@ export function Focusable({
           opacity: disabled ? 0.35 : 1,
         },
         style,
+        focused && invert && { backgroundColor: colors.focus },
         focused && {
           borderColor: colors.focus,
           transform: [{ scale }],

@@ -3,7 +3,7 @@ import { Focusable } from '../components/Focusable';
 import { Icon } from '../components/Icon';
 import { CACHE_CAPS, type Settings } from '../lib/settings';
 import { GENRES } from '../lib/meta';
-import { font, radius, SAFE, space, type, useColors, useThemedStyles } from '../theme';
+import { GUTTER, SAFE, font, radius, space, type, useColors, useThemedStyles } from '../theme';
 
 const BUFFERS = [1, 4, 8, 16];
 
@@ -26,7 +26,7 @@ function Choice<T extends string | number | boolean>({
     row: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: space.md },
     chip: {
       paddingHorizontal: space.lg,
-      height: 54,
+      height: 40,
       justifyContent: 'center' as const,
       borderRadius: radius.pill,
       backgroundColor: c.control,
@@ -41,6 +41,7 @@ function Choice<T extends string | number | boolean>({
         const on = option === value;
         return (
           <Focusable
+            invert
             key={String(option)}
             first={first && i === 0}
             onPress={() => onPick(option)}
@@ -97,7 +98,7 @@ export function SettingsScreen({
 }) {
   const styles = useThemedStyles((c) => ({
     screen: { flex: 1, backgroundColor: c.bg },
-    body: { paddingHorizontal: SAFE.x, paddingTop: SAFE.y, paddingBottom: SAFE.y * 3 },
+    body: { paddingLeft: GUTTER, paddingRight: SAFE.x, paddingTop: SAFE.y, paddingBottom: SAFE.y * 3 },
     heading: { ...type.display, color: c.text, marginBottom: space.xl },
   }));
 
@@ -175,7 +176,7 @@ export function SettingsScreen({
                   scale={1.04}
                   style={{
                     paddingHorizontal: space.lg,
-                    height: 54,
+                    height: 40,
                     justifyContent: 'center',
                     borderRadius: radius.pill,
                   }}
