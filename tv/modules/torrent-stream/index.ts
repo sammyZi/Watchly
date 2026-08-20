@@ -56,6 +56,15 @@ export type PlayOptions = {
   season?: number;
   /** Show name for Movies/Watchly/<this>/. */
   saveFolder?: string;
+  /**
+   * Megabytes of the streamed file allowed on disk before it rolls over.
+   *
+   * A television has single-digit gigabytes free and a 4K file is tens of them.
+   * On reaching the cap the engine deletes the torrent's data and restarts it
+   * at the playhead — the player's connection survives, at the cost of one
+   * rebuffer. Zero (the default) lets the file grow to its full size.
+   */
+  cacheCapMb?: number;
 };
 
 type TorrentStream = {

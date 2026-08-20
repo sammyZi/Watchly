@@ -60,6 +60,18 @@ class LocalFileServer(
    */
   private val generation = AtomicLong()
 
+  /**
+   * Bumped when the file on disk is replaced under us.
+   *
+   * The rolling cache frees space by deleting the torrent's data and starting
+   * it again from the playhead. An open RandomAccessFile keeps pointing at the
+   * unlinked inode after that and would read stale bytes for the life of the
+   * connection, so a reader that sees a new epoch reopens.
+   */
+  @Volatile private var epoch = 0L
+
+  fun reopen() { epoch++ }
+
   val port: Int get() = server.localPort
   private val path: String get() = "/$token/${file.name.urlEncoded()}"
 
@@ -170,10 +182,12 @@ class LocalFileServer(
 
   /** Copies bytes out, waiting on the torrent whenever it runs past what has arrived. */
   private fun stream(out: OutputStream, start: Long, end: Long, generationAtStart: Long) {
-    RandomAccessFile(file, "r").use { raf ->
-      val buffer = ByteArray(64 * 1024)
-      var position = start
+    val buffer = ByteArray(64 * 1024)
+    var position = start
+    var seen = epoch
+    var raf = RandomAccessFile(file, "r")
 
+    try {
       while (position <= end && running) {
         // Report on every pass, not only when starved: the window has to stay
         // ahead of a reader that is currently keeping up, or it falls behind the
@@ -188,6 +202,14 @@ class LocalFileServer(
           continue
         }
 
+        // Data is back, but it may be in a different file — reopen before the
+        // first read past a roll.
+        if (seen != epoch) {
+          seen = epoch
+          runCatching { raf.close() }
+          raf = RandomAccessFile(file, "r")
+        }
+
         raf.seek(position)
         val want = minOf(buffer.size.toLong(), end - position + 1).toInt()
         val read = raf.read(buffer, 0, want)
@@ -200,6 +222,8 @@ class LocalFileServer(
         position += read
       }
       out.flush()
+    } finally {
+      runCatching { raf.close() }
     }
   }
 
