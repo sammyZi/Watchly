@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Image, ScrollView, Text, View } from 'react-native';
 import { Rail } from '../components/Ui';
 import { Focusable } from '../components/Focusable';
@@ -124,6 +124,7 @@ function Hero({ title }: { title: Title | null }) {
           source={{ uri: title.backdrop ?? title.poster! }}
           style={styles.art}
           resizeMode="cover"
+          resizeMethod="resize"
         />
       )}
       <View style={styles.veilY} />
@@ -203,7 +204,14 @@ function ResumeRail({
               onPress={() => onPick(item)}
               style={styles.card}
             >
-              {!!art && <Image source={{ uri: art }} style={styles.art} resizeMode="cover" />}
+              {!!art && (
+                <Image
+                  source={{ uri: art }}
+                  style={styles.art}
+                  resizeMode="cover"
+                  resizeMethod="resize"
+                />
+              )}
               <View style={styles.strip}>
                 <Text style={styles.name} numberOfLines={1}>
                   {item.titleName || item.title}
@@ -251,6 +259,40 @@ export function HomeScreen({
     )
   );
   const [hero, setHero] = useState<Title | null>(null);
+
+  /**
+   * The hero lags focus by a beat.
+   *
+   * Updating it on every press re-rendered the page and started a fresh
+   * full-screen backdrop download for each poster arrowed past — on a set-top
+   * box that is the whole frame budget, and holding the D-pad turned into a
+   * slideshow of half-decoded images. Only what focus settles on is worth
+   * fetching.
+   */
+  const heroTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const aimHero = useCallback((title: Title) => {
+    if (heroTimer.current) clearTimeout(heroTimer.current);
+    heroTimer.current = setTimeout(() => setHero(title), 220);
+  }, []);
+  useEffect(
+    () => () => {
+      if (heroTimer.current) clearTimeout(heroTimer.current);
+    },
+    []
+  );
+
+  /**
+   * hasTVPreferredFocus is honoured on every mount, and a virtualised rail
+   * remounts its first poster whenever it scrolls back into the window — which
+   * snatched focus back to the start of the row. Reaching the end of a rail
+   * then bounced between the two, which is the flicker. Claim it once.
+   */
+  const claimed = useRef(false);
+  const claimFirst = () => {
+    if (claimed.current) return false;
+    claimed.current = true;
+    return true;
+  };
 
   const resumable = useMemo(() => history.filter(isInProgress).slice(0, 6), [history]);
 
@@ -354,8 +396,8 @@ export function HomeScreen({
             heading="Your list"
             titles={watchlist}
             onPick={onPickTitle}
-            onFocusItem={setHero}
-            firstItem={!resumable.length}
+            onFocusItem={aimHero}
+            firstItem={!resumable.length && claimFirst()}
           />
         )}
         {shelves.map((shelf, i) => (
@@ -366,8 +408,8 @@ export function HomeScreen({
             wide={shelf.wide}
             titles={loaded[shelfKey(shelf)] ?? []}
             onPick={onPickTitle}
-            onFocusItem={setHero}
-            firstItem={!resumable.length && !watchlist.length && i === 0}
+            onFocusItem={aimHero}
+            firstItem={!resumable.length && !watchlist.length && i === 0 && claimFirst()}
           />
         ))}
       </View>

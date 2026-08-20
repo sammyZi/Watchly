@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { FlatList, Image, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Focusable } from './Focusable';
 import { Icon, type IconName } from './Icon';
@@ -95,7 +96,7 @@ export function TvButton({
  * to navigate than one with lettered placeholders — the eye needs something to
  * count along.
  */
-export function Poster({
+export const Poster = memo(function Poster({
   title,
   onPress,
   onFocus,
@@ -134,7 +135,12 @@ export function Poster({
       <Focusable onPress={onPress} onFocus={onFocus} first={first}>
         <View style={styles.card}>
           {title.poster ? (
-            <Image source={{ uri: title.poster }} style={styles.art} resizeMode="cover" />
+            <Image
+              source={{ uri: title.poster }}
+              style={styles.art}
+              resizeMode="cover"
+              resizeMethod="resize"
+            />
           ) : (
             <View
               style={[
@@ -152,7 +158,7 @@ export function Poster({
       </Text>
     </View>
   );
-}
+});
 
 /**
  * A landscape card carrying the backdrop.
@@ -161,7 +167,7 @@ export function Poster({
  * indistinguishable row of posters — a suggestion the app made deserves to look
  * different from a chart it merely fetched.
  */
-function WideCard({
+const WideCard = memo(function WideCard({
   title,
   onPress,
   onFocus,
@@ -208,7 +214,12 @@ function WideCard({
     <Focusable onPress={onPress} onFocus={onFocus} first={first}>
       <View style={styles.card}>
         {art ? (
-          <Image source={{ uri: art }} style={styles.art} resizeMode="cover" />
+          <Image
+            source={{ uri: art }}
+            style={styles.art}
+            resizeMode="cover"
+            resizeMethod="resize"
+          />
         ) : (
           <View
             style={[
@@ -228,7 +239,7 @@ function WideCard({
       </View>
     </Focusable>
   );
-}
+});
 
 /**
  * A horizontal shelf.
@@ -238,7 +249,7 @@ function WideCard({
  * the end scrolls the list itself — Android does that for us once the child
  * that took focus asks its parent to reveal it.
  */
-export function Rail({
+export const Rail = memo(function Rail({
   heading,
   note,
   titles,
@@ -319,4 +330,4 @@ export function Rail({
       />
     </View>
   );
-}
+});
