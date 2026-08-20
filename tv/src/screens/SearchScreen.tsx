@@ -35,7 +35,10 @@ export function SearchScreen({ onPickTitle }: { onPickTitle: (title: Title) => v
       paddingHorizontal: space.lg,
       borderRadius: radius.md,
       backgroundColor: c.control,
+      borderWidth: 2,
+      borderColor: 'transparent',
     },
+    fieldOn: { borderColor: c.focus },
     input: { flex: 1, ...type.title, color: c.text, padding: 0 },
     section: {
       ...type.title,
@@ -61,6 +64,8 @@ export function SearchScreen({ onPickTitle }: { onPickTitle: (title: Title) => v
   const [results, setResults] = useState<Title[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [recents, setRecents] = useState<string[]>([]);
+  /** Whether the field holds focus — it draws its own ring, having no wrapper. */
+  const [typing, setTyping] = useState(false);
 
   useEffect(() => {
     loadSearches().then(setRecents);
@@ -120,12 +125,20 @@ export function SearchScreen({ onPickTitle }: { onPickTitle: (title: Title) => v
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="always">
         <Text style={styles.heading}>Search</Text>
 
-        <Focusable first scale={1.01} style={styles.field}>
-          <Icon name="search" size={24} color={colors.faint} />
+        {/* The TextInput is the focus target itself, not something inside a
+            Pressable. Wrapped, the D-pad lands on the wrapper and OK never
+            reaches the field, so the television's keyboard is never asked to
+            open. autoFocus opens it on arrival, which is the only reason to be
+            on this screen. */}
+        <View style={[styles.field, typing && styles.fieldOn]}>
+          <Icon name="search" size={24} color={typing ? colors.accent : colors.faint} />
           <TextInput
+            autoFocus
             style={styles.input}
             value={query}
             onChangeText={setQuery}
+            onFocus={() => setTyping(true)}
+            onBlur={() => setTyping(false)}
             onSubmitEditing={() => run(query, { remember: true })}
             placeholder="Film or series"
             placeholderTextColor={colors.faint}
@@ -133,7 +146,7 @@ export function SearchScreen({ onPickTitle }: { onPickTitle: (title: Title) => v
             autoCorrect={false}
           />
           {busy && <ActivityIndicator color={colors.accent} />}
-        </Focusable>
+        </View>
 
         {!!recents.length && !results && (
           <>
