@@ -194,6 +194,15 @@ private const val REWIND_BYTES = 32L * 1024 * 1024
  */
 private const val SEEK_READER = -1L
 
+/**
+ * How long to wait for libtorrent to let go of a torrent before giving up.
+ *
+ * This runs on the polling thread, so it is a stall in progress reporting for
+ * as long as it lasts — long enough to be reliable, short enough not to look
+ * like a freeze.
+ */
+private const val REMOVE_WAIT_MS = 4_000
+
 class PlayOptions : Record {
   /** MB of the file head buffered before the player is handed the URL. The
    *  server blocks on data that has not arrived, so one piece is enough — the
@@ -1844,14 +1853,19 @@ class TorrentStreamModule : Module() {
 
     if (ticks % 20 == 0 && saveDir.usableSpace < FREE_SPACE_MIN) {
       log("out of space — stopping")
-      sendEvent(
-        "error",
-        mapOf("message" to "Out of storage space. The stream has been stopped and its files cleared.")
-      )
-      downloads.keys.toList().forEach { stopDownload(it) }
+      // Each step guarded on its own: a failure to stop one download must not
+      // skip tearing down the rest, or the next tick finds the disk still full
+      // and does the whole thing again, forever.
+      runCatching {
+        sendEvent(
+          "error",
+          mapOf("message" to "Out of storage space. The stream has been stopped and its files cleared.")
+        )
+      }
+      downloads.keys.toList().forEach { id -> runCatching { stopDownload(id) } }
       if (handle != null) {
-        teardown()
-        wipeStreamCache()
+        runCatching { teardown() }
+        runCatching { wipeStreamCache() }
       }
       return
     }
@@ -2121,6 +2135,7 @@ class TorrentStreamModule : Module() {
     // the buffer away.
     val at = readers.values.minOrNull() ?: return false
     lastRollTick = ticks
+    val freeBefore = saveDir.usableSpace
     log(
       "roll: ${onDisk / 1024 / 1024}MB on disk, cap ${cacheCapBytes / 1024 / 1024}MB, " +
         "${saveDir.usableSpace / 1024 / 1024}MB free — restarting at byte $at"
@@ -2133,46 +2148,89 @@ class TorrentStreamModule : Module() {
     runCatching { h.clearPieceDeadlines() }
     deadlined.clear()
 
-    // Removed first and deleted by hand rather than with DELETE_FILES: that
-    // flag unlinks asynchronously, and the replacement torrent would be writing
-    // into the same paths while libtorrent was still deleting them.
-    runCatching { session.remove(h) }
-    var waited = 0
-    while (session.find(ti.infoHash()) != null && waited < 5_000) {
-      Thread.sleep(50)
-      waited += 50
-    }
-    val files = ti.files()
-    File(saveDir, ti.name()).deleteRecursively()
-    for (i in 0 until files.numFiles()) File(saveDir, files.filePath(i)).delete()
+    // Everything past this point is recoverable only by finishing it. The
+    // torrent is about to leave the session, so any throw in here would leave
+    // `handle` pointing at something libtorrent no longer owns — every later
+    // tick would return early, the HTTP server would block on data that is
+    // never coming, and the film would hang with no error on screen. So the
+    // whole thing is wrapped, and every exit tears down honestly instead.
+    try {
+      // Removed first and deleted by hand rather than with DELETE_FILES: that
+      // flag unlinks asynchronously, and the replacement torrent would be
+      // writing into the same paths while libtorrent was still deleting them.
+      runCatching { session.remove(h) }
+      var waited = 0
+      while (session.find(ti.infoHash()) != null && waited < REMOVE_WAIT_MS) {
+        Thread.sleep(50)
+        waited += 50
+      }
+      if (session.find(ti.infoHash()) != null) {
+        // Still libtorrent's. Deleting the files under it corrupts the re-add,
+        // and the old handle is still valid, so the honest move is to leave
+        // everything alone and let the next roll try again.
+        log("roll: torrent would not release after ${waited}ms — left alone")
+        return false
+      }
 
-    val priorities = Array(files.numFiles()) { Priority.IGNORE }
-    wantedFiles.forEach { if (it in priorities.indices) priorities[it] = Priority.DEFAULT }
-    session.download(ti, saveDir, null, priorities, peers, TorrentFlags.SEQUENTIAL_DOWNLOAD)
-    val next = awaitHandle(ti)
-    if (next == null) {
-      log("roll: torrent did not come back")
-      sendEvent("error", mapOf("message" to "The stream ran out of space and could not restart."))
+      val files = ti.files()
+      runCatching {
+        File(saveDir, ti.name()).deleteRecursively()
+        for (i in 0 until files.numFiles()) File(saveDir, files.filePath(i)).delete()
+      }.onFailure { log("roll: delete failed (${it.message})") }
+
+      // Rolling is only worth doing if it actually frees something. When the
+      // disk is full of *other* things, re-adding just fills it again in
+      // thirty seconds and does so forever — stopping with a message beats
+      // grinding.
+      val free = saveDir.usableSpace
+      if (free < FREE_SPACE_MIN) {
+        log("roll: only ${free / 1024 / 1024}MB free after cleaning — giving up")
+        failStream("Out of storage space. The stream has been stopped.")
+        return true
+      }
+      log("roll: freed ${(free - freeBefore) / 1024 / 1024}MB")
+
+      val priorities = Array(files.numFiles()) { Priority.IGNORE }
+      wantedFiles.forEach { if (it in priorities.indices) priorities[it] = Priority.DEFAULT }
+      session.download(ti, saveDir, null, priorities, peers, TorrentFlags.SEQUENTIAL_DOWNLOAD)
+      val next = awaitHandle(ti)
+        ?: throw IllegalStateException("torrent did not come back after re-adding")
+
+      // Same reasoning as play(): piece deadlines do the ordering, not
+      // sequential mode, which hands piece 0 to whichever peer is slowest.
+      next.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
+      val existing = runCatching { next.trackers().map { it.url() } }.getOrDefault(emptyList())
+      TRACKERS.filterNot { it in existing }.forEach {
+        runCatching { next.addTracker(AnnounceEntry(it)) }
+      }
+      runCatching { next.forceReannounce() }
+      runCatching { next.forceDHTAnnounce() }
+
+      handle = next
+      // The applied zone describes a file that no longer exists; the next tick
+      // re-derives it from the readers.
+      zoneStarts = emptyList()
+      zoneWidth = -1
+      zoneRushedTail = false
+      server?.reopen()
+      return true
+    } catch (e: Exception) {
+      Log.w(TAG, "roll failed", e)
+      failStream("The stream could not be restarted after freeing space.")
       return true
     }
-    // Same reasoning as play(): piece deadlines do the ordering, not sequential
-    // mode, which hands piece 0 to whichever peer happens to be slowest.
-    next.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
-    val existing = runCatching { next.trackers().map { it.url() } }.getOrDefault(emptyList())
-    TRACKERS.filterNot { it in existing }.forEach {
-      runCatching { next.addTracker(AnnounceEntry(it)) }
-    }
-    next.forceReannounce()
-    next.forceDHTAnnounce()
+  }
 
-    handle = next
-    // The applied zone describes a file that no longer exists; the next tick
-    // re-derives it from the readers.
-    zoneStarts = emptyList()
-    zoneWidth = -1
-    zoneRushedTail = false
-    server?.reopen()
-    return true
+  /**
+   * Stop the stream and say so.
+   *
+   * Used where carrying on is not possible: silence would leave the player
+   * spinning on a socket that will never produce another byte.
+   */
+  private fun failStream(message: String) {
+    runCatching { sendEvent("error", mapOf("message" to message)) }
+    runCatching { teardown() }
+    runCatching { wipeStreamCache() }
   }
 
   /**
@@ -2365,12 +2423,18 @@ class TorrentStreamModule : Module() {
       if (keep == null) {
         if (downloads.isEmpty()) wipeStreamCache()
       } else {
+        // Guarded: this runs on every film-to-film change, and a failure to
+        // delete the outgoing torrent's pieces must not abort the rest of
+        // teardown. Leaving `handle` and `info` set would strand the next
+        // play() on a session state that is already gone.
         info?.let { old ->
-          File(saveDir, old.name()).deleteRecursively()
-          val files = old.files()
-          for (i in 0 until files.numFiles()) {
-            File(saveDir, files.filePath(i)).delete()
-          }
+          runCatching {
+            File(saveDir, old.name()).deleteRecursively()
+            val files = old.files()
+            for (i in 0 until files.numFiles()) {
+              File(saveDir, files.filePath(i)).delete()
+            }
+          }.onFailure { Log.w(TAG, "cleanup of ${old.name()} failed", it) }
           log("cleaned ${old.name()}")
         }
       }
@@ -2399,15 +2463,28 @@ class TorrentStreamModule : Module() {
   /* ---------------------------------------------------------------- utils */
 
   /** Delete streamed/downloaded piece files. Meta + peer cache stays (tiny). */
+  /**
+   * Never throws.
+   *
+   * teardown() calls this partway through, so an IO error here would skip
+   * everything after it — the handle and info would be left set, and the next
+   * play() would build on a session state that no longer exists. Failing to
+   * free disk space is survivable; failing to finish tearing down is not. The
+   * directory is recreated whatever happens, because the next stream writes
+   * into it.
+   */
   private fun wipeStreamCache() {
     // Anything an older build left in cacheDir is stranded otherwise — it can be
     // several GB, and nothing writes there any more to notice it.
-    legacySaveDir.takeIf { it.exists() }?.deleteRecursively()
+    runCatching { legacySaveDir.takeIf { it.exists() }?.deleteRecursively() }
 
-    val dir = saveDir
-    if (!dir.exists()) return
-    val ok = dir.deleteRecursively()
-    dir.mkdirs()
+    val dir = runCatching { saveDir }.getOrNull() ?: return
+    val ok = runCatching { !dir.exists() || dir.deleteRecursively() }
+      .getOrElse { e ->
+        Log.w(TAG, "stream cache wipe failed", e)
+        false
+      }
+    runCatching { dir.mkdirs() }
     log(if (ok) "wiped stream cache" else "stream cache wipe incomplete")
   }
 
