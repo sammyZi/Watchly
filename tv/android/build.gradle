@@ -1,12 +1,6 @@
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
 
 buildscript {
-  // Cast framework version, read by app/build.gradle. Added by hand because
-  // this project keeps its own android/ directory and never runs prebuild —
-  // react-native-google-cast's config plugin would otherwise write it.
-  ext {
-    castFrameworkVersion = "21.5.0"
-  }
   repositories {
     google()
     mavenCentral()

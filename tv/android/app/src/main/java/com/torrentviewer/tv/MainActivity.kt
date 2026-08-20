@@ -9,8 +9,6 @@ import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
 import com.facebook.react.defaults.DefaultReactActivityDelegate
 
-import com.reactnative.googlecast.api.RNGCCastContext
-
 import expo.modules.ReactActivityDelegateWrapper
 
 class MainActivity : ReactActivity() {
@@ -23,10 +21,6 @@ class MainActivity : ReactActivity() {
     SplashScreenManager.registerOnActivity(this)
     // @generated end expo-splashscreen
     super.onCreate(null)
-    // The TV is the cast *receiver*, so nothing here ever casts out. The
-    // library still initialises because it is linked in, and a TV box without
-    // Play Services throws from this call — on the phone that could not happen.
-    runCatching { RNGCCastContext.getSharedInstance(this) }
     preferHighRefreshRate()
   }
 

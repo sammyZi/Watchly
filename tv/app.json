@@ -1,0 +1,60 @@
+{
+  "expo": {
+    "name": "Watchly TV",
+    "slug": "watchly-tv",
+    "version": "1.0.0",
+    "orientation": "landscape",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#000000",
+    "android": {
+      "package": "com.torrentviewer.tv",
+      "adaptiveIcon": {
+        "backgroundColor": "#E50914",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "category": ["DEFAULT", "BROWSABLE"],
+          "data": [{ "scheme": "magnet" }]
+        },
+        {
+          "action": "VIEW",
+          "category": ["DEFAULT", "BROWSABLE"],
+          "data": [
+            { "mimeType": "application/x-bittorrent" },
+            { "scheme": "content", "mimeType": "application/x-bittorrent" },
+            { "scheme": "file", "mimeType": "application/x-bittorrent" }
+          ]
+        }
+      ]
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "extraMavenRepos": ["https://jitpack.io"],
+            "buildArchs": ["armeabi-v7a", "arm64-v8a"],
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": false,
+            "enableBundleCompression": true
+          }
+        }
+      ],
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#000000",
+          "image": "./assets/splash-icon-dark.png",
+          "imageWidth": 260
+        }
+      ]
+    ]
+  }
+}
