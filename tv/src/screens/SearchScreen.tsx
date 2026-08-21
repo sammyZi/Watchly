@@ -13,6 +13,24 @@ const MIN_QUERY = 2;
 const DEBOUNCE_MS = 400;
 
 /**
+ * How well a title answers what was typed. Lower is better.
+ *
+ * Both catalogues are searched, and simply concatenating them buried the
+ * series: "the mentalist" returns twelve films before the series of that exact
+ * name, which is the third row down and off the screen — so the show looked
+ * missing entirely. Ranking by the title rather than by which catalogue it came
+ * from puts the thing that was actually asked for first, whichever it is.
+ */
+const relevance = (title: string, query: string) => {
+  const a = title.trim().toLowerCase();
+  const q = query.trim().toLowerCase();
+  if (a === q) return 0;
+  if (a.startsWith(q)) return 1;
+  if (a.includes(q)) return 2;
+  return 3;
+};
+
+/**
  * Search on a remote.
  *
  * The field opens the television's own keyboard when it takes focus, which is
@@ -94,7 +112,13 @@ export function SearchScreen({ onPickTitle }: { onPickTitle: (title: Title) => v
           searchTitles(q, 'tv').catch(() => [] as Title[]),
         ]);
         if (latest.current !== q) return;
-        setResults(uniqueById([...films, ...series]));
+        // Stable sort, so within one relevance band each catalogue keeps the
+        // order the index gave it.
+        setResults(
+          uniqueById([...films, ...series]).sort(
+            (a, b) => relevance(a.title, q) - relevance(b.title, q)
+          )
+        );
         // Only a deliberate submit is worth remembering — every prefix on the
         // way to "interstellar" is not a search anyone wants offered back.
         if (opts?.remember) setRecents(await rememberSearch(q));
@@ -191,11 +215,20 @@ export function SearchScreen({ onPickTitle }: { onPickTitle: (title: Title) => v
         {!!results && (
           <>
             <Text style={styles.section}>
-              {results.length ? `Results for “${query}”` : `Nothing found for “${query}”`}
+              {results.length
+                ? `Results for “${query.trim()}”`
+                : `Nothing found for “${query.trim()}”`}
             </Text>
             <View style={styles.grid}>
               {results.map((title) => (
-                <Poster key={title.imdb} title={title} onPress={() => onPickTitle(title)} />
+                <Poster
+                  key={title.imdb}
+                  title={title}
+                  sub={[title.kind === 'tv' ? 'Series' : 'Film', title.year]
+                    .filter(Boolean)
+                    .join('  ·  ')}
+                  onPress={() => onPickTitle(title)}
+                />
               ))}
             </View>
           </>

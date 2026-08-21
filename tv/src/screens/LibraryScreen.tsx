@@ -74,7 +74,18 @@ export function LibraryScreen({
       backgroundColor: c.surface,
       justifyContent: 'flex-end' as const,
     },
-    art: { position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0 },
+    art: {
+      position: 'absolute' as const,
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      // Rounded here as well as on the parent. `overflow: hidden` is a clip on
+      // the container, and Android drops that clip once an ancestor is
+      // transformed — so the focused card, which is the one being scaled, was
+      // the only one whose artwork spilled out to square corners.
+      borderRadius: radius.md,
+    },
     strip: {
       paddingHorizontal: space.sm,
       paddingBottom: space.sm,

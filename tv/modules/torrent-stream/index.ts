@@ -65,6 +65,16 @@ export type PlayOptions = {
    * rebuffer. Zero (the default) lets the file grow to its full size.
    */
   cacheCapMb?: number;
+  /**
+   * Bytes per second of the selected file, or 0 when it is not known.
+   *
+   * The engine's buffers are byte counts, which makes their size in *time*
+   * depend on the bitrate: 128MB of readahead is seven minutes of a 1080p x265
+   * encode and sixteen seconds of a 4K remux. Given this, they are sized in
+   * seconds of playback instead — never smaller than they were, only larger
+   * where the bitrate demands it.
+   */
+  bitrate?: number;
 };
 
 type TorrentStream = {

@@ -35,6 +35,9 @@ import {
  */
 const QUALITY_ORDER = ['4K', '1080p', '720p', 'CAM'];
 
+/** Episodes revealed at a time. See `shownEpisodes`. */
+const EPISODE_PAGE = 10;
+
 const qualityRank = (q: string) => {
   const i = QUALITY_ORDER.indexOf(q);
   return i === -1 ? QUALITY_ORDER.length : i;
@@ -46,6 +49,22 @@ const HEALTH_LABEL: Record<ReturnType<typeof health>, string> = {
   good: 'Good',
   weak: 'Weak',
   dead: 'No seeds',
+};
+
+/**
+ * What a release actually contains.
+ *
+ * An episode search deliberately returns the packs alongside the loose
+ * episodes, because a pack usually has far more seeders and streams just as
+ * well — only the one file inside it is ever fetched. But the rows all looked
+ * alike, so a 60GB season was indistinguishable from a 2GB episode except by
+ * reading the release name. Saying it outright is the difference between
+ * picking a pack on purpose and picking one by accident.
+ */
+const SCOPE_LABEL: Record<Hit['scope'], string> = {
+  episode: 'Episode',
+  season: 'Season pack',
+  complete: 'Complete series',
 };
 
 function Source({
@@ -101,7 +120,14 @@ function Source({
               {hit.name}
             </Text>
             <Text style={[styles.meta, focused && { color: colors.bg }]}>
-              {[hit.quality, bytes(hit.size), `${hit.seeders} seeds`]
+              {[
+                SCOPE_LABEL[hit.scope],
+                hit.quality,
+                // For a pack this is the whole torrent, not the episode — which
+                // is the number that decides whether it fits on the box.
+                bytes(hit.size),
+                `${hit.seeders} seeds`,
+              ]
                 .filter(Boolean)
                 .join('   ·   ')}
             </Text>
@@ -209,7 +235,12 @@ export function DetailScreen({
   }, [title.episodes]);
 
   const [season, setSeason] = useState<number | null>(null);
-  useEffect(() => setSeason(seasons[0] ?? null), [seasons]);
+  // Only when the current choice is not in the list. `title` is replaced the
+  // moment loadTitle answers, which rebuilds `seasons` — and resetting on that
+  // threw the viewer back to season one just as they had picked season four.
+  useEffect(() => {
+    setSeason((prev) => (prev != null && seasons.includes(prev) ? prev : seasons[0] ?? null));
+  }, [seasons]);
 
   const [episode, setEpisode] = useState<Episode | null>(null);
   const [hits, setHits] = useState<Hit[] | null>(null);
@@ -236,9 +267,30 @@ export function DetailScreen({
     [title.episodes, season]
   );
 
+  /**
+   * How many episodes are on screen.
+   *
+   * A season of twenty-four is twenty-four rows to arrow past to reach the
+   * sources below, and rendering all of them costs a set-top box real time.
+   * Ten at a time, with a row at the end to ask for ten more.
+   */
+  const [shownEpisodes, setShownEpisodes] = useState(EPISODE_PAGE);
+  useEffect(() => setShownEpisodes(EPISODE_PAGE), [season, title.imdb]);
+
+  /**
+   * Which request the visible sources belong to.
+   *
+   * Arrowing down a season fires one of these per episode and they do not
+   * return in order, so a slower answer for episode 2 could replace episode 5's
+   * — and because the first row claims focus when it mounts, the remote was
+   * dragged down into a list belonging to an episode nobody had selected.
+   */
+  const wanted = useRef(0);
+
   /** Releases for a film, or for one episode of a series. */
   const findSources = useCallback(
     async (ep?: Episode) => {
+      const ticket = ++wanted.current;
       setBusy(true);
       setHits(null);
       setQuality(null);
@@ -250,14 +302,34 @@ export function DetailScreen({
               imdb: title.imdb,
               year: title.year,
             });
-        setHits(found);
+        if (ticket === wanted.current) setHits(found);
+        return ticket === wanted.current ? found : null;
       } catch {
-        setHits([]);
+        if (ticket === wanted.current) setHits([]);
+        return null;
       } finally {
-        setBusy(false);
+        if (ticket === wanted.current) setBusy(false);
       }
     },
     [title]
+  );
+
+  /**
+   * Pressing an episode plays it.
+   *
+   * The list below is still filled in, so a different release is one press away
+   * — but landing on a list of thirty near-identical names and having to choose
+   * one is not what pressing an episode means. The top row is what the ranking
+   * already decided was best, so take it.
+   */
+  const playEpisode = useCallback(
+    async (ep: Episode) => {
+      const found = await findSources(ep);
+      if (found?.length) {
+        onStream(found[0], title, episodeTag(ep.season, ep.episode), ep);
+      }
+    },
+    [findSources, onStream, title]
   );
 
   // A film has exactly one thing to look for, so look for it on arrival rather
@@ -365,12 +437,17 @@ export function DetailScreen({
               })}
             </View>
 
-            <Text style={styles.section}>Episodes</Text>
-            {episodes.map((ep) => (
+            <Text style={styles.section}>
+              Episodes
+              {episodes.length > EPISODE_PAGE
+                ? `  ·  ${Math.min(shownEpisodes, episodes.length)} of ${episodes.length}`
+                : ''}
+            </Text>
+            {episodes.slice(0, shownEpisodes).map((ep) => (
               <Focusable
                 invert
                 key={ep.id}
-                onPress={() => findSources(ep)}
+                onPress={() => playEpisode(ep)}
                 scale={1.01}
                 style={styles.episode}
               >
@@ -401,6 +478,20 @@ export function DetailScreen({
                 )}
               </Focusable>
             ))}
+            {shownEpisodes < episodes.length && (
+              <Focusable
+                invert
+                onPress={() => setShownEpisodes((n) => n + EPISODE_PAGE)}
+                scale={1.01}
+                style={styles.episode}
+              >
+                {(focused) => (
+                  <Text style={[styles.epName, focused && { color: colors.bg }]}>
+                    Show {Math.min(EPISODE_PAGE, episodes.length - shownEpisodes)} more
+                  </Text>
+                )}
+              </Focusable>
+            )}
           </>
         )}
 

@@ -16,6 +16,7 @@ import TorrentStream, { type Progress } from '../../modules/torrent-stream';
 import { Focusable } from '../components/Focusable';
 import { Icon, type IconName } from '../components/Icon';
 import { Sheet, type Option } from '../components/Sheet';
+import { TvButton } from '../components/Ui';
 import { searchSubtitles, type Sub } from '../lib/subdl';
 import { parseEpisode } from '../lib/search';
 import { searchableName } from '../lib/title';
@@ -30,6 +31,22 @@ const HIDE_MS = 6000;
 const SKIP = 10;
 
 const RATES = [0.75, 1, 1.25, 1.5, 2];
+
+/** Card appears this far from the end, matching the phone. */
+const UP_NEXT_SECONDS = 30;
+/** And rolls over here, unless it was dismissed. */
+const AUTO_NEXT_SECONDS = 10;
+
+/**
+ * libVLC's buffer, sized by bitrate.
+ *
+ * Its default second is nothing at remux rates, so playback stalls whenever a
+ * piece is late even though the engine holds a minute of readahead. Small files
+ * keep the short cache, because there the second costs start-up time and buys
+ * nothing.
+ */
+const cacheMsFor = (bytesPerSecond: number) =>
+  bytesPerSecond > 4_000_000 ? 5000 : bytesPerSecond > 1_500_000 ? 3000 : 1000;
 
 /** Committed this long after the last press, the way a TV remote expects. */
 const SCRUB_COMMIT_MS = 700;
@@ -183,6 +200,9 @@ export function PlayerScreen({
   savedSubs,
   onSaveSubs,
   progress,
+  bitrate,
+  next,
+  onNext,
   onPosition,
   onDuration,
   onEnded,
@@ -202,6 +222,11 @@ export function PlayerScreen({
   savedSubs?: SavedSub[];
   onSaveSubs?: (subs: SavedSub[]) => void;
   progress: Progress | null;
+  /** Bytes per second of the file, for sizing libVLC's own buffer. */
+  bitrate?: number;
+  /** The following episode inside this torrent, when there is one. */
+  next?: { index: number; name: string } | null;
+  onNext?: () => void;
   onPosition: (seconds: number) => void;
   onDuration: (seconds: number) => void;
   onEnded: () => void;
@@ -304,6 +329,22 @@ export function PlayerScreen({
       gap: space.sm,
       marginTop: space.md,
     },
+    upNext: {
+      position: 'absolute' as const,
+      right: SAFE.x,
+      bottom: SAFE.y,
+      maxWidth: 520,
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: space.md,
+      paddingHorizontal: space.lg,
+      paddingVertical: space.md,
+      borderRadius: radius.md,
+      backgroundColor: c.surface,
+      zIndex: 4,
+    },
+    upNextLabel: { ...type.meta, color: c.faint },
+    upNextName: { ...type.label, color: c.text, marginTop: 1 },
     toast: {
       position: 'absolute' as const,
       top: SAFE.y,
@@ -337,6 +378,8 @@ export function PlayerScreen({
   const [rate, setRate] = useState(1);
   const [scale, setScale] = useState<VlcScaleType>('SURFACE_BEST_FIT');
   const [note, setNote] = useState<string | null>(null);
+  /** Cancelled for this episode — do not offer or roll over again. */
+  const [noNext, setNoNext] = useState(false);
   /** Where the ‹ › keys have walked to, not yet committed. Null when idle. */
   const [scrub, setScrub] = useState<number | null>(null);
   /**
@@ -383,6 +426,9 @@ export function PlayerScreen({
       if (hideTimer.current) clearTimeout(hideTimer.current);
     };
   }, [show]);
+
+  // A new episode is a new offer; the last one's refusal does not carry over.
+  useEffect(() => setNoNext(false), [url]);
 
   // A sheet is a decision in progress; nothing should slide out from under it.
   useEffect(() => {
@@ -614,6 +660,16 @@ export function PlayerScreen({
   const pct = duration ? Math.max(0, Math.min(100, (head / duration) * 100)) : 0;
   const have = Math.max(0, Math.min(100, progress?.progress ?? 0));
 
+  const remaining = duration > 0 ? duration - at : Infinity;
+  const offerNext = !!next && !!onNext && !noNext && remaining <= UP_NEXT_SECONDS;
+
+  // Rolls over by itself near the end, the way the phone does — but only if the
+  // card was left alone. Guarded on `noNext` so Cancel really cancels.
+  useEffect(() => {
+    if (!next || !onNext || noNext) return;
+    if (duration > 0 && remaining <= AUTO_NEXT_SECONDS) onNext();
+  }, [next, onNext, noNext, duration, remaining]);
+
   const waiting = !url || buffering;
 
   return (
@@ -625,6 +681,7 @@ export function PlayerScreen({
           source={url}
           paused={paused}
           rate={rate}
+          cacheMs={cacheMsFor(bitrate ?? 0)}
           scaleType={scale}
           startPosition={startAt}
           subtitleTrack={subtitle}
@@ -688,6 +745,21 @@ export function PlayerScreen({
       {!!note && (
         <View style={styles.toast}>
           <Text style={styles.toastText}>{note}</Text>
+        </View>
+      )}
+
+      {offerNext && (
+        <View style={styles.upNext}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.upNextLabel}>
+              Up next in {Math.max(0, Math.ceil(remaining - AUTO_NEXT_SECONDS))}s
+            </Text>
+            <Text style={styles.upNextName} numberOfLines={1}>
+              {next!.name}
+            </Text>
+          </View>
+          <TvButton icon="play" variant="solid" label="Play now" onPress={() => onNext!()} />
+          <TvButton label="Cancel" onPress={() => setNoNext(true)} />
         </View>
       )}
 

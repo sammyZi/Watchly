@@ -101,11 +101,18 @@ export const Poster = memo(function Poster({
   onPress,
   onFocus,
   first,
+  sub,
 }: {
   title: Title;
   onPress: () => void;
   onFocus?: () => void;
   first?: boolean;
+  /**
+   * A second line under the name. Search uses it to say film or series, because
+   * a show and the film of the same name sit next to each other there with
+   * nothing else to tell them apart.
+   */
+  sub?: string;
 }) {
   const styles = useThemedStyles((c) => ({
     card: {
@@ -115,7 +122,15 @@ export const Poster = memo(function Poster({
       overflow: 'hidden' as const,
       backgroundColor: c.surface,
     },
-    art: { width: '100%' as const, height: '100%' as const },
+    art: {
+      width: '100%' as const,
+      height: '100%' as const,
+      // Rounded here as well as on the parent. `overflow: hidden` is a clip on
+      // the container, and Android drops that clip once an ancestor is
+      // transformed — so the focused card, which is the one being scaled, was
+      // the only one whose artwork spilled out to square corners.
+      borderRadius: radius.md,
+    },
     fallback: {
       flex: 1,
       alignItems: 'center' as const,
@@ -128,6 +143,7 @@ export const Poster = memo(function Poster({
       width: POSTER_W,
       marginTop: space.sm,
     },
+    sub: { ...type.meta, fontSize: 11, color: c.faint, width: POSTER_W },
   }));
 
   return (
@@ -156,6 +172,11 @@ export const Poster = memo(function Poster({
       <Text style={styles.name} numberOfLines={1}>
         {title.title}
       </Text>
+      {!!sub && (
+        <Text style={styles.sub} numberOfLines={1}>
+          {sub}
+        </Text>
+      )}
     </View>
   );
 });
@@ -187,7 +208,18 @@ const WideCard = memo(function WideCard({
       backgroundColor: c.surface,
       justifyContent: 'flex-end' as const,
     },
-    art: { position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0 },
+    art: {
+      position: 'absolute' as const,
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      // Rounded here as well as on the parent. `overflow: hidden` is a clip on
+      // the container, and Android drops that clip once an ancestor is
+      // transformed — so the focused card, which is the one being scaled, was
+      // the only one whose artwork spilled out to square corners.
+      borderRadius: radius.md,
+    },
     strip: {
       paddingHorizontal: space.sm,
       paddingBottom: space.sm,

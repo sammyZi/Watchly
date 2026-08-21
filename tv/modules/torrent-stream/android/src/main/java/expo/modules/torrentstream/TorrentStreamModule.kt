@@ -168,6 +168,31 @@ private const val WINDOW_BYTES = 32L * 1024 * 1024
  */
 private const val READAHEAD_BYTES = 128L * 1024 * 1024
 
+/**
+ * Buffers measured in seconds of playback, not megabytes.
+ *
+ * Every constant above is a byte count, which means a buffer whose size in
+ * *time* depends entirely on the bitrate. 128MB of readahead is seven minutes
+ * of a 1080p x265 encode and sixteen seconds of a 4K remux — which is why a
+ * remux rebuffers constantly on a link that plays everything else. Given a
+ * bitrate these turn the byte counts into a floor and size the real buffer by
+ * how long it will last.
+ */
+/**
+ * Deliberately small: this one gates `ready`, which is when the player is
+ * handed the URL. Sized at eight seconds it made a remux sit on "finding peers"
+ * for a minute before showing anything — the viewer reads that as a hang. Three
+ * seconds is enough to start, and it is READAHEAD_SECONDS that keeps playback
+ * from stalling afterwards.
+ */
+private const val PREPARE_SECONDS = 3
+private const val WINDOW_SECONDS = 15
+private const val READAHEAD_SECONDS = 60
+
+/** Ceilings, so a bad bitrate estimate cannot ask for the whole film at once. */
+private const val PREPARE_MAX = 24L * 1024 * 1024
+private const val READAHEAD_MAX = 768L * 1024 * 1024
+
 /** Refuse to start below this much free space rather than dying on a write. */
 private const val FREE_SPACE_MIN = 512L * 1024 * 1024
 
@@ -233,6 +258,15 @@ class PlayOptions : Record {
   @Field var saveFolder: String = ""
 
   /**
+   * Bytes per second of the file being played, or 0 when it is not known.
+   *
+   * Only the caller can work this out — it needs a running time, which the
+   * torrent does not carry. With it the buffers are sized in seconds of
+   * playback instead of megabytes; without it they stay as they were.
+   */
+  @Field var bitrate: Double = 0.0
+
+  /**
    * Megabytes of the streamed file allowed on disk before it rolls over.
    *
    * A television has single-digit gigabytes free and a 4K film is tens of them,
@@ -283,6 +317,8 @@ class TorrentStreamModule : Module() {
   /** Replaced by play() before anything reads it; see WINDOW_BYTES. */
   private var windowPieces = 4
   private var prepareBytes = 3L * 1024 * 1024
+  /** The zone width in bytes, sized from the bitrate when one was given. */
+  private var readaheadBytes = READAHEAD_BYTES
   private var removeFilesAfterStop = true
   private var announcedReady = false
   private var peerSaveTick = 0
@@ -1391,7 +1427,31 @@ class TorrentStreamModule : Module() {
     if (gen != playGen) return emptyList()
 
     // Never less than a piece: nothing is readable until one completes.
-    prepareBytes = maxOf(options.prepareMb.toLong() * 1024 * 1024, ti.pieceLength().toLong())
+    // Seconds of playback, floored by the old byte constants so that nothing
+    // low-bitrate ends up with a smaller buffer than it used to have.
+    val perSecond = options.bitrate.takeIf { it > 0 }?.toLong() ?: 0L
+    // `ready` waits for this many bytes *contiguous* from the start, and a
+    // contiguous run can only advance a whole piece at a time. An 84GB remux
+    // has 8MB pieces, so a 23MB target means four consecutive pieces — and the
+    // swarm is spread across the whole readahead zone, so those four took 90
+    // seconds while 4MB/s was arriving. Two pieces is the most worth waiting
+    // for; libVLC's own cache covers the rest, and the readahead keeps filling
+    // behind it.
+    prepareBytes = maxOf(
+      options.prepareMb.toLong() * 1024 * 1024,
+      ti.pieceLength().toLong(),
+      minOf(perSecond * PREPARE_SECONDS, PREPARE_MAX)
+    ).coerceAtMost(ti.pieceLength().toLong() * 2)
+    readaheadBytes = maxOf(
+      READAHEAD_BYTES,
+      minOf(perSecond * READAHEAD_SECONDS, READAHEAD_MAX)
+    )
+    if (perSecond > 0) {
+      log(
+        "buffers: ${perSecond / 1024}kB/s source — prepare ${prepareBytes / 1024 / 1024}MB, " +
+          "readahead ${readaheadBytes / 1024 / 1024}MB"
+      )
+    }
     // Bytes, with the option as an override rather than a floor.
     //
     // As a floor it was the reason playback stalled on a fast connection: a
@@ -1402,7 +1462,10 @@ class TorrentStreamModule : Module() {
     // moving the contiguous head forward at 0.8MB/s.
     windowPieces =
       if (options.windowPieces > 0) options.windowPieces
-      else maxOf(2, (WINDOW_BYTES / ti.pieceLength()).toInt())
+      else maxOf(
+        2,
+        (maxOf(WINDOW_BYTES, perSecond * WINDOW_SECONDS) / ti.pieceLength()).toInt()
+      )
     removeFilesAfterStop = options.removeFilesAfterStop
     cacheCapBytes = options.cacheCapMb.toLong() * 1024 * 1024
     lastRollTick = -1000
@@ -1976,7 +2039,7 @@ class TorrentStreamModule : Module() {
     // the zone just keeps the peers doing something useful.
     // Two pieces is the floor purely so the arithmetic cannot produce a zone
     // narrower than the reader plus its next step.
-    val width = maxOf(2, (READAHEAD_BYTES / pieceLen).toInt())
+    val width = maxOf(2, (readaheadBytes / pieceLen).toInt())
 
     /** How far behind each reader stays wanted. See REWIND_BYTES. */
     val back = maxOf(8, (REWIND_BYTES / pieceLen).toInt())
@@ -2457,6 +2520,7 @@ class TorrentStreamModule : Module() {
     fullFile = false
     cacheCapBytes = 0L
     lastRollTick = -1000
+    readaheadBytes = READAHEAD_BYTES
     if (downloads.isNotEmpty() && poller == null) startPolling()
   }
 
