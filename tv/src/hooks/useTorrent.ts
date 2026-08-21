@@ -56,10 +56,7 @@ export function useTorrent(settings: Settings) {
   itemRef.current = item;
   const metaRef = useRef<TorrentMeta | null>(null);
   metaRef.current = meta;
-  // Progress ticks once a second. Once the player is up that re-render makes
-  // controls feel laggy — mute it for streaming. Download mode needs every tick.
   const streaming = useRef(false);
-  const keepProgress = useRef(false);
   const queueRef = useRef<number[]>([]);
 
   useEffect(() => {
@@ -75,7 +72,11 @@ export function useTorrent(settings: Settings) {
           lastState.current = p.state;
           console.log(`[torrent] ${p.state} seeds=${p.seeds} dht=${p.dhtNodes}`);
         }
-        if (!streaming.current || keepProgress.current) setProgress(p);
+        // Always. The phone mutes these once playback starts, because its
+        // player shows nothing that uses them and the re-render made the
+        // controls feel laggy — but the television's bar shows the transfer
+        // rate, so muting them froze the readout the instant the film began.
+        setProgress(p);
       }),
       TorrentStream.addListener('ready', ({ url, lanUrl: lan, name, subtitleFiles: subs, uri }) => {
         if (uri) return;
@@ -116,7 +117,6 @@ export function useTorrent(settings: Settings) {
     source.current = null;
     lastState.current = null;
     streaming.current = false;
-    keepProgress.current = false;
   }, []);
 
   /** Stage 1 — resolve the file list. Returns the metadata so callers can auto-pick. */
@@ -161,10 +161,11 @@ export function useTorrent(settings: Settings) {
       fileIndex: number,
       startRatio = 0,
       opts?: {
-        keepProgress?: boolean;
         fileIndices?: number[];
         queueIndices?: number[];
         season?: number;
+        /** Bytes per second of the file, so the engine can size its buffers. */
+        bitrate?: number;
       }
     ) => {
       const uri = source.current;
@@ -175,7 +176,6 @@ export function useTorrent(settings: Settings) {
       setLanUrl(null);
       setSubtitleFiles([]);
       streaming.current = false;
-      keepProgress.current = !!opts?.keepProgress;
       setPlayingIndex(fileIndex);
       const indices = opts?.fileIndices?.length ? opts.fileIndices : [fileIndex];
       const queue = opts?.queueIndices?.length ? opts.queueIndices : indices;
@@ -204,6 +204,10 @@ export function useTorrent(settings: Settings) {
           saveFolder: '',
           // The rolling cache. Without this a 4K stream fills the TV and stops.
           cacheCapMb: settings.cacheCapMb,
+          // Lets the engine buy seconds of playback rather than megabytes — a
+          // remux needs twenty times the bytes of an x265 encode for the same
+          // cushion.
+          bitrate: opts?.bitrate ?? 0,
         },
         (opts?.fileIndices ?? []).join(',')
       ).then((wanted) => {
@@ -228,10 +232,10 @@ export function useTorrent(settings: Settings) {
       next: Item,
       fileIndex: number,
       opts?: {
-        keepProgress?: boolean;
         fileIndices?: number[];
         queueIndices?: number[];
         season?: number;
+        bitrate?: number;
       }
     ) => {
       const uri = settings.addTrackers ? withTrackers(next.uri) : next.uri;
@@ -251,11 +255,9 @@ export function useTorrent(settings: Settings) {
           })),
         });
       }
-      play(
-        fileIndex,
-        opts?.keepProgress ? 0 : resumeRatio(next, fileIndex),
-        opts
-      );
+      // Always the stored resume point. `keepProgress` used to double as
+      // "start from zero", which is not a thing any caller here ever wants.
+      play(fileIndex, resumeRatio(next, fileIndex), opts);
     },
     [play, settings.addTrackers]
   );

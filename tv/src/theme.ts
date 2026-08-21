@@ -122,7 +122,16 @@ export const SAFE = { x: 28, y: 20 };
  */
 export const NAV_W = 68;
 export const NAV_OPEN_W = 210;
-export const GUTTER = NAV_W + SAFE.x;
+
+/**
+ * Clear air between the rail and the first card.
+ *
+ * Without it the gutter is exactly the rail's own width, so a focused poster —
+ * which grows by 5% and carries a 3px ring — reaches back over the icons and
+ * looks cut off against them.
+ */
+export const NAV_GAP = 24;
+export const GUTTER = NAV_W + SAFE.x + NAV_GAP;
 
 /**
  * Sized for the canvas a television actually reports, which is much smaller
@@ -167,12 +176,20 @@ export function fadeToBg(bg: string, from = 0.35) {
   return `linear-gradient(to bottom, rgba(${rgb},0) 0%, rgba(${rgb},${from}) 45%, rgba(${rgb},0.92) 82%, rgb(${rgb}) 100%)`;
 }
 
-/** Solid at the left, clear by halfway — keeps hero prose off the artwork. */
-export function fadeRight(bg: string) {
+/**
+ * Solid at the left, clear by halfway — keeps hero prose off the artwork.
+ *
+ * `strength` scales every stop. The hero wants the full thing so its text stays
+ * readable over any frame; the collapsed navigation rail wants far less, since
+ * there it only has to keep four icons legible and at full strength it reads as
+ * a black column down the side of the page.
+ */
+export function fadeRight(bg: string, strength = 1) {
   const rgb = hexToRgb(bg);
+  const a = (v: number) => Math.max(0, Math.min(1, v * strength)).toFixed(2);
   return (
-    `linear-gradient(to right, rgb(${rgb}) 0%, rgba(${rgb},0.86) 28%, ` +
-    `rgba(${rgb},0.35) 62%, rgba(${rgb},0) 100%)`
+    `linear-gradient(to right, rgba(${rgb},${a(1)}) 0%, rgba(${rgb},${a(0.86)}) 28%, ` +
+    `rgba(${rgb},${a(0.35)}) 62%, rgba(${rgb},0) 100%)`
   );
 }
 

@@ -59,6 +59,14 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
   private var startMs = 0L
   private var paused = false
   private var rate = 1f
+  /**
+   * libVLC's own buffer, in milliseconds of stream.
+   *
+   * A fixed 1000 is one second whatever the bitrate — fine for a 700MB encode,
+   * and about 8MB for a 4K remux, which is gone the instant a piece is late.
+   * The caller sets this from the bitrate.
+   */
+  private var cacheMs = 1000
   /** Applied on load — tracks do not exist until the media is parsed. */
   private var wantedSpu: Int? = null
   private var announced = false
@@ -100,6 +108,12 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
   }
 
   /* ----------------------------------------------------------------- props */
+
+  fun setCacheMs(value: Int) {
+    // Read when the media loads; setSource defers that to the end of the prop
+    // batch, so arriving in any order is fine.
+    cacheMs = value.coerceIn(500, 8000)
+  }
 
   fun setSource(uri: String?) {
     if (uri == source) return
@@ -339,8 +353,8 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
           // Native torrent window already holds tens of MB ahead of the
           // playhead. 1s is enough to ride a piece stall; 3s was extra black
           // screen after the URL was already handed over.
-          "--network-caching=1000",
-          "--file-caching=1000",
+          "--network-caching=$cacheMs",
+          "--file-caching=$cacheMs",
           "--no-video-title-show",
           "--audio-time-stretch"
         )

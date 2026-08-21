@@ -31,9 +31,11 @@ import {
 } from './lib/history';
 import { loadSaved, toggleSaved, type List, type Saved } from './lib/saved';
 import { loadTitle, type Episode, type Title } from './lib/meta';
-import type { TorrentMeta } from '../modules/torrent-stream';
+import type { TorrentFile, TorrentMeta } from '../modules/torrent-stream';
+import { Sheet } from './components/Sheet';
+import { bytes as formatBytes } from './lib/format';
 import { episodeTag, type Hit } from './lib/search';
-import { pickFile } from './lib/pick';
+import { nextEpisode, pickFile } from './lib/pick';
 import { DEFAULTS, loadSettings, saveSettings, type Settings } from './lib/settings';
 import {
   NAV_OPEN_W,
@@ -50,6 +52,22 @@ import {
 } from './theme';
 
 SplashScreen.preventAutoHideAsync();
+
+/**
+ * "136 min" -> 8160 seconds.
+ *
+ * Cinemeta's running time is the only duration a torrent that has never been
+ * played carries, and without a duration there is no bitrate — so a remux gets
+ * the same buffers as a 700MB encode and rebuffers all the way through.
+ */
+const runtimeSeconds = (runtime?: string | null) => {
+  const found = /(\d+)\s*min/i.exec(runtime ?? '');
+  return found ? Number(found[1]) * 60 : 0;
+};
+
+/** Bytes per second, or 0 when the running time is not known. */
+const bitrateOf = (bytes: number, seconds: number) =>
+  bytes > 0 && seconds > 0 ? bytes / seconds : 0;
 
 type Tab = 'home' | 'search' | 'library' | 'settings';
 
@@ -99,8 +117,11 @@ function Nav({ tab, onChange }: { tab: Tab; onChange: (tab: Tab) => void }) {
       top: 0,
       bottom: 0,
       left: 0,
-      experimental_backgroundImage: fadeRight(c.bg),
+      // Closed, this only has to keep four icons legible over a backdrop. At
+      // full strength it reads as a black column down the side of every page.
+      experimental_backgroundImage: fadeRight(c.bg, 0.4),
     },
+    veilOpen: { experimental_backgroundImage: fadeRight(c.bg) },
     mark: {
       ...type.title,
       fontFamily: font.bold,
@@ -123,7 +144,14 @@ function Nav({ tab, onChange }: { tab: Tab; onChange: (tab: Tab) => void }) {
   return (
     <View style={[styles.rail, { width: open ? NAV_OPEN_W : NAV_W }]}>
       <View
-        style={[styles.veil, { width: open ? NAV_OPEN_W * 2.4 : NAV_W * 1.6 }]}
+        // Closed it must stop before GUTTER (NAV_W + SAFE.x), or its fade runs
+        // out on top of the first card as a black strip. Open it is meant to
+        // dim the page, so it deliberately spills.
+        style={[
+          styles.veil,
+          open && styles.veilOpen,
+          { width: open ? NAV_OPEN_W * 2.4 : NAV_W },
+        ]}
         pointerEvents="none"
       />
       {open ? (
@@ -228,6 +256,8 @@ function Shell({
   const [history, setHistory] = useState<Item[]>([]);
   const [saved, setSaved] = useState<Saved[]>([]);
   const [detail, setDetail] = useState<Title | null>(null);
+  /** Set when the torrent's names cannot say which file was asked for. */
+  const [choose, setChoose] = useState<{ item: Item; meta: TorrentMeta } | null>(null);
 
   const torrent = useTorrent(settings);
   const { phase, item, meta, url, fileName, subtitleFiles, playingIndex, progress, inspect, play, playKnown, reset } =
@@ -244,6 +274,10 @@ function Shell({
   useEffect(() => {
     if (phase === 'playing') return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (choose) {
+        setChoose(null);
+        return true;
+      }
       if (detail) {
         setDetail(null);
         return true;
@@ -255,7 +289,7 @@ function Shell({
       return false;
     });
     return () => sub.remove();
-  }, [detail, tab, phase]);
+  }, [choose, detail, tab, phase]);
 
   const openTitle = useCallback((title: Title) => setDetail(title), []);
 
@@ -317,10 +351,20 @@ function Shell({
       const found = await inspect(fresh);
       if (!found) return;
       const index = pickFile(found.files, tag);
-      if (index == null) return;
+      if (index == null) {
+        // A pack whose names carry no readable episode marker. The biggest file
+        // is just the longest episode, not the one that was asked for, so the
+        // phone hands the choice over rather than guessing — and returning
+        // silently here was the whole "nothing happens" bug.
+        setChoose({ item: fresh, meta: found });
+        return;
+      }
 
       await rememberFiles(next.uri, found, index);
-      play(index, resumeRatio(fresh, index));
+      const size = found.files.find((f) => f.index === index)?.size ?? 0;
+      play(index, resumeRatio(fresh, index), {
+        bitrate: bitrateOf(size, fresh.durations?.[index] || runtimeSeconds(title.runtime)),
+      });
     },
     [inspect, play, rememberFiles]
   );
@@ -337,7 +381,10 @@ function Shell({
     async (target: Item) => {
       const known = target.lastFileIndex;
       if (known != null && target.files?.length) {
-        playKnown(target, known);
+        const size = target.files.find((f) => f.index === known)?.size ?? 0;
+        playKnown(target, known, {
+          bitrate: bitrateOf(size, target.durations?.[known] ?? 0),
+        });
         return;
       }
 
@@ -346,7 +393,10 @@ function Shell({
       const index = known ?? pickFile(found.files);
       if (index == null) return;
       await rememberFiles(target.uri, found, index);
-      play(index, resumeRatio(target, index));
+      const size = found.files.find((f) => f.index === index)?.size ?? 0;
+      play(index, resumeRatio(target, index), {
+        bitrate: bitrateOf(size, target.durations?.[index] ?? 0),
+      });
     },
     [inspect, play, playKnown, rememberFiles]
   );
@@ -387,6 +437,38 @@ function Shell({
     [item, playingIndex]
   );
 
+  /**
+   * The episode after this one, inside the same torrent.
+   *
+   * Only ever a season pack — `nextEpisode` returns nothing unless the playing
+   * file is named like an episode, so a film never offers one.
+   */
+  const upNext = useMemo(() => {
+    if (!meta?.files?.length) return null;
+    const found = nextEpisode(meta.files, playingIndex);
+    return found ? { index: found.index, name: found.name } : null;
+  }, [meta, playingIndex]);
+
+  const playNext = useCallback(() => {
+    if (!upNext || !item) return;
+    // Same torrent, different file: no inspect, and it starts from the top
+    // rather than the resume point of whatever was watched before.
+    setPosition(item, upNext.index, 0);
+    play(upNext.index, 0, {
+      bitrate: bitrateOf(
+        item.files?.find((f) => f.index === upNext.index)?.size ?? 0,
+        item.durations?.[upNext.index] ?? 0
+      ),
+    });
+  }, [upNext, item, play]);
+
+  /** Bytes per second of what is playing, or 0 when the runtime is unknown. */
+  const playingBitrate = useMemo(() => {
+    if (!item) return 0;
+    const size = item.files?.find((f) => f.index === playingIndex)?.size ?? 0;
+    return bitrateOf(size, item.durations?.[playingIndex] ?? 0);
+  }, [item, playingIndex]);
+
   const startAt = useMemo(() => {
     if (!item) return 0;
     return item.positions?.[playingIndex] ?? 0;
@@ -405,6 +487,9 @@ function Shell({
         savedSubs={item?.subtitles?.[playingIndex]}
         onSaveSubs={saveSubs}
         progress={progress}
+        bitrate={playingBitrate}
+        next={upNext}
+        onNext={playNext}
         onPosition={savePosition}
         onDuration={saveDuration}
         onEnded={exit}
@@ -452,6 +537,30 @@ function Shell({
           setTab(next);
         }}
       />
+
+      {!!choose && (
+        <Sheet
+          title="Which file?"
+          options={choose.meta.files
+            .filter((f) => f.isVideo)
+            .map((f) => ({
+              value: f.index,
+              label: f.name,
+              hint: formatBytes(f.size),
+            }))}
+          empty="This torrent holds no video."
+          onPick={async (index) => {
+            const target = choose;
+            setChoose(null);
+            if (index == null) return;
+            const file = target.meta.files.find((f) => f.index === index);
+            await rememberFiles(target.item.uri, target.meta, index);
+            play(index, resumeRatio(target.item, index), {
+              bitrate: bitrateOf(file?.size ?? 0, target.item.durations?.[index] ?? 0),
+            });
+          }}
+        />
+      )}
     </View>
   );
 }

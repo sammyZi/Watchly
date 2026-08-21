@@ -51,6 +51,14 @@ export type VlcPlayerProps = {
   subtitleFiles?: string[] | null;
   /** How the picture is fitted to the surface. Defaults to best fit. */
   scaleType?: VlcScaleType;
+  /**
+   * libVLC's own buffer, in milliseconds of stream. Default 1000.
+   *
+   * One second is about 8MB of a 4K remux and vanishes the moment a piece is
+   * late; on a small encode the same second is nothing to hold. Scale it with
+   * the bitrate rather than paying the start-up cost on everything.
+   */
+  cacheMs?: number;
 
   onLoaded?: (e: { nativeEvent: { duration: number } }) => void;
   onProgress?: (e: { nativeEvent: { currentTime: number } }) => void;
