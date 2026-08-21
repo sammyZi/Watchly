@@ -304,6 +304,15 @@ class TorrentStreamModule : Module() {
   private var readyAt = 0L
   /** Last piece of the container header region. */
   private var headEndPiece = 0
+  /**
+   * The most recent byte a reader asked for, kept after the socket closes.
+   *
+   * `readers` empties whenever the player has no connection open — every seek,
+   * and the whole time it is paused — and the rolling cache still needs to know
+   * where playback is.
+   */
+  private var lastReaderAt = 0L
+
   /** Bytes of the streamed file allowed on disk; 0 lets it grow to full size. */
   private var cacheCapBytes = 0L
   /** Tick of the last roll, so a cap set too low cannot thrash. */
@@ -1915,6 +1924,20 @@ class TorrentStreamModule : Module() {
     ticks++
 
     if (ticks % 20 == 0 && saveDir.usableSpace < FREE_SPACE_MIN) {
+      // One last roll before giving up. A stream with a cache cap can almost
+      // always free itself and carry on, and tearing the player down is the
+      // only outcome here the viewer cannot recover from — so it is worth
+      // trying even at the floor, where the roll normally would have run long
+      // before.
+      val h = handle
+      val ti = info
+      if (h != null && ti != null && h.isValid && cacheCapBytes > 0) {
+        lastRollTick = -1000
+        if (runCatching { rollCache(h, ti) }.getOrDefault(false)) {
+          log("out of space — rolled instead of stopping")
+          return
+        }
+      }
       log("out of space — stopping")
       // Each step guarded on its own: a failure to stop one download must not
       // skip tearing down the rest, or the next tick finds the disk still full
@@ -2133,7 +2156,10 @@ class TorrentStreamModule : Module() {
         file = path,
         fileSize = size,
         available = { offset -> handle?.havePiece(pieceAt(offset)) == true },
-        request = { id, offset -> readers[id] = offset },
+        request = { id, offset ->
+          readers[id] = offset
+          lastReaderAt = offset
+        },
         release = { id -> readers.remove(id) }
       )
       srv.start()
@@ -2190,13 +2216,21 @@ class TorrentStreamModule : Module() {
     val status = runCatching { h.status() }.getOrNull() ?: return false
     val onDisk = status.totalDone()
     // A cap guessed too high still must not walk into the hard out-of-space
-    // stop, which kills the stream outright.
-    val low = saveDir.usableSpace < FREE_SPACE_MIN * 2
+    // stop, which kills the stream outright. Three times the floor, not two:
+    // the roll itself needs room to finish, and reaching the floor is the one
+    // outcome with no recovery.
+    val low = saveDir.usableSpace < FREE_SPACE_MIN * 3
     if (onDisk < cacheCapBytes && !low) return false
 
-    // No reader means no playhead to restart from, and rolling would only throw
-    // the buffer away.
-    val at = readers.values.minOrNull() ?: return false
+    // Where playback is. `readers` is only populated while an HTTP connection
+    // is actually open, and the player closes one on every seek and while
+    // paused — so insisting on a live reader here meant that pausing a remux
+    // filled the disk with nobody to roll for, and the out-of-space stop tore
+    // the whole stream down. The last known offset is still the right place to
+    // restart from; a closed socket does not move the playhead.
+    val at = readers.values.minOrNull()
+      ?: lastReaderAt.takeIf { it > 0 }
+      ?: return false
     lastRollTick = ticks
     val freeBefore = saveDir.usableSpace
     log(
@@ -2520,6 +2554,7 @@ class TorrentStreamModule : Module() {
     fullFile = false
     cacheCapBytes = 0L
     lastRollTick = -1000
+    lastReaderAt = 0L
     readaheadBytes = READAHEAD_BYTES
     if (downloads.isNotEmpty() && poller == null) startPolling()
   }
