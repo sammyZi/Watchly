@@ -642,10 +642,17 @@ async function findEpisode(
   }
 
   console.log('[releases] episode fallback apibay');
-  const found = await searchTorrents(show, signal, {
-    suffix: episodeTag(season, episode),
-  }).catch(() => [] as Hit[]);
-  const out = rankEpisode(found.filter(plays), show, season);
+  // Two questions, not one. "Prison Break S01E01" only ever matches a loose
+  // episode file — the season packs are called "Prison Break Season 1
+  // Complete", carry no episode tag at all, and out-seed the loose rips by an
+  // order of magnitude. Asking for the show by name is what puts them on the
+  // page; `plays` then drops the seasons this episode is not in, and
+  // rankEpisode floats the single-season packs to the top.
+  const [loose, packs] = await Promise.all([
+    searchTorrents(show, signal, { suffix: tag }).catch(() => [] as Hit[]),
+    searchTorrents(show, signal).catch(() => [] as Hit[]),
+  ]);
+  const out = rankEpisode(merge([loose, packs]).filter(plays), show, season);
   console.log(`[releases] episode done ${Date.now() - t0}ms n=${out.length} bay`);
   return out;
 }

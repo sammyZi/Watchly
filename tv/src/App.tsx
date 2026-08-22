@@ -260,8 +260,37 @@ function Shell({
   const [choose, setChoose] = useState<{ item: Item; meta: TorrentMeta } | null>(null);
 
   const torrent = useTorrent(settings);
-  const { phase, item, meta, url, fileName, subtitleFiles, playingIndex, progress, inspect, play, playKnown, reset } =
+  const { phase, item, meta, url, fileName, subtitleFiles, playingIndex, progress, error, inspect, play, playKnown, reset } =
     torrent;
+
+  const styles = useThemedStyles((c) => ({
+    toast: {
+      position: 'absolute' as const,
+      bottom: SAFE.y,
+      right: SAFE.x,
+      maxWidth: 560,
+      paddingHorizontal: space.md,
+      paddingVertical: space.sm,
+      borderRadius: radius.md,
+      backgroundColor: c.surface,
+      zIndex: 3,
+    },
+    toastText: { ...type.meta, color: c.text },
+  }));
+
+  /**
+   * Torrent failures are otherwise invisible: the engine tears its own stream
+   * down, the player unmounts, and the viewer is dropped back on whatever page
+   * they came from with no word as to why. A dead swarm, a blocked network and
+   * a full disk all land here now.
+   */
+  const [note, setNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!error) return;
+    setNote(error);
+    const timer = setTimeout(() => setNote(null), 8000);
+    return () => clearTimeout(timer);
+  }, [error]);
 
   useEffect(() => {
     loadHistory().then(setHistory);
@@ -560,6 +589,14 @@ function Shell({
             });
           }}
         />
+      )}
+
+      {/* Painted last so it sits over everything; never focusable, so the
+          D-pad ignores it and it leaves on its own. */}
+      {!!note && (
+        <View style={styles.toast} pointerEvents="none">
+          <Text style={styles.toastText}>{note}</Text>
+        </View>
       )}
     </View>
   );

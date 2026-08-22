@@ -511,10 +511,12 @@ export function namesTitle(release: string, title: string): boolean {
  * Search public indexes for video torrents.
  *
  * `suffix` is appended to every name variant — an episode tag, or "complete".
- * The title is asked for under both its own name and its alias. YTS is
- * tried first; Torrentio and apibay only run when it comes up empty, so a
- * slow index cannot hold the page. One of them being blocked is the normal
- * case rather than the exception, and half a list beats an error message.
+ * The title is asked for under both its own name and its alias. apibay is
+ * tried first — it indexes the widest spread of releases, and its rows carry
+ * real seeder counts rather than a scraped display string. YTS and Torrentio
+ * only run when it comes up empty, which covers the ISPs that block it.
+ * One source being unreachable is the normal case rather than the exception,
+ * and half a list beats an error message.
  */
 export async function searchTorrents(
   title: string,
@@ -532,7 +534,19 @@ export async function searchTorrents(
   console.log(`[releases] torrents start "${full}" imdb=${opts?.imdb ?? '-'}`);
 
   const bags: Hit[][] = [];
-  if (!opts?.suffix) {
+  const [primary, aliased] = await Promise.all([
+    timed('apibay', bay(full)),
+    alias
+      ? timed('apibay-alias', bay([alias, tail].filter(Boolean).join(' ')))
+      : Promise.resolve([] as Hit[]),
+  ]);
+  // The alias is a looser question — "Dune 2021" also matches Dune Prophecy's
+  // 2021 rips — so its answers have to carry the year to count. The primary
+  // query named the film outright and needs no such proof.
+  bags.push(primary, year ? aliased.filter((h) => h.name.includes(year)) : aliased);
+
+  if (!bags.some((h) => h.length) && !opts?.suffix) {
+    console.log('[releases] torrents fallback yts/torrentio');
     const fast = await firstHits([
       timed('yts', limited(fromYts(opts?.imdb ?? full, signal), FAST_MS, [] as Hit[])),
       opts?.imdb
@@ -543,20 +557,6 @@ export async function searchTorrents(
         : Promise.resolve([] as Hit[]),
     ]);
     if (fast.length) bags.push(fast);
-  }
-
-  if (!bags.some((h) => h.length)) {
-    console.log('[releases] torrents fallback apibay');
-    const [primary, aliased] = await Promise.all([
-      timed('apibay', bay(full)),
-      alias
-        ? timed('apibay-alias', bay([alias, tail].filter(Boolean).join(' ')))
-        : Promise.resolve([] as Hit[]),
-    ]);
-    // The alias is a looser question — "Dune 2021" also matches Dune Prophecy's
-    // 2021 rips — so its answers have to carry the year to count. The primary
-    // query named the film outright and needs no such proof.
-    bags.push(primary, year ? aliased.filter((h) => h.name.includes(year)) : aliased);
   }
 
   const found = rank(merge(bags), full);
@@ -620,6 +620,24 @@ async function findEpisode(
   const tag = episodeTag(season, episode);
   console.log(`[releases] episode start "${show}" ${tag} imdb=${imdb ?? '-'}`);
 
+  // Two questions, not one. "Prison Break S01E01" only ever matches a loose
+  // episode file — the season packs are called "Prison Break Season 1
+  // Complete", carry no episode tag at all, and out-seed the loose rips by an
+  // order of magnitude. Asking for the show by name is what puts them on the
+  // page; `plays` then drops the seasons this episode is not in, and
+  // rankEpisode floats the single-season packs to the top.
+  const [loose, packs] = await Promise.all([
+    searchTorrents(show, signal, { suffix: tag }).catch(() => [] as Hit[]),
+    searchTorrents(show, signal).catch(() => [] as Hit[]),
+  ]);
+  const bayHits = rankEpisode(merge([loose, packs]).filter(plays), show, season);
+  if (bayHits.length) {
+    console.log(`[releases] episode done ${Date.now() - t0}ms n=${bayHits.length} bay`);
+    return bayHits;
+  }
+  if (signal?.aborted) return [];
+
+  console.log('[releases] episode fallback torrentio/eztv');
   if (imdb) {
     const tio = await timed(
       'torrentio',
@@ -641,11 +659,6 @@ async function findEpisode(
     }
   }
 
-  console.log('[releases] episode fallback apibay');
-  const found = await searchTorrents(show, signal, {
-    suffix: episodeTag(season, episode),
-  }).catch(() => [] as Hit[]);
-  const out = rankEpisode(found.filter(plays), show, season);
-  console.log(`[releases] episode done ${Date.now() - t0}ms n=${out.length} bay`);
-  return out;
+  console.log(`[releases] episode done ${Date.now() - t0}ms n=0`);
+  return [];
 }

@@ -114,6 +114,8 @@ export function useTorrent(settings: Settings) {
     setWantedIndices([]);
     setQueueIndices([]);
     setProgress(null);
+    // A failure from the last session must not survive into the next one.
+    setError(null);
     source.current = null;
     lastState.current = null;
     streaming.current = false;
