@@ -52,17 +52,21 @@ export function pickFile(files: Filed[], tag?: string): number | null {
 }
 
 /**
- * The episode that follows the one playing, inside the same torrent.
+ * The episode `step` places from the one playing, inside the same torrent.
  *
- * Only ever the same download: a season pack already holds the next episode and
- * playing it is instant, whereas a loose episode would mean another search,
+ * Only ever the same download: a season pack already holds its neighbours and
+ * playing one is instant, whereas a loose episode would mean another search,
  * another swarm and a wait — nothing worth auto-starting on someone.
  *
  * Ordering is by what the names say, not by file order, because packs are
  * routinely laid out alphabetically ("E10" before "E2") and a season boundary
  * then falls in the wrong place.
  */
-export function nextEpisode(files: Filed[], index: number): Filed | null {
+export function siblingEpisode(
+  files: Filed[],
+  index: number,
+  step: number
+): Filed | null {
   const playing = files.find((f) => f.index === index);
   if (!playing || !parseEpisode(playing.name)) return null;
 
@@ -73,7 +77,18 @@ export function nextEpisode(files: Filed[], index: number): Filed | null {
     .sort((a, b) => a.at.season - b.at.season || a.at.episode - b.at.episode);
 
   const at = ordered.findIndex((e) => e.file.index === index);
-  return at < 0 ? null : (ordered[at + 1]?.file ?? null);
+  if (at < 0) return null;
+  const to = at + step;
+  return to < 0 ? null : (ordered[to]?.file ?? null);
+}
+
+export function nextEpisode(files: Filed[], index: number): Filed | null {
+  return siblingEpisode(files, index, 1);
+}
+
+/** The episode before this one. Same ordering, same "only a pack" rule. */
+export function prevEpisode(files: Filed[], index: number): Filed | null {
+  return siblingEpisode(files, index, -1);
 }
 
 export function parentDir(path?: string, name?: string) {

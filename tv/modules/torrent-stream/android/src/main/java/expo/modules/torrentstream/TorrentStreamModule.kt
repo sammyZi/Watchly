@@ -2289,9 +2289,12 @@ class TorrentStreamModule : Module() {
     // the roll itself needs room to finish, and reaching the floor is the one
     // outcome with no recovery.
     val low = saveDir.usableSpace < FREE_SPACE_MIN * 3
-    // A zero cap disables cap-based rolling only — the low watermark below
-    // still applies, or an unbounded stream fills the disk and dies.
-    if (onDisk < cacheCapBytes && !low) return false
+    // A zero cap disables cap-based rolling only — the low watermark still
+    // applies, or an unbounded stream fills the disk and dies. Spelled out
+    // rather than leaned on: `onDisk < cacheCapBytes` is false for every
+    // possible `onDisk` when the cap is zero, so folding the two rules into
+    // one comparison rolled the whole stream every 30s on an empty disk.
+    if (!low && (cacheCapBytes <= 0L || onDisk < cacheCapBytes)) return false
 
     // Where playback is. `readers` is only populated while an HTTP connection
     // is actually open, and the player closes one on every seek and while

@@ -32,10 +32,12 @@ const SKIP = 10;
 
 const RATES = [0.75, 1, 1.25, 1.5, 2];
 
-/** Card appears this far from the end, matching the phone. */
-const UP_NEXT_SECONDS = 30;
-/** And rolls over here, unless it was dismissed. */
-const AUTO_NEXT_SECONDS = 10;
+/** Card appears this far from the end — the last ten seconds, so it sits over
+ *  the credits rather than over the episode. */
+const UP_NEXT_SECONDS = 10;
+/** And rolls over when the file actually runs out, unless it was dismissed.
+ *  Not an offset any more: the card counts the full ten seconds down. */
+const AUTO_NEXT_SECONDS = 0;
 
 /**
  * libVLC's buffer, sized by bitrate.
@@ -50,6 +52,20 @@ const cacheMsFor = (bytesPerSecond: number) =>
 
 /** Committed this long after the last press, the way a TV remote expects. */
 const SCRUB_COMMIT_MS = 700;
+
+/**
+ * No frame this long means the stream is stalled.
+ *
+ * libVLC only reports buffering when its own input buffer drains — but this
+ * stream blocks a level below that, inside the socket read, whenever the next
+ * piece has not landed. The player simply freezes on the last frame and no
+ * event is ever posted, so the spinner never appears and the television looks
+ * broken. A clock that stops is the only signal there is.
+ *
+ * Well clear of libVLC's ~250ms TimeChanged interval, so ordinary jitter and
+ * the gap around a seek do not flash the spinner.
+ */
+const STALL_MS = 1500;
 
 /**
  * How far one press of ‹ or › moves, given how long it has been held.
@@ -203,6 +219,8 @@ export function PlayerScreen({
   bitrate,
   next,
   onNext,
+  prev,
+  onPrev,
   onPosition,
   onDuration,
   onEnded,
@@ -227,6 +245,9 @@ export function PlayerScreen({
   /** The following episode inside this torrent, when there is one. */
   next?: { index: number; name: string } | null;
   onNext?: () => void;
+  /** The preceding one. Null on the first episode, and on any film. */
+  prev?: { index: number; name: string } | null;
+  onPrev?: () => void;
   onPosition: (seconds: number) => void;
   onDuration: (seconds: number) => void;
   onEnded: () => void;
@@ -663,14 +684,56 @@ export function PlayerScreen({
   const remaining = duration > 0 ? duration - at : Infinity;
   const offerNext = !!next && !!onNext && !noNext && remaining <= UP_NEXT_SECONDS;
 
-  // Rolls over by itself near the end, the way the phone does — but only if the
-  // card was left alone. Guarded on `noNext` so Cancel really cancels.
+  /**
+   * A new file is not the old one.
+   *
+   * `duration` and `at` keep describing the episode that just finished until
+   * the new one's `onLoaded` lands — and auto-next reads both. So the countdown
+   * was still expired the instant the next episode started, and because `next`
+   * and `onNext` change identity with it the effect below re-ran and fired
+   * again, and again: pressing play on episode one walked the whole season and
+   * landed on episode twenty-two. Clearing the runtime is what breaks the
+   * chain — `duration > 0` gates every reader of it.
+   */
   useEffect(() => {
-    if (!next || !onNext || noNext) return;
-    if (duration > 0 && remaining <= AUTO_NEXT_SECONDS) onNext();
-  }, [next, onNext, noNext, duration, remaining]);
+    setDuration(0);
+    setAt(startAt);
+    // Cancel applied to the episode that was playing, not to the whole pack.
+    setNoNext(false);
+  }, [url, startAt]);
 
-  const waiting = !url || buffering;
+  /**
+   * Rolls over by itself, but never twice for the same file.
+   *
+   * Two things call this: the countdown reaching zero, and libVLC reaching the
+   * end of the file — because a stream that stops feeding frames never reaches
+   * zero, and a runtime a few frames short of the real one never fires
+   * EndReached. Whichever lands first wins and the other becomes a no-op.
+   */
+  const advancedFrom = useRef<string | null>(null);
+  const goNext = useCallback(() => {
+    if (!onNext || !next || advancedFrom.current === url) return;
+    advancedFrom.current = url;
+    onNext();
+  }, [onNext, next, url]);
+
+  // Guarded on `noNext` so Cancel really cancels.
+  useEffect(() => {
+    if (noNext) return;
+    if (duration > 0 && remaining <= AUTO_NEXT_SECONDS) goNext();
+  }, [goNext, noNext, duration, remaining]);
+
+  // Restarted by every frame; only an absence of them lets it fire. Paused is
+  // not stalled, and neither is a player that has no stream yet.
+  const [stalled, setStalled] = useState(false);
+  useEffect(() => {
+    setStalled(false);
+    if (!url || paused) return;
+    const timer = setTimeout(() => setStalled(true), STALL_MS);
+    return () => clearTimeout(timer);
+  }, [at, url, paused]);
+
+  const waiting = !url || buffering || stalled;
 
   return (
     <View style={styles.screen}>
@@ -716,7 +779,13 @@ export function PlayerScreen({
             const picked = nativeEvent.defaultAudio ?? nativeEvent.audioId;
             if (picked != null && picked >= 0) setDefaultAudio(picked);
           }}
-          onEnded={onEnded}
+          // The file running out is the countdown's real deadline. Leaving the
+          // pack only happens when there is nothing after this, or Cancel said
+          // so — otherwise the player would exit to the menu mid-season.
+          onEnded={() => {
+            if (next && !noNext) goNext();
+            else onEnded();
+          }}
           onFailed={({ nativeEvent }) => {
             say(nativeEvent.message);
             onExit();
@@ -758,7 +827,10 @@ export function PlayerScreen({
               {next!.name}
             </Text>
           </View>
-          <TvButton icon="play" variant="solid" label="Play now" onPress={() => onNext!()} />
+          {/* `first` so the remote lands here the moment the card appears —
+              without it focus stayed wherever it was and neither button could
+              be reached. */}
+          <TvButton icon="play" variant="solid" label="Play now" first onPress={goNext} />
           <TvButton label="Cancel" onPress={() => setNoNext(true)} />
         </View>
       )}
@@ -766,8 +838,10 @@ export function PlayerScreen({
       {/* With the bar down the remote has nothing to land on. OK is play/pause
           here, which is what Android's TV guidance asks for — up and down are
           the buttons that merely peek at the bar. It stays mounted through a
-          scrub so focus has nowhere to drift to. */}
-      {!controls && !panel && (
+          scrub so focus has nowhere to drift to. Never while the Up Next card
+          is up: two `first` targets fight, and this one is the whole screen,
+          so it always won and the card's buttons could not be reached. */}
+      {!controls && !panel && !offerNext && (
         <Focusable
           first
           onPress={() => {
@@ -793,7 +867,9 @@ export function PlayerScreen({
         </Focusable>
       )}
 
-      {(controls || scrub != null) && (
+      {/* Stood down while the card is up: the bar is full-width at bottom 0 and
+          the card sits in the same corner, so the two drew over each other. */}
+      {(controls || scrub != null) && !offerNext && (
         <View style={styles.bar}>
           <View style={styles.titleRow}>
             <Text style={styles.name} numberOfLines={1}>
@@ -843,6 +919,15 @@ export function PlayerScreen({
           {controls && scrub == null && (
             <>
           <View style={styles.row}>
+            {/* Only inside a pack — a film has no siblings, and an empty round
+                button that does nothing is worse than no button. */}
+            {!!prev && !!onPrev && (
+              <Round
+                icon="skip-back"
+                onFocus={() => setRow('transport')}
+                onPress={onPrev}
+              />
+            )}
             <Round
               icon="rotate-ccw"
               onFocus={() => setRow('transport')}
@@ -863,6 +948,13 @@ export function PlayerScreen({
               onFocus={() => setRow('transport')}
               onPress={() => seekBy(SKIP)}
             />
+            {!!next && !!onNext && (
+              <Round
+                icon="skip-forward"
+                onFocus={() => setRow('transport')}
+                onPress={goNext}
+              />
+            )}
             <View style={{ flex: 1 }} />
             <Round icon="x" onFocus={() => setRow('transport')} onPress={onExit} />
           </View>
