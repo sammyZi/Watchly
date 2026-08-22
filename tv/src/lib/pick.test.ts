@@ -1,6 +1,6 @@
 // node --experimental-strip-types src/lib/pick.test.ts
 import assert from 'node:assert';
-import { nextEpisode, pickFile, seasonFiles } from './pick.ts';
+import { nextEpisode, pickFile, prevEpisode, seasonFiles } from './pick.ts';
 
 const f = (index: number, name: string, size: number, isVideo = true) => ({
   index,
@@ -51,6 +51,13 @@ assert.equal(nextEpisode(season, 0)?.name, 'Show.S02E01.mkv');
 assert.equal(nextEpisode(season, 3), null);
 // A film has nothing to follow it.
 assert.equal(nextEpisode([f(0, 'Dune.2021.1080p.mkv', 100)], 0), null);
+
+// Backwards down the same ordering — and off the front, which must not wrap
+// round to the last episode of the pack.
+assert.equal(prevEpisode(season, 1)?.name, 'Show.S01E01.mkv');
+assert.equal(prevEpisode(season, 3)?.name, 'Show.S01E10.mkv');
+assert.equal(prevEpisode(season, 2), null);
+assert.equal(prevEpisode([f(0, 'Dune.2021.1080p.mkv', 100)], 0), null);
 
 assert.deepEqual(seasonFiles(pack, 1), [0, 1, 2]);
 assert.deepEqual(seasonFiles(season, 1), [2, 1, 0]);

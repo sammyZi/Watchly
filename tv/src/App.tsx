@@ -35,7 +35,7 @@ import type { TorrentFile, TorrentMeta } from '../modules/torrent-stream';
 import { Sheet } from './components/Sheet';
 import { bytes as formatBytes } from './lib/format';
 import { episodeTag, type Hit } from './lib/search';
-import { nextEpisode, pickFile } from './lib/pick';
+import { nextEpisode, pickFile, prevEpisode } from './lib/pick';
 import { DEFAULTS, loadSettings, saveSettings, type Settings } from './lib/settings';
 import {
   NAV_OPEN_W,
@@ -467,10 +467,10 @@ function Shell({
   );
 
   /**
-   * The episode after this one, inside the same torrent.
+   * The episodes either side of this one, inside the same torrent.
    *
-   * Only ever a season pack — `nextEpisode` returns nothing unless the playing
-   * file is named like an episode, so a film never offers one.
+   * Only ever a season pack — `siblingEpisode` returns nothing unless the
+   * playing file is named like an episode, so a film never offers one.
    */
   const upNext = useMemo(() => {
     if (!meta?.files?.length) return null;
@@ -478,18 +478,30 @@ function Shell({
     return found ? { index: found.index, name: found.name } : null;
   }, [meta, playingIndex]);
 
-  const playNext = useCallback(() => {
-    if (!upNext || !item) return;
-    // Same torrent, different file: no inspect, and it starts from the top
-    // rather than the resume point of whatever was watched before.
-    setPosition(item, upNext.index, 0);
-    play(upNext.index, 0, {
-      bitrate: bitrateOf(
-        item.files?.find((f) => f.index === upNext.index)?.size ?? 0,
-        item.durations?.[upNext.index] ?? 0
-      ),
-    });
-  }, [upNext, item, play]);
+  const upPrev = useMemo(() => {
+    if (!meta?.files?.length) return null;
+    const found = prevEpisode(meta.files, playingIndex);
+    return found ? { index: found.index, name: found.name } : null;
+  }, [meta, playingIndex]);
+
+  /** Same torrent, different file: no inspect, and it starts from the top
+   *  rather than the resume point of whatever was watched before. */
+  const playSibling = useCallback(
+    (to: { index: number } | null) => {
+      if (!to || !item) return;
+      setPosition(item, to.index, 0);
+      play(to.index, 0, {
+        bitrate: bitrateOf(
+          item.files?.find((f) => f.index === to.index)?.size ?? 0,
+          item.durations?.[to.index] ?? 0
+        ),
+      });
+    },
+    [item, play]
+  );
+
+  const playNext = useCallback(() => playSibling(upNext), [playSibling, upNext]);
+  const playPrev = useCallback(() => playSibling(upPrev), [playSibling, upPrev]);
 
   /** Bytes per second of what is playing, or 0 when the runtime is unknown. */
   const playingBitrate = useMemo(() => {
@@ -519,6 +531,8 @@ function Shell({
         bitrate={playingBitrate}
         next={upNext}
         onNext={playNext}
+        prev={upPrev}
+        onPrev={playPrev}
         onPosition={savePosition}
         onDuration={saveDuration}
         onEnded={exit}
