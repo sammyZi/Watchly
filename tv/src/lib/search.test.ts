@@ -223,4 +223,39 @@ const [csv] = toCsvHits([
 assert.equal(csv.id, 'c39fe3eefbdb62da9c27eb6398ff4a7d2e26e7ab');
 assert.equal(csv.seeders, 9);
 
+// The real apibay rows for "Prison Break": the season packs out-seed every
+// loose S01E01 rip by 4x, so they have to reach the top of an episode list.
+const pbRow = (name: string, seeders: number): Hit => ({
+  id: name,
+  name,
+  magnet: `magnet:?xt=urn:btih:${name}`,
+  seeders,
+  leechers: 0,
+  size: 0,
+  quality: null,
+  scope: scopeOf(name),
+  kind: 'tv',
+  imdb: null,
+});
+const pbRanked = rankEpisode(
+  [
+    pbRow('Prison Break (2005) Season 1-5 S01-S05 1080p BluRay x265 HEVC', 145),
+    pbRow('Prison Break 2005 Season 1 Complete 720p AMZN WEB-DL x264 [i_c]', 73),
+    pbRow('Prison Break 2005 Season 2 Complete 720p AMZN WEB-DL x264 [i_c]', 70),
+    pbRow('Prison.Break.S01E01.ENG.1080p.HD.WEB', 18),
+  ],
+  'Prison Break',
+  1
+);
+assert.equal(
+  pbRanked[0].name,
+  'Prison Break 2005 Season 1 Complete 720p AMZN WEB-DL x264 [i_c]'
+);
+// Season 2's pack cannot play S01E01, and the 5-season span is not a "season
+// pack" — both stay below the loose episode that actually works.
+assert.ok(
+  pbRanked.findIndex((h) => h.scope === 'episode') <
+    pbRanked.findIndex((h) => h.name.includes('Season 2'))
+);
+
 console.log('ok');

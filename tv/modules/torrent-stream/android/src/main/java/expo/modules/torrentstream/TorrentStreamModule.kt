@@ -193,6 +193,20 @@ private const val READAHEAD_SECONDS = 60
 private const val PREPARE_MAX = 24L * 1024 * 1024
 private const val READAHEAD_MAX = 768L * 1024 * 1024
 
+/**
+ * Pre-roll deadline: how long the engine waits for its first byte before it
+ * gives up and says so.
+ *
+ * Metadata that arrived from the disk cache means play() starts without
+ * inspect()'s sixty-second proof that anyone is out there. Without a deadline
+ * of its own, a dead swarm or a network that blocks BitTorrent leaves the
+ * television on "finding peers" until someone restarts the app.
+ */
+private const val STALL_NO_DATA_MS = 90_000L
+
+/** While pre-roll has no data, re-ask trackers and DHT this often. */
+private const val SHAKE_INTERVAL_MS = 10_000L
+
 /** Refuse to start below this much free space rather than dying on a write. */
 private const val FREE_SPACE_MIN = 512L * 1024 * 1024
 
@@ -302,6 +316,10 @@ class TorrentStreamModule : Module() {
   private var tailPiece = 0
   private var ticks = 0
   private var readyAt = 0L
+  /** Clock time the last pre-roll byte landed — drives the stall guard. */
+  private var lastDataAt = 0L
+  /** Clock time of the last forced reannounce while still waiting. */
+  private var lastShakeAt = 0L
   /** Last piece of the container header region. */
   private var headEndPiece = 0
   /**
@@ -714,6 +732,9 @@ class TorrentStreamModule : Module() {
       if (h != null && h.isValid) {
         h.resume()
         userPaused = false
+        // A long pause during pre-roll must not hand the stall guard an
+        // already-expired clock.
+        lastDataAt = System.currentTimeMillis()
         lastNotifPct = -1
         lastNotifPaused = null
         emitPausedProgress(h)
@@ -1547,6 +1568,7 @@ class TorrentStreamModule : Module() {
       running.prioritizeFiles(priorities)
       running
     } else {
+      cleanOrphans(ti)
       val peers = loadPeers(infoHashHex!!)
       log("play: cold start, ${peers.size} cached peer(s)")
       // Dial immediately. DHT bootstraps in parallel; trackers do not need it.
@@ -1609,6 +1631,8 @@ class TorrentStreamModule : Module() {
     applyFocus(h)
 
     readyAt = System.currentTimeMillis()
+    lastDataAt = readyAt
+    lastShakeAt = 0L
     startPolling()
     return videos
   }
@@ -1694,6 +1718,7 @@ class TorrentStreamModule : Module() {
       running.prioritizeFiles(priorities)
       running
     } else {
+      cleanOrphans(ti)
       val peers = loadPeers(hash)
       log("download: cold start, ${peers.size} cached peer(s)")
       session.download(ti, saveDir, null, priorities, peers, TorrentFlags.SEQUENTIAL_DOWNLOAD)
@@ -1931,7 +1956,9 @@ class TorrentStreamModule : Module() {
       // before.
       val h = handle
       val ti = info
-      if (h != null && ti != null && h.isValid && cacheCapBytes > 0) {
+      // No cap is not no protection: a stream nobody bounds must still be
+      // able to save itself when the volume runs dry.
+      if (h != null && ti != null && h.isValid) {
         lastRollTick = -1000
         if (runCatching { rollCache(h, ti) }.getOrDefault(false)) {
           log("out of space — rolled instead of stopping")
@@ -1965,7 +1992,13 @@ class TorrentStreamModule : Module() {
     val gen = playGen
     val h = handle ?: return
     val ti = info ?: return
-    if (!h.isValid) return
+    if (!h.isValid) {
+      // A handle libtorrent has dropped would silently skip every tick after
+      // this one — the player would spin on a socket nobody will ever feed.
+      // Saying so is the only exit the viewer gets.
+      failStream("The torrent engine lost this stream. Please try again.")
+      return
+    }
 
     // A download wants every piece of the selected file, so none of the
     // windowing below applies: there is no reader to follow, the zone would
@@ -2038,6 +2071,34 @@ class TorrentStreamModule : Module() {
 
     val status = h.status()
     val pieceLen = ti.pieceLength().toLong().coerceAtLeast(1L)
+
+    // Pre-roll watchdog. Metadata served from the disk cache never passes
+    // inspect()'s own timeout, so a dead swarm or a network that blocks
+    // BitTorrent used to spin "finding peers" forever. Nothing at all arriving
+    // within the deadline is exactly that failure — give up and say so rather
+    // than let the spinner run all evening. Paused waits are not stalls.
+    if (!announcedReady && !userPaused) {
+      val now = System.currentTimeMillis()
+      if (status.totalWantedDone() > 0 || status.downloadRate() > 0) {
+        lastDataAt = now
+      } else {
+        // Trackers retry on their own interval, which can be minutes; while no
+        // byte has landed, ask early and often instead.
+        if (now - lastShakeAt >= SHAKE_INTERVAL_MS) {
+          lastShakeAt = now
+          runCatching { h.forceReannounce() }
+          runCatching { h.forceDHTAnnounce() }
+        }
+        if (now - lastDataAt >= STALL_NO_DATA_MS) {
+          log("stall: no data in ${STALL_NO_DATA_MS / 1000}s — giving up")
+          failStream(
+            "No data arrived from any peer within ${STALL_NO_DATA_MS / 1000}s. " +
+              "The torrent may be dead, or the network is blocking BitTorrent."
+          )
+          return
+        }
+      }
+    }
 
     // Two widths, and the difference matters.
     //
@@ -2121,8 +2182,16 @@ class TorrentStreamModule : Module() {
     val headHave = contiguousFrom(h, ti, firstPiece)
     val startHave =
       if (startPiece == firstPiece) headHave else contiguousFrom(h, ti, startPiece)
+    // Resuming the closing minutes of a film leaves fewer pieces past the
+    // resume point than the prepare window asks for — and a run that can never
+    // be completed means `ready` can never fire, so the viewer sits on
+    // "finding peers" forever. Ask only for what the file holds from here.
+    val startAvailable = maxOf(1, lastPiece - startPiece + 1).toLong() * pieceLen
     val startNeed =
-      if (startPiece == firstPiece) maxOf(prepareBytes, headNeed) else prepareBytes
+      minOf(
+        if (startPiece == firstPiece) maxOf(prepareBytes, headNeed) else prepareBytes,
+        startAvailable
+      )
 
     val buffered = minOf(startHave, headHave)
     val ready = headHave >= headNeed && startHave >= startNeed
@@ -2208,7 +2277,7 @@ class TorrentStreamModule : Module() {
    * @return true when the handle was replaced, which makes the caller's stale.
    */
   private fun rollCache(h: TorrentHandle, ti: TorrentInfo): Boolean {
-    if (cacheCapBytes <= 0L || !announcedReady) return false
+    if (!announcedReady) return false
     // ~30s of ticks. A cap set below the readahead window would otherwise roll
     // on every pass and the viewer would never get a frame.
     if (ticks - lastRollTick < 60) return false
@@ -2220,6 +2289,8 @@ class TorrentStreamModule : Module() {
     // the roll itself needs room to finish, and reaching the floor is the one
     // outcome with no recovery.
     val low = saveDir.usableSpace < FREE_SPACE_MIN * 3
+    // A zero cap disables cap-based rolling only — the low watermark below
+    // still applies, or an unbounded stream fills the disk and dies.
     if (onDisk < cacheCapBytes && !low) return false
 
     // Where playback is. `readers` is only populated while an HTTP connection
@@ -2350,6 +2421,14 @@ class TorrentStreamModule : Module() {
     rushTail: Boolean,
   ) {
     val prios = runCatching { h.piecePriorities() }.getOrNull() ?: return
+    // A magnet re-added for reuse has no piece picker until its metadata
+    // arrives, and play() runs the moment the *cached* metadata is read — so
+    // the first pass lands on a handle that silently drops every priority and
+    // deadline. Recording the zone anyway made `stale` false forever: piece 0
+    // never got TOP_PRIORITY, nothing got a deadline, and the pre-roll finished
+    // whenever the swarm felt like it. Leave the state untouched so the next
+    // tick tries again.
+    if (prios.size <= lastPiece) return
     val zones = targets.map { it..minOf(it + width, lastPiece) }
     // Behind each reader, kept only at LOW — a rewind of a few seconds should
     // find the data already there, but never at the cost of the pieces the
@@ -2550,6 +2629,9 @@ class TorrentStreamModule : Module() {
     infoHashHex = null
     fileIndex = -1
     announcedReady = false
+    readyAt = 0L
+    lastDataAt = 0L
+    lastShakeAt = 0L
     peerSaveTick = 0
     fullFile = false
     cacheCapBytes = 0L
@@ -2585,6 +2667,40 @@ class TorrentStreamModule : Module() {
       }
     runCatching { dir.mkdirs() }
     log(if (ok) "wiped stream cache" else "stream cache wipe incomplete")
+  }
+
+  /**
+   * Delete piece data left by sessions that never got to stop cleanly.
+   *
+   * A television that lost power mid-film — or an app the OS reaped while it
+   * streamed — leaves up to a full cache cap of pieces under saveDir, and
+   * nothing else ever clears them: every other wipe runs only after a clean
+   * stop. On a box with single-digit gigabytes free, the next open then fails
+   * on space with no way to recover from inside the app.
+   *
+   * Runs when a torrent is about to be added cold. Anything whose tree belongs
+   * to this torrent (or to one still downloading) stays — libtorrent re-checks
+   * matching files on add, so a crashed session of the same film restarts warm
+   * rather than full.
+   */
+  private fun cleanOrphans(ti: TorrentInfo) {
+    val dir = runCatching { saveDir }.getOrNull() ?: return
+    val mine = safeName(ti.name())
+    val keep = mutableSetOf<String>()
+    downloads.values.forEach { dl ->
+      runCatching {
+        keep.add(dl.info.name())
+        keep.add(safeName(dl.info.name()))
+      }
+    }
+    var freed = 0
+    dir.listFiles()?.forEach { child ->
+      if (child.name == ti.name() || safeName(child.name) == mine || child.name in keep) {
+        return@forEach
+      }
+      if (runCatching { child.deleteRecursively() }.getOrDefault(false)) freed++
+    }
+    if (freed > 0) log("cleaned $freed orphaned item(s) from ${dir.name}")
   }
 
   /** jlibtorrent takes magnet:/http: URLs or a bare filesystem path, not file:// */
