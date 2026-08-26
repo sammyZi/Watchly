@@ -31,6 +31,7 @@ class MediaButtons : BroadcastReceiver() {
     // Only the press. A headset sends down and up for one tap, and acting on
     // both toggles play straight back to where it started.
     if (key == null || key.action != KeyEvent.ACTION_DOWN) return
+    android.util.Log.i("VlcPlayer", "media button ${key.keyCode}")
     VlcPlayerView.onMediaKey(key.keyCode)
   }
 }
