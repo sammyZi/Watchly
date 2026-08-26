@@ -12,7 +12,7 @@ import { Icon } from '../components/Icon';
 import { Marquee } from '../components/Marquee';
 import { bytes } from '../lib/format';
 import { groupByFolder } from '../lib/pick';
-import { parseEpisode } from '../lib/search';
+import { episodeTag, parseEpisode } from '../lib/search';
 import { searchableName } from '../lib/title';
 import type { TorrentFile, TorrentMeta } from '../../modules/torrent-stream';
 import { font, radius, space, type, useColors, useTheme, useThemedStyles } from '../theme';
@@ -44,7 +44,13 @@ export function FilesScreen({
     [meta]
   );
 
-  const videos = meta.files.filter((f) => f.isVideo).length;
+  // "episodes" was a guess that a torrent of one film, or of a film plus its
+  // extras, got wrong every time. Count what is there and say how big it is —
+  // the size is the number someone actually wants before starting a 250GB pack.
+  const videoFiles = meta.files.filter((f) => f.isVideo);
+  const videos = videoFiles.length;
+  const videoBytes = videoFiles.reduce((sum, f) => sum + f.size, 0);
+  const others = meta.files.length - videos;
   const insets = useSafeAreaInsets();
   const downloading = mode === 'download';
   const colors = useColors();
@@ -159,26 +165,24 @@ export function FilesScreen({
           <Text numberOfLines={1} style={styles.title}>
             {searchableName(meta.name) || meta.name}
           </Text>
-          <Text style={styles.subtitle}>
-            {videos} {videos === 1 ? 'episode' : 'episodes'}
+          <Text style={styles.subtitle} numberOfLines={1}>
+            {[
+              `${videos} ${videos === 1 ? 'video' : 'videos'}`,
+              videoBytes ? bytes(videoBytes) : null,
+              others ? `${others} other` : null,
+            ]
+              .filter(Boolean)
+              .join('  ·  ')}
           </Text>
         </View>
-        {downloading && videos > 1 && onDownloadAll ? (
+        {/* Offered in both modes. Streaming a pack and then wanting the whole
+            thing kept is the common next thought, and the button was only ever
+            drawn on the download path. */}
+        {videos > 1 && onDownloadAll && (
           <Pressable onPress={onDownloadAll} hitSlop={8} style={styles.modeChip}>
             <Icon name="download" size={12} color={colors.accent} />
             <Text style={styles.modeChipText}>All {videos}</Text>
           </Pressable>
-        ) : (
-        <View style={[styles.modeChip, downloading && styles.modeChipDownload]}>
-          <Icon
-            name={downloading ? 'download' : 'play'}
-            size={12}
-            color={downloading ? colors.onAccent : colors.accent}
-          />
-          <Text style={[styles.modeChipText, downloading && styles.modeChipTextOn]}>
-            {downloading ? 'Download' : 'Stream'}
-          </Text>
-        </View>
         )}
       </View>
 
@@ -244,13 +248,16 @@ export function FilesScreen({
                 >
                   {item.name}
                 </Marquee>
+                {/* The episode leads: inside a pack it is what tells one
+                    near-identical release name from the next. */}
                 <Text style={styles.size} numberOfLines={1}>
-                  {bytes(item.size)}
-                  {item.isSubtitle
-                    ? ' · subtitle'
-                    : item.isVideo
-                      ? ''
-                      : ' · not playable'}
+                  {[
+                    at ? episodeTag(at.season, at.episode) : null,
+                    bytes(item.size),
+                    item.isSubtitle ? 'subtitle' : !item.isVideo ? 'not playable' : null,
+                  ]
+                    .filter(Boolean)
+                    .join('  ·  ')}
                 </Text>
               </View>
 

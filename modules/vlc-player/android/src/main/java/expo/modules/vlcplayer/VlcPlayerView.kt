@@ -1,15 +1,21 @@
 package expo.modules.vlcplayer
 
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
+import android.media.MediaMetadata
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.KeyEvent
 import android.view.PixelCopy
 import android.view.SurfaceView
 import android.view.View
@@ -50,6 +56,18 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
   private val onEnded by EventDispatcher()
   private val onFailed by EventDispatcher()
   private val onTracks by EventDispatcher()
+  private val onRemote by EventDispatcher()
+
+  /**
+   * What makes a headset's play/pause button reach this player.
+   *
+   * Android hands a Bluetooth AVRCP press to whichever app holds an *active*
+   * media session; audio focus alone is not enough. Without one the buttons
+   * went to whatever else had a session — usually nothing, so they did nothing.
+   * Registered on the platform class rather than the support library, because
+   * that needs no dependency this module does not already have.
+   */
+  private var session: MediaSession? = null
 
   private val videoLayout = VLCVideoLayout(context)
   private var vlc: LibVLC? = null
@@ -97,6 +115,119 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
 
   init {
     addView(videoLayout, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+    startSession()
+  }
+
+  /**
+   * Take the media buttons, and tell React what was pressed.
+   *
+   * The session acts on the player directly so the button works even if React
+   * is busy, and *also* emits — otherwise the overlay would still be drawing a
+   * pause icon over a paused film.
+   */
+  private fun startSession() {
+    runCatching {
+      val ms = MediaSession(context, "watchly")
+      // Vendor ROMs that route media buttons by receiver rather than by which
+      // session is playing will not see this app without one. Harmless on stock
+      // Android, where the active session wins anyway.
+      runCatching {
+        ms.setMediaButtonReceiver(
+          PendingIntent.getBroadcast(
+            context,
+            0,
+            Intent(Intent.ACTION_MEDIA_BUTTON).setClass(context, MediaButtons::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+          )
+        )
+      }
+      // Some ROMs treat a session with no metadata as not worth routing to.
+      runCatching {
+        ms.setMetadata(
+          MediaMetadata.Builder()
+            .putString(MediaMetadata.METADATA_KEY_TITLE, "Watchly")
+            .putLong(MediaMetadata.METADATA_KEY_DURATION, player?.length ?: 0L)
+            .build()
+        )
+      }
+      ms.setCallback(object : MediaSession.Callback() {
+        override fun onPlay() = remotePlay(false)
+
+        override fun onPause() = remotePlay(true)
+
+        override fun onStop() = remotePlay(true)
+
+        // Seeking is this player's own business, but next/previous belong to
+        // whatever is playing them — React owns the queue, so it decides.
+        override fun onSkipToNext() = onRemote(mapOf("action" to "next"))
+        override fun onSkipToPrevious() = onRemote(mapOf("action" to "previous"))
+
+        override fun onSeekTo(pos: Long) {
+          seekTo(pos)
+          onRemote(mapOf("action" to "seek", "position" to pos / 1000.0))
+        }
+      })
+      ms.isActive = true
+      session = ms
+      live = this
+      pushState()
+      Log.i(TAG, "media session active")
+    }.onFailure { Log.w(TAG, "media session unavailable", it) }
+  }
+
+  companion object {
+    /** The player a media button should act on — there is only ever one on
+     *  screen, and the receiver is a separate object with no handle to it. */
+    private var live: VlcPlayerView? = null
+
+    fun onMediaKey(code: Int) {
+      val view = live ?: return
+      view.post {
+        when (code) {
+          KeyEvent.KEYCODE_MEDIA_PLAY -> view.remotePlay(false)
+          KeyEvent.KEYCODE_MEDIA_PAUSE -> view.remotePlay(true)
+          KeyEvent.KEYCODE_MEDIA_STOP -> view.remotePlay(true)
+          KeyEvent.KEYCODE_HEADSETHOOK,
+          KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> view.remotePlay(!view.paused)
+          KeyEvent.KEYCODE_MEDIA_NEXT -> view.onRemote(mapOf("action" to "next"))
+          KeyEvent.KEYCODE_MEDIA_PREVIOUS -> view.onRemote(mapOf("action" to "previous"))
+          else -> Unit
+        }
+      }
+    }
+  }
+
+  /** Act, then tell React, so the overlay does not keep drawing the old icon. */
+  private fun remotePlay(pause: Boolean) {
+    setPaused(pause)
+    onRemote(mapOf("action" to if (pause) "pause" else "play"))
+  }
+
+  /** Headsets and car stereos read the state, not the player — a session that
+   *  never reports one is treated as idle and its buttons are ignored. */
+  private fun pushState() {
+    val ms = session ?: return
+    val position = runCatching { player?.time ?: 0L }.getOrDefault(0L)
+    runCatching {
+      ms.setPlaybackState(
+        PlaybackState.Builder()
+          .setActions(
+            PlaybackState.ACTION_PLAY or
+              PlaybackState.ACTION_PAUSE or
+              PlaybackState.ACTION_PLAY_PAUSE or
+              PlaybackState.ACTION_STOP or
+              PlaybackState.ACTION_SEEK_TO or
+              PlaybackState.ACTION_SKIP_TO_NEXT or
+              PlaybackState.ACTION_SKIP_TO_PREVIOUS
+          )
+          .setState(
+            if (paused) PlaybackState.STATE_PAUSED else PlaybackState.STATE_PLAYING,
+            position,
+            if (paused) 0f else rate
+          )
+          .build()
+      )
+    }
   }
 
   /* ----------------------------------------------------------------- props */
@@ -130,6 +261,7 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     // the moment data arrives, so a pause asked for in that window was dropped
     // and the audio came back. Both calls are no-ops when already in that state.
     runCatching { if (value) p.pause() else p.play() }
+    pushState()
   }
 
   /**
@@ -143,6 +275,7 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     paused = true
     dropAudioFocus()
     runCatching { player?.pause() }
+    pushState()
   }
 
   fun setRate(value: Float) {
@@ -507,6 +640,14 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
 
   fun release() {
     dropAudioFocus()
+    // Left active, it keeps claiming the headset's buttons after the player is
+    // gone — pressing play would resume nothing at all.
+    runCatching {
+      session?.isActive = false
+      session?.release()
+    }
+    session = null
+    if (live === this) live = null
     removeCallbacks(attachSubs)
     subRetries = 0
     player?.let { p ->

@@ -58,6 +58,17 @@ export type VlcPlayerProps = {
   onEnded?: (e: { nativeEvent: Record<string, never> }) => void;
   onFailed?: (e: { nativeEvent: { message: string } }) => void;
   onTracks?: (e: { nativeEvent: VlcTracks }) => void;
+  /**
+   * A headset, car stereo or lock-screen button. The native side has already
+   * acted on play/pause by the time this arrives — it is here so the overlay's
+   * own state can follow, and so next/previous reach whoever owns the queue.
+   */
+  onRemote?: (e: {
+    nativeEvent: {
+      action: 'play' | 'pause' | 'next' | 'previous' | 'seek';
+      position?: number;
+    };
+  }) => void;
 
   ref?: Ref<VlcPlayerRef>;
 };

@@ -140,6 +140,23 @@ export function SearchScreen({ onPickTitle }: { onPickTitle: (title: Title) => v
       setBusy(false);
       return;
     }
+    /**
+     * Results for a different search are not an answer to this one.
+     *
+     * The race guard above keeps a late reply from overwriting a newer one, but
+     * nothing cleared the rows already on screen — so starting a fresh search
+     * left the previous title's list sitting there through the debounce and the
+     * request, looking like the answer.
+     *
+     * Only when the two are unrelated. Refining "incep" to "incept" should not
+     * blink the list away and back; clearing the box and typing something else
+     * should.
+     */
+    const was = latest.current;
+    if (was && !q.startsWith(was) && !was.startsWith(q)) {
+      latest.current = '';
+      setResults(null);
+    }
     const timer = setTimeout(() => run(q), DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [query, run]);

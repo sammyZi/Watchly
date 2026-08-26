@@ -9,7 +9,18 @@ class VlcPlayerModule : Module() {
     Name("VlcPlayer")
 
     View(VlcPlayerView::class) {
-      Events("onLoaded", "onProgress", "onBuffering", "onEnded", "onFailed", "onTracks")
+      // `onRemote` carries a headset or car-stereo button press up to React, so
+      // the overlay's own paused state follows the same truth the media session
+      // just acted on.
+      Events(
+        "onLoaded",
+        "onProgress",
+        "onBuffering",
+        "onEnded",
+        "onFailed",
+        "onTracks",
+        "onRemote"
+      )
 
       Prop("source") { view: VlcPlayerView, value: String? -> view.setSource(value) }
       Prop("paused") { view: VlcPlayerView, value: Boolean -> view.setPaused(value) }

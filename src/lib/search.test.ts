@@ -1,6 +1,6 @@
 // node --experimental-strip-types src/lib/search.test.ts
 import assert from 'node:assert';
-import { aliasOf, episodeTag, merge, namesTitle, parseEpisode, seasonsIn, health, kindOf, quality, rank, rankEpisode, scopeOf, toCsvHits, toEztvHits, toHits, toTorrentioHits, toYtsHits, type Hit } from './search.ts';
+import { aliasOf, episodeTag, merge, namesTitle, parseEpisode, releaseTitle, sameTitle, seasonsIn, health, kindOf, quality, rank, rankEpisode, scopeOf, toCsvHits, toEztvHits, toHits, toTorrentioHits, toYtsHits, type Hit } from './search.ts';
 
 const row = (over: Record<string, string | number> = {}) => ({
   id: '1',
@@ -207,6 +207,36 @@ assert.ok(namesTitle('Dune (2021) [1080p] [WEBRip]', aliasOf('Dune: Part One')!)
 // Every word has to be there, and as a word.
 assert.ok(!namesTitle('The Matrix Reloaded 2003', 'The Matrix Revolutions'));
 assert.ok(namesTitle('The.Matrix.1999.1080p', 'The Matrix'));
+
+// Why the name test alone cannot do this: every word of "House" is present in
+// "House of the Dragon", so a search for one filled the page with the other.
+assert.ok(namesTitle('House of the Dragon S01 1080p', 'House'));
+
+// The real rows from that page. The title portion is what separates them.
+assert.ok(!sameTitle('House of the Dragon S01 1080p', 'House'));
+assert.ok(!sameTitle('Dragon - Season 1 - Mp4 x264', 'House'));
+assert.ok(!sameTitle('Dragon.S01.COMPLETE.720p', 'House'));
+assert.ok(!sameTitle('House.of.the.Dragon.S01E01.2160p.WEB-DL', 'House'));
+// …while the show actually asked for still gets through, including the way
+// releases really write it.
+assert.ok(sameTitle('House.S01E01.1080p.WEB', 'House'));
+assert.ok(sameTitle('House.M.D.S01.COMPLETE.720p.BluRay', 'House'));
+assert.ok(sameTitle('House 2004 Season 1 Complete 1080p', 'House'));
+// Country tags are a short suffix, not a different show.
+assert.ok(sameTitle('The.Office.US.S02E01.1080p', 'The Office'));
+// A sequel is a different film, whatever its seed count.
+assert.ok(!sameTitle('The.Matrix.Reloaded.2003.1080p', 'The Matrix'));
+assert.ok(sameTitle('The.Matrix.1999.2160p.BluRay.x265', 'The Matrix'));
+// Nothing but metadata means no title to compare.
+assert.deepEqual(releaseTitle('S01E01.1080p.WEB'), []);
+const houses = merge([
+  [
+    { ...swarm('d1', 400, 0), name: 'House of the Dragon S01 1080p', imdb: 'tt11198330' } as Hit,
+    { ...swarm('h1', 20, 0), name: 'House.S01E01.1080p', imdb: 'tt0412142' } as Hit,
+    { ...swarm('h2', 9, 0), name: 'House.M.D.S01.720p', imdb: null } as Hit,
+  ],
+]).filter((h) => !h.imdb || h.imdb === 'tt0412142');
+assert.deepEqual(houses.map((h) => h.id).sort(), ['h1', 'h2']);
 
 const [yts] = toYtsHits([
   {

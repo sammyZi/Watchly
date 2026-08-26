@@ -1,0 +1,14 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <!-- Named on the MediaSession so vendor ROMs that route by receiver, rather
+         than by which session is playing, can find this app at all. Not
+         exported: only the system delivers ACTION_MEDIA_BUTTON. -->
+    <receiver
+      android:name="expo.modules.vlcplayer.MediaButtons"
+      android:exported="false">
+      <intent-filter>
+        <action android:name="android.intent.action.MEDIA_BUTTON" />
+      </intent-filter>
+    </receiver>
+  </application>
+</manifest>
