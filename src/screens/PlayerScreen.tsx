@@ -1251,7 +1251,10 @@ export function PlayerScreen({
               exactly 35. Only while the controls are up, so it never sits over
               the picture. */}
           {showUi && !locked && (
-            <View style={styles.brightRail}>
+            {/* Past the cutout, not just off the edge. In landscape the punch
+                hole sits in the left inset, and a fixed margin put the buttons
+                under it. */}
+            <View style={[styles.brightRail, { left: insets.left + 16 }]}>
               <Pressable
                 onPress={() => stepBright(1)}
                 onLongPress={() => stepBright(10)}
@@ -1788,7 +1791,7 @@ const styles = StyleSheet.create({
   // more. Centred on the left edge, clear of the transport bar at the bottom.
   brightRail: {
     position: 'absolute',
-    left: 10,
+    // `left` is set inline from the safe-area inset — see the note at the call.
     top: '50%',
     transform: [{ translateY: -78 }],
     alignItems: 'center',
