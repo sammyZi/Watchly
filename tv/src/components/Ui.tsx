@@ -288,6 +288,7 @@ export const Rail = memo(function Rail({
   onPick,
   onFocusItem,
   firstItem,
+  focusId,
   wide,
 }: {
   heading: string;
@@ -298,6 +299,11 @@ export const Rail = memo(function Rail({
   onFocusItem?: (title: Title) => void;
   /** Marks the very first poster of the very first rail as the entry point. */
   firstItem?: boolean;
+  /**
+   * Put focus on this title instead of the first one — how the page gets you
+   * back to the card you opened rather than the top of the page.
+   */
+  focusId?: string | null;
   /** Landscape backdrop cards instead of posters. */
   wide?: boolean;
 }) {
@@ -342,23 +348,26 @@ export const Rail = memo(function Rail({
         initialNumToRender={8}
         windowSize={5}
         removeClippedSubviews={false}
-        renderItem={({ item, index }) =>
-          wide ? (
+        renderItem={({ item, index }) => {
+          // A named card wins over the entry-point rule: returning from a title
+          // page should land where you left, not at the start of the row.
+          const first = focusId ? item.imdb === focusId : firstItem && index === 0;
+          return wide ? (
             <WideCard
               title={item}
-              first={firstItem && index === 0}
+              first={first}
               onPress={() => onPick(item)}
               onFocus={onFocusItem ? () => onFocusItem(item) : undefined}
             />
           ) : (
             <Poster
               title={item}
-              first={firstItem && index === 0}
+              first={first}
               onPress={() => onPick(item)}
               onFocus={onFocusItem ? () => onFocusItem(item) : undefined}
             />
-          )
-        }
+          );
+        }}
       />
     </View>
   );

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BackHandler, Text, View } from 'react-native';
+import { ActivityIndicator, BackHandler, Text, View } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import {
   NotoSans_400Regular,
@@ -260,7 +260,7 @@ function Shell({
   const [choose, setChoose] = useState<{ item: Item; meta: TorrentMeta } | null>(null);
 
   const torrent = useTorrent(settings);
-  const { phase, item, meta, url, fileName, subtitleFiles, playingIndex, progress, error, inspect, play, playKnown, reset } =
+  const { phase, item, meta, url, fileName, subtitleFiles, playingIndex, progress, error, fail, inspect, play, playKnown, reset } =
     torrent;
 
   const styles = useThemedStyles((c) => ({
@@ -276,6 +276,19 @@ function Shell({
       zIndex: 3,
     },
     toastText: { ...type.meta, color: c.text },
+    opening: {
+      position: 'absolute' as const,
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+      gap: space.md,
+      backgroundColor: '#000000cc',
+      zIndex: 5,
+    },
+    openingText: { ...type.title, color: '#ffffff' },
   }));
 
   /**
@@ -373,29 +386,46 @@ function Shell({
           ? `${title.title} · ${episodeTag(episode.season, episode.episode)}`
           : title.title,
       };
-      const items = await put(next);
-      setHistory(items);
-      const fresh = items.find((h) => h.uri === next.uri) ?? next;
+      try {
+        const items = await put(next);
+        setHistory(items);
+        const fresh = items.find((h) => h.uri === next.uri) ?? next;
 
-      const found = await inspect(fresh);
-      if (!found) return;
-      const index = pickFile(found.files, tag);
-      if (index == null) {
-        // A pack whose names carry no readable episode marker. The biggest file
-        // is just the longest episode, not the one that was asked for, so the
-        // phone hands the choice over rather than guessing — and returning
-        // silently here was the whole "nothing happens" bug.
-        setChoose({ item: fresh, meta: found });
-        return;
+        const found = await inspect(fresh);
+        // inspect() has already said why on its own channel.
+        if (!found) return;
+
+        // An empty picker is not a choice. Saying so beats a sheet with nothing
+        // in it, which is indistinguishable from the press not registering.
+        if (!found.files.some((f) => f.isVideo)) {
+          fail('This torrent holds no video.');
+          return;
+        }
+
+        const index = pickFile(found.files, tag);
+        if (index == null) {
+          // A pack whose names carry no readable episode marker. The biggest file
+          // is just the longest episode, not the one that was asked for, so the
+          // phone hands the choice over rather than guessing — and returning
+          // silently here was the whole "nothing happens" bug.
+          setChoose({ item: fresh, meta: found });
+          return;
+        }
+
+        await rememberFiles(next.uri, found, index);
+        const size = found.files.find((f) => f.index === index)?.size ?? 0;
+        play(index, resumeRatio(fresh, index), {
+          bitrate: bitrateOf(size, fresh.durations?.[index] || runtimeSeconds(title.runtime)),
+        });
+      } catch (e: any) {
+        // `stream` is fired from onPress and nobody awaits it, so a throw
+        // anywhere above — a failed history write, a storage error — vanished
+        // and the press looked ignored. It has to land somewhere visible.
+        console.warn('[stream] failed', e?.message ?? e);
+        fail(String(e?.message ?? e));
       }
-
-      await rememberFiles(next.uri, found, index);
-      const size = found.files.find((f) => f.index === index)?.size ?? 0;
-      play(index, resumeRatio(fresh, index), {
-        bitrate: bitrateOf(size, fresh.durations?.[index] || runtimeSeconds(title.runtime)),
-      });
     },
-    [inspect, play, rememberFiles]
+    [fail, inspect, play, rememberFiles]
   );
 
   /**
@@ -417,17 +447,27 @@ function Shell({
         return;
       }
 
-      const found = await inspect(target);
-      if (!found) return;
-      const index = known ?? pickFile(found.files);
-      if (index == null) return;
-      await rememberFiles(target.uri, found, index);
-      const size = found.files.find((f) => f.index === index)?.size ?? 0;
-      play(index, resumeRatio(target, index), {
-        bitrate: bitrateOf(size, target.durations?.[index] ?? 0),
-      });
+      try {
+        const found = await inspect(target);
+        if (!found) return;
+        const index = known ?? pickFile(found.files);
+        if (index == null) {
+          // Nothing playable, or a pack too ambiguous to pick from — either way
+          // returning in silence is what made the card look dead.
+          setChoose({ item: target, meta: found });
+          return;
+        }
+        await rememberFiles(target.uri, found, index);
+        const size = found.files.find((f) => f.index === index)?.size ?? 0;
+        play(index, resumeRatio(target, index), {
+          bitrate: bitrateOf(size, target.durations?.[index] ?? 0),
+        });
+      } catch (e: any) {
+        console.warn('[resume] failed', e?.message ?? e);
+        fail(String(e?.message ?? e));
+      }
     },
-    [inspect, play, playKnown, rememberFiles]
+    [fail, inspect, play, playKnown, rememberFiles]
   );
 
   const exit = useCallback(() => {
@@ -543,21 +583,22 @@ function Shell({
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <View style={{ flex: 1 }}>
-        {detail ? (
-          <DetailScreen
-            title={detail}
-            saved={saved}
-            onSave={saveTitle}
-            onStream={stream}
-          />
-        ) : tab === 'home' ? (
+      {/* The tabs stay mounted underneath a title page rather than being
+          swapped out for it. Unmounting threw away the rails, the scroll
+          offset and the focused card, so coming back from a film landed at the
+          top of a page rebuilding itself — instead of on the film you had just
+          been looking at. Hidden, not removed: the native views keep their
+          scroll position, and `display: none` takes them out of the D-pad's
+          reach so focus cannot wander into the page behind. */}
+      <View style={[{ flex: 1 }, !!detail && { display: 'none' as const }]}>
+        {tab === 'home' ? (
           <HomeScreen
             history={history}
             saved={saved}
             genres={settings.genres}
             onPickTitle={openTitle}
             onResume={resume}
+            hidden={!!detail}
           />
         ) : tab === 'search' ? (
           <SearchScreen onPickTitle={openTitle} />
@@ -572,6 +613,16 @@ function Shell({
           <SettingsScreen settings={settings} onChange={onChangeSettings} />
         )}
       </View>
+      {!!detail && (
+        <View style={{ flex: 1 }}>
+          <DetailScreen
+            title={detail}
+            saved={saved}
+            onSave={saveTitle}
+            onStream={stream}
+          />
+        </View>
+      )}
       {/* Last, so it paints over the backdrop rather than beside it. */}
       <Nav
         tab={tab}
@@ -603,6 +654,17 @@ function Shell({
             });
           }}
         />
+      )}
+
+      {/* Resolving a torrent's metadata is a DHT round trip — seconds, and on a
+          cold magnet more than that. Nothing was drawn for it, so pressing an
+          episode looked like it had done nothing at all and the set sat there
+          until the player appeared. Say what is happening instead. */}
+      {phase === 'inspecting' && (
+        <View style={styles.opening} pointerEvents="none">
+          <ActivityIndicator size="large" color={colors.accent} />
+          <Text style={styles.openingText}>Opening…</Text>
+        </View>
       )}
 
       {/* Painted last so it sits over everything; never focusable, so the

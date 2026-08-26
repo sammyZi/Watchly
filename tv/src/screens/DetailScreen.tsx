@@ -469,11 +469,20 @@ export function DetailScreen({
                         </Text>
                       )}
                     </View>
-                    <Icon
-                      name="chevron-right"
-                      size={22}
-                      color={focused ? colors.bg : colors.faint}
-                    />
+                    {/* Searching this episode is a network round trip before
+                        anything else can happen. Without a mark on the row the
+                        press looked ignored. */}
+                    {busy && episode?.id === ep.id ? (
+                      <ActivityIndicator
+                        color={focused ? colors.bg : colors.accent}
+                      />
+                    ) : (
+                      <Icon
+                        name="chevron-right"
+                        size={22}
+                        color={focused ? colors.bg : colors.faint}
+                      />
+                    )}
                   </>
                 )}
               </Focusable>

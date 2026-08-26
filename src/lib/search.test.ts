@@ -154,6 +154,10 @@ assert.equal(one.size, Math.round(51.3 * 1024 ** 3));
 assert.equal(one.quality, '4K');
 assert.equal(one.id, 'aa0fd381c944a72cabb3e962d5f727c8694d7dd6');
 assert.ok(one.magnet.startsWith('magnet:?xt=urn:btih:aa0fd381'));
+// Torrentio's 💾 is the one file it found inside the torrent, not the whole
+// pack — the only source with that gap, and the only one tagged for it.
+assert.equal(one.perFileSize, true);
+assert.equal(toHits([row()])[0].perFileSize, undefined);
 
 // No stats at all is still a usable release, just an unranked one.
 assert.equal(toTorrentioHits([stream({ title: 'Some.Release.720p' })], 'movie')[0].seeders, 0);
@@ -162,13 +166,24 @@ assert.equal(toTorrentioHits([stream({ infoHash: 'nope' })], 'movie').length, 0)
 
 // Merging two indexes: the same hash is one row, and the better-informed copy
 // wins rather than whichever arrived first.
-const swarm = (id: string, seeders: number, size = 0) =>
-  ({ id, seeders, size, name: 'x' }) as Hit;
+const swarm = (id: string, seeders: number, size = 0, perFileSize?: boolean) =>
+  ({ id, seeders, size, name: 'x', perFileSize }) as Hit;
 const merged = merge([[swarm('a', 5, 100), swarm('b', 1)], [swarm('a', 900)]]);
 assert.equal(merged.length, 2);
 assert.equal(merged.find((h) => h.id === 'a')?.seeders, 900);
 // The size the other index knew is not thrown away with it.
 assert.equal(merged.find((h) => h.id === 'a')?.size, 100);
+
+// The same release from both apibay (whole-pack size, more seeders) and
+// Torrentio (per-file size, fewer): the winning number is apibay's, and the
+// flag has to follow it — not the seeder-winner — or the pack gets scaled up
+// a second time downstream.
+const dual = merge([
+  [swarm('c', 900, 15 * 1024 ** 3, false)],
+  [swarm('c', 20, 700 * 1024 ** 2, true)],
+]);
+assert.equal(dual[0].size, 15 * 1024 ** 3);
+assert.equal(dual[0].perFileSize, false);
 
 // The renamed-title case: an index knows "Dune 2021", never "Dune: Part One".
 assert.equal(aliasOf('Dune: Part One'), 'Dune');

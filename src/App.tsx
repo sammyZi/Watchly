@@ -176,6 +176,16 @@ function ShellApp({
   const styles = useThemedStyles((c) => ({
     app: { flex: 1, backgroundColor: c.bg },
     body: { flex: 1 },
+    /** A full-bleed page drawn over the tabs, which stay mounted beneath it.
+     *  Opaque, or the tab it covers shows through. */
+    layer: {
+      position: 'absolute' as const,
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: c.bg,
+    },
     modePicker: {
       flex: 1,
       backgroundColor: c.bg,
@@ -1083,11 +1093,18 @@ function ShellApp({
     );
   }
 
-  // Sits above the tabs but below the streaming flow: once a source is picked,
-  // the file picker and the player take the screen from here.
-  if (detail) {
-    return (
-      <DetailScreen
+  /**
+   * Sits above the tabs but below the streaming flow: once a source is picked,
+   * the file picker and the player take the screen from here.
+   *
+   * A layer rather than an early return. Returning this instead of the tab
+   * stack unmounted every tab with it — so a search, its results and the scroll
+   * position behind them were gone by the time you pressed Back, and the tab
+   * rebuilt itself from nothing. Rendered on top instead, so what is underneath
+   * is still there when it closes.
+   */
+  const detailLayer = detail ? (
+    <DetailScreen
         seed={detail}
         busy={phase === 'inspecting'}
         error={torrent.error}
@@ -1128,20 +1145,19 @@ function ShellApp({
         }}
         onBack={() => setDetail(null)}
       />
-    );
-  }
+  ) : null;
 
-  if (shelf) {
-    return (
-      <CatalogScreen
-        heading={shelf.title}
-        kind={shelf.kind}
-        genre={shelf.genre}
-        onOpenTitle={setDetail}
-        onBack={() => setShelf(null)}
-      />
-    );
-  }
+  // Same reasoning as the title page: a layer, so the tab underneath survives
+  // being browsed away from and back.
+  const shelfLayer = shelf ? (
+    <CatalogScreen
+      heading={shelf.title}
+      kind={shelf.kind}
+      genre={shelf.genre}
+      onOpenTitle={setDetail}
+      onBack={() => setShelf(null)}
+    />
+  ) : null;
 
   return (
     <View style={styles.app} onLayout={onReady}>
@@ -1231,7 +1247,11 @@ function ShellApp({
         </TabPage>
       </View>
 
-      <TabBar active={tab} onChange={setTab} />
+      {/* Only the tab bar hides behind them — the title and shelf pages carry
+          their own Back. */}
+      {!detailLayer && !shelfLayer && <TabBar active={tab} onChange={setTab} />}
+      {!!shelfLayer && <View style={styles.layer}>{shelfLayer}</View>}
+      {!!detailLayer && <View style={styles.layer}>{detailLayer}</View>}
       <ConfirmModal request={confirm} onClose={() => setConfirm(null)} />
     </View>
   );
