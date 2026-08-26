@@ -189,6 +189,15 @@ export function PlayerScreen({
   const warnTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Screen brightness 0–1; left-edge vertical swipe adjusts it like VLC. */
   const brightness = useRef(0.5);
+  /**
+   * The same number, rendered.
+   *
+   * The swipe is quick but cannot be aimed — landing on exactly 35% means
+   * fighting it, so the stepper below sets it a point at a time. Kept beside
+   * the ref rather than replacing it: the gesture writes on every move and
+   * re-rendering the player at that rate is what made it feel heavy.
+   */
+  const [brightPct, setBrightPct] = useState(50);
   const brightDrag = useRef<{ y: number; start: number } | null>(null);
   /** When a subtitle track was last chosen, so onError can blame the right thing. */
   const pickedAt = useRef(0);
@@ -517,6 +526,29 @@ export function PlayerScreen({
     []
   );
 
+  /** One place that writes brightness, so the swipe and the stepper cannot
+   *  disagree about what the current level is. */
+  const setBright = useCallback(
+    (next: number) => {
+      const level = Math.max(0.01, Math.min(1, next));
+      brightness.current = level;
+      setBrightPct(Math.round(level * 100));
+      Brightness.setBrightnessAsync(level).catch(() => {});
+      return level;
+    },
+    []
+  );
+
+  /** A point at a time, which is the whole reason this exists. */
+  const stepBright = useCallback(
+    (by: number) => {
+      const level = setBright((Math.round(brightness.current * 100) + by) / 100);
+      showHud({ icon: 'sun', label: `${Math.round(level * 100)}%` });
+      bumpUi();
+    },
+    [setBright, showHud, bumpUi]
+  );
+
   /**
    * Left half, vertical drag — same gesture VLC uses for brightness. A tap or
    * double-tap still falls through when the finger barely moved.
@@ -541,9 +573,7 @@ export function PlayerScreen({
           clearTimeout(tapTimer.current);
           tapTimer.current = null;
         }
-        const next = Math.max(0.01, Math.min(1, drag.start - dy / (height * 0.7)));
-        brightness.current = next;
-        Brightness.setBrightnessAsync(next).catch(() => {});
+        const next = setBright(drag.start - dy / (height * 0.7));
         showHud({ icon: 'sun', label: `${Math.round(next * 100)}%` });
         return;
       }
@@ -554,7 +584,7 @@ export function PlayerScreen({
       }
       tapPicture(x);
     },
-    [locked, bumpUi, width, height, showHud, tapPicture]
+    [locked, bumpUi, width, height, showHud, tapPicture, setBright]
   );
 
   const lock = useCallback(
@@ -583,6 +613,8 @@ export function PlayerScreen({
     Brightness.getBrightnessAsync()
       .then((v) => {
         brightness.current = v;
+        // So the stepper opens showing the level the screen is actually at.
+        setBrightPct(Math.round(v * 100));
       })
       .catch(() => {});
     return () => {
@@ -781,6 +813,13 @@ export function PlayerScreen({
               onDuration(d);
             }}
             onBuffering={({ nativeEvent: { isBuffering } }) => setBuffering(isBuffering)}
+            // The native side already paused or resumed; this keeps the overlay
+            // from drawing the opposite icon.
+            onRemote={({ nativeEvent: { action } }) => {
+              if (action === 'play') setPaused(false);
+              else if (action === 'pause') setPaused(true);
+              else if (action === 'next' && next && onNext) playNext();
+            }}
             onEnded={() => {
               // "End of stream" is what the player reports when the HTTP body
               // finishes — which over a torrent can mean the connection dropped
@@ -1204,6 +1243,35 @@ export function PlayerScreen({
                   Enter a search term and press Search
                 </Text>
               )}
+            </View>
+          )}
+
+          {/* Left edge, over the same strip the brightness drag owns — the
+              gesture is quick but cannot be aimed, and this is how you land on
+              exactly 35. Only while the controls are up, so it never sits over
+              the picture. */}
+          {showUi && !locked && (
+            <View style={styles.brightRail}>
+              <Pressable
+                onPress={() => stepBright(1)}
+                onLongPress={() => stepBright(10)}
+                hitSlop={10}
+                style={styles.brightBtn}
+              >
+                <Icon name="plus" size={18} color="#fff" />
+              </Pressable>
+              <View style={styles.brightValue}>
+                <Icon name="sun" size={13} color="#ffffffb0" />
+                <Text style={styles.brightText}>{brightPct}</Text>
+              </View>
+              <Pressable
+                onPress={() => stepBright(-1)}
+                onLongPress={() => stepBright(-10)}
+                hitSlop={10}
+                style={styles.brightBtn}
+              >
+                <Icon name="minus" size={18} color="#fff" />
+              </Pressable>
             </View>
           )}
 
@@ -1716,6 +1784,23 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   upNextPlayText: { ...type.label, color: '#0b0e14', fontFamily: font.semibold },
+  // Vertical, because brightness is a vertical gesture here and up should mean
+  // more. Centred on the left edge, clear of the transport bar at the bottom.
+  brightRail: {
+    position: 'absolute',
+    left: 10,
+    top: '50%',
+    transform: [{ translateY: -78 }],
+    alignItems: 'center',
+    borderRadius: 999,
+    paddingVertical: 4,
+    backgroundColor: '#00000073',
+  },
+  // Finger-sized: this gets pressed repeatedly to walk a few points, so it has
+  // to stay under the thumb without aiming.
+  brightBtn: { width: 44, height: 48, alignItems: 'center', justifyContent: 'center' },
+  brightValue: { alignItems: 'center', gap: 2, paddingVertical: 2 },
+  brightText: { ...type.meta, color: '#fff', fontFamily: font.semibold },
   // Under the title rather than mid-screen: at 38% it landed straight on the
   // play button, which is the one thing that must never be covered.
   hud: {

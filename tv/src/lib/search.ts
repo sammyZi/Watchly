@@ -507,6 +507,50 @@ export function namesTitle(release: string, title: string): boolean {
   return want.every((w) => got.has(w));
 }
 
+const tokens = (s: string) =>
+  s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+
+/**
+ * The first token that is release metadata rather than part of the name.
+ *
+ * Everything before it is what the uploader called the title, which is the only
+ * part worth comparing — "1080p", "S01" and "2019" say nothing about which show
+ * this is.
+ */
+const RELEASE_MARK =
+  /^(?:s\d{1,2}(?:e\d{1,3})?|e\d{1,3}|\d{1,2}x\d{2}|(?:19|20)\d{2}|season|seasons|complete|series|\d{3,4}p|4k|uhd|hdr|bluray|blu|bdrip|brrip|web|webrip|webdl|hdtv|dvdrip|dvd|x264|x265|h264|h265|hevc|avc|xvid|aac|ac3|eac3|dts|ddp?5|truehd|atmos|remux|proper|repack|extended|imax|uncut|limited|internal|multi|dual|hindi|eng|english|subbed|dubbed)$/i;
+
+/** The part of a release name that is the title, in order. */
+export function releaseTitle(release: string): string[] {
+  const out: string[] = [];
+  for (const word of tokens(release)) {
+    if (RELEASE_MARK.test(word)) break;
+    out.push(word);
+  }
+  return out;
+}
+
+/**
+ * This release is *this* title, not one whose name merely contains it.
+ *
+ * `namesTitle` asks only whether every word appears somewhere, which a set
+ * cannot make ordered or exclusive — so a one-word title like "House" matched
+ * "House of the Dragon", and with the dragon's ten thousand seeders it took the
+ * whole page. Comparing the title portion instead makes the extra words visible.
+ *
+ * Extra words are allowed only when they are initials or short tags: releases
+ * write the same show as "House M.D." and "The Office US" all the time, and
+ * rejecting those would leave nothing. "of the dragon" is not that.
+ */
+export function sameTitle(release: string, title: string): boolean {
+  const want = tokens(title);
+  if (!want.length) return true;
+  const got = releaseTitle(release);
+  if (got.length < want.length) return false;
+  for (let i = 0; i < want.length; i++) if (got[i] !== want[i]) return false;
+  return got.slice(want.length).every((w) => w.length <= 2);
+}
+
 /**
  * Search public indexes for video torrents.
  *
@@ -559,12 +603,34 @@ export async function searchTorrents(
     if (fast.length) bags.push(fast);
   }
 
-  const found = rank(merge(bags), full);
-  // Everything that does not name the title is a collection pack riding in on
-  // a catalogue's worth of seeders. Falling back to the unfiltered list keeps
-  // an unusually-named release reachable rather than showing an empty page.
+  /**
+   * A row that names a different title is a different show, not a near miss.
+   *
+   * Name matching cannot save this one: every word of "House" appears in
+   * "House of the Dragon", so a one-word title matched an entire other series
+   * and the page filled with it. apibay tags many rows with an IMDb id, and
+   * when we know which title was asked for, a row claiming another one is
+   * simply wrong. Rows carrying no id are left to the name test below — most
+   * releases have none, and dropping them would empty the page.
+   */
+  const merged = opts?.imdb
+    ? merge(bags).filter((h) => !h.imdb || h.imdb === opts.imdb)
+    : merge(bags);
+
+  const found = rank(merged, full);
+  /**
+   * Three tiers, strictest first, and the first non-empty one wins.
+   *
+   * `sameTitle` is what keeps "House of the Dragon" off a page asked for
+   * "House". It is deliberately strict, so it can come up empty on a release
+   * named unusually — hence `namesTitle` behind it, which only asks that the
+   * words are present, and the unfiltered list behind that. Falling straight
+   * from strict to unfiltered was the mistake: it put the whole wrong show back
+   * the moment the strict pass found nothing.
+   */
+  const exact = found.filter((h) => sameTitle(h.name, alias ?? title));
   const named = found.filter((h) => namesTitle(h.name, alias ?? title));
-  const out = named.length ? named : found;
+  const out = exact.length ? exact : named.length ? named : found;
   console.log(`[releases] torrents done ${Date.now() - t0}ms n=${out.length}`);
   return out;
 }
@@ -626,9 +692,12 @@ async function findEpisode(
   // order of magnitude. Asking for the show by name is what puts them on the
   // page; `plays` then drops the seasons this episode is not in, and
   // rankEpisode floats the single-season packs to the top.
+  // `imdb` matters most on the unsuffixed pack query: "House" on its own is a
+  // substring of half the catalogue, and the id is what tells the show apart
+  // from the ones merely containing its name.
   const [loose, packs] = await Promise.all([
-    searchTorrents(show, signal, { suffix: tag }).catch(() => [] as Hit[]),
-    searchTorrents(show, signal).catch(() => [] as Hit[]),
+    searchTorrents(show, signal, { suffix: tag, imdb }).catch(() => [] as Hit[]),
+    searchTorrents(show, signal, { imdb }).catch(() => [] as Hit[]),
   ]);
   const bayHits = rankEpisode(merge([loose, packs]).filter(plays), show, season);
   if (bayHits.length) {

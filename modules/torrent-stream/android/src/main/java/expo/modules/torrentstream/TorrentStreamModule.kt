@@ -171,6 +171,10 @@ private const val READAHEAD_BYTES = 128L * 1024 * 1024
 /** Refuse to start below this much free space rather than dying on a write. */
 private const val FREE_SPACE_MIN = 512L * 1024 * 1024
 
+/** How long to wait for libtorrent to actually let go of a torrent. Removal is
+ *  asynchronous, and re-adding before it lands is refused. */
+private const val REMOVE_WAIT_MS = 3000
+
 /**
  * Kept behind each reader as well as ahead.
  *
@@ -1416,12 +1420,33 @@ class TorrentStreamModule : Module() {
 
     // Adopt the torrent inspect() left running rather than adding it again —
     // re-adding drops every peer connection and starts the search from nothing.
-    val running = session.find(ti.infoHash())?.takeIf { it.isValid }
+    /**
+     * Only reuse a torrent whose files are still on disk.
+     *
+     * Stopping a stream wipes the cache but the torrent can outlive it in the
+     * session. Adopting that handle points libtorrent at a tree that is no
+     * longer there: every read fails with "End of file", nothing is wanted, the
+     * torrent reports FINISHED with zero bytes, and the film never starts. A
+     * cold start costs the peer connections and is the only thing that works.
+     */
+    val onDisk = File(saveDir, files.filePath(index)).parentFile?.exists() == true
+    val running = session.find(ti.infoHash())
+      ?.takeIf { it.isValid && onDisk }
     val h = if (running != null) {
       log("play: reusing running torrent (${running.status().numPeers()} peer(s) connected)")
       running.prioritizeFiles(priorities)
       running
     } else {
+      // A stale handle has to leave before the same torrent can be added again.
+      session.find(ti.infoHash())?.let {
+        log("play: torrent outlived its files — restarting it")
+        runCatching { session.remove(it) }
+        var waited = 0
+        while (session.find(ti.infoHash()) != null && waited < REMOVE_WAIT_MS) {
+          Thread.sleep(50)
+          waited += 50
+        }
+      }
       val peers = loadPeers(infoHashHex!!)
       log("play: cold start, ${peers.size} cached peer(s)")
       // Dial immediately. DHT bootstraps in parallel; trackers do not need it.

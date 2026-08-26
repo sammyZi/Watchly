@@ -1174,7 +1174,22 @@ function ShellApp({
           />
         </TabPage>
         <TabPage show={tab === 'search'} mounted={visited.has('search')}>
-          <SearchScreen onOpenTitle={setDetail} />
+          <SearchScreen
+            onOpenTitle={setDetail}
+            /**
+             * Straight to the file list, not the stream/download picker.
+             *
+             * The picker exists for a magnet arriving from another app, where
+             * the intent is unknown. Someone who searched for a release and
+             * tapped it has already said what they want — to see what is in it
+             * — and the list itself offers play and download per file, so
+             * asking first was a screen in the way of the answer.
+             */
+            onOpenMagnet={(magnet, name) => {
+              setTorrentMode('stream');
+              openUri(magnet, { titleName: name });
+            }}
+          />
         </TabPage>
         <TabPage show={tab === 'history'} mounted={visited.has('history')}>
           <HistoryScreen

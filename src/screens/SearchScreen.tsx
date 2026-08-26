@@ -12,6 +12,8 @@ import { PosterGrid } from '../components/PosterGrid';
 import { Screen } from '../components/Screen';
 import { ANIME_GENRE, loadCatalog, searchTitles, type Title } from '../lib/meta';
 import { useOnline } from '../lib/net';
+import { bytes } from '../lib/format';
+import { health, searchTorrents, type Hit } from '../lib/search';
 import { clearSearches, loadSearches, rememberSearch } from '../lib/searches';
 import { font, radius, space, type, useColors, useThemedStyles } from '../theme';
 
@@ -46,7 +48,10 @@ function useSearchStyles() {
     input: { ...type.body, flex: 1, color: c.text, height: 46, padding: 0 },
     // flexGrow:0 or the row claims the whole page — a horizontal ScrollView in a
     // column has no natural height.
-    chipRow: { flexGrow: 0, marginBottom: space.md },
+    // minHeight because a horizontal ScrollView in a column takes its height
+    // from content, and with one short chip in the row it collapsed and cropped
+    // the label. flexGrow:0 or it claims the whole page instead.
+    chipRow: { flexGrow: 0, minHeight: 34, marginBottom: space.md },
     chips: { paddingHorizontal: space.xl, gap: space.sm, alignItems: 'center' as const },
     rule: { width: 1, height: 16, backgroundColor: c.line },
     clearRecent: { paddingHorizontal: space.xs, paddingVertical: space.xs },
@@ -64,6 +69,19 @@ function useSearchStyles() {
     chipTextOn: { color: c.onAccent },
     heading: { ...type.overline, color: c.faint, marginBottom: space.sm },
     empty: { ...type.meta, color: c.faint, textAlign: 'center' as const, marginTop: space.xl },
+    hitList: { paddingHorizontal: space.lg, paddingBottom: space.xl * 3 },
+    hit: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: space.md,
+      paddingVertical: space.md,
+      borderBottomWidth: 1,
+      borderBottomColor: c.line,
+    },
+    hitBody: { flex: 1, gap: 3 },
+    hitName: { ...type.label, color: c.text },
+    hitMeta: { ...type.meta, color: c.faint },
+    dot: { width: 8, height: 8, borderRadius: 4 },
   }));
 }
 
@@ -75,14 +93,33 @@ function useSearchStyles() {
  * instead gives posters and plots, and the releases are then one tap away on
  * the title page — where the choice between them is an informed one.
  */
-function SearchScreenView({ onOpenTitle }: { onOpenTitle: (title: Title) => void }) {
+function SearchScreenView({
+  onOpenTitle,
+  onOpenMagnet,
+}: {
+  onOpenTitle: (title: Title) => void;
+  /** A release picked by name — opened the way a shared magnet link is. */
+  onOpenMagnet: (magnet: string, name: string) => void;
+}) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Title[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [kind, setKind] = useState<'movie' | 'tv' | null>(null);
   const [genre, setGenre] = useState<string | null>(null);
+  /**
+   * Searching the indexes by release name instead of the catalogue by title.
+   *
+   * The catalogue only knows what Cinemeta lists, so anything without an entry
+   * — a concert, a niche rip, a pack named its own way — could not be reached
+   * at all. This asks the torrent indexes directly and hands whatever comes
+   * back to the same magnet flow a shared link uses.
+   */
+  const [torrents, setTorrents] = useState(false);
+  const [hits, setHits] = useState<Hit[] | null>(null);
   /** Only the newest query may write results — searches finish out of order. */
   const latest = useRef(0);
+  /** Which query the rows on screen belong to. See the effect below. */
+  const shownFor = useRef('');
   /** A search that failed offline runs again when the connection returns. */
   const online = useOnline();
   /** Submitted queries, newest first. */
@@ -95,6 +132,7 @@ function SearchScreenView({ onOpenTitle }: { onOpenTitle: (title: Title) => void
 
   const load = useCallback(async (q: string, browsing: string | null) => {
     const mine = ++latest.current;
+    shownFor.current = q;
     setBusy(true);
     // Anime is not a genre anything here carries — it is a different catalog,
     // so it has to be fetched rather than filtered for.
@@ -124,14 +162,52 @@ function SearchScreenView({ onOpenTitle }: { onOpenTitle: (title: Title) => void
     setBusy(false);
   }, []);
 
+  // Release-name search. Same ticket as the catalogue, so a slow index cannot
+  // overwrite a newer query's answer.
+  const loadTorrents = useCallback(async (q: string) => {
+    const mine = ++latest.current;
+    shownFor.current = q;
+    if (!q) {
+      setHits(null);
+      setBusy(false);
+      return;
+    }
+    setBusy(true);
+    const found = await searchTorrents(q).catch(() => [] as Hit[]);
+    if (mine !== latest.current) return;
+    setHits(found);
+    setBusy(false);
+  }, []);
+
   useEffect(() => {
     const q = query.trim();
+    if (torrents) {
+      const t = setTimeout(() => loadTorrents(q), q ? DEBOUNCE : 0);
+      return () => clearTimeout(t);
+    }
     // A genre chosen while browsing must not survive into a search, where it
     // would filter against data the results do not carry.
     if (q) setGenre(null);
+    /**
+     * Results for a different search are not an answer to this one.
+     *
+     * The counter above stops a late reply overwriting a newer one, but nothing
+     * cleared the rows already on screen — so starting a fresh search left the
+     * previous title's list sitting there through the debounce and the request,
+     * looking like the answer to what had just been typed.
+     *
+     * Only when the two are unrelated: refining "incep" to "incept" should not
+     * blink the list away and back, while clearing the box and typing something
+     * else should.
+     */
+    const was = shownFor.current;
+    if (was && q && !q.startsWith(was) && !was.startsWith(q)) {
+      shownFor.current = '';
+      setResults(null);
+    }
     const t = setTimeout(() => load(q, genre), q ? DEBOUNCE : 0);
     return () => clearTimeout(t);
-  }, [query, genre, load, online]);
+  }, [query, genre, load, loadTorrents, torrents, online]);
 
   const shown = (results ?? []).filter(
     (t) =>
@@ -148,7 +224,7 @@ function SearchScreenView({ onOpenTitle }: { onOpenTitle: (title: Title) => void
           style={styles.input}
           value={query}
           onChangeText={setQuery}
-          placeholder="Films and series"
+          placeholder={torrents ? 'Release or torrent name' : 'Films and series'}
           placeholderTextColor={colors.faint}
           autoCapitalize="none"
           autoCorrect={false}
@@ -197,22 +273,43 @@ function SearchScreenView({ onOpenTitle }: { onOpenTitle: (title: Title) => void
         contentContainerStyle={styles.chips}
         style={styles.chipRow}
       >
+        {/* The mode switch leads, because it changes what everything after it
+            means — these are catalogue filters, and none of them apply to a
+            raw index search. */}
         <Chip
-          label="Films"
-          icon="film"
-          on={kind === 'movie'}
-          onPress={() => setKind(kind === 'movie' ? null : 'movie')}
+          label="Torrents"
+          icon="search"
+          on={torrents}
+          onPress={() => {
+            setTorrents((on) => !on);
+            setHits(null);
+            setResults(null);
+            shownFor.current = '';
+          }}
         />
-        <Chip
-          label="Series"
-          icon="tv"
-          on={kind === 'tv'}
-          onPress={() => setKind(kind === 'tv' ? null : 'tv')}
-        />
+        {/* Only when something follows it — a divider with nothing after it is
+            just a stray mark. */}
+        {!torrents && (
+          <>
+            <View style={styles.rule} />
+            <Chip
+              label="Films"
+              icon="film"
+              on={kind === 'movie'}
+              onPress={() => setKind(kind === 'movie' ? null : 'movie')}
+            />
+            <Chip
+              label="Series"
+              icon="tv"
+              on={kind === 'tv'}
+              onPress={() => setKind(kind === 'tv' ? null : 'tv')}
+            />
+          </>
+        )}
         {/* Search results come back without genres — the endpoint returns names
             and posters only — so a genre chip could only ever empty the grid.
             They belong to browsing, which is what an empty box shows. */}
-        {!query.trim() && (
+        {!torrents && !query.trim() && (
           <>
             <View style={styles.rule} />
             {GENRES.map((g) => (
@@ -227,6 +324,63 @@ function SearchScreenView({ onOpenTitle }: { onOpenTitle: (title: Title) => void
         )}
       </ScrollView>
 
+      {torrents ? (
+        <ScrollView
+          contentContainerStyle={styles.hitList}
+          keyboardShouldPersistTaps="handled"
+        >
+          {!!hits?.length && (
+            <Text style={styles.heading}>{hits.length} releases</Text>
+          )}
+          {hits?.map((h) => (
+            <Pressable
+              key={h.id}
+              style={styles.hit}
+              onPress={() => {
+                if (query.trim()) rememberSearch(query).then(setRecent);
+                onOpenMagnet(h.magnet, h.name);
+              }}
+            >
+              <View style={styles.hitBody}>
+                <Text style={styles.hitName} numberOfLines={2}>
+                  {h.name}
+                </Text>
+                <Text style={styles.hitMeta}>
+                  {[
+                    h.size ? bytes(h.size) : null,
+                    h.quality,
+                    `${h.seeders} seeders`,
+                  ]
+                    .filter(Boolean)
+                    .join('  ·  ')}
+                </Text>
+              </View>
+              <View
+                style={[
+                  styles.dot,
+                  {
+                    backgroundColor:
+                      health(h.seeders) === 'dead'
+                        ? colors.danger
+                        : health(h.seeders) === 'weak'
+                          ? colors.warn
+                          : colors.good,
+                  },
+                ]}
+              />
+            </Pressable>
+          ))}
+          {!busy && hits && !hits.length && (
+            <Text style={styles.empty}>No releases match that.</Text>
+          )}
+          {!hits && !busy && (
+            <Text style={styles.empty}>
+              Search the indexes by release name — anything they carry, whether
+              the catalogue lists it or not.
+            </Text>
+          )}
+        </ScrollView>
+      ) : (
       <PosterGrid
         titles={shown}
         // Recorded here rather than only on the keyboard's search key: most
@@ -253,6 +407,7 @@ function SearchScreenView({ onOpenTitle }: { onOpenTitle: (title: Title) => void
           )
         }
       />
+      )}
     </Screen>
   );
 }
@@ -264,7 +419,7 @@ function Chip({
   onPress,
 }: {
   label: string;
-  icon?: 'film' | 'tv';
+  icon?: 'film' | 'tv' | 'search';
   on: boolean;
   onPress: () => void;
 }) {
