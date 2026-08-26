@@ -1249,11 +1249,12 @@ export function PlayerScreen({
           {/* Left edge, over the same strip the brightness drag owns — the
               gesture is quick but cannot be aimed, and this is how you land on
               exactly 35. Only while the controls are up, so it never sits over
-              the picture. */}
+              the picture.
+
+              `left` comes off the safe-area inset rather than being fixed: in
+              landscape the punch hole sits inside that inset, and a fixed
+              margin put these buttons underneath it. */}
           {showUi && !locked && (
-            {/* Past the cutout, not just off the edge. In landscape the punch
-                hole sits in the left inset, and a fixed margin put the buttons
-                under it. */}
             <View style={[styles.brightRail, { left: insets.left + 16 }]}>
               <Pressable
                 onPress={() => stepBright(1)}

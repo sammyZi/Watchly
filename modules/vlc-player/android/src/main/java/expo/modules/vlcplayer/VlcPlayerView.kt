@@ -1,6 +1,7 @@
 package expo.modules.vlcplayer
 
 import android.app.PendingIntent
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -171,6 +172,21 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
       session = ms
       live = this
       pushState()
+      /**
+       * The legacy registration as well, deliberately.
+       *
+       * It has been deprecated since API 21 and on stock Android the session
+       * above is enough. But this phone's ROM keeps its own
+       * "VivoMediaButtonReceiver" slot, and that slot is filled by this call —
+       * not by owning a session. Whatever last called it was still receiving
+       * every press, so a modern-only implementation could not win.
+       */
+      runCatching {
+        @Suppress("DEPRECATION")
+        audioManager.registerMediaButtonEventReceiver(
+          ComponentName(context, MediaButtons::class.java)
+        )
+      }
       Log.i(TAG, "media session active")
     }.onFailure { Log.w(TAG, "media session unavailable", it) }
   }
@@ -647,6 +663,12 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
       session?.release()
     }
     session = null
+    runCatching {
+      @Suppress("DEPRECATION")
+      audioManager.unregisterMediaButtonEventReceiver(
+        ComponentName(context, MediaButtons::class.java)
+      )
+    }
     if (live === this) live = null
     removeCallbacks(attachSubs)
     subRetries = 0
