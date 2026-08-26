@@ -45,6 +45,13 @@ const SKIP_SECONDS = 10;
 const UP_NEXT_SECONDS = 30;
 const RATES = [0.75, 1, 1.25, 1.5, 2];
 
+/** No frame for this long means the stream is stalled. Well clear of libVLC's
+ *  ~250ms TimeChanged interval, so jitter and seeks do not flash the spinner. */
+const STALL_MS = 1200;
+/** How often the watchdog looks. Small enough that the spinner arrives shortly
+ *  after STALL_MS rather than a whole beat later. */
+const STALL_TICK_MS = 300;
+
 /**
  * libVLC's fit modes, in the order the button cycles them.
  *
@@ -116,6 +123,17 @@ export function PlayerScreen({
   const [current, setCurrent] = useState(resumeAt ?? 0);
   const [rate, setRate] = useState(1);
   const [buffering, setBuffering] = useState(false);
+  /**
+   * The stall libVLC never reports.
+   *
+   * `onBuffering` only fires when libVLC's own input buffer drains — but this
+   * stream blocks a level below that, inside the socket read, whenever the next
+   * piece has not landed. libVLC sits in read(), the picture freezes on the
+   * last frame, and no event is ever posted: the spinner never appears and the
+   * app looks broken rather than busy. A clock that stops is the only signal
+   * there is, and `position` moves on every tick whether or not we re-render.
+   */
+  const [stalled, setStalled] = useState(false);
   /** Every subtitle track libVLC found inside the media. */
   const [tracks, setTracks] = useState<VlcTrack[]>([]);
   /** Audio tracks, for the dubs and commentaries a release often carries. */
@@ -590,16 +608,36 @@ export function PlayerScreen({
     };
   }, []);
 
+  // Polled rather than keyed on a state value, because progress deliberately
+  // does not re-render while the overlay is hidden — `position` is the only
+  // thing that moves every tick. Two beats of no movement is a stall.
+  useEffect(() => {
+    if (!url || paused) {
+      setStalled(false);
+      return;
+    }
+    let last = position.current;
+    let movedAt = Date.now();
+    const timer = setInterval(() => {
+      if (position.current !== last) {
+        last = position.current;
+        movedAt = Date.now();
+      }
+      setStalled(Date.now() - movedAt >= STALL_MS);
+    }, STALL_TICK_MS);
+    return () => clearInterval(timer);
+  }, [url, paused]);
+
   /**
    * Straight off the native event rather than down through props: the parent
    * stops re-rendering once playback starts, on purpose. Subscribing only while
    * something displays the stats keeps a hidden overlay free of re-renders.
    */
   useEffect(() => {
-    if (!showUi && !buffering) return;
+    if (!showUi && !buffering && !stalled) return;
     const sub = TorrentStream.addListener('progress', setStats);
     return () => sub.remove();
-  }, [showUi, buffering]);
+  }, [showUi, buffering, stalled]);
 
   useEffect(() => {
     const back = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -903,7 +941,7 @@ export function PlayerScreen({
                     <Text style={styles.skipText}>{SKIP_SECONDS}</Text>
                   </Pressable>
 
-                  {buffering ? (
+                  {buffering || stalled ? (
                     <View style={styles.playBtn}>
                       <ActivityIndicator color="#fff" />
                     </View>
@@ -1208,7 +1246,7 @@ export function PlayerScreen({
           {/* A seek lands in a region the swarm has not sent yet — say so, with
               the numbers that show it is actually moving. The overlay has its
               own spinner, so this one is for when the controls are hidden. */}
-          {buffering && !showUi && (
+          {(buffering || stalled) && !showUi && (
             <View pointerEvents="none" style={styles.waiting}>
               <ActivityIndicator color="#fff" />
               <Text style={styles.waitingText}>Buffering</Text>

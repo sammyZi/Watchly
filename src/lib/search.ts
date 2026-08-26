@@ -114,6 +114,14 @@ export type Hit = {
   scope: Scope;
   /** IMDb id when the uploader tagged one — the index carries no genre. */
   imdb: string | null;
+  /**
+   * True only for Torrentio: its 💾 is the size of the one file it found, even
+   * when the torrent behind it is a season pack. Every other index reports the
+   * size of the whole torrent already. A caller that needs the pack's total
+   * multiplies by episode count for this source and takes `size` as-is for
+   * every other — mixing the two up is a 15GB pack rendered as 300GB.
+   */
+  perFileSize?: boolean;
 };
 
 /** The index answers with strings, but its precompiled feeds use numbers. */
@@ -252,6 +260,7 @@ export function toTorrentioHits(streams: Record<string, any>[], kind: Kind): Hit
         scope: scopeOf(name),
         kind,
         imdb: null,
+        perFileSize: true,
       };
     })
     .filter((h) => !!h.name);
@@ -347,10 +356,16 @@ export function merge(lists: Hit[][]): Hit[] {
     }
     // One index reports a swarm the other cannot see, and one reports a size
     // the other left at zero. Neither number is worth throwing away.
+    const bigger = hit.size > seen.size ? hit : seen;
     best.set(hit.id, {
       ...(hit.seeders > seen.seeders ? hit : seen),
       seeders: Math.max(hit.seeders, seen.seeders),
-      size: Math.max(hit.size, seen.size),
+      size: bigger.size,
+      // Whichever side's size actually won is what the flag has to describe —
+      // spreading it from the seeder-winner let a Torrentio per-file number
+      // outvote an apibay whole-pack number on seeders and still get tagged
+      // "multiply me", doubling the same torrent's size twice over.
+      perFileSize: bigger.perFileSize,
     });
   }
   return [...best.values()];

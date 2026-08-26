@@ -1,5 +1,6 @@
 package expo.modules.torrentstream
 
+import android.app.ActivityManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -928,8 +929,29 @@ class TorrentStreamModule : Module() {
   private fun ensureSession() {
     if (session.isRunning) return
 
+    /**
+     * Peers cost native memory, and these numbers were tuned on a phone.
+     *
+     * A television is not one: the set this crashed on has 2GB of RAM for the
+     * whole system, and 200 live connections plus a 4K decoder's buffers is
+     * over what the low-memory killer will tolerate — the app went away
+     * mid-film. Scaled to what the device actually has rather than dropped for
+     * everyone, so a roomy box keeps the fast swarm ramp it was tuned for.
+     *
+     * ponytail: two brackets, not a curve. Widen if a middle size behaves
+     * badly.
+     */
+    val totalRam = runCatching {
+      val am = (appCtx ?: appContext.reactContext)
+        ?.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+      ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }.totalMem
+    }.getOrDefault(Long.MAX_VALUE)
+    val tight = totalRam < 3L * 1024 * 1024 * 1024
+    val peers = if (tight) 80 else 200
+    if (tight) log("device has ${totalRam / 1024 / 1024}MB RAM — limiting to $peers peers")
+
     val settings = SettingsPack()
-      .connectionsLimit(200)
+      .connectionsLimit(peers)
       .activeDhtLimit(88)
       .downloadRateLimit(0)
       .uploadRateLimit(0)
@@ -947,8 +969,8 @@ class TorrentStreamModule : Module() {
       // couple of minutes — most of the wait before the first frame is simply not
       // having enough peers yet. We usually have 175 cached endpoints and the
       // trackers return 200 more, so dial them all at once.
-      .setInteger(settings_pack.int_types.torrent_connect_boost.swigValue(), 200)
-      .setInteger(settings_pack.int_types.connection_speed.swigValue(), 200)
+      .setInteger(settings_pack.int_types.torrent_connect_boost.swigValue(), peers)
+      .setInteger(settings_pack.int_types.connection_speed.swigValue(), peers)
       // Half those cached endpoints are stale by the next session, and 15s each
       // is a long time to hold a slot open for a peer that is gone. Not much
       // below that though: a mobile handshake to a distant peer genuinely takes
@@ -1439,7 +1461,16 @@ class TorrentStreamModule : Module() {
     // Nothing can free the middle of a file once libtorrent has written it, so
     // a session keeps every piece it fetches until it stops. Check the room up
     // front instead of failing on a write half an hour in.
-    val free = saveDir.usableSpace
+    var free = saveDir.usableSpace
+    if (free < FREE_SPACE_MIN) {
+      // A session the OS killed never reached teardown, so its pieces are still
+      // there — tens of gigabytes of them after a 4K stream. cleanOrphans is
+      // what reclaims that, but it sat below this throw in the cold-start path,
+      // so every later play() died here and the disk was never swept. The app
+      // could not recover from inside itself. Sweep first, then decide.
+      cleanOrphans(ti)
+      free = saveDir.usableSpace
+    }
     if (free < FREE_SPACE_MIN) {
       throw CodedException(
         "Only ${free / 1024 / 1024}MB free. Clear some space and try again."
@@ -1497,7 +1528,36 @@ class TorrentStreamModule : Module() {
         (maxOf(WINDOW_BYTES, perSecond * WINDOW_SECONDS) / ti.pieceLength()).toInt()
       )
     removeFilesAfterStop = options.removeFilesAfterStop
+    /**
+     * A cap the volume cannot honour is not a cap.
+     *
+     * The setting defaults to 4GB, and a television routinely has less free
+     * than that — 3GB on the box this was found on. `onDisk` then never reaches
+     * the cap, so the orderly roll never fires and the *only* thing that ever
+     * reclaims anything is the emergency low-space watermark. On a 4K stream
+     * that meant a full teardown — delete every piece, re-add the torrent,
+     * re-dial the swarm — roughly every three minutes, which is what the
+     * constant rebuffering actually was.
+     *
+     * Clamped to the room that genuinely exists, so rolling happens on the cap
+     * with headroom to spare instead of at the floor.
+     */
+    val room = saveDir.usableSpace - FREE_SPACE_MIN * 3
     cacheCapBytes = options.cacheCapMb.toLong() * 1024 * 1024
+    if (room > 0 && (cacheCapBytes <= 0L || cacheCapBytes > room)) {
+      log(
+        "cache cap ${cacheCapBytes / 1024 / 1024}MB exceeds the " +
+          "${saveDir.usableSpace / 1024 / 1024}MB free — using ${room / 1024 / 1024}MB"
+      )
+      cacheCapBytes = room
+    }
+    // Never hold more ahead of the playhead than the cap can keep: a roll
+    // deletes the readahead too, so fetching further than that is bandwidth
+    // spent on bytes that are thrown away before anyone reaches them.
+    if (cacheCapBytes > 0L && readaheadBytes > cacheCapBytes / 2) {
+      readaheadBytes = maxOf(ti.pieceLength().toLong() * 4, cacheCapBytes / 2)
+      log("readahead trimmed to ${readaheadBytes / 1024 / 1024}MB to fit the cap")
+    }
     lastRollTick = -1000
     info = ti
     infoHashHex = ti.infoHash().toHex()

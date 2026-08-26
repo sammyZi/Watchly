@@ -65,7 +65,7 @@ const SCRUB_COMMIT_MS = 700;
  * Well clear of libVLC's ~250ms TimeChanged interval, so ordinary jitter and
  * the gap around a seek do not flash the spinner.
  */
-const STALL_MS = 1500;
+const STALL_MS = 1200;
 
 /**
  * How far one press of ‹ or › moves, given how long it has been held.

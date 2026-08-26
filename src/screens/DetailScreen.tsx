@@ -397,9 +397,16 @@ function CastCard({ name }: { name: string }) {
   );
 }
 
-/** Torrentio's 💾 is the one file; a pack's torrent is that times its episodes. */
+/**
+ * Torrentio's 💾 is the one file; a pack's torrent is that times its episodes.
+ *
+ * Only for Torrentio, though — `perFileSize` is what says so. Every other
+ * index (apibay, CSV, EZTV) reports the size of the whole pack torrent
+ * already, and multiplying that by the episode count a second time is how a
+ * genuine 15GB season showed up as 300GB.
+ */
 function torrentBytes(hit: Hit, episodes: Episode[], season: number | null): number {
-  if (hit.scope === 'episode' || !hit.size) return hit.size;
+  if (!hit.perFileSize || hit.scope === 'episode' || !hit.size) return hit.size;
   const claims = seasonsIn(hit.name);
   const n = (
     claims.length

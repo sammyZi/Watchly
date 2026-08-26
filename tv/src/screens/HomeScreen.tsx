@@ -39,10 +39,32 @@ type Shelf = {
   wide?: boolean;
 };
 
+/**
+ * The rails every home page ends with, after the viewer's own genres and
+ * whatever their history suggested.
+ *
+ * The charts lead; the genre rails below them are there so a page with no
+ * chosen genres and no history is still worth scrolling. All drawn from
+ * `GENRES`, so every one is a name Cinemeta actually answers to — anything
+ * outside its vocabulary comes back as an empty rail.
+ */
 const SHELVES: Shelf[] = [
   { title: 'Trending films', kind: 'movie' },
   { title: 'Popular series', kind: 'tv' },
   { title: 'Anime', kind: 'tv', genre: ANIME_GENRE },
+  { title: 'Sci-Fi', kind: 'movie', genre: 'Sci-Fi' },
+  { title: 'Thriller', kind: 'movie', genre: 'Thriller' },
+  { title: 'Horror', kind: 'movie', genre: 'Horror' },
+  { title: 'Mystery', kind: 'movie', genre: 'Mystery' },
+  { title: 'Action', kind: 'movie', genre: 'Action' },
+  { title: 'Comedy', kind: 'movie', genre: 'Comedy' },
+  { title: 'Crime', kind: 'movie', genre: 'Crime' },
+  { title: 'Animation', kind: 'movie', genre: 'Animation' },
+  { title: 'Fantasy', kind: 'movie', genre: 'Fantasy' },
+  { title: 'Adventure', kind: 'movie', genre: 'Adventure' },
+  { title: 'Documentary', kind: 'movie', genre: 'Documentary' },
+  { title: 'Drama series', kind: 'tv', genre: 'Drama' },
+  { title: 'Crime series', kind: 'tv', genre: 'Crime' },
 ];
 
 const shelfKey = (s: Shelf) => `${s.kind}:${s.genre ?? ''}`;
@@ -250,6 +272,7 @@ export function HomeScreen({
   genres,
   onPickTitle,
   onResume,
+  hidden,
 }: {
   history: Item[];
   saved: Saved[];
@@ -257,6 +280,8 @@ export function HomeScreen({
   genres: string[];
   onPickTitle: (title: Title) => void;
   onResume: (item: Item) => void;
+  /** True while a title page is covering this one. */
+  hidden?: boolean;
 }) {
   const colors = useColors();
   const online = useOnline();
@@ -304,6 +329,37 @@ export function HomeScreen({
     claimed.current = true;
     return true;
   };
+
+  /**
+   * The card to put focus back on when a title page closes.
+   *
+   * Hiding this page with `display: none` makes Android drop focus entirely, so
+   * something has to ask for it back — and asking the first poster would scroll
+   * the page to the top, undoing the offset the mount preserved. Naming the
+   * card that was opened keeps both: same place, same poster.
+   *
+   * Only set while hidden, and cleared once focus has been handed back, so a
+   * rail that virtualises its rows later does not snatch focus a second time.
+   */
+  const [restoreId, setRestoreId] = useState<string | null>(null);
+  const opened = useRef<string | null>(null);
+  const pick = useCallback(
+    (title: Title) => {
+      opened.current = title.imdb;
+      onPickTitle(title);
+    },
+    [onPickTitle]
+  );
+  useEffect(() => {
+    if (hidden) return;
+    if (!opened.current) return;
+    setRestoreId(opened.current);
+    opened.current = null;
+    // One frame is all `hasTVPreferredFocus` needs; holding it longer is what
+    // lets a scrolled-back-in row steal focus afterwards.
+    const timer = setTimeout(() => setRestoreId(null), 400);
+    return () => clearTimeout(timer);
+  }, [hidden]);
 
   const resumable = useMemo(() => history.filter(isInProgress).slice(0, 6), [history]);
 
@@ -365,14 +421,24 @@ export function HomeScreen({
     return [...chosen, ...rest, ...SHELVES.filter((s) => !taken.has(shelfKey(s)))];
   }, [chosen, picks]);
 
+  // Top-down rather than all at once. With this many rails, firing every
+  // request together put a burst of parallel fetches and their JSON on a
+  // television with 2GB of RAM for the whole system — and filled the rails in
+  // whatever order the network answered. In order is also the order they are
+  // scrolled, and `loadCatalog` returns settled shelves without a round trip,
+  // so anything already cached still lands on the first pass.
   useEffect(() => {
     let live = true;
-    for (const shelf of shelves) {
-      loadCatalog(shelf.kind, shelf.genre).then((titles) => {
-        if (!live || !titles.length) return;
-        setLoaded((all) => ({ ...all, [shelfKey(shelf)]: titles }));
-      });
-    }
+    void (async () => {
+      for (const shelf of shelves) {
+        if (!live) return;
+        const titles = await loadCatalog(shelf.kind, shelf.genre);
+        if (!live) return;
+        if (titles.length) {
+          setLoaded((all) => ({ ...all, [shelfKey(shelf)]: titles }));
+        }
+      }
+    })();
     return () => {
       live = false;
     };
@@ -406,8 +472,9 @@ export function HomeScreen({
           <Rail
             heading="Your list"
             titles={watchlist}
-            onPick={onPickTitle}
+            onPick={pick}
             onFocusItem={aimHero}
+            focusId={restoreId}
             firstItem={!resumable.length && claimFirst()}
           />
         )}
@@ -418,8 +485,9 @@ export function HomeScreen({
             note={shelf.note}
             wide={shelf.wide}
             titles={loaded[shelfKey(shelf)] ?? []}
-            onPick={onPickTitle}
+            onPick={pick}
             onFocusItem={aimHero}
+            focusId={restoreId}
             firstItem={!resumable.length && !watchlist.length && i === 0 && claimFirst()}
           />
         ))}

@@ -105,6 +105,13 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
 
   init {
     addView(videoLayout, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+    // The television's screen saver does not care that a film is playing — it
+    // watches for input, and a remote nobody is touching looks like an idle
+    // set. The engine's PARTIAL_WAKE_LOCK deliberately does not cover this:
+    // partial locks keep the CPU up and let the panel sleep. This is the flag
+    // that covers it, and it follows the view, so it lifts by itself when the
+    // player unmounts.
+    keepScreenOn = true
   }
 
   /* ----------------------------------------------------------------- props */
@@ -137,6 +144,9 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
 
   fun setPaused(value: Boolean) {
     paused = value
+    // Paused is idle: someone who walks away mid-film should get the screen
+    // saver they asked for, rather than a still frame burned in all night.
+    keepScreenOn = !value
     if (value) dropAudioFocus() else takeAudioFocus()
     val p = player ?: return
     // Unconditional. Gating on isPlaying looks like an optimisation but leaves a
@@ -155,6 +165,7 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
    */
   fun pause() {
     paused = true
+    keepScreenOn = false
     dropAudioFocus()
     runCatching { player?.pause() }
   }
