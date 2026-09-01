@@ -287,6 +287,28 @@ export function DetailScreen({
    */
   const wanted = useRef(0);
 
+  /**
+   * Bring the releases into view when an episode is picked.
+   *
+   * They render below the episode list, which is twenty-two rows long — so
+   * pressing an episode filled a section the viewer could not see, and the
+   * screen looked like it had done nothing at all. The list is what pressing an
+   * episode is *for*, so put it on screen.
+   */
+  const scroller = useRef<ScrollView>(null);
+  const sourcesY = useRef(0);
+  useEffect(() => {
+    if (!episode) return;
+    // On the press, not on the answer: the search takes seconds, and the
+    // spinner saying so is in the same section. Waiting for the results meant
+    // the screen sat still for the whole search.
+    const timer = setTimeout(
+      () => scroller.current?.scrollTo({ y: Math.max(0, sourcesY.current - 24), animated: true }),
+      50
+    );
+    return () => clearTimeout(timer);
+  }, [episode]);
+
   /** Releases for a film, or for one episode of a series. */
   const findSources = useCallback(
     async (ep?: Episode) => {
@@ -315,22 +337,30 @@ export function DetailScreen({
   );
 
   /**
-   * Pressing an episode plays it.
+   * Pressing an episode in the list reveals its releases rather than playing.
    *
-   * The list below is still filled in, so a different release is one press away
-   * — but landing on a list of thirty near-identical names and having to choose
-   * one is not what pressing an episode means. The top row is what the ranking
-   * already decided was best, so take it.
+   * An episode search returns the loose rip and the season packs together, and
+   * their quality and swarm differ enough that the choice is worth having. But
+   * that cannot be the *only* way in — the list sits below twenty-two rows, and
+   * wanting to watch the next episode is the ordinary case. The button at the
+   * top is that case: it takes the top release for `ep` and goes.
    */
   const playEpisode = useCallback(
     async (ep: Episode) => {
-      const found = await findSources(ep);
-      if (found?.length) {
-        onStream(found[0], title, episodeTag(ep.season, ep.episode), ep);
-      }
+      // Already looked this one up — no reason to ask the indexes twice.
+      const ready = episode?.id === ep.id && !busy ? shown : null;
+      const found = ready?.length ? ready : await findSources(ep);
+      const best = found?.[0];
+      if (best) onStream(best, title, episodeTag(ep.season, ep.episode), ep);
     },
-    [findSources, onStream, title]
+    [episode, busy, shown, findSources, onStream, title]
   );
+
+  /**
+   * What the top button plays: the episode being looked at, or the first of the
+   * season on offer. Never nothing, so the button is never a dead end.
+   */
+  const upNext = episode ?? episodes[0] ?? null;
 
   // A film has exactly one thing to look for, so look for it on arrival rather
   // than making someone press a button that could not have meant anything else.
@@ -367,7 +397,7 @@ export function DetailScreen({
       {!!art && <Image source={{ uri: art }} style={styles.art} resizeMode="cover" />}
       <View style={styles.veilY} />
       <View style={styles.veilX} />
-      <ScrollView contentContainerStyle={styles.body}>
+      <ScrollView ref={scroller} contentContainerStyle={styles.body}>
         <Text style={styles.name} numberOfLines={2}>
           {title.title}
         </Text>
@@ -395,8 +425,24 @@ export function DetailScreen({
               }}
             />
           )}
+          {title.kind === 'tv' && !!upNext && (
+            // Same reasoning as the film's button: never disabled, because a
+            // disabled view cannot hold focus and the remote would open on
+            // "Add to list" with nothing to move it back.
+            <TvButton
+              first
+              icon="play"
+              variant="solid"
+              label={
+                busy && episode?.id === upNext.id
+                  ? 'Finding sources'
+                  : `Play ${episodeTag(upNext.season, upNext.episode)}`
+              }
+              onPress={() => playEpisode(upNext)}
+            />
+          )}
           <TvButton
-            first={title.kind === 'tv'}
+            first={title.kind === 'tv' && !upNext}
             icon={inList ? 'check' : 'plus'}
             label={inList ? 'In your list' : 'Add to list'}
             onPress={() => onSave(title, 'later')}
@@ -447,7 +493,7 @@ export function DetailScreen({
               <Focusable
                 invert
                 key={ep.id}
-                onPress={() => playEpisode(ep)}
+                onPress={() => findSources(ep)}
                 scale={1.01}
                 style={styles.episode}
               >
@@ -504,7 +550,12 @@ export function DetailScreen({
           </>
         )}
 
-        <Text style={styles.section}>
+        <Text
+          style={styles.section}
+          onLayout={(e) => {
+            sourcesY.current = e.nativeEvent.layout.y;
+          }}
+        >
           {episode ? `Sources for ${episodeTag(episode.season, episode.episode)}` : 'Sources'}
         </Text>
         {!busy && qualities.length > 1 && (
