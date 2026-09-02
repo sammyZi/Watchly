@@ -171,9 +171,6 @@ private const val READAHEAD_BYTES = 128L * 1024 * 1024
 /** Refuse to start below this much free space rather than dying on a write. */
 private const val FREE_SPACE_MIN = 512L * 1024 * 1024
 
-/** How long to wait for libtorrent to actually let go of a torrent. Removal is
- *  asynchronous, and re-adding before it lands is refused. */
-private const val REMOVE_WAIT_MS = 3000
 
 /**
  * Kept behind each reader as well as ahead.
@@ -1431,22 +1428,29 @@ class TorrentStreamModule : Module() {
      */
     val onDisk = File(saveDir, files.filePath(index)).parentFile?.exists() == true
     val running = session.find(ti.infoHash())
-      ?.takeIf { it.isValid && onDisk }
+      ?.takeIf { it.isValid && sameFiles(it, files.numFiles()) }
     val h = if (running != null) {
       log("play: reusing running torrent (${running.status().numPeers()} peer(s) connected)")
+      /**
+       * Files wiped from under a torrent the session still holds.
+       *
+       * Stopping a stream clears the cache but the torrent can outlive it, and
+       * libtorrent goes on believing it has the pieces — every read then fails
+       * with "End of file" and nothing is ever wanted. A recheck is what makes
+       * it look again.
+       *
+       * Deliberately not a remove-and-re-add: `ti` here is backed by this very
+       * torrent, so removing it frees the metadata still being held, and the
+       * add that followed saw a torrent with no files at all
+       * ("priorities count should be equals to the number of files").
+       */
+      if (!onDisk) {
+        log("play: files are gone — rechecking")
+        runCatching { running.forceRecheck() }
+      }
       running.prioritizeFiles(priorities)
       running
     } else {
-      // A stale handle has to leave before the same torrent can be added again.
-      session.find(ti.infoHash())?.let {
-        log("play: torrent outlived its files — restarting it")
-        runCatching { session.remove(it) }
-        var waited = 0
-        while (session.find(ti.infoHash()) != null && waited < REMOVE_WAIT_MS) {
-          Thread.sleep(50)
-          waited += 50
-        }
-      }
       val peers = loadPeers(infoHashHex!!)
       log("play: cold start, ${peers.size} cached peer(s)")
       // Dial immediately. DHT bootstraps in parallel; trackers do not need it.
@@ -1588,12 +1592,17 @@ class TorrentStreamModule : Module() {
     val priorities = Array(files.numFiles()) { Priority.IGNORE }
     wanted.forEach { if (it in priorities.indices) priorities[it] = Priority.DEFAULT }
 
-    val running = session.find(ti.infoHash())?.takeIf { it.isValid }
+    // Same guard as play(): a handle without its metadata has no files to
+    // prioritise, and offering it a full array is refused outright.
+    val running = session.find(ti.infoHash())
+      ?.takeIf { it.isValid && sameFiles(it, files.numFiles()) }
     val h = if (running != null) {
       log("download: reusing running torrent (${running.status().numPeers()} peer(s))")
       running.prioritizeFiles(priorities)
       running
     } else {
+      // No removal here either — see play(): `ti` belongs to whatever is in the
+      // session, and taking that out from under it is what broke the add.
       val peers = loadPeers(hash)
       log("download: cold start, ${peers.size} cached peer(s)")
       session.download(ti, saveDir, null, priorities, peers, TorrentFlags.SEQUENTIAL_DOWNLOAD)
@@ -1664,6 +1673,19 @@ class TorrentStreamModule : Module() {
     val dest = downloadDest(relPath, folder, torrentName)
     return dest.exists() && dest.length() >= expected * 99L / 100L
   }
+
+  /**
+   * The handle knows the same files we do.
+   *
+   * A magnet re-added for reuse carries no torrent_info until its metadata
+   * arrives, so its file count is zero while our cached metadata says
+   * otherwise. `prioritizeFiles` refuses that outright — "priorities count
+   * should be equals to the number of files" — and the whole play call was
+   * rejected with it. Anything that does not match is not worth adopting: a
+   * cold start re-adds it with the metadata already in hand.
+   */
+  private fun sameFiles(h: TorrentHandle, expected: Int): Boolean =
+    runCatching { h.torrentFile()?.files()?.numFiles() }.getOrNull() == expected
 
   private fun adoptSaved(ti: TorrentInfo) {
     if (!fullFile) return
@@ -2224,6 +2246,29 @@ class TorrentStreamModule : Module() {
 
     val keeping = keep != null && keep == infoHashHex
     val keepDownload = infoHashHex != null && downloads.containsKey(infoHashHex)
+
+    /**
+     * Read the paths before the torrent leaves the session.
+     *
+     * `session.remove` frees the native torrent_info that this `TorrentInfo`
+     * wraps, so asking it for a file path afterwards is a use-after-free — and
+     * it does not throw, it takes the whole process down inside
+     * `file_storage::file_path`. Strings survive the removal; the object does
+     * not. Same list as before, gathered a few lines earlier.
+     */
+    val doomed: List<String> =
+      if (removeFilesAfterStop && !keeping && !keepDownload && keep != null) {
+        info?.let { old ->
+          runCatching {
+            val files = old.files()
+            listOf(old.name()) +
+              (0 until files.numFiles()).map { files.filePath(it) }
+          }.getOrDefault(emptyList())
+        } ?: emptyList()
+      } else {
+        emptyList()
+      }
+
     handle?.let { h ->
       if (h.isValid) {
         h.clearPieceDeadlines()
@@ -2242,15 +2287,12 @@ class TorrentStreamModule : Module() {
     if (removeFilesAfterStop && !keeping && !keepDownload) {
       if (keep == null) {
         if (downloads.isEmpty()) wipeStreamCache()
-      } else {
-        info?.let { old ->
-          File(saveDir, old.name()).deleteRecursively()
-          val files = old.files()
-          for (i in 0 until files.numFiles()) {
-            File(saveDir, files.filePath(i)).delete()
-          }
-          log("cleaned ${old.name()}")
-        }
+      } else if (doomed.isNotEmpty()) {
+        // Plain strings now — nothing here touches libtorrent.
+        val name = doomed.first()
+        File(saveDir, name).deleteRecursively()
+        doomed.drop(1).forEach { File(saveDir, it).delete() }
+        log("cleaned $name")
       }
     }
 
