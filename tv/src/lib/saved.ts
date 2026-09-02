@@ -6,7 +6,7 @@
  * what a poster needs; the title page refetches the rest by id, off its own
  * disk cache.
  */
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { store } from './store';
 import type { Title } from './meta.ts';
 
 export type List = 'favorite' | 'later';
@@ -27,7 +27,7 @@ const KEY = 'saved';
 
 export async function loadSaved(): Promise<Saved[]> {
   try {
-    const raw = await AsyncStorage.getItem(KEY);
+    const raw = await store.getItem(KEY);
     const all: Saved[] = raw ? JSON.parse(raw) : [];
     return Array.isArray(all) ? all.sort((a, b) => b.at - a.at) : [];
   } catch {
@@ -60,7 +60,7 @@ export async function toggleSaved(title: Title, list: List): Promise<Saved[]> {
           ...without,
         ]
       : without;
-  await AsyncStorage.setItem(KEY, JSON.stringify(next));
+  await store.setItem(KEY, JSON.stringify(next));
   return next;
 }
 

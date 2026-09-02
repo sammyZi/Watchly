@@ -36,6 +36,19 @@ import { Sheet } from './components/Sheet';
 import { bytes as formatBytes } from './lib/format';
 import { episodeTag, type Hit } from './lib/search';
 import { nextEpisode, pickFile, prevEpisode } from './lib/pick';
+import {
+  addProfile,
+  editProfile,
+  isGuest,
+  loadLastProfile,
+  loadProfiles,
+  rememberProfile,
+  removeProfile,
+  setPin,
+  type Profile,
+} from './lib/profiles';
+import { useProfile, wipeProfile } from './lib/store';
+import { ProfilesScreen } from './screens/ProfilesScreen';
 import { DEFAULTS, loadSettings, saveSettings, type Settings } from './lib/settings';
 import {
   NAV_OPEN_W,
@@ -305,11 +318,37 @@ function Shell({
     return () => clearTimeout(timer);
   }, [error]);
 
-  useEffect(() => {
+  /**
+   * Who is watching, decided before anything is read off disk.
+   *
+   * Every library call below goes through the per-profile store, so the active
+   * profile has to be set first or the wrong shelf is loaded and then written
+   * back over the right one.
+   */
+  const [profiles, setProfiles] = useState<Profile[] | null>(null);
+  const [who, setWho] = useState<Profile | null>(null);
+  const [switching, setSwitching] = useState(false);
+
+  const enter = useCallback((profile: Profile) => {
+    useProfile(profile.id, isGuest(profile));
+    setWho(profile);
+    setSwitching(false);
+    rememberProfile(profile.id).catch(() => {});
+    // Read after the switch, never before.
     loadHistory().then(setHistory);
     loadSaved().then(setSaved);
-    SplashScreen.hideAsync().catch(() => {});
   }, []);
+
+  useEffect(() => {
+    (async () => {
+      const list = await loadProfiles();
+      setProfiles(list);
+      // The picker every time, even with one profile. Whoever picked up the
+      // remote is not necessarily whoever put it down, and landing straight in
+      // someone else's library is the thing profiles exist to prevent.
+      SplashScreen.hideAsync().catch(() => {});
+    })();
+  }, [enter]);
 
   // BACK unwinds one layer at a time. The player handles its own — it is a full
   // screen with its own two-step exit.
@@ -555,6 +594,42 @@ function Shell({
     return item.positions?.[playingIndex] ?? 0;
   }, [item, playingIndex]);
 
+  /**
+   * Before anything else, and above the player: switching profile mid-film
+   * would write one person's resume point onto another's shelf.
+   */
+  if (profiles !== null && (!who || switching)) {
+    return (
+      <ProfilesScreen
+        profiles={profiles}
+        onPick={enter}
+        onAdd={(name, icon, colour) => {
+          addProfile(name, icon, colour).then((list) => {
+            setProfiles(list);
+            // Straight in — naming a profile is choosing it.
+            const made = list[list.length - 1];
+            if (made) enter(made);
+          });
+        }}
+        onEdit={(id, changes) => {
+          editProfile(id, changes).then((list) => {
+            setProfiles(list);
+            // Keep the active profile's own copy current, or Settings keeps
+            // showing the name it had before the edit.
+            if (who?.id === id) setWho(list.find((p) => p.id === id) ?? who);
+          });
+        }}
+        onRemove={(profile) => {
+          removeProfile(profile.id).then(setProfiles);
+          wipeProfile(profile.id).catch(() => {});
+          // Removing whoever is active leaves nobody watching.
+          if (who?.id === profile.id) setWho(null);
+        }}
+        onCancel={who ? () => setSwitching(false) : undefined}
+      />
+    );
+  }
+
   if (phase === 'playing') {
     return (
       <PlayerScreen
@@ -610,7 +685,24 @@ function Shell({
             onClear={clearAll}
           />
         ) : (
-          <SettingsScreen settings={settings} onChange={onChangeSettings} />
+          <SettingsScreen
+            settings={settings}
+            onChange={onChangeSettings}
+            who={who?.name}
+            onSwitchProfile={() => setSwitching(true)}
+            pin={!!who?.pin}
+            // The guest is never written down, so it has nothing to lock.
+            onSetPin={
+              who && !isGuest(who)
+                ? (value) => {
+                    setPin(who.id, value).then((list) => {
+                      setProfiles(list);
+                      setWho(list.find((p) => p.id === who.id) ?? who);
+                    });
+                  }
+                : undefined
+            }
+          />
         )}
       </View>
       {!!detail && (

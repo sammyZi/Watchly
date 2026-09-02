@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { store } from './store';
 
 const KEY = 'episodes';
 
@@ -13,7 +13,7 @@ export type EpisodeLinks = Record<string, string>;
 
 export async function loadEpisodeLinks(): Promise<EpisodeLinks> {
   try {
-    const raw = await AsyncStorage.getItem(KEY);
+    const raw = await store.getItem(KEY);
     return raw ? JSON.parse(raw) : {};
   } catch {
     return {};
@@ -22,7 +22,7 @@ export async function loadEpisodeLinks(): Promise<EpisodeLinks> {
 
 export async function linkEpisode(id: string, uri: string): Promise<EpisodeLinks> {
   const links = { ...(await loadEpisodeLinks()), [id]: uri };
-  await AsyncStorage.setItem(KEY, JSON.stringify(links));
+  await store.setItem(KEY, JSON.stringify(links));
   return links;
 }
 

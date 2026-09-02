@@ -1,6 +1,8 @@
-import { ScrollView, Text, View } from 'react-native';
+import { useState } from 'react';
+import { ScrollView, Text, TextInput, View } from 'react-native';
 import { Focusable } from '../components/Focusable';
 import { Icon } from '../components/Icon';
+import { TvButton } from '../components/Ui';
 import { CACHE_CAPS, type Settings } from '../lib/settings';
 import { GENRES } from '../lib/meta';
 import { GUTTER, SAFE, font, radius, space, type, useColors, useThemedStyles } from '../theme';
@@ -92,10 +94,22 @@ function Section({
 export function SettingsScreen({
   settings,
   onChange,
+  who,
+  onSwitchProfile,
+  pin,
+  onSetPin,
 }: {
   settings: Settings;
   onChange: (next: Settings) => void;
+  /** Name of whoever is watching, for the profile row. */
+  who?: string;
+  onSwitchProfile?: () => void;
+  /** Whether this profile already has a PIN. Absent for the guest. */
+  pin?: boolean;
+  onSetPin?: (pin: string) => void;
 }) {
+  const [pinEntry, setPinEntry] = useState('');
+  const colors = useColors();
   const styles = useThemedStyles((c) => ({
     screen: { flex: 1, backgroundColor: c.bg },
     body: { paddingLeft: GUTTER, paddingRight: SAFE.x, paddingTop: SAFE.y, paddingBottom: SAFE.y * 3 },
@@ -117,6 +131,75 @@ export function SettingsScreen({
     <View style={styles.screen}>
       <ScrollView contentContainerStyle={styles.body}>
         <Text style={styles.heading}>Settings</Text>
+
+        {/* First, because it decides what every other screen is showing. */}
+        {!!onSwitchProfile && (
+          <Section
+            title="Profile"
+            hint={
+              who === 'Guest'
+                ? 'Guest keeps nothing — history and watchlist are dropped when the app closes.'
+                : 'Library, watchlist and resume points belong to this profile.'
+            }
+          >
+            <TvButton
+              icon="users"
+              label={who ? `Watching as ${who} — switch` : 'Switch profile'}
+              onPress={onSwitchProfile}
+            />
+          </Section>
+        )}
+
+        {!!onSetPin && (
+          <Section
+            title="Profile PIN"
+            hint={
+              pin
+                ? 'Asked for before this profile opens. Clear it to remove the lock.'
+                : 'Four digits, asked for before this profile opens. A lock for a shared television — not a password, and not protection for what is inside.'
+            }
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+              <TextInput
+                style={{
+                  ...type.title,
+                  width: 140,
+                  textAlign: 'center',
+                  letterSpacing: 8,
+                  color: colors.text,
+                  backgroundColor: colors.surface,
+                  borderRadius: radius.md,
+                  paddingVertical: space.sm,
+                }}
+                value={pinEntry}
+                onChangeText={(v) => setPinEntry(v.replace(/\D/g, '').slice(0, 4))}
+                placeholder={pin ? '••••' : '----'}
+                placeholderTextColor={colors.faint}
+                keyboardType="number-pad"
+                secureTextEntry
+                maxLength={4}
+              />
+              <TvButton
+                icon="lock"
+                label={pinEntry.length === 4 ? 'Set PIN' : 'Enter 4 digits'}
+                onPress={() => {
+                  if (pinEntry.length !== 4) return;
+                  onSetPin(pinEntry);
+                  setPinEntry('');
+                }}
+              />
+              {!!pin && (
+                <TvButton
+                  label="Remove"
+                  onPress={() => {
+                    onSetPin('');
+                    setPinEntry('');
+                  }}
+                />
+              )}
+            </View>
+          </Section>
+        )}
 
         <Section
           title="Storage for one film"

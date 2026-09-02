@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { store } from './store';
 import TorrentStream from '../../modules/torrent-stream';
 
 export type StoredFile = {
@@ -47,7 +47,7 @@ const MAX = 50;
 
 export async function loadHistory(): Promise<Item[]> {
   try {
-    return JSON.parse((await AsyncStorage.getItem(KEY)) ?? '[]');
+    return JSON.parse((await store.getItem(KEY)) ?? '[]');
   } catch {
     return [];
   }
@@ -76,7 +76,7 @@ function serial<T>(job: () => Promise<T>): Promise<T> {
 
 async function write(items: Item[]) {
   const capped = items.slice(0, MAX);
-  await AsyncStorage.setItem(KEY, JSON.stringify(capped));
+  await store.setItem(KEY, JSON.stringify(capped));
   return capped;
 }
 
