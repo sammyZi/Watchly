@@ -29,5 +29,27 @@ stub(async () => {
 await assert.rejects(() => net('https://x/a', { signal: ctrl.signal }));
 assert.equal(isOnline(), true);
 
+// A host that accepts the socket and then says nothing must not hang forever.
+// The request is driven by a signal of net's own — the one the timeout fires —
+// with the caller's abort relayed onto it. Aborting from outside exercises that
+// same wiring without sitting out the fifteen seconds.
+const sent: { signal: AbortSignal | null } = { signal: null };
+stub(
+  ((_url: string, init: RequestInit) =>
+    new Promise((_, reject) => {
+      sent.signal = init.signal ?? null;
+      init.signal?.addEventListener('abort', () =>
+        reject(new DOMException('Aborted', 'AbortError'))
+      );
+    })) as unknown as typeof fetch
+);
+const outer = new AbortController();
+const hung = assert.rejects(() => net('https://x/hang', { signal: outer.signal }, true));
+assert.ok(sent.signal, 'net must drive fetch with a signal of its own');
+assert.notEqual(sent.signal, outer.signal);
+outer.abort();
+await hung;
+assert.equal(isOnline(), true);
+
 globalThis.fetch = real;
 console.log('ok');

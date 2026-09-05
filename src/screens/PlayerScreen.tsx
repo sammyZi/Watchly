@@ -32,7 +32,6 @@ import { clock, speed } from '../lib/format';
 import { searchSubtitles, type Sub } from '../lib/subdl';
 import { parseEpisode } from '../lib/search';
 import { searchableName } from '../lib/title';
-import { recordDownload } from './DownloadsScreen';
 import { font, radius, space, type } from '../theme';
 
 /** Ships with the app — see .env. Nothing to type in, and nothing to store:
@@ -89,6 +88,7 @@ export function PlayerScreen({
   progress,
   onSavePosition,
   onDuration,
+  onDownload,
   onExit,
 }: {
   /** What is playing — the file inside the torrent, not the torrent. */
@@ -114,6 +114,9 @@ export function PlayerScreen({
   progress: Progress | null;
   onSavePosition: (seconds: number) => void;
   onDuration: (seconds: number) => void;
+  /** Queue the file for a real, complete download (Downloads tab) rather than
+   *  copying whatever partial bytes streaming happens to have on disk. */
+  onDownload?: () => void;
   onExit: () => void;
 }) {
   const [failure, setFailure] = useState<{ text: string; fatal: boolean } | null>(null);
@@ -341,18 +344,17 @@ export function PlayerScreen({
     }
   }, [url, warn]);
 
-  const saveCopy = useCallback(async () => {
-    if (fileIndex < 0) return;
-    const name = title ?? 'video.mp4';
-    try {
-      const path = await TorrentStream.copyTo(fileIndex, name);
-      const dest = Array.isArray(path) ? path[0] : path;
-      recordDownload(name, 0, dest);
-      warn(`Saved to Movies/${name}`);
-    } catch (e: any) {
-      warn(String(e?.message ?? e));
-    }
-  }, [fileIndex, title, warn]);
+  /**
+   * Whatever is on disk right now is just the streaming buffer — it can be a
+   * long way short of the whole file. Queue a real download instead of
+   * copying that partial snapshot; the Downloads tab finishes it in the
+   * background and saves it once it is actually complete.
+   */
+  const saveCopy = useCallback(() => {
+    if (fileIndex < 0 || !onDownload) return;
+    onDownload();
+    warn('Downloading — see Downloads tab');
+  }, [fileIndex, onDownload, warn]);
 
   const searchSubs = useCallback(async (query?: string) => {
     const typed = (query ?? subQuery).trim();

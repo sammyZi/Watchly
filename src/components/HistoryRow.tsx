@@ -229,7 +229,8 @@ export function HistoryRow({
       </Pressable>
 
       {/* A season pack: the row plays what you were last on, this reaches the
-          rest. Only worth a control when there is more than one thing inside. */}
+          rest. A single file — a movie — has nothing to expand, just a
+          download button of its own. */}
       {videos.length > 1 && (
         <View style={styles.more}>
           <Pressable onPress={() => setExpanded((e) => !e)} style={styles.moreHit}>
@@ -243,6 +244,18 @@ export function HistoryRow({
               <Icon name="download" size={14} color={colors.accent} />
             </Pressable>
           )}
+        </View>
+      )}
+      {videos.length === 1 && (
+        <View style={styles.more}>
+          <Pressable
+            onPress={() => onDownloadFile(videos[0].index)}
+            hitSlop={8}
+            style={[styles.downloadBtn, { marginLeft: 'auto' }]}
+            accessibilityLabel="Download"
+          >
+            <Icon name="download" size={14} color={colors.accent} />
+          </Pressable>
         </View>
       )}
 
