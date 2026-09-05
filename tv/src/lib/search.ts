@@ -708,10 +708,15 @@ async function findEpisode(
 
   console.log('[releases] episode fallback torrentio/eztv');
   if (imdb) {
+    // Capped like every other index here. These two are the last thing between
+    // a press and an answer, so a slow one has to be given up on rather than
+    // waited out.
     const tio = await timed(
       'torrentio',
-      fromTorrentio(`series/${imdb}:${season}:${episode}`, 'tv', signal).catch(
-        () => [] as Hit[]
+      limited(
+        fromTorrentio(`series/${imdb}:${season}:${episode}`, 'tv', signal),
+        FAST_MS * 3,
+        [] as Hit[]
       )
     );
     if (tio.length) {
@@ -720,7 +725,9 @@ async function findEpisode(
       return out;
     }
     if (signal?.aborted) return [];
-    const eztv = (await timed('eztv', eztvFor(imdb))).filter(plays);
+    const eztv = (
+      await timed('eztv', limited(eztvFor(imdb), FAST_MS * 3, [] as Hit[]))
+    ).filter(plays);
     if (eztv.length) {
       const out = rankEpisode(eztv, show, season);
       console.log(`[releases] episode done ${Date.now() - t0}ms n=${out.length} eztv`);

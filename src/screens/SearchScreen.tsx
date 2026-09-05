@@ -82,6 +82,14 @@ function useSearchStyles() {
     hitName: { ...type.label, color: c.text },
     hitMeta: { ...type.meta, color: c.faint },
     dot: { width: 8, height: 8, borderRadius: 4 },
+    hitDownload: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+      backgroundColor: c.surfaceAlt,
+    },
   }));
 }
 
@@ -96,10 +104,13 @@ function useSearchStyles() {
 function SearchScreenView({
   onOpenTitle,
   onOpenMagnet,
+  onDownloadMagnet,
 }: {
   onOpenTitle: (title: Title) => void;
   /** A release picked by name — opened the way a shared magnet link is. */
   onOpenMagnet: (magnet: string, name: string) => void;
+  /** Same release, queued straight to Downloads instead of streamed. */
+  onDownloadMagnet: (magnet: string, name: string) => void;
 }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Title[] | null>(null);
@@ -355,6 +366,14 @@ function SearchScreenView({
                     .join('  ·  ')}
                 </Text>
               </View>
+              <Pressable
+                onPress={() => onDownloadMagnet(h.magnet, h.name)}
+                hitSlop={8}
+                style={styles.hitDownload}
+                accessibilityLabel="Download"
+              >
+                <Icon name="download" size={15} color={colors.accent} />
+              </Pressable>
               <View
                 style={[
                   styles.dot,

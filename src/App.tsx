@@ -771,13 +771,23 @@ function ShellApp({
     return () => sub.remove();
   }, [phase, torrentMode, detail, shelf, reset]);
 
-  /** Ask for notification permission (Android 13+) then show the download notif. */
+  /**
+   * Ask for notification permission (Android 13+), then start the foreground
+   * service either way.
+   *
+   * `setNotify` is what keeps the download alive once the screen locks — it
+   * starts the foreground service and holds the wake lock, which Android
+   * grants independently of notification permission. Bailing out on a denied
+   * permission used to skip that call entirely, so declining "Allow
+   * notifications" (the common reflex) silently meant the download stopped
+   * the moment the app left the foreground. The only thing permission
+   * actually gates is whether the progress notification is visible.
+   */
   const enableDownloadNotify = useCallback(async () => {
     if (Platform.OS === 'android' && Platform.Version >= 33) {
-      const status = await PermissionsAndroid.request(
+      await PermissionsAndroid.request(
         PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
-      );
-      if (status !== PermissionsAndroid.RESULTS.GRANTED) return;
+      ).catch(() => {});
     }
     TorrentStream.setNotify(true).catch(() => {});
   }, []);
@@ -936,6 +946,7 @@ function ShellApp({
         onSaveSubs={(subs) =>
           setFileSubs(stored, playingIndex, subs).then(setHistory)
         }
+        onDownload={() => downloadFile(stored, playingIndex)}
         onExit={reset}
       />
     );
@@ -1188,6 +1199,9 @@ function ShellApp({
             onOpenMagnet={(magnet, name) => {
               setTorrentMode('stream');
               openUri(magnet, { titleName: name });
+            }}
+            onDownloadMagnet={(magnet, name) => {
+              beginDownload({ uri: magnet, fileIndices: [], auto: true, title: name, titleName: name });
             }}
           />
         </TabPage>

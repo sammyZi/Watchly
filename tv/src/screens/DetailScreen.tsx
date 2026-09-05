@@ -461,6 +461,14 @@ export function DetailScreen({
                     key={s}
                     onPress={() => {
                       setSeason(s);
+                      // Give up on whatever search is still out: it belongs to
+                      // the season being left. Letting it land put its releases
+                      // under the new season — and if it was the Play button
+                      // that started it, it streamed that other season's
+                      // episode. Retiring the ticket here also means clearing
+                      // `busy`, which only its owner ever clears.
+                      wanted.current++;
+                      setBusy(false);
                       setHits(null);
                       setEpisode(null);
                     }}

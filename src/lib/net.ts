@@ -23,6 +23,18 @@ function set(next: boolean) {
 
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
+/**
+ * How long any one request gets.
+ *
+ * React Native's fetch has no timeout — a host that accepts the socket and
+ * then says nothing leaves the promise pending for the life of the process.
+ * `searchEpisode` memoises its promise, so one hung request left every later
+ * press on that episode awaiting a promise that would never settle: the button
+ * did nothing, the spinner never stopped, and only restarting the app cleared
+ * it. Nothing here is worth waiting longer than this for.
+ */
+const TIMEOUT_MS = 15000;
+
 /** Poll until something answers, then flip back. One loop at a time — every
  *  failing request calls this, and they fail in batches. */
 async function probe() {
@@ -31,7 +43,10 @@ async function probe() {
   for (let wait = 2000; ; wait = Math.min(wait * 2, 30000)) {
     await sleep(wait);
     try {
-      await fetch(PROBE, { method: 'HEAD' });
+      // Through `net`, for its timeout: a probe left hanging is a loop that
+      // never comes round again, and an offline banner nothing can clear.
+      // Quiet, so a failure here cannot start a second probe.
+      await net(PROBE, { method: 'HEAD' }, true);
       break;
     } catch {
       // Still down.
@@ -54,13 +69,22 @@ export async function net(
   /** Indexer misses are not "you are offline" — they must not flip the banner. */
   quiet = false
 ): Promise<Response> {
+  // Our own controller rather than the caller's, so the timer can cancel a
+  // request nobody else is watching; the caller's signal still gets through.
+  const stop = new AbortController();
+  const timer = setTimeout(() => stop.abort(), TIMEOUT_MS);
+  const caller = init?.signal;
+  const relay = () => stop.abort();
+  caller?.addEventListener('abort', relay);
+  if (caller?.aborted) stop.abort();
+
   try {
-    const res = await fetch(url, init);
+    const res = await fetch(url, { ...init, signal: stop.signal });
     set(true);
     return res;
   } catch (e) {
     const aborted =
-      !!init?.signal?.aborted ||
+      stop.signal.aborted ||
       (e instanceof Error && (e.name === 'AbortError' || /abort/i.test(e.message)));
     // An abort, or a single index being down, is not a lost connection.
     if (!aborted && !quiet) {
@@ -68,6 +92,9 @@ export async function net(
       probe();
     }
     throw e;
+  } finally {
+    clearTimeout(timer);
+    caller?.removeEventListener('abort', relay);
   }
 }
 
