@@ -21,7 +21,9 @@ const nextConfig: NextConfig = {
   },
   // The torrent engine (lib/engine.ts) runs in Node with native deps
   // (node-datachannel, utp-native); load it from node_modules, never bundle it.
-  serverExternalPackages: ['webtorrent', 'webrtc-polyfill', 'node-datachannel', 'utp-native'],
+  // ffmpeg-static resolves its binary relative to its own folder, which only
+  // works when it is loaded from node_modules.
+  serverExternalPackages: ['webtorrent', 'webrtc-polyfill', 'node-datachannel', 'utp-native', 'ffmpeg-static'],
 };
 
 export default nextConfig;

@@ -40,6 +40,4 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# copied at install time (scripts/copy-assets.mjs)
-/public/ffmpeg/
 /public/sw.min.js
