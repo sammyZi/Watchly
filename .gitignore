@@ -53,3 +53,7 @@ yarn-error.*
 modules/*/android/build/
 modules/*/android/.gradle/
 modules/*/android/.cxx/
+
+# Windows app build output.
+windows/**/bin/
+windows/**/obj/

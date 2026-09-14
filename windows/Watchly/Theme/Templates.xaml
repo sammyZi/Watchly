@@ -1,0 +1,62 @@
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:c="clr-namespace:Watchly.Controls"
+                    xmlns:core="clr-namespace:Watchly.Core"
+                    xmlns:v="clr-namespace:Watchly.Views"
+                    xmlns:local="clr-namespace:Watchly">
+
+  <!-- A poster on a shelf or in a grid: HomeScreen's Poster / PosterGrid's card. -->
+  <DataTemplate x:Key="PosterCard" DataType="{x:Type core:Title}">
+    <Button Style="{StaticResource Bare}" Width="150" Margin="0,0,14,0" VerticalAlignment="Top"
+            Command="{x:Static local:Cmd.OpenTitle}" CommandParameter="{Binding}" ToolTip="{Binding Name}">
+      <StackPanel>
+        <Grid Height="225">
+          <Border CornerRadius="12" Background="{Binding Name, Converter={StaticResource Hue}}" />
+          <Border CornerRadius="12">
+            <Border.Background>
+              <ImageBrush ImageSource="{Binding Poster, Converter={StaticResource Img}, ConverterParameter=300}" Stretch="UniformToFill" />
+            </Border.Background>
+          </Border>
+          <Border Visibility="{Binding Rating, Converter={StaticResource Vis}}" CornerRadius="8" Background="#cc0b0e14" Padding="5,2"
+                  HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8">
+            <StackPanel Orientation="Horizontal">
+              <c:Icon Kind="star" Size="9" Foreground="{DynamicResource Warn}" Filled="True" VerticalAlignment="Center" />
+              <TextBlock Text="{Binding Rating}" Foreground="White" FontSize="10" FontWeight="Medium" Margin="3,0,0,0" />
+            </StackPanel>
+          </Border>
+        </Grid>
+        <TextBlock Text="{Binding Name}" FontSize="12" Foreground="{DynamicResource Text}" Margin="0,8,0,0" TextTrimming="CharacterEllipsis" />
+        <TextBlock FontSize="11" Foreground="{DynamicResource Faint}" TextTrimming="CharacterEllipsis">
+          <TextBlock.Text>
+            <MultiBinding StringFormat="{}{0}{1}">
+              <Binding Path="Year" TargetNullValue="" />
+              <Binding Path="Kind" Converter="{x:Static c:KindSuffix.Instance}" />
+            </MultiBinding>
+          </TextBlock.Text>
+        </TextBlock>
+      </StackPanel>
+    </Button>
+  </DataTemplate>
+
+  <!-- Continue watching: the same card with where you stopped. -->
+  <DataTemplate x:Key="ResumeCard" DataType="{x:Type v:ResumeTile}">
+    <Button Style="{StaticResource Bare}" Width="150" Margin="0,0,14,0" VerticalAlignment="Top" Command="{x:Static local:Cmd.PlayResume}" CommandParameter="{Binding}" ToolTip="{Binding Title.Name}">
+      <StackPanel>
+        <Grid Height="225">
+          <Border CornerRadius="12" Background="{Binding Title.Name, Converter={StaticResource Hue}}" />
+          <Border CornerRadius="12">
+            <Border.Background>
+              <ImageBrush ImageSource="{Binding Title.Poster, Converter={StaticResource Img}, ConverterParameter=300}" Stretch="UniformToFill" />
+            </Border.Background>
+          </Border>
+          <Border Visibility="{Binding Stamp, Converter={StaticResource Vis}}" CornerRadius="8" Background="#cc0b0e14" Padding="5,2"
+                  HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="8,0,8,15">
+            <TextBlock Text="{Binding Stamp}" Foreground="White" FontSize="10" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+          </Border>
+          <ProgressBar Style="{StaticResource Bar}" Value="{Binding Progress, Mode=OneWay}" VerticalAlignment="Bottom" Margin="8" />
+        </Grid>
+        <TextBlock Text="{Binding Title.Name}" FontSize="12" Foreground="{DynamicResource Muted}" Margin="0,8,0,0" TextTrimming="CharacterEllipsis" />
+      </StackPanel>
+    </Button>
+  </DataTemplate>
+</ResourceDictionary>

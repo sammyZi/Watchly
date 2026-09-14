@@ -1,0 +1,86 @@
+<Window x:Class="Watchly.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:Watchly.Controls"
+        xmlns:local="clr-namespace:Watchly"
+        Title="Watchly" Width="1280" Height="840" MinWidth="760" MinHeight="560"
+        Background="{DynamicResource Bg}" FontFamily="{StaticResource Noto}"
+        TextOptions.TextFormattingMode="Ideal" UseLayoutRounding="True"
+        WindowStartupLocation="CenterScreen" AllowDrop="True">
+  <Window.CommandBindings>
+    <CommandBinding Command="{x:Static local:Cmd.OpenTitle}" Executed="OnOpenTitle" />
+    <CommandBinding Command="{x:Static local:Cmd.OpenShelf}" Executed="OnOpenShelf" />
+    <CommandBinding Command="{x:Static local:Cmd.PlayResume}" Executed="OnPlayResume" />
+  </Window.CommandBindings>
+
+  <Grid x:Name="Root">
+    <!-- Tabs: built on first visit, then kept and only hidden (App.tsx's TabPage). -->
+    <Grid x:Name="Tabs" />
+
+    <!-- src/components/TabBar.tsx: a floating capsule over a fade. -->
+    <Grid x:Name="TabDock" VerticalAlignment="Bottom" Height="110" IsHitTestVisible="True">
+      <Border Background="{DynamicResource FadeUp}" IsHitTestVisible="False" />
+      <Border x:Name="TabCapsule" Height="62" CornerRadius="31" Background="{DynamicResource TabBar}" VerticalAlignment="Bottom"
+              HorizontalAlignment="Center" Width="520" Margin="0,0,0,16" Padding="8,0">
+        <UniformGrid x:Name="TabButtons" Rows="1" />
+      </Border>
+    </Grid>
+
+    <!-- Pages drawn over the tabs: shelf grid, title page, file list. Last child is on top. -->
+    <Grid x:Name="Layers" />
+
+    <ContentControl x:Name="PlayerHost" Focusable="False" />
+
+    <!-- A torrent being read — the swarm has to answer before anything can play. -->
+    <Border x:Name="BusyCard" Visibility="Collapsed" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,96"
+            CornerRadius="18" Background="{DynamicResource SurfaceAlt}" Padding="16,10">
+      <StackPanel Orientation="Horizontal">
+        <ContentControl Style="{StaticResource Spinner}" Width="18" Height="18" />
+        <TextBlock x:Name="BusyText" Text="Reading torrent…" Style="{StaticResource Label}" Margin="12,0,16,0" VerticalAlignment="Center" />
+        <Button Style="{StaticResource Bare}" Click="OnCancelOpen" VerticalAlignment="Center">
+          <TextBlock Text="Cancel" Foreground="{DynamicResource Accent}" FontWeight="SemiBold" FontSize="13" />
+        </Button>
+      </StackPanel>
+    </Border>
+
+    <!-- src/components/Offline.tsx -->
+    <Border x:Name="Offline" Visibility="Collapsed" VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,12,0,0"
+            CornerRadius="16" Background="{DynamicResource DangerSoft}" Padding="12,7" IsHitTestVisible="False">
+      <StackPanel Orientation="Horizontal">
+        <c:Icon Kind="wifi-off" Size="13" Foreground="{DynamicResource Danger}" />
+        <TextBlock Text="Offline — retrying when you're back" Foreground="{DynamicResource Danger}" FontSize="12" FontWeight="Medium" Margin="8,0,0,0" />
+      </StackPanel>
+    </Border>
+
+    <Border x:Name="ToastBar" Visibility="Collapsed" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="24,0,24,150"
+            CornerRadius="18" Background="#e60b0e14" Padding="16,9" MaxWidth="640" IsHitTestVisible="False">
+      <TextBlock x:Name="ToastText" Foreground="White" FontSize="13" TextWrapping="Wrap" />
+    </Border>
+
+    <!-- src/components/ConfirmModal.tsx -->
+    <Grid x:Name="ConfirmLayer" Visibility="Collapsed" Background="{DynamicResource Scrim}" MouseDown="OnConfirmBackdrop">
+      <Border Width="360" CornerRadius="18" Background="{DynamicResource Control}" Padding="24" VerticalAlignment="Center" HorizontalAlignment="Center"
+              MouseDown="OnSwallow">
+        <Border.Effect>
+          <DropShadowEffect BlurRadius="24" ShadowDepth="8" Opacity="0.25" Color="#0b1020" />
+        </Border.Effect>
+        <StackPanel>
+          <Border x:Name="ConfirmBadge" Width="46" Height="46" CornerRadius="23" Background="{DynamicResource DangerSoft}" Margin="0,0,0,16">
+            <c:Icon x:Name="ConfirmIcon" Kind="trash-2" Size="20" Foreground="{DynamicResource Danger}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <TextBlock x:Name="ConfirmTitle" FontSize="17" FontWeight="Medium" Foreground="{DynamicResource Text}" TextAlignment="Center" TextWrapping="Wrap" />
+          <TextBlock x:Name="ConfirmMessage" Style="{StaticResource Body}" TextAlignment="Center" Margin="0,8,0,0" />
+          <Grid Margin="0,24,0,0">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition />
+              <ColumnDefinition Width="12" />
+              <ColumnDefinition />
+            </Grid.ColumnDefinitions>
+            <Button Style="{StaticResource Pill}" Content="Cancel" Click="OnConfirmCancel" />
+            <Button x:Name="ConfirmOk" Grid.Column="2" Style="{StaticResource PillDanger}" Content="Confirm" Click="OnConfirmOk" />
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+  </Grid>
+</Window>

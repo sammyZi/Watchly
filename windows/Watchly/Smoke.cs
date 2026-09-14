@@ -1,0 +1,260 @@
+using System.IO;
+using System.Text.Json.Nodes;
+using System.Windows;
+using Watchly.Core;
+using Watchly.Views;
+
+namespace Watchly;
+
+/// <summary>
+/// `Watchly.exe --smoke`: the phone's lib tests (src/lib/*.test.ts) run against
+/// the C# ports, then every screen is built and laid out offscreen — XAML and
+/// template mistakes only surface at runtime. No window is shown and no torrent
+/// is opened. Exit code 0 means everything passed; failures go to smoke.log.
+/// </summary>
+static class Smoke
+{
+    static readonly List<string> Failures = new();
+
+    static void Eq<T>(T actual, T expected, string what)
+    {
+        if (!EqualityComparer<T>.Default.Equals(actual, expected)) Failures.Add($"{what}: expected «{expected}», got «{actual}»");
+    }
+
+    static void Ok(bool condition, string what)
+    {
+        if (!condition) Failures.Add(what);
+    }
+
+    static Hit H(string id, string name = "n", int seeders = 0, int leechers = 0, long size = 0, string scope = "episode", string? imdb = null, bool perFile = false) =>
+        new() { Id = id, Name = name, Magnet = "m", Seeders = seeders, Leechers = leechers, Size = size, Scope = scope, Imdb = imdb, PerFileSize = perFile };
+
+    static TorrentFileInfo F(int index, string name, long size, bool video = true) => new() { Index = index, Name = name, Path = name, Size = size, IsVideo = video };
+
+    public static int Run(Application app)
+    {
+        var log = Path.Combine(Path.GetTempPath(), "watchly-smoke.log");
+        try
+        {
+            Logic();
+            Screens();
+        }
+        catch (Exception e)
+        {
+            Failures.Add($"crashed: {e}");
+        }
+        Engine.Downloads.Instance.Live.Clear();
+        File.WriteAllText(log, Failures.Count == 0 ? "ok\n" : string.Join("\n", Failures) + "\n");
+        return Failures.Count == 0 ? 0 : 1;
+    }
+
+    static void Logic()
+    {
+        // search.test.ts
+        var rows = (JsonArray)JsonNode.Parse("""
+            [{"id":"0","name":"x","info_hash":"0000000000000000000000000000000000000000","seeders":"5","leechers":"1","size":"1","category":"207"},
+             {"id":"2","name":"x","info_hash":"C39FE3EEFBDB62DA9C27EB6398FF4A7D2E26E7AB","seeders":"5","leechers":"1","size":"1","category":"101"},
+             {"id":42,"name":"A Movie 1080p","info_hash":"C39FE3EEFBDB62DA9C27EB6398FF4A7D2E26E7AB","seeders":7,"leechers":2,"size":9,"category":207,"imdb":""}]
+            """)!;
+        var hits = Search.ToHits(rows);
+        Eq(hits.Count, 1, "toHits drops placeholder and non-video rows");
+        Eq(hits[0].Id, "c39fe3eefbdb62da9c27eb6398ff4a7d2e26e7ab", "toHits keys by info hash");
+        Eq(hits[0].Seeders, 7, "toHits reads numeric rows");
+        Eq(hits[0].Imdb, null, "empty imdb is null");
+        Ok(hits[0].Magnet.StartsWith("magnet:?xt=urn:btih:c39fe3eefbdb62da9c27eb6398ff4a7d2e26e7ab&dn=") && hits[0].Magnet.Contains("&tr="), "magnet carries hash and trackers");
+
+        Eq(Search.Quality("Some.Film.2160p.WEB"), "4K", "quality 4K");
+        Eq(Search.Quality("Some.Film.720p"), "720p", "quality 720p");
+        Eq(Search.Quality("Some.Film.DVDRip"), null, "quality none");
+        Eq(Search.KindOf(207), "movie", "kindOf 207");
+        Eq(Search.KindOf(208), "tv", "kindOf 208");
+        Eq(Search.Health(500), "fast", "health fast");
+        Eq(Search.Health(0), "dead", "health dead");
+
+        Eq(string.Join(",", Search.Rank(new[] { H("leech", leechers: 20), H("seed", seeders: 10) }).Select(h => h.Id)), "seed,leech", "rank seeders over leechers");
+        Eq(string.Join(",", Search.Rank(new[] { H("partial", "The Matrix Pack", 100), H("exact", "The Matrix Reloaded", 80) }, "matrix reloaded").Select(h => h.Id)), "exact,partial", "rank full name match");
+        Eq(string.Join(",", Search.RankEpisode(new[] { H("all", "Show S01-S05", 99, scope: "complete"), H("ep", "Show S01E02 1080p", 80), H("pack", "Show S01 COMPLETE", 40, scope: "season") }, "", 1).Select(h => h.Id)), "pack,ep,all", "rankEpisode order");
+
+        Eq(Search.EpisodeTag(1, 2), "S01E02", "episodeTag");
+        Eq(Search.ScopeOf("Ted Lasso S01E02 1080p WEB-DL"), "episode", "scope episode");
+        Eq(Search.ScopeOf("Ted.Lasso.S01E01-E10.1080p"), "season", "scope range season");
+        Eq(Search.ScopeOf("Ted.Lasso.S01.COMPLETE.720p.WEBRip"), "season", "scope season");
+        Eq(Search.ScopeOf("Ted Lasso Seasons 1-3 COMPLETE 1080p"), "complete", "scope seasons range");
+        Eq(Search.ScopeOf("Prison Break [S01-S05] 1080p"), "complete", "scope S01-S05");
+        Eq(Search.ScopeOf("Some.Film.2024.1080p.BluRay"), "episode", "scope film");
+        Eq(Search.ScopeOf("Show Complete Series S02E05"), "episode", "scope marker wins");
+
+        Eq(Search.ParseEpisode("Ted.Lasso.S01E02.1080p.mkv"), (1, 2), "parseEpisode S01E02");
+        Eq(Search.ParseEpisode("Show S1 E2.mkv"), (1, 2), "parseEpisode S1 E2");
+        Eq(Search.ParseEpisode("Show 1x02.mkv"), (1, 2), "parseEpisode 1x02");
+        Eq(Search.ParseEpisode("Some.Film.2024.1080p.mkv"), null, "parseEpisode film");
+
+        Eq(string.Join(",", Search.SeasonsIn("Stranger.Things.S04.COMPLETE.1080p")), "4", "seasonsIn S04");
+        Eq(string.Join(",", Search.SeasonsIn("Stranger.Things.Season.5.Complete.2025.720p")), "5", "seasonsIn Season.5");
+        Eq(string.Join(",", Search.SeasonsIn("Show S01-S03 COMPLETE")), "1,2,3", "seasonsIn range");
+        Eq(string.Join(",", Search.SeasonsIn("Show Seasons 1-3 COMPLETE")), "1,2,3", "seasonsIn spelled range");
+        Eq(string.Join(",", Search.SeasonsIn("Show.S04.DDP5.1.Atmos.x265.10bit")), "4", "seasonsIn ignores codecs");
+        Eq(string.Join(",", Search.SeasonsIn("Ocean's 8 2018 1080p")), "", "seasonsIn Ocean's 8");
+
+        var streams = (JsonArray)JsonNode.Parse("[{\"name\":\"Torrentio\",\"title\":\"The.Matrix.1999.2160p.BluRay.x265\\n\\uD83D\\uDC64 84 \\uD83D\\uDCBE 51.3 GB \\u2699\\uFE0F 1337x\",\"infoHash\":\"aa0fd381c944a72cabb3e962d5f727c8694d7dd6\"}]")!;
+        var tio = Search.ToTorrentioHits(streams, "movie");
+        Eq(tio.Count, 1, "torrentio row");
+        Eq(tio[0].Seeders, 84, "torrentio seeders from 👤");
+        Eq(tio[0].Size, (long)Math.Round(51.3 * 1024 * 1024 * 1024), "torrentio size from 💾");
+        Eq(tio[0].PerFileSize, true, "torrentio per-file size");
+
+        var merged = Search.Merge(new[] { new[] { H("a", seeders: 5, size: 100), H("b", seeders: 1) }, new[] { H("a", seeders: 900) } });
+        Eq(merged.Count, 2, "merge dedupes");
+        Eq(merged.First(h => h.Id == "a").Seeders, 900, "merge keeps bigger swarm");
+        Eq(merged.First(h => h.Id == "a").Size, 100L, "merge keeps known size");
+        var dual = Search.Merge(new[] { new[] { H("c", seeders: 900, size: 15L << 30) }, new[] { H("c", seeders: 20, size: 700L << 20, perFile: true) } });
+        Eq(dual[0].PerFileSize, false, "merge flag follows size");
+
+        Eq(Search.AliasOf("Dune: Part One"), "Dune", "aliasOf colon");
+        Eq(Search.AliasOf("Star Wars - A New Hope"), "Star Wars", "aliasOf dash");
+        Eq(Search.AliasOf("The Matrix"), null, "aliasOf none");
+        Eq(Search.AliasOf("Spider-Man"), null, "aliasOf hyphen word");
+        Ok(!Search.NamesTitle("IMDB Top 250 - 2024 Edition", "Interstellar"), "namesTitle rejects packs");
+        Ok(Search.NamesTitle("Interstellar (2014) [1080p] [WEBRip]", "Interstellar"), "namesTitle accepts release");
+        Ok(!Search.SameTitle("House of the Dragon S01 1080p", "House"), "sameTitle rejects longer show");
+        Ok(Search.SameTitle("House.M.D.S01.COMPLETE.720p.BluRay", "House"), "sameTitle initials");
+        Ok(Search.SameTitle("The.Office.US.S02E01.1080p", "The Office"), "sameTitle country tag");
+        Ok(!Search.SameTitle("The.Matrix.Reloaded.2003.1080p", "The Matrix"), "sameTitle sequel");
+        Eq(Search.ReleaseTitle("S01E01.1080p.WEB").Count, 0, "releaseTitle only metadata");
+
+        var pb = Search.RankEpisode(new[]
+        {
+            H("a", "Prison Break (2005) Season 1-5 S01-S05 1080p BluRay x265 HEVC", 145, scope: Search.ScopeOf("Prison Break (2005) Season 1-5 S01-S05 1080p BluRay x265 HEVC")),
+            H("b", "Prison Break 2005 Season 1 Complete 720p AMZN WEB-DL x264 [i_c]", 73, scope: Search.ScopeOf("Prison Break 2005 Season 1 Complete 720p AMZN WEB-DL x264 [i_c]")),
+            H("c", "Prison Break 2005 Season 2 Complete 720p AMZN WEB-DL x264 [i_c]", 70, scope: Search.ScopeOf("Prison Break 2005 Season 2 Complete 720p AMZN WEB-DL x264 [i_c]")),
+            H("d", "Prison.Break.S01E01.ENG.1080p.HD.WEB", 18, scope: Search.ScopeOf("Prison.Break.S01E01.ENG.1080p.HD.WEB")),
+        }, "Prison Break", 1);
+        Eq(pb[0].Id, "b", "prison break season 1 pack first");
+
+        // pick.test.ts
+        Eq(Pick.PickFile(new[] { F(0, "Movie.1080p.mkv", 8_000_000_000), F(1, "sample.mkv", 40_000_000), F(2, "Movie.nfo", 900, false) }), 0, "pickFile feature");
+        var pack = new[] { F(0, "Show.S01E01.1080p.mkv", 2_000_000_000), F(1, "Show.S01E02.1080p.mkv", 1_000_000_000), F(2, "Show.S01E03.1080p.mkv", 3_000_000_000) };
+        Eq(Pick.PickFile(pack, "S01E02"), 1, "pickFile tag");
+        Eq(Pick.PickFile(new[] { F(0, "Show.1x02.mkv", 5), F(1, "Show.S1E2.mkv", 9) }, "S01E02"), 1, "pickFile no zeros");
+        Eq(Pick.PickFile(pack, "S09E09"), null, "pickFile refuses wrong episode");
+        Eq(Pick.PickFile(new[] { F(0, "episode.mkv", 500) }, "S09E09"), 0, "pickFile single video");
+        Eq(Pick.PickFile(new[] { F(0, "readme.txt", 10, false) }), null, "pickFile nothing");
+        var season = new[] { F(0, "Show.S01E10.mkv", 100), F(1, "Show.S01E02.mkv", 100), F(2, "Show.S01E01.mkv", 100), F(3, "Show.S02E01.mkv", 100), F(4, "sample.mkv", 5) };
+        Eq(Pick.NextEpisode(season, 2)?.Name, "Show.S01E02.mkv", "nextEpisode order");
+        Eq(Pick.NextEpisode(season, 0)?.Name, "Show.S02E01.mkv", "nextEpisode boundary");
+        Eq(Pick.NextEpisode(season, 3), null, "nextEpisode end");
+        Eq(string.Join(",", Pick.SeasonFiles(pack, 1)), "0,1,2", "seasonFiles pack");
+        Eq(string.Join(",", Pick.SeasonFiles(season, 1)), "2,1,0", "seasonFiles order");
+        Eq(string.Join(",", Pick.SeasonFiles(season, 2)), "3", "seasonFiles season 2");
+
+        // title.test.ts
+        Eq(TitleText.TitleOf("magnet:?xt=urn:btih:ABC123&dn=Big+Buck+Bunny%202008"), "Big Buck Bunny 2008", "titleOf dn");
+        Eq(TitleText.TitleOf("magnet:?xt=urn:btih:abcdef0123456789aabb"), "abcdef0123456789", "titleOf hash");
+        Eq(TitleText.TitleOf("https://x.org/dl/thing.torrent?key=1"), "thing.torrent", "titleOf url");
+        Eq(TitleText.TitleOf("magnet:?xt=urn:btih:ABC&dn=100%"), "100%", "titleOf bad escape");
+        Ok(TitleText.HueOf("Spider-Man") != TitleText.HueOf("Spider-Man 2"), "hueOf spreads");
+        Eq(TitleText.SearchableName("The.Matrix.1999.1080p.BluRay.x264-GRP"), "The Matrix", "searchableName film");
+        Eq(TitleText.SearchableName("Ted Lasso S01E02 1080p WEB-DL"), "Ted Lasso", "searchableName episode");
+        Eq(TitleText.SearchableName("Some Show Season 2 Complete"), "Some Show", "searchableName season");
+        Eq(TitleText.SearchableName("Dune Part Two (2024) 2160p.mkv"), "Dune Part Two", "searchableName parens");
+        Eq(TitleText.SearchableName("[Anime Time] Attack On Titan - 01.mkv"), "Attack On Titan - 01", "searchableName tags");
+        Eq(TitleText.YearOf("The.Matrix.1999.1080p"), "1999", "yearOf");
+        Ok(TitleText.IsSeries("Show Season 2 Complete") && !TitleText.IsSeries("The.Matrix.1999.1080p"), "isSeries");
+
+        // format
+        Eq(Format.Clock(75), "1:15", "clock minutes");
+        Eq(Format.Clock(3675), "1:01:15", "clock hours");
+        Ok(Format.Natural("E2", "E10") < 0, "natural sort numbers");
+    }
+
+    static void Screens()
+    {
+        var window = new MainWindow(null);
+        var size = new Size(1280, 820);
+        void Layout(FrameworkElement e, string name)
+        {
+            try
+            {
+                e.Measure(size);
+                e.Arrange(new Rect(size));
+                e.UpdateLayout();
+            }
+            catch (Exception ex)
+            {
+                Failures.Add($"{name} layout: {ex.GetBaseException().Message}");
+            }
+        }
+
+        // Item templates only build when there is an item, so hand them one each.
+        var sample = new Title { Imdb = "tt0133093", Kind = "tv", Name = "The Matrix", Year = "1999", Rating = "8.7", Poster = "https://example.invalid/p.jpg" };
+        var item = new HistoryItem { Uri = "magnet:?xt=urn:btih:c39fe3eefbdb62da9c27eb6398ff4a7d2e26e7ab", Title = "The.Matrix.1999", LastFileIndex = 0 };
+        foreach (var (key, content) in new (string, object)[] { ("PosterCard", sample), ("ResumeCard", new ResumeTile(sample, item, 0, 40, "S1 E2  ·  12:00")) })
+        {
+            try
+            {
+                Layout(new System.Windows.Controls.ContentPresenter { Content = content, ContentTemplate = (DataTemplate)Application.Current.FindResource(key) }, key);
+            }
+            catch (Exception ex)
+            {
+                Failures.Add($"{key}: {ex.GetBaseException().Message}");
+            }
+        }
+        var job = new Engine.DownloadJob { Uri = item.Uri, Title = "Some.Show.S01", FileIndices = new() { 0, 1 } };
+        var active = new Engine.ActiveDownload(job) { HasQueue = true };
+        active.Queue.Add(new Engine.QueueFile { Index = 0, Name = "Some.Show.S01E01.mkv", Size = 1_000_000, State = "Done" });
+        active.Queue.Add(new Engine.QueueFile { Index = 1, Name = "Some.Show.S01E02.mkv", Size = 1_000_000, State = "Downloading", Percent = 42 });
+        active.Queue.Add(new Engine.QueueFile { Index = 2, Name = "Some.Show.S01E03.mkv", Size = 1_000_000, State = "Off" });
+        Engine.Downloads.Instance.Live.Add(active);
+
+        foreach (var tab in new[] { "home", "search", "history", "downloads", "settings" })
+        {
+            try
+            {
+                window.ShowTab(tab);
+                Layout((FrameworkElement)window.Content, $"tab {tab}");
+            }
+            catch (Exception ex)
+            {
+                Failures.Add($"tab {tab}: {ex.GetBaseException().Message}");
+            }
+        }
+
+        var film = new Title
+        {
+            Imdb = "tt0133093", Kind = "movie", Name = "The Matrix", Year = "1999", Rating = "8.7",
+            Genres = new() { "Action", "Sci-Fi" }, Plot = "A hacker learns the truth.", Cast = new() { "Keanu Reeves", "Carrie-Anne Moss" },
+            Directors = new() { "Lana Wachowski" }, Awards = "Won 4 Oscars",
+        };
+        var show = film with
+        {
+            Imdb = "tt0000001", Kind = "tv", Name = "Some Show",
+            Episodes = Enumerable.Range(1, 14).Select(i => new Episode { Id = $"tt0000001:1:{i}", Season = 1, Number = i, Name = $"Episode {i}" })
+                .Append(new Episode { Id = "tt0000001:2:1", Season = 2, Number = 1, Name = "Return" }).ToList(),
+        };
+        foreach (var (name, make) in new (string, Func<FrameworkElement>)[]
+        {
+            ("detail film", () => new DetailView(film)),
+            ("detail series", () => new DetailView(show)),
+            ("catalog", () => new CatalogView(new Shelf("Trending films", "movie"))),
+            ("files", () => new FilesView(new TorrentMeta("Some.Show.S01.1080p", new() { F(0, "Some.Show.S01E01.mkv", 1_000_000), F(1, "Some.Show.S01E02.mkv", 1_000_000), F(2, "info.nfo", 10, false) }), "stream", _ => { }, _ => { }, () => { }, () => { })),
+            ("mode picker", () => new ModePickerView(new TorrentMeta("x", new() { F(0, "a.mkv", 1) }), () => { }, () => { }, () => { })),
+            ("player", () =>
+            {
+                LibVLCSharp.Shared.Core.Initialize();
+                return new PlayerView(new PlaybackRequest { Title = "missing.mkv", LocalPath = Path.Combine(Path.GetTempPath(), "watchly-smoke-missing.mkv") });
+            }),
+        })
+        {
+            try
+            {
+                var view = make();
+                Layout(view, name);
+                (view as IDisposable)?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Failures.Add($"{name}: {ex.GetBaseException().Message}");
+            }
+        }
+    }
+}
