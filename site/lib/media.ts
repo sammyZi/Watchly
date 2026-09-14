@@ -162,13 +162,34 @@ export function remux(
   return spawn(bin(), args, { stdio: ['ignore', 'pipe', 'ignore'] });
 }
 
-/** One built-in text subtitle track as WebVTT. Reads the whole file: subtitle
- *  packets are spread through it, which is why this is slow on a fresh torrent. */
-export function extractSubtitle(input: string, track: number, signal: AbortSignal): Promise<string> {
+/**
+ * One built-in text subtitle track as WebVTT, for `seconds` from `from` only.
+ *
+ * Subtitle packets are spread through the whole file, so extracting a track
+ * in one go meant downloading the entire torrent before a single line showed
+ * — it looked stuck. A window reads just that stretch, which the player is
+ * downloading anyway: input `-ss` seeks, `-copyts` keeps the cue times the
+ * film's own, and output `-to` (an absolute time, because of -copyts) stops
+ * the read. `-t` as an input option does not stop it here — ffmpeg read on to
+ * the end of the file, the very download this is meant to avoid.
+ */
+export function extractSubtitle(
+  input: string,
+  track: number,
+  window: { from: number; seconds: number },
+  signal: AbortSignal
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const proc = spawn(
       bin(),
-      ['-hide_banner', '-loglevel', 'error', '-i', input, '-map', `0:s:${track}`, '-f', 'webvtt', 'pipe:1'],
+      [
+        '-hide_banner', '-loglevel', 'error',
+        '-ss', String(window.from),
+        '-i', input,
+        '-copyts', '-map', `0:s:${track}`,
+        '-to', String(window.from + window.seconds),
+        '-f', 'webvtt', 'pipe:1',
+      ],
       { stdio: ['ignore', 'pipe', 'pipe'] }
     );
     let out = '';
@@ -177,8 +198,9 @@ export function extractSubtitle(input: string, track: number, signal: AbortSigna
     proc.stderr.on('data', (c) => (err += c));
     signal.addEventListener('abort', () => proc.kill('SIGKILL'), { once: true });
     proc.on('error', reject);
+    // An empty window (no dialogue in those minutes) is still a success.
     proc.on('close', (code) =>
-      code === 0 && out ? resolve(out) : reject(new Error(err.trim().split('\n').pop() || 'Subtitle extraction failed.'))
+      code === 0 ? resolve(out || 'WEBVTT\n') : reject(new Error(err.trim().split('\n').pop() || 'Subtitle extraction failed.'))
     );
   });
 }

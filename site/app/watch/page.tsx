@@ -43,7 +43,7 @@ import { linkEpisode } from '../../lib/watched';
 import { loadSettings } from '../../lib/settings';
 import { withTrackers } from '../../lib/magnet';
 import { searchEpisode, type Hit } from '../../lib/search';
-import { downloadSubtitle, findSubtitles, subtitleBlob, type Sub } from '../../lib/subs';
+import { downloadSubtitle, findSubtitles, parseVtt, subtitleBlob, type Cue, type Sub } from '../../lib/subs';
 import { saveUrlToDisk, supportsSaveAPI } from '../../lib/save';
 import type { Probe } from '../../lib/media';
 import { searchableName, titleOf } from '../../lib/title';
@@ -64,6 +64,10 @@ const SCALES = [
 ] as const;
 /** Controls hide after this long without a pointer move while playing. */
 const HIDE_MS = 4000;
+/** Built-in subtitles are extracted this many seconds at a time… */
+const SUB_WINDOW = 300;
+/** …and the next window is fetched when playback is this close to the end. */
+const SUB_READAHEAD = 90;
 
 /** A subtitle the sheet can offer: an in-torrent file, a track built into the
  *  video (extracted by the server), or a SubDL download. */
@@ -196,12 +200,21 @@ function PlayerInner() {
   );
 
   /** Seek in either mode: a converted stream has no ranges, so it restarts. */
+  /**
+   * Where a seek is headed until playback gets there. Over a torrent the
+   * element keeps reporting the old position while it waits for data, which
+   * snapped the slider back until the picture moved.
+   */
+  const seekTarget = useRef<{ to: number; at: number } | null>(null);
+
   const seekTo = useCallback(
     (seconds: number) => {
       const v = videoRef.current;
       if (!v) return;
       const end = media?.duration || v.duration || 0;
       const to = Math.max(0, end ? Math.min(end - 1, seconds) : seconds);
+      seekTarget.current = { to, at: Date.now() };
+      setTime(to);
       const c = convertRef.current;
       if (c) startConvert(c, to);
       else v.currentTime = to;
@@ -209,7 +222,12 @@ function PlayerInner() {
     [media, startConvert]
   );
 
-  const skip = useCallback((by: number) => seekTo(clockNow() + by), [seekTo, clockNow]);
+  // From the pending target, so quick repeated skips add up instead of each
+  // starting from the position the video has not left yet.
+  const skip = useCallback(
+    (by: number) => seekTo((seekTarget.current?.to ?? clockNow()) + by),
+    [seekTo, clockNow]
+  );
 
   /** Fullscreen, and on a phone turn to landscape with it — the lock is only
    *  allowed while fullscreen, and not at all on iOS, hence the catches. */
@@ -486,6 +504,7 @@ function PlayerInner() {
       const url = engine.findFile(index)?.streamURL;
       if (!url) return;
       setFileIndex(index);
+      seekTarget.current = null;
       convertRef.current = null;
       setConvert(null);
       setMedia(null);
@@ -496,6 +515,7 @@ function PlayerInner() {
         void v.play().catch(() => {});
       }
       setActiveSub(null);
+      setBuiltIn(null);
       setSubs([]);
       setError(null);
       setDismissedNext(false);
@@ -523,10 +543,16 @@ function PlayerInner() {
         setError('ASS/SSA subtitles are not supported in the browser — pick an SRT.');
         return;
       }
+      // Built-in tracks load in windows as the film plays — see the effect below.
+      if (s.url.includes('/subtitle?')) {
+        const track = Number(new URL(s.url, location.origin).searchParams.get('track')) || 0;
+        setActiveSub(null);
+        setBuiltIn({ track, label: s.label, url: s.url });
+        if (historyItem && fileIndex != null)
+          void setFileSubs(historyItem, fileIndex, [{ path: s.url, label: s.label }]);
+        return;
+      }
       setSubBusy(s.url);
-      // Built-in tracks are read out of the whole file — say so, it takes a while.
-      const builtIn = s.url.includes('/subtitle?');
-      if (builtIn) setNotice('Loading built-in subtitles — this reads through the whole file');
       try {
         let text: string;
         if (s.online) text = await downloadSubtitle(s.url, { season, episode });
@@ -535,13 +561,13 @@ function PlayerInner() {
           if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? `answered ${res.status}`);
           text = await res.text();
         }
+        setBuiltIn(null);
         setActiveSub({ text, label: s.label });
         if (historyItem && fileIndex != null)
           void setFileSubs(historyItem, fileIndex, [{ path: s.url, label: s.label }]);
       } catch (e) {
         setError(`Subtitle failed: ${String((e as Error)?.message ?? e)}`);
       }
-      if (builtIn) setNotice(null);
       setSubBusy(null);
     },
     [historyItem, fileIndex, season, episode]
@@ -664,9 +690,100 @@ function PlayerInner() {
     const v = video();
     if (!v) return;
     for (const t of Array.from(v.textTracks)) {
-      if (t.kind === 'subtitles') t.mode = subUrl ? 'showing' : 'hidden';
+      if (t.kind === 'subtitles' && t !== builtInTrack.current) t.mode = subUrl ? 'showing' : 'hidden';
     }
   }, [subUrl]);
+
+  /**
+   * Built-in subtitles, a window at a time.
+   *
+   * Reading a whole track means reading the whole file (its lines are spread
+   * through it), which on a torrent looked like the subtitles were stuck. So
+   * the server extracts WINDOW seconds around where playback is, the cues go
+   * straight onto one live text track, and the next window is fetched before
+   * playback reaches the end of this one. A seek outside what is loaded
+   * fetches the window there. Cue times are the film's; they are shifted by
+   * the converted stream's offset when there is one.
+   */
+  const [builtIn, setBuiltIn] = useState<{ track: number; label: string; url: string } | null>(null);
+  const builtInTrack = useRef<TextTrack | null>(null);
+  const builtInCues = useRef(new Map<string, Cue>());
+  const builtInLoaded = useRef<{ from: number; to: number }[]>([]);
+  const builtInLoading = useRef<AbortController | null>(null);
+  const [builtInWaiting, setBuiltInWaiting] = useState(false);
+
+  /** Redraw every known cue onto the track, relative to the current stream. */
+  const drawBuiltIn = useCallback(() => {
+    const t = builtInTrack.current;
+    if (!t) return;
+    for (const cue of Array.from(t.cues ?? [])) t.removeCue(cue);
+    const offset = convertRef.current?.offset ?? 0;
+    for (const c of builtInCues.current.values()) {
+      if (c.end - offset <= 0) continue;
+      t.addCue(new VTTCue(Math.max(0, c.start - offset), c.end - offset, c.text));
+    }
+  }, []);
+
+  // Choosing (or dropping) a built-in track resets what is loaded.
+  useEffect(() => {
+    builtInLoading.current?.abort();
+    builtInLoading.current = null;
+    builtInCues.current.clear();
+    builtInLoaded.current = [];
+    const v = video();
+    if (!builtInTrack.current && v && builtIn) {
+      builtInTrack.current = v.addTextTrack('subtitles', 'Built in');
+    }
+    if (builtInTrack.current) {
+      drawBuiltIn();
+      builtInTrack.current.mode = builtIn ? 'showing' : 'disabled';
+    }
+    setBuiltInWaiting(!!builtIn);
+  }, [builtIn, drawBuiltIn]);
+
+  // The converted stream's clock moved: same cues, new offset.
+  useEffect(() => {
+    if (builtIn) drawBuiltIn();
+  }, [convert?.offset, builtIn, drawBuiltIn]);
+
+  // Keep a window loaded ahead of playback.
+  useEffect(() => {
+    if (!builtIn || builtInLoading.current) return;
+    const at = time;
+    const here = builtInLoaded.current.find((r) => r.from <= at && at < r.to);
+    let from: number;
+    if (!here) from = Math.max(0, Math.floor(at) - 5);
+    else if (here.to - at < SUB_READAHEAD && here.to < (media?.duration || Infinity)) {
+      if (builtInLoaded.current.some((r) => r.from <= here.to && here.to < r.to)) return;
+      from = here.to;
+    } else return;
+
+    const ctrl = new AbortController();
+    builtInLoading.current = ctrl;
+    const q = new URL(builtIn.url, location.origin);
+    q.searchParams.set('from', String(from));
+    q.searchParams.set('seconds', String(SUB_WINDOW));
+    fetch(q, { signal: ctrl.signal })
+      .then(async (res) => {
+        if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? `answered ${res.status}`);
+        return res.text();
+      })
+      .then((vtt) => {
+        for (const c of parseVtt(vtt)) builtInCues.current.set(`${c.start}|${c.text}`, c);
+        builtInLoaded.current.push({ from, to: from + SUB_WINDOW });
+        drawBuiltIn();
+        setBuiltInWaiting(false);
+      })
+      .catch((e) => {
+        if (ctrl.signal.aborted) return;
+        setBuiltInWaiting(false);
+        setError(`Subtitle failed: ${String((e as Error)?.message ?? e)}`);
+      })
+      .finally(() => {
+        if (builtInLoading.current === ctrl) builtInLoading.current = null;
+      });
+    // `time` ticks several times a second; the checks above make most ticks free.
+  }, [builtIn, time, media, drawBuiltIn]);
 
   /** Swarm stats, once a second — the poll also tells the server we are still
    *  watching, so the stream data is not swept as idle. */
@@ -874,7 +991,17 @@ function PlayerInner() {
         onWaiting={() => setBuffering(true)}
         onPlaying={() => setBuffering(false)}
         onCanPlay={() => setBuffering(false)}
-        onTimeUpdate={(e) => setTime((convert?.offset ?? 0) + e.currentTarget.currentTime)}
+        onTimeUpdate={(e) => {
+          const t = (convertRef.current?.offset ?? 0) + e.currentTarget.currentTime;
+          const target = seekTarget.current;
+          if (target) {
+            // Still the old position: hold the slider on the target. Given up
+            // after a while so a seek that never lands cannot freeze the clock.
+            if (Math.abs(t - target.to) > 3 && Date.now() - target.at < 15_000) return;
+            seekTarget.current = null;
+          }
+          setTime(t);
+        }}
         onDurationChange={(e) => {
           // A converted stream has no length of its own; the probe's stands.
           const d = e.currentTarget.duration;
@@ -1034,7 +1161,7 @@ function PlayerInner() {
               </Action>
               <Action
                 label="Subtitles"
-                on={!!activeSub}
+                on={!!activeSub || !!builtIn}
                 onClick={() => { setSearch((s) => ({ ...s, open: false })); setPicking((p) => !p); bumpUi(); }}
               >
                 <CcIcon />
@@ -1112,9 +1239,10 @@ function PlayerInner() {
           <div className="pl-sheet-title">Subtitles</div>
           <TrackOption
             label="Off"
-            active={!activeSub}
+            active={!activeSub && !builtIn}
             onClick={() => {
               setActiveSub(null);
+              setBuiltIn(null);
               if (historyItem && fileIndex != null) void setFileSubs(historyItem, fileIndex, []);
               setPicking(false);
             }}
@@ -1123,9 +1251,9 @@ function PlayerInner() {
             <TrackOption
               key={s.url}
               label={s.label}
-              note={s.meta}
-              busy={subBusy === s.url}
-              active={activeSub?.label === s.label}
+              note={builtIn?.url === s.url && builtInWaiting ? 'Loading…' : s.meta}
+              busy={subBusy === s.url || (builtIn?.url === s.url && builtInWaiting)}
+              active={builtIn ? builtIn.url === s.url : activeSub?.label === s.label}
               onClick={() => { void applySub(s); setPicking(false); }}
             />
           ))}
