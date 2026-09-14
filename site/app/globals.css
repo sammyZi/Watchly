@@ -2042,3 +2042,20 @@ html {
     border-radius: 14px;
   }
 }
+
+/* Loading placeholders — the shape of what is coming, softly pulsing. */
+.skeleton {
+  background: var(--surface);
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.skeleton-line {
+  height: 18px;
+  border-radius: 8px;
+}
+
+@keyframes skeleton-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
