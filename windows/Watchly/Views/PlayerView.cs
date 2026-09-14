@@ -45,7 +45,7 @@ public sealed class PlayerView : UserControl, IDisposable
     readonly MainWindow shell = MainWindow.Shell;
     readonly VideoView video = new();
     readonly MediaPlayer player;
-    readonly Grid overlay = new() { Background = new SolidColorBrush(Color.FromArgb(1, 0, 0, 0)) };
+    readonly Grid overlay = new() { Background = Brushes.Black };
     readonly DispatcherTimer tick = new() { Interval = TimeSpan.FromMilliseconds(300) };
     readonly DispatcherTimer hideTimer = new() { Interval = TimeSpan.FromSeconds(3.5) };
     readonly DispatcherTimer clickTimer = new() { Interval = TimeSpan.FromMilliseconds(230) };
@@ -69,6 +69,7 @@ public sealed class PlayerView : UserControl, IDisposable
     int scaleIdx;
     double rate = 1;
     bool picking;
+    bool pickingAudio;
     bool searchingSubs;
     bool dismissedNext;
     bool fullscreen;
@@ -79,11 +80,48 @@ public sealed class PlayerView : UserControl, IDisposable
     DateTime lastSave = DateTime.UtcNow;
     readonly List<SavedSub> externalSubs;
     readonly HashSet<string> addedSlaves = new(StringComparer.OrdinalIgnoreCase);
+    readonly Dictionary<int, string> slaveTrackLabels = new();
     string? pendingSub;
     List<Sub> subResults = new();
     bool subLoading;
     string subQuery = "";
     Progress? stats;
+    Point lastMousePos;
+    DateTime lastLog = DateTime.MinValue;
+
+    bool IsPlayingSafe
+    {
+        get
+        {
+            if (disposed) return false;
+            try
+            {
+                var p = player;
+                return p.NativeReference != IntPtr.Zero && p.IsPlaying;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+
+    VLCState SafeState
+    {
+        get
+        {
+            if (disposed) return VLCState.Stopped;
+            try
+            {
+                var p = player;
+                return p.NativeReference != IntPtr.Zero ? p.State : VLCState.Stopped;
+            }
+            catch
+            {
+                return VLCState.Stopped;
+            }
+        }
+    }
 
     // Chrome, rebuilt when state changes rather than bound.
     readonly Grid chrome = new();
@@ -95,6 +133,25 @@ public sealed class PlayerView : UserControl, IDisposable
     {
         this.request = request;
         externalSubs = request.SavedSubs.Where(s => File.Exists(s.Path)).ToList();
+        if (request.LocalPath is not null)
+        {
+            try
+            {
+                var dir = Path.GetDirectoryName(request.LocalPath);
+                if (dir is not null && Directory.Exists(dir))
+                {
+                    var files = Directory.GetFiles(dir, "*.srt")
+                        .Concat(Directory.GetFiles(dir, "*.vtt"))
+                        .Concat(Directory.GetFiles(dir, "*.sub"));
+                    foreach (var f in files)
+                    {
+                        if (!externalSubs.Any(s => s.Path.Equals(f, StringComparison.OrdinalIgnoreCase)))
+                            externalSubs.Add(new SavedSub(f, Path.GetFileName(f)));
+                    }
+                }
+            }
+            catch { }
+        }
         Background = Brushes.Black;
         Focusable = true;
 
@@ -105,14 +162,23 @@ public sealed class PlayerView : UserControl, IDisposable
         Content = video;
 
         overlay.Children.Add(chrome);
-        overlay.MouseMove += (_, _) => Bump();
+        overlay.MouseMove += OnOverlayMouseMove;
+        overlay.MouseLeave += OnOverlayMouseLeave;
         overlay.MouseLeftButtonDown += OnPictureDown;
-        overlay.MouseWheel += (_, e) => { StepVolume(e.Delta > 0 ? 5 : -5); e.Handled = true; };
-        overlay.PreviewKeyDown += (_, e) => HandleKey(e);
+        overlay.MouseWheel += OnOverlayMouseWheel;
+        PreviewKeyDown += (_, e) => HandleKey(e);
+        System.Windows.Interop.ComponentDispatcher.ThreadFilterMessage += OnThreadMessage;
+
         seek.Scrub += ratio => { seekAt = DateTime.UtcNow; current = (long)(ratio * duration); UpdateClock(); Bump(); };
         seek.Commit += ratio => SeekTo((long)(ratio * duration));
 
-        player.Playing += (_, _) => Ui(() => { buffering = false; OnPlaying(); Render(); });
+        player.Playing += (_, _) => Ui(() =>
+        {
+            buffering = false;
+            OnPlaying();
+            Bump();
+            Render();
+        });
         player.Paused += (_, _) => Ui(Render);
         player.Buffering += (_, e) => Ui(() =>
         {
@@ -146,8 +212,21 @@ public sealed class PlayerView : UserControl, IDisposable
         tick.Tick += (_, _) => OnTick();
         hideTimer.Tick += (_, _) =>
         {
-            hideTimer.Stop();
-            if (!picking && !searchingSubs && player.IsPlaying) { showUi = false; Render(); }
+            if (disposed) return;
+            if (picking || pickingAudio || searchingSubs)
+            {
+                return;
+            }
+            if (IsPlayingSafe || SafeState == VLCState.Playing)
+            {
+                hideTimer.Stop();
+                showUi = false;
+                Render();
+            }
+            else
+            {
+                hideTimer.Interval = TimeSpan.FromSeconds(2);
+            }
         };
         clickTimer.Tick += (_, _) => { clickTimer.Stop(); ToggleUi(); };
 
@@ -155,6 +234,62 @@ public sealed class PlayerView : UserControl, IDisposable
         tick.Start();
         Render();
         _ = Start();
+    }
+
+    void OnOverlayMouseMove(object sender, MouseEventArgs e)
+    {
+        if (disposed) return;
+        var p = e.GetPosition(overlay);
+        if ((p - lastMousePos).LengthSquared > 16)
+        {
+            lastMousePos = p;
+            Bump();
+        }
+    }
+
+    void OnOverlayMouseLeave(object sender, MouseEventArgs e)
+    {
+        if (disposed) return;
+        if (!picking && !pickingAudio && !searchingSubs && IsPlayingSafe)
+        {
+            hideTimer.Stop();
+            hideTimer.Interval = TimeSpan.FromSeconds(1);
+            hideTimer.Start();
+        }
+    }
+
+    void OnOverlayMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (disposed) return;
+        StepVolume(e.Delta > 0 ? 5 : -5);
+        e.Handled = true;
+    }
+
+    void OnThreadMessage(ref System.Windows.Interop.MSG msg, ref bool handled)
+    {
+        if (handled || disposed) return;
+        const int WM_KEYDOWN = 0x0100;
+        const int WM_SYSKEYDOWN = 0x0104;
+        if (msg.message != WM_KEYDOWN && msg.message != WM_SYSKEYDOWN) return;
+
+        if (Keyboard.FocusedElement is TextBox) return;
+
+        var key = KeyInterop.KeyFromVirtualKey((int)msg.wParam);
+        if (key == Key.None) return;
+
+        var window = Window.GetWindow(this) ?? Application.Current?.MainWindow;
+        var source = (window is not null ? PresentationSource.FromVisual(window) : null)
+                  ?? System.Windows.Interop.HwndSource.FromHwnd(msg.hwnd);
+        if (source is null) return;
+        var args = new KeyEventArgs(Keyboard.PrimaryDevice, source, 0, key)
+        {
+            RoutedEvent = Keyboard.KeyDownEvent
+        };
+        HandleKey(args);
+        if (args.Handled)
+        {
+            handled = true;
+        }
     }
 
     static void Ui(Action action) => Application.Current?.Dispatcher.BeginInvoke(action);
@@ -172,7 +307,7 @@ public sealed class PlayerView : UserControl, IDisposable
             }
             else
             {
-                session = await StreamSession.Start(request.Torrent!, request.FileIndex, shell.Settings.RemoveFilesAfterStop, life.Token);
+                session = await StreamSession.Start(request.Torrent!, request.FileIndex, shell.Settings.RemoveFilesAfterStop, request.HistoryUri, life.Token);
                 if (disposed) { await session.DisposeAsync(); return; }
                 url = session.Url;
             }
@@ -218,7 +353,49 @@ public sealed class PlayerView : UserControl, IDisposable
     void AddSlave(string path, bool select)
     {
         if (!addedSlaves.Add(path)) return;
-        player.AddSlave(MediaSlaveType.Subtitle, new Uri(path).AbsoluteUri, select);
+        var label = externalSubs.FirstOrDefault(s => s.Path.Equals(path, StringComparison.OrdinalIgnoreCase))?.Label
+                 ?? Path.GetFileName(path);
+        try
+        {
+            player.AddSlave(MediaSlaveType.Subtitle, new Uri(path).AbsoluteUri, select);
+            MapNewTracks(label, select);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("player", $"AddSlave failed for '{path}': {ex.Message}");
+        }
+    }
+
+    void MapNewTracks(string label, bool select)
+    {
+        _ = Task.Run(async () =>
+        {
+            for (int i = 0; i < 15; i++)
+            {
+                await Task.Delay(150);
+                var found = false;
+                Ui(() =>
+                {
+                    var tracks = player.SpuDescription.Where(t => t.Id >= 0).ToList();
+                    foreach (var t in tracks)
+                    {
+                        if (!slaveTrackLabels.ContainsKey(t.Id))
+                        {
+                            slaveTrackLabels[t.Id] = label;
+                            found = true;
+                            if (select || pendingSub is not null)
+                            {
+                                player.SetSpu(t.Id);
+                                ShowHud($"Subtitles: {label}");
+                                pendingSub = null;
+                            }
+                        }
+                    }
+                    if (found && (picking || pickingAudio)) Render();
+                });
+                if (found) break;
+            }
+        });
     }
 
     void OnTracksChanged()
@@ -229,7 +406,10 @@ public sealed class PlayerView : UserControl, IDisposable
         if (tracks.Count == 0) return;
         var stem = Path.GetFileNameWithoutExtension(pendingSub);
         var match = tracks.FindIndex(t => t.Name?.Contains(stem, StringComparison.OrdinalIgnoreCase) == true);
-        player.SetSpu(tracks[match >= 0 ? match : tracks.Count - 1].Id);
+        var chosen = tracks[match >= 0 ? match : tracks.Count - 1];
+        player.SetSpu(chosen.Id);
+        var label = slaveTrackLabels.TryGetValue(chosen.Id, out var l) ? l : FriendlySub(chosen.Name, chosen.Id);
+        ShowHud($"Subtitles: {label}");
         pendingSub = null;
         if (picking) Render();
     }
@@ -242,7 +422,7 @@ public sealed class PlayerView : UserControl, IDisposable
         // The stall libVLC never reports: the socket blocks on a piece that has
         // not landed, the picture freezes, and no event fires. A clock that stops
         // is the only signal there is.
-        if (player.IsPlaying)
+        if (IsPlayingSafe)
         {
             if (current != lastMovedTime) { lastMovedTime = current; lastMovedAt = DateTime.UtcNow; }
             var nowStalled = (DateTime.UtcNow - lastMovedAt).TotalMilliseconds > 1200;
@@ -255,7 +435,23 @@ public sealed class PlayerView : UserControl, IDisposable
         }
 
         if (session is not null)
-            foreach (var path in session.ReadySubtitles()) AddSlave(path, false);
+        {
+            foreach (var path in session.ReadySubtitles())
+            {
+                if (!externalSubs.Any(s => s.Path.Equals(path, StringComparison.OrdinalIgnoreCase)))
+                    externalSubs.Add(new SavedSub(path, Path.GetFileName(path)));
+                AddSlave(path, false);
+            }
+        }
+
+        if ((DateTime.UtcNow - lastLog).TotalSeconds >= 3)
+        {
+            lastLog = DateTime.UtcNow;
+            if (stats is not null)
+            {
+                Log.Player($"{Format.Speed(stats.Speed)} · seeds={stats.Seeds} · peers={stats.Peers} · {stats.State} · {Format.Clock(current / 1000.0)}/{Format.Clock(duration / 1000.0)} · buf={bufferPct:0}%");
+            }
+        }
 
         if ((DateTime.UtcNow - lastSave).TotalSeconds >= 5 && current > 0)
         {
@@ -276,11 +472,16 @@ public sealed class PlayerView : UserControl, IDisposable
     /// otherwise just updates the numbers in place.
     /// </summary>
     string Signature() => string.Join('|',
-        started, Preparing, showUi, locked, buffering || stalled, started && player.IsPlaying, picking, searchingSubs, hud, UpNextVisible,
-        failure, failureFatal, scaleIdx, rate, fullscreen, started && player.Mute, started && player.Spu >= 0,
-        stats is { } s && (s.Seeds > 0 || s.Peers > 0), subLoading, subResults.Count);
+        started, Preparing, showUi, locked, buffering || stalled, started && IsPlayingSafe,
+        picking, pickingAudio, searchingSubs, hud, UpNextVisible,
+        failure, failureFatal, scaleIdx, rate, fullscreen,
+        started && !disposed && player.NativeReference != IntPtr.Zero && player.Mute,
+        started && !disposed && player.NativeReference != IntPtr.Zero && player.Spu >= 0,
+        !disposed && player.NativeReference != IntPtr.Zero ? player.AudioTrack : -1,
+        !disposed && player.NativeReference != IntPtr.Zero ? player.AudioTrackCount : 0,
+        stats != null, subLoading, subResults.Count);
 
-    bool Preparing => !started || (buffering && current <= 0 && !player.IsPlaying);
+    bool Preparing => !started || (buffering && current <= 0 && !IsPlayingSafe);
 
     void Refresh()
     {
@@ -372,14 +573,14 @@ public sealed class PlayerView : UserControl, IDisposable
         overlay.Cursor = null;
         if (!showUi) { showUi = true; Render(); }
         hideTimer.Stop();
-        hideTimer.Interval = TimeSpan.FromSeconds(picking || searchingSubs ? 12 : 3.5);
+        hideTimer.Interval = TimeSpan.FromSeconds(picking || pickingAudio || searchingSubs ? 12 : 3.5);
         hideTimer.Start();
     }
 
     void ToggleUi()
     {
         if (locked) { Bump(); return; }
-        if (picking || searchingSubs) { picking = searchingSubs = false; Render(); return; }
+        if (picking || pickingAudio || searchingSubs) { picking = pickingAudio = searchingSubs = false; Render(); return; }
         showUi = !showUi;
         if (showUi) Bump();
         Render();
@@ -388,6 +589,7 @@ public sealed class PlayerView : UserControl, IDisposable
     void OnPictureDown(object sender, MouseButtonEventArgs e)
     {
         if (e.OriginalSource != overlay && e.OriginalSource is not Border { Tag: "dim" }) return;
+        if (picking || pickingAudio || searchingSubs) { picking = pickingAudio = searchingSubs = false; Render(); return; }
         if (e.ClickCount == 2)
         {
             clickTimer.Stop();
@@ -399,7 +601,12 @@ public sealed class PlayerView : UserControl, IDisposable
 
     public void HandleKey(KeyEventArgs e)
     {
-        if (Keyboard.FocusedElement is TextBox) { if (e.Key == Key.Escape) { searchingSubs = false; Render(); e.Handled = true; } return; }
+        if (e.Handled) return;
+        if (Keyboard.FocusedElement is TextBox)
+        {
+            if (e.Key == Key.Escape) { searchingSubs = false; Render(); e.Handled = true; }
+            return;
+        }
         if (locked && e.Key != Key.Escape) { Bump(); e.Handled = true; return; }
         switch (e.Key)
         {
@@ -422,6 +629,61 @@ public sealed class PlayerView : UserControl, IDisposable
                 player.Mute = !player.Mute;
                 ShowHud(player.Mute ? "Muted" : $"Volume {player.Volume}%");
                 break;
+            case Key.A:
+                CycleAudio();
+                break;
+            case Key.S:
+                CycleSubtitles();
+                break;
+            case Key.C:
+                ToggleSubtitles();
+                break;
+            case Key.OemOpenBrackets:
+                AdjustSpeed(-1);
+                break;
+            case Key.OemCloseBrackets:
+                AdjustSpeed(1);
+                break;
+            case Key.D0 or Key.NumPad0:
+                SeekRatio(0);
+                break;
+            case Key.D1 or Key.NumPad1:
+                SeekRatio(0.1);
+                break;
+            case Key.D2 or Key.NumPad2:
+                SeekRatio(0.2);
+                break;
+            case Key.D3 or Key.NumPad3:
+                SeekRatio(0.3);
+                break;
+            case Key.D4 or Key.NumPad4:
+                SeekRatio(0.4);
+                break;
+            case Key.D5 or Key.NumPad5:
+                SeekRatio(0.5);
+                break;
+            case Key.D6 or Key.NumPad6:
+                SeekRatio(0.6);
+                break;
+            case Key.D7 or Key.NumPad7:
+                SeekRatio(0.7);
+                break;
+            case Key.D8 or Key.NumPad8:
+                SeekRatio(0.8);
+                break;
+            case Key.D9 or Key.NumPad9:
+                SeekRatio(0.9);
+                break;
+            case Key.Home:
+                SeekTo(0);
+                ShowHud("Start (0:00)");
+                break;
+            case Key.End:
+                if (duration > 0) SeekTo(Math.Max(0, duration - 10_000));
+                break;
+            case Key.H or Key.OemQuestion:
+                ShowShortcutsHelp();
+                break;
             case Key.F or Key.F11:
                 ToggleFullscreen();
                 break;
@@ -430,7 +692,7 @@ public sealed class PlayerView : UserControl, IDisposable
                 break;
             case Key.Escape:
                 if (locked) { Lock(false); break; }
-                if (picking || searchingSubs) { picking = searchingSubs = false; Render(); break; }
+                if (picking || pickingAudio || searchingSubs) { picking = pickingAudio = searchingSubs = false; Render(); break; }
                 if (fullscreen) { ToggleFullscreen(); break; }
                 RequestExit();
                 break;
@@ -444,11 +706,107 @@ public sealed class PlayerView : UserControl, IDisposable
         Bump();
     }
 
+    void CycleAudio()
+    {
+        var tracks = player.AudioTrackDescription.Where(t => t.Id >= 0).ToList();
+        if (tracks.Count <= 1)
+        {
+            ShowHud(tracks.Count == 1 ? $"Audio: {tracks[0].Name}" : "No audio tracks detected");
+            return;
+        }
+        var currentId = player.AudioTrack;
+        var idx = tracks.FindIndex(t => t.Id == currentId);
+        var next = tracks[(idx + 1) % tracks.Count];
+        player.SetAudioTrack(next.Id);
+        var label = string.IsNullOrWhiteSpace(next.Name) ? $"Track {next.Id}" : next.Name;
+        ShowHud($"Audio: {label}");
+        Render();
+    }
+
+    void CycleSubtitles()
+    {
+        var tracks = player.SpuDescription.Where(t => t.Id >= 0).ToList();
+        if (tracks.Count == 0)
+        {
+            ShowHud("No subtitles available");
+            return;
+        }
+        var currentId = player.Spu;
+        if (currentId < 0)
+        {
+            var first = tracks[0];
+            player.SetSpu(first.Id);
+            ShowHud($"Subtitles: {FriendlySub(first.Name, first.Id)}");
+        }
+        else
+        {
+            var idx = tracks.FindIndex(t => t.Id == currentId);
+            if (idx >= 0 && idx < tracks.Count - 1)
+            {
+                var next = tracks[idx + 1];
+                player.SetSpu(next.Id);
+                ShowHud($"Subtitles: {FriendlySub(next.Name, next.Id)}");
+            }
+            else
+            {
+                player.SetSpu(-1);
+                ShowHud("Subtitles: Off");
+            }
+        }
+        Render();
+    }
+
+    void ToggleSubtitles()
+    {
+        var tracks = player.SpuDescription.Where(t => t.Id >= 0).ToList();
+        if (tracks.Count == 0)
+        {
+            ShowHud("No subtitles available");
+            return;
+        }
+        if (player.Spu >= 0)
+        {
+            player.SetSpu(-1);
+            ShowHud("Subtitles: Off");
+        }
+        else
+        {
+            var first = tracks[0];
+            player.SetSpu(first.Id);
+            ShowHud($"Subtitles: {FriendlySub(first.Name, first.Id)}");
+        }
+        Render();
+    }
+
+    void AdjustSpeed(int direction)
+    {
+        var currentIdx = Array.IndexOf(Rates, rate);
+        if (currentIdx < 0) currentIdx = 1;
+        var nextIdx = Math.Clamp(currentIdx + direction, 0, Rates.Length - 1);
+        rate = Rates[nextIdx];
+        player.SetRate((float)rate);
+        ShowHud($"Speed {rate}x");
+        Render();
+    }
+
+    void SeekRatio(double ratio)
+    {
+        if (duration <= 0) return;
+        var target = (long)(ratio * duration);
+        SeekTo(target);
+        ShowHud($"{Format.Clock(target / 1000.0)} ({(int)(ratio * 100)}%)");
+    }
+
+    void ShowShortcutsHelp()
+    {
+        ShowHud("F: Fullscreen · Space: Play/Pause · ←/→: 10s · ↑/↓: Vol · A: Audio · S: Subs · [: Slower · ]: Faster", 3000);
+    }
+
     void TogglePlay()
     {
-        if (!started) return;
-        if (player.IsPlaying) player.SetPause(true);
-        else if (player.State == VLCState.Ended || player.State == VLCState.Stopped) player.Play();
+        if (!started || disposed) return;
+        if (IsPlayingSafe) player.SetPause(true);
+        else if (SafeState == VLCState.Ended || SafeState == VLCState.Stopped) player.Play();
         else player.SetPause(false);
         Render();
     }
@@ -478,10 +836,10 @@ public sealed class PlayerView : UserControl, IDisposable
         shell.ChangeSettings(shell.Settings with { Volume = next });
     }
 
-    void ShowHud(string text)
+    void ShowHud(string text, int durationMs = 1200)
     {
         hud = text;
-        hudUntil = DateTime.UtcNow.AddMilliseconds(900);
+        hudUntil = DateTime.UtcNow.AddMilliseconds(durationMs);
         Render();
     }
 
@@ -530,21 +888,25 @@ public sealed class PlayerView : UserControl, IDisposable
 
     void ToggleFullscreen()
     {
-        var window = Window.GetWindow(this);
+        var window = Window.GetWindow(this) ?? Application.Current?.MainWindow;
         if (window is null) return;
         fullscreen = !fullscreen;
         if (fullscreen)
         {
+            window.Topmost = true;
             window.WindowStyle = WindowStyle.None;
             window.ResizeMode = ResizeMode.NoResize;
-            if (window.WindowState == WindowState.Maximized) window.WindowState = WindowState.Normal;
+            window.WindowState = WindowState.Normal;
             window.WindowState = WindowState.Maximized;
+            ShowHud("Fullscreen");
         }
         else
         {
+            window.Topmost = false;
             window.WindowStyle = WindowStyle.SingleBorderWindow;
             window.ResizeMode = ResizeMode.CanResize;
-            window.WindowState = WindowState.Normal;
+            window.WindowState = WindowState.Maximized;
+            ShowHud("Windowed");
         }
         Dispatcher.BeginInvoke(ApplyScale, DispatcherPriority.Background);
         Render();
@@ -677,6 +1039,7 @@ public sealed class PlayerView : UserControl, IDisposable
 
         if (Preparing)
         {
+            overlay.Background = Brushes.Black;
             var preparing = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MaxWidth = 700 };
             var name = WText(request.Title, 15, null, FontWeights.Medium);
             name.TextWrapping = TextWrapping.Wrap;
@@ -689,7 +1052,7 @@ public sealed class PlayerView : UserControl, IDisposable
             liveStage.HorizontalAlignment = HorizontalAlignment.Center;
             liveStage.Margin = new Thickness(0, 12, 0, 0);
             preparing.Children.Add(liveStage);
-            if (stats is { } s && (s.Seeds > 0 || s.Peers > 0))
+            if (stats is not null)
             {
                 liveMeta.HorizontalAlignment = HorizontalAlignment.Center;
                 liveMeta.Margin = new Thickness(0, 4, 0, 0);
@@ -705,6 +1068,7 @@ public sealed class PlayerView : UserControl, IDisposable
             return;
         }
 
+        overlay.Background = new SolidColorBrush(Color.FromArgb(1, 0, 0, 0));
         var waiting = buffering || stalled;
 
         if (showUi && locked)
@@ -806,10 +1170,24 @@ public sealed class PlayerView : UserControl, IDisposable
             actions.Children.Add(Action("lock", null, "Lock", false, () => Lock(true)));
             if (request.Next is not null) actions.Children.Add(Action("skip-forward", null, "Next", false, PlayNext));
             actions.Children.Add(Action("maximize", null, Scales[scaleIdx].Label, scaleIdx != 0, CycleScale));
-            actions.Children.Add(Action("subtitles", null, "Subtitles", player.Spu >= 0 || picking, () => { searchingSubs = false; picking = !picking; Render(); }));
+            actions.Children.Add(Action("volume", null, "Audio", pickingAudio, () =>
+            {
+                picking = false;
+                searchingSubs = false;
+                pickingAudio = !pickingAudio;
+                Render();
+            }));
+            actions.Children.Add(Action("subtitles", null, "Subtitles", player.Spu >= 0 || picking, () =>
+            {
+                pickingAudio = false;
+                searchingSubs = false;
+                picking = !picking;
+                Render();
+            }));
             actions.Children.Add(Action("search", null, "Find subs", searchingSubs, () =>
             {
                 picking = false;
+                pickingAudio = false;
                 searchingSubs = !searchingSubs;
                 if (searchingSubs)
                 {
@@ -832,6 +1210,7 @@ public sealed class PlayerView : UserControl, IDisposable
         }
 
         if (picking) chrome.Children.Add(TrackSheet());
+        if (pickingAudio) chrome.Children.Add(AudioSheet());
         if (searchingSubs) chrome.Children.Add(SearchSheet());
 
         if (waiting && !showUi)
@@ -901,9 +1280,12 @@ public sealed class PlayerView : UserControl, IDisposable
         return e;
     }
 
-    static void Detach(FrameworkElement e)
+    static void Detach(FrameworkElement? e)
     {
+        if (e is null) return;
         if (e.Parent is Panel p) p.Children.Remove(e);
+        else if (e.Parent is Decorator d) d.Child = null;
+        else if (e.Parent is ContentControl cc) cc.Content = null;
     }
 
     static UIElement Spin()
@@ -967,41 +1349,32 @@ public sealed class PlayerView : UserControl, IDisposable
         return b;
     }
 
-    FrameworkElement TrackSheet()
+    FrameworkElement AudioSheet()
     {
-        var columns = new StackPanel { Orientation = Orientation.Horizontal };
-
+        var panel = new StackPanel { Width = 260 };
+        panel.Children.Add(SheetTitle("AUDIO TRACKS"));
         var audio = player.AudioTrackDescription.Where(t => t.Id >= 0).ToList();
-        if (audio.Count > 1)
+        if (audio.Count == 0)
         {
-            var list = new StackPanel { Width = 240 };
-            list.Children.Add(SheetTitle("AUDIO"));
+            var none = WText("No audio tracks detected", 12, White(0x70));
+            none.Margin = new Thickness(10, 8, 10, 8);
+            panel.Children.Add(none);
+        }
+        else
+        {
             foreach (var t in audio)
             {
                 var id = t.Id;
-                list.Children.Add(Option(string.IsNullOrWhiteSpace(t.Name) ? $"Track {id}" : t.Name, player.AudioTrack == id, () => { player.SetAudioTrack(id); picking = false; Render(); }));
+                var label = string.IsNullOrWhiteSpace(t.Name) ? $"Audio Track {id}" : t.Name;
+                panel.Children.Add(Option(label, player.AudioTrack == id, () =>
+                {
+                    player.SetAudioTrack(id);
+                    pickingAudio = false;
+                    ShowHud($"Audio: {label}");
+                    Render();
+                }));
             }
-            columns.Children.Add(new ScrollViewer { MaxHeight = Math.Max(160, ActualHeight - 200), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = list });
-            columns.Children.Add(new Border { Width = 1, Background = White(0x1f), Margin = new Thickness(6, 0, 6, 0) });
         }
-
-        var subs = new StackPanel { Width = 280 };
-        subs.Children.Add(SheetTitle("SUBTITLES"));
-        subs.Children.Add(Option("Off", player.Spu < 0, () => { player.SetSpu(-1); picking = false; Render(); }));
-        var tracks = player.SpuDescription.Where(t => t.Id >= 0).ToList();
-        foreach (var t in tracks)
-        {
-            var id = t.Id;
-            subs.Children.Add(Option(FriendlySub(t.Name, id), player.Spu == id, () => { player.SetSpu(id); picking = false; Render(); }));
-        }
-        if (tracks.Count == 0)
-        {
-            var none = WText(SubDL.Key is not null ? "No subtitles found. Use Find subs to search online." : "No subtitles found, and this build has no SubDL key for online search.", 12, White(0x70));
-            none.TextWrapping = TextWrapping.Wrap;
-            none.Margin = new Thickness(10, 8, 10, 8);
-            subs.Children.Add(none);
-        }
-        columns.Children.Add(new ScrollViewer { MaxHeight = Math.Max(160, ActualHeight - 200), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = subs });
 
         return new Border
         {
@@ -1011,16 +1384,50 @@ public sealed class PlayerView : UserControl, IDisposable
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top,
             Margin = new Thickness(0, 68, 16, 0),
-            Child = columns,
+            Child = new ScrollViewer { MaxHeight = Math.Max(160, ActualHeight - 200), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = panel },
+        };
+    }
+
+    FrameworkElement TrackSheet()
+    {
+        var subs = new StackPanel { Width = 280 };
+        subs.Children.Add(SheetTitle("SUBTITLES"));
+        subs.Children.Add(Option("Off", player.Spu < 0, () => { player.SetSpu(-1); picking = false; ShowHud("Subtitles: Off"); Render(); }));
+        var tracks = player.SpuDescription.Where(t => t.Id >= 0).ToList();
+        foreach (var t in tracks)
+        {
+            var id = t.Id;
+            var label = FriendlySub(t.Name, id);
+            subs.Children.Add(Option(label, player.Spu == id, () => { player.SetSpu(id); picking = false; ShowHud($"Subtitles: {label}"); Render(); }));
+        }
+        if (tracks.Count == 0)
+        {
+            var none = WText(SubDL.Key is not null ? "No subtitles found. Use Find subs to search online." : "No subtitles found.", 12, White(0x70));
+            none.TextWrapping = TextWrapping.Wrap;
+            none.Margin = new Thickness(10, 8, 10, 8);
+            subs.Children.Add(none);
+        }
+
+        return new Border
+        {
+            CornerRadius = new CornerRadius(12),
+            Background = Black(0xdd),
+            Padding = new Thickness(6),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, 68, 16, 0),
+            Child = new ScrollViewer { MaxHeight = Math.Max(160, ActualHeight - 200), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = subs },
         };
     }
 
     string FriendlySub(string? raw, int id)
     {
+        if (slaveTrackLabels.TryGetValue(id, out var custom) && !string.IsNullOrWhiteSpace(custom))
+            return custom;
         var name = (raw ?? "").Trim();
         var external = externalSubs.FirstOrDefault(s => name.Contains(Path.GetFileNameWithoutExtension(s.Path), StringComparison.OrdinalIgnoreCase));
         if (external is not null) return external.Label;
-        return name.Length == 0 || name.StartsWith("Track", StringComparison.OrdinalIgnoreCase) && name.Length < 9 ? $"Subtitle {id}" : name;
+        return name.Length == 0 || (name.StartsWith("Track", StringComparison.OrdinalIgnoreCase) && name.Length < 9) ? $"Subtitle {id}" : name;
     }
 
     static TextBlock SheetTitle(string text) => new()
@@ -1039,6 +1446,7 @@ public sealed class PlayerView : UserControl, IDisposable
         var panel = new StackPanel { Width = 420 };
         panel.Children.Add(SheetTitle("FIND SUBTITLES"));
 
+        Detach(subBox);
         subBox ??= new TextBox
         {
             Style = (Style)FindResource("Field"),
@@ -1051,8 +1459,6 @@ public sealed class PlayerView : UserControl, IDisposable
         subBox.KeyDown -= OnSubKey;
         subBox.KeyDown += OnSubKey;
         var field = new Border { Background = White(0x14), CornerRadius = new CornerRadius(8), Padding = new Thickness(10, 0, 10, 0), Height = 36, Child = subBox };
-        Detach(subBox);
-        field.Child = subBox;
         var go = Controls.Ui.Button(subLoading ? Spin() : WIcon("search", 16), () => { subQuery = subBox.Text; SearchSubs(subBox.Text); }, "Bare", "Search");
         go.Width = go.Height = 36;
         go.Tag = 8;
@@ -1142,6 +1548,8 @@ public sealed class PlayerView : UserControl, IDisposable
 
     public async void RequestExit()
     {
+        overlay.Background = Brushes.Black;
+        Background = Brushes.Black;
         await Close();
         Exited?.Invoke();
     }
@@ -1150,6 +1558,8 @@ public sealed class PlayerView : UserControl, IDisposable
     async Task Close()
     {
         if (disposed) return;
+        overlay.Background = Brushes.Black;
+        Background = Brushes.Black;
         SavePosition();
         if (fullscreen) ToggleFullscreen();
         Dispose();
@@ -1169,6 +1579,26 @@ public sealed class PlayerView : UserControl, IDisposable
     {
         if (disposed) return;
         disposed = true;
+        try { System.Windows.Interop.ComponentDispatcher.ThreadFilterMessage -= OnThreadMessage; } catch { }
+        try
+        {
+            var window = Window.GetWindow(this) ?? Application.Current?.MainWindow;
+            if (window != null && fullscreen)
+            {
+                fullscreen = false;
+                window.Topmost = false;
+                window.WindowStyle = WindowStyle.SingleBorderWindow;
+                window.ResizeMode = ResizeMode.CanResize;
+                window.WindowState = WindowState.Maximized;
+            }
+        }
+        catch { }
+        overlay.MouseMove -= OnOverlayMouseMove;
+        overlay.MouseLeave -= OnOverlayMouseLeave;
+        overlay.MouseLeftButtonDown -= OnPictureDown;
+        overlay.MouseWheel -= OnOverlayMouseWheel;
+        overlay.Background = Brushes.Black;
+        Background = Brushes.Black;
         life.Cancel();
         tick.Stop();
         hideTimer.Stop();

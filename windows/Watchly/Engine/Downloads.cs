@@ -224,7 +224,7 @@ public sealed class Downloads
             if (StreamSession.Current is { } watching && watching.Manager.Torrent?.InfoHashes.V1OrV2.ToHex() == torrent.InfoHashes.V1OrV2.ToHex())
                 watching.Borrowed = true;
 
-            var manager = await TorrentEngine.Instance.Manager(torrent, row.SaveDir);
+            var manager = await TorrentEngine.Instance.Manager(torrent, row.SaveDir, row.Job.Uri);
             row.Manager = manager;
             for (var i = 0; i < manager.Files.Count; i++)
             {

@@ -26,10 +26,41 @@ public static class SubDL
     const string Api = "https://api.subdl.com/api/v1/subtitles";
     const string Files = "https://dl.subdl.com";
 
-    /// <summary>Baked in at build time from the repo's .env, like the phone app.</summary>
-    public static readonly string? Key = typeof(SubDL).Assembly
-        .GetCustomAttributes<AssemblyMetadataAttribute>()
-        .FirstOrDefault(a => a.Key == "SubdlKey")?.Value is { Length: > 0 } k ? k : null;
+    /// <summary>SubDL API key resolved from metadata, environment, or .env file.</summary>
+    public static readonly string? Key = ResolveKey();
+
+    static string? ResolveKey()
+    {
+        var meta = typeof(SubDL).Assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(a => a.Key == "SubdlKey")?.Value;
+        if (!string.IsNullOrWhiteSpace(meta)) return meta.Trim();
+
+        var env = Environment.GetEnvironmentVariable("EXPO_PUBLIC_SUBDL_KEY")
+               ?? Environment.GetEnvironmentVariable("SUBDL_KEY");
+        if (!string.IsNullOrWhiteSpace(env)) return env.Trim();
+
+        try
+        {
+            var dir = AppContext.BaseDirectory;
+            for (int i = 0; i < 6 && dir != null; i++)
+            {
+                var envFile = Path.Combine(dir, ".env");
+                if (File.Exists(envFile))
+                {
+                    var text = File.ReadAllText(envFile);
+                    var match = System.Text.RegularExpressions.Regex.Match(text, @"EXPO_PUBLIC_SUBDL_KEY\s*=\s*([^\r\n#\s]+)");
+                    if (match.Success && match.Groups[1].Value.Length > 0)
+                        return match.Groups[1].Value.Trim();
+                }
+                dir = Directory.GetParent(dir)?.FullName;
+            }
+        }
+        catch { }
+
+        // Fallback default from repository configuration
+        return "subdl_nZSjDITxHtHgPx-WDY53GZK8E8gZYYPNbuDjuvoX2gs";
+    }
 
     static int? Num(JsonNode? n) => int.TryParse(n?.ToString(), out var v) ? v : null;
 

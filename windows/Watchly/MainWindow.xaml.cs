@@ -560,10 +560,15 @@ public partial class MainWindow : Window
     void OpenPlayer(PlaybackRequest request)
     {
         if (PlayerHost.Content is PlayerView old) old.Dispose();
+        PlayerHost.Visibility = Visibility.Visible;
         var player = new PlayerView(request);
         player.Exited += () =>
         {
-            if (PlayerHost.Content == player) PlayerHost.Content = null;
+            if (PlayerHost.Content == player)
+            {
+                PlayerHost.Content = null;
+                PlayerHost.Visibility = Visibility.Collapsed;
+            }
             Tabs.Visibility = Layers.Visibility = TabDock.Visibility = Visibility.Visible;
             if (Layers.Children.Count > 0) TabDock.Visibility = Visibility.Collapsed;
             LibraryChanged?.Invoke();

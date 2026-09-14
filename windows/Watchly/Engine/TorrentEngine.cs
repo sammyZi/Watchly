@@ -35,21 +35,24 @@ public sealed class TorrentEngine
         {
             CacheDirectory = Paths.EngineCache,
             AllowPortForwarding = true,
+            AllowLocalPeerDiscovery = true,
             AutoSaveLoadDhtCache = true,
             AutoSaveLoadFastResume = true,
             AutoSaveLoadMagnetLinkMetadata = true,
             FastResumeMode = FastResumeMode.BestEffort,
-            // Incomplete files carry a suffix until they finish, so nothing half
-            // written ever looks like a finished episode in the downloads folder.
+            // 128 MB RAM piece buffer for high-throughput streaming
+            DiskCacheBytes = 128 * 1024 * 1024,
             UsePartialFiles = true,
             HttpStreamingPrefix = $"http://127.0.0.1:{FreePort()}/",
-            MaximumConnections = 300,
-            MaximumHalfOpenConnections = 16,
+            MaximumConnections = 600,
+            MaximumHalfOpenConnections = 120,
+            ConnectionTimeout = TimeSpan.FromSeconds(6),
         };
         var app = AppSettings.Load();
-        settings.MaximumDownloadRate = app.MaxDownloadKbps * 1024;
-        settings.MaximumUploadRate = app.MaxUploadKbps * 1024;
+        if (app.MaxDownloadKbps > 0) settings.MaximumDownloadRate = app.MaxDownloadKbps * 1024;
+        if (app.MaxUploadKbps > 0) settings.MaximumUploadRate = app.MaxUploadKbps * 1024;
         engine = new ClientEngine(settings.ToSettings());
+        Log.Info("engine", $"ClientEngine initialized on {settings.HttpStreamingPrefix} (DiskCache: 128MB, MaxConn: 600, HalfOpen: 120)");
     }
 
     static int FreePort()
@@ -141,13 +144,51 @@ public sealed class TorrentEngine
         }).ToList());
 
     /// <summary>Add (or reuse) a manager for <paramref name="torrent"/>, saving into <paramref name="saveDir"/>.</summary>
-    public async Task<TorrentManager> Manager(Torrent torrent, string saveDir)
+    public async Task<TorrentManager> Manager(Torrent torrent, string saveDir, string? sourceUri = null)
     {
         var existing = Find(Hex(torrent.InfoHashes));
-        if (existing is not null) return existing;
+        if (existing is not null)
+        {
+            await AddTrackersAsync(existing, sourceUri);
+            return existing;
+        }
         Directory.CreateDirectory(saveDir);
-        var settings = new TorrentSettingsBuilder { CreateContainingDirectory = false }.ToSettings();
-        return await engine.AddStreamingAsync(torrent, saveDir, settings);
+        var settings = new TorrentSettingsBuilder
+        {
+            CreateContainingDirectory = false,
+            MaximumConnections = 250,
+            AllowDht = true,
+            AllowPeerExchange = true,
+        }.ToSettings();
+        var manager = await engine.AddStreamingAsync(torrent, saveDir, settings);
+        await AddTrackersAsync(manager, sourceUri);
+        return manager;
+    }
+
+    public async Task AddTrackersAsync(TorrentManager manager, string? sourceUri = null)
+    {
+        var urls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrEmpty(sourceUri) && sourceUri.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase))
+        {
+            if (MagnetLink.TryParse(sourceUri, out var magnet))
+            {
+                foreach (var tr in magnet.AnnounceUrls) urls.Add(tr);
+            }
+        }
+        foreach (var t in TitleText.Trackers) urls.Add(t);
+
+        int added = 0;
+        foreach (var url in urls)
+        {
+            if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            {
+                try { await manager.TrackerManager.AddTrackerAsync(uri); added++; } catch { }
+            }
+        }
+        Log.Torrent($"attached {added} trackers to '{manager.Name}'");
+        try { _ = manager.TrackerManager.AnnounceAsync(CancellationToken.None); } catch { }
+        try { _ = manager.DhtAnnounceAsync(); } catch { }
+        try { _ = manager.LocalPeerAnnounceAsync(); } catch { }
     }
 
     public async Task Remove(TorrentManager manager, bool deleteFiles)
@@ -163,7 +204,7 @@ public sealed class TorrentEngine
         }
         catch (Exception e)
         {
-            Debug.WriteLine($"[engine] remove failed: {e.Message}");
+            Log.Warn("engine", $"remove failed: {e.Message}");
         }
     }
 
@@ -225,34 +266,55 @@ public sealed class StreamSession : IAsyncDisposable
         this.deleteFiles = deleteFiles;
     }
 
-    public static async Task<StreamSession> Start(Torrent torrent, int fileIndex, bool deleteFilesAfter, CancellationToken ct = default)
+    public static async Task<StreamSession> Start(Torrent torrent, int fileIndex, bool deleteFilesAfter, string? sourceUri = null, CancellationToken ct = default)
     {
         var engine = TorrentEngine.Instance;
         var hex = torrent.InfoHashes.V1OrV2.ToHex().ToLowerInvariant();
         var borrowed = engine.Find(hex) is not null;
-        var manager = await engine.Manager(torrent, Path.Combine(Paths.StreamCache, hex));
+        var manager = await engine.Manager(torrent, Path.Combine(Paths.StreamCache, hex), sourceUri);
         var meta = TorrentEngine.MetaOf(torrent);
         var file = manager.Files[fileIndex];
 
         if (!borrowed)
         {
-            // Only the file being watched, plus the subtitles sitting next to it —
-            // they are tiny, and VLC picks them up as soon as they land.
-            var folder = Pick.ParentDir(meta.Files[fileIndex].Path, null);
+            // Only the file being watched, plus ALL subtitles in the torrent.
+            // Subtitles are tiny (a few KB); downloading at Priority.Highest finishes them
+            // in seconds so LibVLC can attach them immediately.
             for (var i = 0; i < manager.Files.Count; i++)
             {
                 var info = meta.Files[i];
-                var wanted = i == fileIndex || (info.IsSubtitle && info.Size < 2_000_000 && Pick.ParentDir(info.Path, null).StartsWith(folder));
-                await manager.SetFilePriorityAsync(manager.Files[i], wanted ? Priority.Normal : Priority.DoNotDownload);
+                if (i == fileIndex)
+                {
+                    await manager.SetFilePriorityAsync(manager.Files[i], Priority.Normal);
+                }
+                else if (info.IsSubtitle && info.Size < 10_000_000)
+                {
+                    await manager.SetFilePriorityAsync(manager.Files[i], Priority.Highest);
+                }
+                else
+                {
+                    await manager.SetFilePriorityAsync(manager.Files[i], Priority.DoNotDownload);
+                }
             }
         }
-        else if (file.Priority == Priority.DoNotDownload)
+        else
         {
-            await manager.SetFilePriorityAsync(file, Priority.Normal);
+            if (file.Priority == Priority.DoNotDownload)
+                await manager.SetFilePriorityAsync(file, Priority.Normal);
+            // Boost all subtitles in borrowed sessions as well
+            for (var i = 0; i < manager.Files.Count; i++)
+            {
+                var info = meta.Files[i];
+                if (info.IsSubtitle && info.Size < 10_000_000 && manager.Files[i].Priority != Priority.Highest)
+                {
+                    await manager.SetFilePriorityAsync(manager.Files[i], Priority.Highest);
+                }
+            }
         }
 
         if (manager.State is TorrentState.Stopped or TorrentState.Paused or TorrentState.Error) await manager.StartAsync();
         var http = await manager.StreamProvider!.CreateHttpStreamAsync(file, false, ct);
+        Log.Stream($"Streaming HTTP ready at {http.FullUri} for '{file.Path}'");
         return Current = new StreamSession(manager, meta, fileIndex, http, borrowed, deleteFilesAfter);
     }
 
