@@ -2,7 +2,7 @@
 /** Downloads: what the engine is fetching right now, and files saved to disk. */
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { activeTorrents, dropTorrent, startServer, type Engine } from '../../lib/torrent';
+import { activeTorrents, dropTorrent, hashOf, type Engine } from '../../lib/torrent';
 import { loadHistory, drop as dropHistory, type Item } from '../../lib/history';
 import { bytes, speed } from '../../lib/format';
 import { titleOf } from '../../lib/title';
@@ -14,13 +14,12 @@ export default function DownloadsScreen() {
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    startServer();
-    const t = setInterval(() => setTick((x) => x + 1), 750);
+    const t = setInterval(() => setTick((x) => x + 1), 1000);
     return () => clearInterval(t);
   }, []);
 
   useEffect(() => {
-    setEngines(activeTorrents().filter((e) => !e.done));
+    activeTorrents().then(setEngines);
   }, [tick]);
 
   useEffect(() => {
@@ -28,7 +27,8 @@ export default function DownloadsScreen() {
   }, [tick]);
 
   const stop = useCallback(async (uri: string) => {
-    dropTorrent(uri);
+    const hash = hashOf(uri);
+    if (hash) await dropTorrent(hash);
     await dropHistory(uri);
     setTick((x) => x + 1);
   }, []);
@@ -54,7 +54,8 @@ export default function DownloadsScreen() {
           <div className="row-body">
             <div className="row-title">{e.torrentName}</div>
             <div className="row-sub">
-              {Math.round(e.progress * 100)}% · {speed(e.downloadSpeed)} down / {speed(e.uploadSpeed)} up · {e.numPeers} peers
+              {e.done ? 'Done · seeding' : `${Math.round(e.progress * 100)}%`} · {bytes(e.size)} ·{' '}
+              {speed(e.downloadSpeed)} down / {speed(e.uploadSpeed)} up · {e.numPeers} peers
             </div>
             <div style={{ height: 3, borderRadius: 2, background: 'var(--line)', marginTop: 6, overflow: 'hidden' }}>
               <div style={{ width: `${e.progress * 100}%`, height: '100%', background: 'var(--accent)' }} />
@@ -93,12 +94,13 @@ export default function DownloadsScreen() {
             <div className="row-title">{h.title}</div>
             <div className="row-sub">{h.files?.[0] ? bytes(h.files[0].size) : ''}</div>
           </div>
+          {/* Saved to the user's own disk — a web page cannot reopen it by path. */}
           <button
             className="btn btn-soft"
             style={{ padding: '8px 12px', fontSize: 12 }}
-            onClick={() => window.location.assign(h.uri.substring('saved:'.length))}
+            onClick={() => dropHistory(h.uri).then(() => setTick((x) => x + 1))}
           >
-            Open
+            Forget
           </button>
         </div>
       ))}

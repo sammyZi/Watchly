@@ -250,9 +250,12 @@ export function PlayerScreen({
    *  must not resubscribe every time that flips. Assigned below its definition. */
   const bump = useRef<() => void>(() => {});
 
-  // Captured once: the native side reads it when the media loads, and letting
-  // it track `position` would restart playback on every checkpoint.
-  const startAt = useRef(resumeAt ?? 0).current;
+  // Read by the native side when the media loads. A ref, not state, because
+  // letting it track `position` would restart playback on every checkpoint —
+  // but it does have to follow the *file*: the same player instance moves to
+  // the next episode, and the old file's resume point would drop the new one
+  // in halfway. Updated on file change, below.
+  const startAt = useRef(resumeAt ?? 0);
 
   const exit = useCallback(() => {
     const at = position.current;
@@ -281,8 +284,21 @@ export function PlayerScreen({
     onNext();
   }, [onNext]);
 
-  // A different file is playing: the card is owed a fresh chance.
-  useEffect(() => setDismissedNext(false), [fileIndex]);
+  // A different file is playing: the card is owed a fresh chance, and the clock
+  // belongs to the file that just ended. Without this the scrubber sits on the
+  // previous episode's elapsed time and length until the new media reports its
+  // first frame — which over a torrent is however long the first piece takes.
+  useEffect(() => {
+    const at = resumeAt ?? 0;
+    startAt.current = at;
+    position.current = at;
+    setCurrent(at);
+    setDuration(0);
+    setDismissedNext(false);
+    // Only on file change: resumeAt moves on every checkpoint write, and
+    // following it would rewind the clock mid-episode.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileIndex]);
 
   // Hand the stream to the receiver as soon as a device is connected, and
   // silence the local player — two copies playing at once is the one thing
@@ -745,7 +761,7 @@ export function PlayerScreen({
             ref={videoRef}
           style={StyleSheet.absoluteFill}
             source={url}
-            startPosition={startAt}
+            startPosition={startAt.current}
             paused={paused}
             rate={rate}
             subtitleTrack={subTrack}

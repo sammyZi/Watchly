@@ -47,23 +47,38 @@ export function Thumb({
 
 export function Poster({
   title,
-  width = 168,
+  width,
   href,
+  progress,
+  stamp,
 }: {
   title: Title;
   width?: number;
   href?: string;
+  /** Resume progress, 0–1. */
+  progress?: number;
+  /** "S1 E4 · 12:30" over the art. */
+  stamp?: string | null;
 }) {
   return (
-    <Link href={href ?? titleHref(title)} className="poster" style={{ width }}>
+    // Width comes from --poster-w (168px desktop, 116px phone) unless given.
+    <Link href={href ?? titleHref(title)} className="poster" style={width ? { width } : undefined}>
       <div className="poster-art">
         {title.poster ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={title.poster} alt={title.title} loading="lazy" />
         ) : (
-          <Thumb name={title.title} size={width} poster={title.poster} />
+          <span className="poster-letter" style={{ background: `hsl(${hueOf(title.title)} 45% 22%)` }}>
+            {title.title[0]}
+          </span>
         )}
         {title.rating && <span className="poster-score">★ {title.rating}</span>}
+        {stamp && <span className="poster-stamp">{stamp}</span>}
+        {progress != null && progress > 0 && (
+          <span className="poster-progress">
+            <span style={{ width: `${Math.min(1, progress) * 100}%` }} />
+          </span>
+        )}
       </div>
       <div className="poster-cap">{title.title}</div>
       <div className="poster-sub">
@@ -75,10 +90,22 @@ export function Poster({
   );
 }
 
-export function Shelf({ title, href, children }: { title: string; href?: string; children: ReactNode }) {
+export function Shelf({
+  title,
+  href,
+  hue,
+  children,
+}: {
+  title: string;
+  href?: string;
+  /** Colour tick before the heading — tells shelves apart while loading. */
+  hue?: string;
+  children: ReactNode;
+}) {
   return (
     <section className="shelf">
       <div className="shelf-head">
+        {hue && <span className="shelf-tick" style={{ background: hue }} />}
         <h2 className="shelf-title">{title}</h2>
         {href && (
           <Link href={href} className="shelf-more">
@@ -97,11 +124,14 @@ export function Hero({
   actionLabel = 'Play',
   facts,
   page,
+  eyebrow,
 }: {
   title: Title;
   actionHref?: string;
   actionLabel?: string;
   facts?: ReactNode;
+  /** Small accent line above the name, e.g. "#1 today". */
+  eyebrow?: string;
   /** Paging dots, when the hero is one of several. */
   page?: { count: number; index: number; onPick: (i: number) => void };
 }) {
@@ -109,12 +139,13 @@ export function Hero({
     <div className="hero" style={{ background: 'var(--surface)' }}>
       {title.backdrop ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={title.backdrop} alt="" />
+        <img key={title.backdrop} src={title.backdrop} alt="" />
       ) : title.poster ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={title.poster} alt="" style={{ objectPosition: 'top' }} />
+        <img key={title.poster} src={title.poster} alt="" style={{ objectPosition: 'top' }} />
       ) : null}
       <div className="hero-body">
+        {eyebrow && <div className="hero-eyebrow">{eyebrow}</div>}
         <h1 className="hero-title">{title.title}</h1>
         <div className="hero-facts">
           {title.year && <span>{title.year.slice(0, 4)}</span>}
@@ -296,10 +327,55 @@ export function FullscreenIcon({ on }: { on?: boolean }) {
   );
 }
 
-export function DownloadIcon() {
+export function DownloadIcon({ size = 19 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>
+      <path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5M4.5 19.5h15" {...stroke} />
+    </svg>
+  );
+}
+
+export function UsersIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8" {...stroke} />
+      <circle cx="9" cy="7" r="4" {...stroke} />
+    </svg>
+  );
+}
+
+export function SearchIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
+      <circle cx="11" cy="11" r="7" {...stroke} strokeWidth={2} />
+      <path d="m20 20-3.5-3.5" {...stroke} strokeWidth={2} />
+    </svg>
+  );
+}
+
+export function CheckIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
+      <path d="M20 6 9 17l-5-5" {...stroke} strokeWidth={2.2} />
+    </svg>
+  );
+}
+
+/** Universal mode — ffmpeg re-encode. */
+export function ZapIcon() {
   return (
     <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden>
-      <path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5M4.5 19.5h15" {...stroke} />
+      <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8Z" {...stroke} />
+    </svg>
+  );
+}
+
+/** Picture scaling (fit / stretch / crop). */
+export function ScaleIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden>
+      <rect x="3" y="5" width="18" height="14" rx="2" {...stroke} />
+      <path d="M7.5 9.5 6.5 12l1 2.5M16.5 9.5l1 2.5-1 2.5" {...stroke} />
     </svg>
   );
 }

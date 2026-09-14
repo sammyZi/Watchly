@@ -59,7 +59,9 @@ function DetailInner() {
   const [picked, setPicked] = useState<Episode | null>(null);
   const [wholeSeason, setWholeSeason] = useState(false);
   const [progress, setProgress] = useState<Progress>({});
-  const [resume, setResume] = useState<{ position: number; duration: number } | null>(null);
+  const [resume, setResume] = useState<{ position: number; duration: number; uri: string } | null>(null);
+  /** Episode id -> the torrent it was watched from. */
+  const [links, setLinks] = useState<Record<string, string>>({});
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -93,22 +95,26 @@ function DetailInner() {
   useEffect(() => {
     let live = true;
     (async () => {
-      const [items, links] = await Promise.all([loadHistory(), loadEpisodeLinks()]);
+      const [items, epLinks] = await Promise.all([loadHistory(), loadEpisodeLinks()]);
       if (!live) return;
       const mine = items.filter((i) => i.imdb === imdb);
       const map: Progress = {};
+      // History is newest first; the first film position found is the latest.
+      let film: { position: number; duration: number; uri: string } | null = null;
       for (const item of mine) {
-        const epId = Object.entries(links).find(([, uri]) => uri === item.uri)?.[0];
+        const epId = Object.entries(epLinks).find(([, uri]) => uri === item.uri)?.[0];
         for (const [idx, pos] of Object.entries(item.positions ?? {})) {
           const dur = item.durations?.[idx];
           if (dur) {
             const pct = Math.min(100, (pos / dur) * 100);
             if (epId) map[epId] = pct;
-            if (!epId && item.kind === 'movie') setResume({ position: pos, duration: dur });
+            if (!epId && item.kind === 'movie' && !film) film = { position: pos, duration: dur, uri: item.uri };
           }
         }
       }
       setProgress(map);
+      setLinks(epLinks);
+      setResume(film);
     })();
     return () => {
       live = false;
@@ -136,7 +142,10 @@ function DetailInner() {
     : resume
       ? Math.min(100, (resume.position / resume.duration) * 100)
       : 0;
-  const canResume = seen >= 1 && seen < WATCHED;
+  // Resume positions belong to the torrent they were watched from — another
+  // release would start from zero.
+  const resumeUri = picked ? links[picked.id] : resume?.uri;
+  const canResume = seen >= 1 && seen < WATCHED && !!resumeUri;
 
   // Releases by name — same as the app: episode asks for its packs too.
   const reject = useRef(false);
@@ -194,10 +203,10 @@ function DetailInner() {
     [title]
   );
 
-  const watchHref = (magnet: string) => {
+  const watchHref = (magnet: string, name?: string) => {
     const q = new URLSearchParams({
       uri: magnet,
-      name: best?.name ?? magnet,
+      name: name ?? title?.title ?? magnet,
       imdb,
       kind: title?.kind ?? kind,
     });
@@ -230,9 +239,13 @@ function DetailInner() {
   return (
     <main className="page">
       <div className="page-head" style={{ paddingBottom: 12 }}>
-        <Link href={savedList.some((s) => s.imdb === imdb) ? '/library' : '/'} className="back-btn" aria-label="Back">
+        <button
+          className="back-btn"
+          aria-label="Back"
+          onClick={() => (window.history.length > 1 ? router.back() : router.push('/'))}
+        >
           <BackIcon />
-        </Link>
+        </button>
         <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
           {(['later', 'favorite'] as const).map((list) => {
             const active = onList(savedList, imdb, list);
@@ -272,7 +285,7 @@ function DetailInner() {
         />
         {canResume && (
           <Link
-            href={watchHref((shown ?? []).find((h) => h)?.magnet ?? '')}
+            href={watchHref(resumeUri!)}
             className="btn btn-primary"
             style={{ position: 'absolute', right: 16, bottom: 16, zIndex: 2, opacity: 0.9 }}
           >
@@ -306,21 +319,26 @@ function DetailInner() {
       <div className="actions">
         <button
           className="btn btn-primary"
-          disabled={!best}
-          onClick={() => best && router.push(watchHref(best.magnet))}
+          disabled={!best && !canResume}
+          onClick={() => {
+            if (canResume) router.push(watchHref(resumeUri!));
+            else if (best) router.push(watchHref(best.magnet, best.name));
+          }}
         >
-          {best
-            ? canResume
-              ? `Continue${tag ? ` ${tag}` : ''} · ${Math.round(seen)}%`
-              : tag
+          {canResume
+            ? `Continue${tag ? ` ${tag}` : ''} · ${Math.round(seen)}%`
+            : best
+              ? tag
                 ? `Play ${tag}`
                 : 'Play'
-            : 'Finding releases…'}
+              : sources
+                ? 'No releases'
+                : 'Finding releases…'}
         </button>
         <button
           className="btn btn-soft"
           disabled={!best}
-          onClick={() => best && router.push(`${watchHref(best.magnet)}&dl=1`)}
+          onClick={() => best && router.push(`${watchHref(best.magnet, best.name)}&dl=1`)}
         >
           ↓ Save
         </button>
@@ -401,7 +419,7 @@ function DetailInner() {
                       {e.released ? ` · ${e.released.slice(0, 10)}` : ''}
                     </div>
                     {e.overview && (
-                      <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 15, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                      <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: '15px', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                         {e.overview}
                       </div>
                     )}
@@ -431,9 +449,9 @@ function DetailInner() {
           <ReleaseRow
             key={h.id}
             hit={h}
-            onClick={() => router.push(watchHref(h.magnet))}
+            onClick={() => router.push(watchHref(h.magnet, h.name))}
             right={
-              <button className="btn btn-primary" style={{ padding: '8px 14px', fontSize: 12 }} onClick={() => router.push(watchHref(h.magnet))}>
+              <button className="btn btn-primary" style={{ padding: '8px 14px', fontSize: 12 }} aria-label={`Play ${h.name}`}>
                 ▶
               </button>
             }
@@ -464,7 +482,7 @@ function DetailInner() {
                 >
                   {name.split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('')}
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6, lineHeight: 14 }}>{name}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6, lineHeight: '14px' }}>{name}</div>
               </div>
             ))}
           </div>
@@ -487,11 +505,11 @@ function DetailInner() {
           </a>
         ))}
       </div>
-      <p className="faint" style={{ fontSize: 11, marginTop: 18, lineHeight: 16 }}>
-        Peer-to-peer streaming: releases are pulled directly from other viewers
-        via WebTorrent, with the service worker answering byte-range requests.
-        Whole-file "Save" keeps a local copy; Universal mostly goes through
-        ffmpeg.wasm when the browser cannot decode a release.
+      <p className="faint" style={{ fontSize: 11, marginTop: 18, lineHeight: '16px' }}>
+        Peer-to-peer streaming: the Watchly server joins the swarm and streams
+        the file to this page with byte-range requests.
+        Whole-file “Save” keeps a local copy; Universal goes through ffmpeg.wasm
+        when the browser cannot decode a release.
       </p>
         </aside>
       </div>

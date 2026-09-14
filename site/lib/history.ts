@@ -88,30 +88,35 @@ export function put(item: Item) {
   });
 }
 
-export function patch(uri: string, fields: Partial<Item>) {
+/**
+ * `fields` may be a function of the stored record. The per-file maps below
+ * must merge into what is stored, not into the caller's copy: the player holds
+ * a snapshot from when the file opened, and merging into that wiped every
+ * other file's resume point in a season pack.
+ */
+export function patch(uri: string, fields: Partial<Item> | ((stored: Item) => Partial<Item>)) {
   return serial(async () => {
     const items = await loadHistory();
-    return write(items.map((x) => (x.uri === uri ? { ...x, ...fields } : x)));
+    return write(
+      items.map((x) =>
+        x.uri === uri ? { ...x, ...(typeof fields === 'function' ? fields(x) : fields) } : x
+      )
+    );
   });
 }
 
 /** Resume point for one file, without clobbering the others. */
 export const setPosition = (item: Item, index: number, seconds: number) =>
-  patch(item.uri, {
+  patch(item.uri, (x) => ({
     lastFileIndex: index,
-    positions: { ...item.positions, [index]: seconds },
-  });
+    positions: { ...x.positions, [index]: seconds },
+  }));
 
 export const setDuration = (item: Item, index: number, seconds: number) =>
-  patch(item.uri, { durations: { ...item.durations, [index]: seconds } });
+  patch(item.uri, (x) => ({ durations: { ...x.durations, [index]: seconds } }));
 
 export const setFileSubs = (item: Item, index: number, subs: SavedSub[]) =>
-  patch(item.uri, {
-    subtitles: { ...item.subtitles, [index]: subs },
-  });
-
-const subPaths = (item: Item) =>
-  Object.values(item.subtitles ?? {}).flatMap((xs) => xs.map((s) => s.path));
+  patch(item.uri, (x) => ({ subtitles: { ...x.subtitles, [index]: subs } }));
 
 /** Web: subtitles live on the page as blob URLs — nothing to delete. */
 const wipeSubs = () => Promise.resolve();

@@ -23,11 +23,11 @@ function LibraryInner() {
       for (const item of items) {
         if (!item.imdb || !item.kind) continue;
         if (rows.some((r) => r.imdb === item.imdb)) continue;
-        const latest = Object.entries(item.positions ?? {});
-        if (item.kind === 'movie') {
-          const dur = latest.length ? item.durations?.[latest[0][0]] : undefined;
-          if (!dur || latest[0][1] / dur >= WATCHED / 100) continue;
-        }
+        // The file last played, not whichever position happens to be first.
+        const i = item.lastFileIndex;
+        const pos = i != null ? item.positions?.[i] : undefined;
+        const dur = i != null ? item.durations?.[i] : undefined;
+        if (!pos || (item.kind === 'movie' && (!dur || pos / dur >= WATCHED / 100))) continue;
         rows.push(
           asTitle({
             imdb: item.imdb,
