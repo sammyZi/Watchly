@@ -45,7 +45,7 @@ import { withTrackers } from '../../lib/magnet';
 import { searchEpisode, type Hit } from '../../lib/search';
 import { downloadSubtitle, findSubtitles, parseVtt, subtitleBlob, type Cue, type Sub } from '../../lib/subs';
 import { saveUrlToDisk, supportsSaveAPI } from '../../lib/save';
-import type { Probe } from '../../lib/media';
+import type { Probe } from '../../lib/probe';
 import { searchableName, titleOf } from '../../lib/title';
 import { clock, bytes, speed } from '../../lib/format';
 

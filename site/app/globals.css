@@ -2066,3 +2066,68 @@ html {
   background: rgb(255 255 255 / 12%);
   flex: none;
 }
+
+/* ---------- sign in ---------- */
+
+.login {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+}
+
+.login-card {
+  width: min(380px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 32px 24px 28px;
+  border-radius: 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+.login-mark {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  font-size: 24px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.login-title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+
+.login-sub {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.login-card .input {
+  text-align: center;
+  font-size: 16px;
+}
+
+.login-error {
+  font-size: 13px;
+  color: var(--danger);
+}
+
+.login-btn {
+  width: 100%;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.login-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

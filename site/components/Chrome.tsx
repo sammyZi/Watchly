@@ -63,7 +63,7 @@ const TABS = [
  */
 export function Nav() {
   const pathname = usePathname();
-  if (pathname.startsWith('/watch')) return null;
+  if (pathname.startsWith('/watch') || pathname === '/login') return null;
   const isActive = (href: string) => (href === '/' ? pathname === '/' : pathname.startsWith(href));
   return (
     <>
