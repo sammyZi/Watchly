@@ -27,23 +27,46 @@ public sealed class HomeView : UserControl
     };
 
     readonly MainWindow shell = MainWindow.Shell;
+    readonly ScrollViewer scroll;
     readonly StackPanel page = new() { Margin = new Thickness(0, 0, 0, 120) };
     readonly Grid hero = new() { Height = 480 };
     readonly StackPanel personal = new();
+    readonly ScrollViewer genreScroll = new()
+    {
+        HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden,
+        VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        Padding = new Thickness(24, 0, 24, 0),
+        Margin = new Thickness(0, 20, 0, 4),
+    };
+    readonly StackPanel genreChips = new() { Orientation = Orientation.Horizontal };
     readonly StackPanel shelves = new();
     readonly Dictionary<string, List<Title>> loaded = new();
+    readonly Dictionary<string, (FrameworkElement Container, ContentControl Body)> shelfControls = new();
     List<Shelf> picks = new();
+    string? selectedGenre;
     int version;
 
     public HomeView()
     {
-        var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = page };
+        scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = page };
+        genreScroll.Content = genreChips;
+        genreScroll.PreviewMouseWheel += (_, e) =>
+        {
+            if (e.Delta != 0)
+            {
+                genreScroll.ScrollToHorizontalOffset(genreScroll.HorizontalOffset - e.Delta);
+                e.Handled = true;
+            }
+        };
+        Ui.DragScroll(genreScroll);
+
         page.Children.Add(hero);
         page.Children.Add(personal);
+        page.Children.Add(genreScroll);
         page.Children.Add(shelves);
         Content = scroll;
 
-        foreach (var s in Fixed)
+        foreach (var s in AllShelves())
             if (Meta.PeekCatalog(s.Kind, s.Genre) is { } ready) loaded[s.Key] = ready;
 
         shell.LibraryChanged += Refresh;
@@ -91,7 +114,56 @@ public sealed class HomeView : UserControl
         var chosen = Chosen();
         var taken = chosen.Select(s => s.Key).ToHashSet();
         var rest = picks.Where(p => taken.Add(p.Key)).ToList();
-        return chosen.Concat(rest).Concat(Fixed.Where(s => !taken.Contains(s.Key))).ToList();
+        var fixedList = Fixed.Where(s => taken.Add(s.Key)).ToList();
+
+        // Include all genres from Meta.Genres
+        var genreShelves = Meta.Genres
+            .Select(g => new Shelf(g == Meta.AnimeGenre ? "Anime" : g, Meta.KindOfGenre(g), g))
+            .Where(s => taken.Add(s.Key))
+            .ToList();
+
+        return chosen.Concat(rest).Concat(fixedList).Concat(genreShelves).ToList();
+    }
+
+    void BuildGenreChips()
+    {
+        genreChips.Children.Clear();
+
+        var allChip = Ui.Chip("All", selectedGenre is null, () => SelectGenre(null), "grid");
+        allChip.Margin = new Thickness(0, 0, 8, 0);
+        genreChips.Children.Add(allChip);
+
+        foreach (var g in Meta.Genres)
+        {
+            var name = g == Meta.AnimeGenre ? "Anime" : g;
+            var on = selectedGenre == g;
+            var chip = Ui.Chip(name, on, () => SelectGenre(g));
+            chip.Margin = new Thickness(0, 0, 8, 0);
+            genreChips.Children.Add(chip);
+        }
+    }
+
+    void SelectGenre(string? g)
+    {
+        selectedGenre = g;
+        BuildGenreChips();
+        if (g is null)
+        {
+            scroll.ScrollToTop();
+            return;
+        }
+
+        var target = shelves.Children.OfType<FrameworkElement>()
+            .FirstOrDefault(c => (c.Tag as string)?.Equals(g, StringComparison.OrdinalIgnoreCase) == true);
+        if (target is not null)
+        {
+            target.BringIntoView();
+        }
+        else
+        {
+            var shelf = new Shelf(g == Meta.AnimeGenre ? "Anime" : g, Meta.KindOfGenre(g), g);
+            MainWindow.Shell.OpenShelfPage(shelf);
+        }
     }
 
     async void Refresh()
@@ -104,6 +176,7 @@ public sealed class HomeView : UserControl
         dirty = false;
         var mine = ++version;
         BuildPersonal();
+        BuildGenreChips();
         BuildShelves();
 
         // What is mid-way leads the taste signal, then the rest, then saved titles.
@@ -131,7 +204,13 @@ public sealed class HomeView : UserControl
             {
                 if (t.Result.Count == 0) return;
                 loaded[shelf.Key] = t.Result;
-                BuildShelves();
+                var watched = shell.HistoryList.Select(h => h.Imdb).Where(i => i is not null).ToHashSet();
+                if (shelfControls.TryGetValue(shelf.Key, out var pair) && pair.Body.Content is Grid)
+                {
+                    var data = shelf.Genre is not null ? t.Result.Where(x => !watched.Contains(x.Imdb)).ToList() : t.Result;
+                    pair.Body.Content = Ui.Rail(data, "PosterCard", 290);
+                }
+                BuildHero(AllShelves(), watched);
             }));
         }
     }
@@ -165,25 +244,57 @@ public sealed class HomeView : UserControl
     {
         var watched = shell.HistoryList.Select(h => h.Imdb).Where(i => i is not null).ToHashSet();
         var all = AllShelves();
-        shelves.Children.Clear();
-        for (var i = 0; i < all.Count; i++)
+
+        var currentKeys = shelfControls.Keys.ToList();
+        var newKeys = all.Select(s => s.Key).ToList();
+
+        if (!currentKeys.SequenceEqual(newKeys))
         {
-            var shelf = all[i];
-            var hue = Ui.Hues[(i + 1) % Ui.Hues.Length];
-            if (!loaded.TryGetValue(shelf.Key, out var raw))
+            shelves.Children.Clear();
+            shelfControls.Clear();
+            for (var i = 0; i < all.Count; i++)
             {
-                shelves.Children.Add(new StackPanel
+                var shelf = all[i];
+                var hue = Ui.Hues[(i + 1) % Ui.Hues.Length];
+                var body = new ContentControl();
+                var captured = shelf;
+                var head = Ui.Head(shelf.Heading, hue, () => MainWindow.Shell.OpenShelfPage(captured));
+                var container = new StackPanel
                 {
                     Margin = new Thickness(0, 28, 0, 0),
-                    Children = { Ui.Head(shelf.Heading, hue, null), new Grid { Height = 225, Children = { Ui.Spinner(20, "Faint") } } },
-                });
-                continue;
+                    Tag = shelf.Genre ?? shelf.Heading,
+                    Children = { head, body },
+                };
+
+                if (loaded.TryGetValue(shelf.Key, out var raw))
+                {
+                    var data = shelf.Genre is not null ? raw.Where(t => !watched.Contains(t.Imdb)).ToList() : raw;
+                    body.Content = Ui.Rail(data, "PosterCard", 290);
+                }
+                else
+                {
+                    body.Content = new Grid { Height = 225, Children = { Ui.Spinner(20, "Faint") } };
+                }
+
+                shelves.Children.Add(container);
+                shelfControls[shelf.Key] = (container, body);
             }
-            // Genre shelves are recommendations: drop what has already been watched.
-            var data = shelf.Genre is not null ? raw.Where(t => !watched.Contains(t.Imdb)).ToList() : raw;
-            var captured = shelf;
-            shelves.Children.Add(Section(shelf.Heading, hue, data.Count > 0 ? () => MainWindow.Shell.OpenShelfPage(captured) : null, data, "PosterCard"));
         }
+        else
+        {
+            foreach (var shelf in all)
+            {
+                if (shelfControls.TryGetValue(shelf.Key, out var pair) && loaded.TryGetValue(shelf.Key, out var raw))
+                {
+                    if (pair.Body.Content is Grid)
+                    {
+                        var data = shelf.Genre is not null ? raw.Where(t => !watched.Contains(t.Imdb)).ToList() : raw;
+                        pair.Body.Content = Ui.Rail(data, "PosterCard", 290);
+                    }
+                }
+            }
+        }
+
         BuildHero(all, watched);
     }
 

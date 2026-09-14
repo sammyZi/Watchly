@@ -328,8 +328,10 @@ public sealed class PlayerView : UserControl, IDisposable
     {
         var old = media;
         media = new Media(Vlc, new Uri(url),
-            ":network-caching=3000",
-            ":file-caching=1000",
+            ":network-caching=600",
+            ":file-caching=300",
+            ":live-caching=300",
+            ":clock-jitter=0",
             $":start-time={startSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
         started = true;
         buffering = true;
@@ -626,7 +628,8 @@ public sealed class PlayerView : UserControl, IDisposable
                 StepVolume(-5);
                 break;
             case Key.M:
-                player.Mute = !player.Mute;
+                userMuted = !userMuted;
+                player.Mute = userMuted;
                 ShowHud(player.Mute ? "Muted" : $"Volume {player.Volume}%");
                 break;
             case Key.A:
@@ -802,12 +805,26 @@ public sealed class PlayerView : UserControl, IDisposable
         ShowHud("F: Fullscreen · Space: Play/Pause · ←/→: 10s · ↑/↓: Vol · A: Audio · S: Subs · [: Slower · ]: Faster", 3000);
     }
 
+    bool userMuted;
+
     void TogglePlay()
     {
         if (!started || disposed) return;
-        if (IsPlayingSafe) player.SetPause(true);
-        else if (SafeState == VLCState.Ended || SafeState == VLCState.Stopped) player.Play();
-        else player.SetPause(false);
+        if (IsPlayingSafe)
+        {
+            player.SetPause(true);
+            if (!userMuted) player.Mute = true;
+        }
+        else if (SafeState == VLCState.Ended || SafeState == VLCState.Stopped)
+        {
+            if (!userMuted) player.Mute = false;
+            player.Play();
+        }
+        else
+        {
+            if (!userMuted) player.Mute = false;
+            player.SetPause(false);
+        }
         Render();
     }
 
@@ -832,6 +849,7 @@ public sealed class PlayerView : UserControl, IDisposable
         var next = Math.Clamp(player.Volume + by, 0, 150);
         player.Volume = next;
         player.Mute = false;
+        userMuted = false;
         ShowHud($"Volume {next}%");
         shell.ChangeSettings(shell.Settings with { Volume = next });
     }

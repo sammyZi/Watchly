@@ -88,7 +88,7 @@ public sealed class TorrentEngine
         Torrent torrent;
         if (uri.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase))
         {
-            var link = MagnetLink.Parse(uri);
+            var link = MagnetLink.Parse(TitleText.WithTrackers(uri));
             var hex = Hex(link.InfoHashes);
             var cached = Path.Combine(MetaDir, hex + ".torrent");
             var running = Find(hex);
