@@ -96,7 +96,9 @@ export function remux(
     '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
     '-f', 'mp4', 'pipe:1'
   );
-  return spawn(bin(), args, { stdio: ['ignore', 'pipe', 'ignore'] });
+  // stderr to the server log (errors only, -loglevel error): a failed
+  // conversion otherwise reaches the player as an empty, unopenable stream.
+  return spawn(bin(), args, { stdio: ['ignore', 'pipe', 'inherit'] });
 }
 
 /**

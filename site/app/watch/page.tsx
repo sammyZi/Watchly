@@ -181,22 +181,28 @@ function PlayerInner() {
    * speakers loses more. A compressor (its defaults level speech against
    * explosions) then 2x gain, so full volume is actually loud. Built on the
    * first play — Web Audio needs a user gesture, and an element can only be
-   * wired once.
+   * wired once. Mute is the gain at 0: once routed through Web Audio, Chrome
+   * on Android plays on regardless of the element's own `muted`.
    */
   const audioRef = useRef<AudioContext | null>(null);
+  const gainRef = useRef<GainNode | null>(null);
   const boostAudio = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
     if (!audioRef.current) {
       const ctx = new AudioContext();
       const gain = ctx.createGain();
-      gain.gain.value = 2;
+      gain.gain.value = v.muted ? 0 : 2;
       ctx.createMediaElementSource(v).connect(ctx.createDynamicsCompressor()).connect(gain).connect(ctx.destination);
       audioRef.current = ctx;
+      gainRef.current = gain;
     }
     void audioRef.current.resume();
   }, []);
   useEffect(() => () => void audioRef.current?.close(), []);
+  useEffect(() => {
+    if (gainRef.current) gainRef.current.gain.value = muted ? 0 : 2;
+  }, [muted]);
 
   /** Where in the film playback is, in either mode. */
   const clockNow = useCallback(
@@ -1174,6 +1180,10 @@ function PlayerInner() {
             </div>
 
             <div className="pl-actions">
+              {/* First, so it is on screen on a phone without scrolling the row. */}
+              <Action label={muted ? 'Unmute' : 'Mute'} on={muted} onClick={() => { setMuted(!muted); bumpUi(); }}>
+                <SoundIcon muted={muted} />
+              </Action>
               <Action label="Lock" onClick={() => { setLocked(true); setPicking(false); bumpUi(); }}>
                 <LockIcon on />
               </Action>
@@ -1236,9 +1246,6 @@ function PlayerInner() {
                   <ZapIcon />
                 </Action>
               )}
-              <Action label={muted ? 'Unmute' : 'Mute'} on={muted} onClick={() => { setMuted(!muted); bumpUi(); }}>
-                <SoundIcon muted={muted} />
-              </Action>
               <Action label="Fullscreen" onClick={toggleFullscreen}>
                 <FullscreenIcon />
               </Action>
