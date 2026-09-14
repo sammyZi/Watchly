@@ -3,7 +3,8 @@
  * The player. Opens a magnet on the server-side engine (HTTP range requests
  * from /api/torrent), picks the file the release intended, and streams it with
  * resume, subtitles, stats and up-next — and when the browser cannot decode a
- * release, hands it to the ffmpeg.wasm transcode path.
+ * release, or another audio track is picked, switches to the server's ffmpeg
+ * conversion (/play), which streams as it converts.
  *
  * Layout copies the Android player (src/screens/PlayerScreen.tsx): everything
  * floats over the picture, transport in the centre, scrubber and a labelled
@@ -43,10 +44,10 @@ import { loadSettings } from '../../lib/settings';
 import { withTrackers } from '../../lib/magnet';
 import { searchEpisode, type Hit } from '../../lib/search';
 import { downloadSubtitle, findSubtitles, subtitleBlob, type Sub } from '../../lib/subs';
-import { saveUrlToDisk, supportsSaveAPI, pickLocalFile } from '../../lib/save';
-import { getFFmpeg, transcode, type Job, type TranscodeHandle } from '../../lib/ffmpeg';
+import { saveUrlToDisk, supportsSaveAPI } from '../../lib/save';
+import type { Probe } from '../../lib/media';
 import { searchableName, titleOf } from '../../lib/title';
-import { clock, bytes, speed, left } from '../../lib/format';
+import { clock, bytes, speed } from '../../lib/format';
 
 /** Same prefix style as the engine, so one console reads as one session. */
 const log = (...parts: unknown[]) => console.log('[player]', ...parts);
@@ -64,8 +65,23 @@ const SCALES = [
 /** Controls hide after this long without a pointer move while playing. */
 const HIDE_MS = 4000;
 
-/** A subtitle the sheet can offer: an in-torrent file, or a SubDL download. */
+/** A subtitle the sheet can offer: an in-torrent file, a track built into the
+ *  video (extracted by the server), or a SubDL download. */
 type SubOption = { label: string; url: string; online: boolean; meta?: string };
+
+/** What /probe answers. */
+type Media = Probe & { needsVideoEncode: boolean };
+
+/** Audio a browser decodes. AC-3, E-AC-3, DTS and TrueHD are not — and Chrome
+ *  plays such a file silently rather than failing, so it has to be caught
+ *  from the probe. */
+const BROWSER_AUDIO = /^(aac|mp3|opus|vorbis|flac|pcm_\w+)$/;
+
+/**
+ * Server conversion in use. The converted stream starts at zero wherever it
+ * was started, so `offset` is where in the film that zero is.
+ */
+type Convert = { audio: number; encode: boolean; offset: number };
 
 /** SubDL links are .zip; the server hands back the .srt inside. */
 const onlineOption = (s: Sub): SubOption => ({
@@ -109,10 +125,10 @@ function PlayerInner() {
   const [locked, setLocked] = useState(false);
   const [stats, setStats] = useState({ progress: 0, dl: 0, ul: 0, peers: 0 });
   const [subs, setSubs] = useState<SubOption[]>([]);
-  const [activeSub, setActiveSub] = useState<{ url: string; label: string } | null>(null);
+  /** The subtitle on screen, as text — its blob URL is rebuilt per `convert`
+   *  offset so cues stay in sync with a converted stream. */
+  const [activeSub, setActiveSub] = useState<{ text: string; label: string } | null>(null);
   const [picking, setPicking] = useState(false);
-  /** Why the subtitle list is empty (no server key, SubDL down, nothing found). */
-  const [subNote, setSubNote] = useState<string | null>(null);
   /** The subtitle being downloaded, for its spinner. */
   const [subBusy, setSubBusy] = useState<string | null>(null);
   const [search, setSearch] = useState<{
@@ -122,8 +138,12 @@ function PlayerInner() {
     results: SubOption[];
     note: string | null;
   }>({ open: false, query: '', busy: false, results: [], note: null });
-  const [universal, setUniversal] = useState<'off' | 'prep' | 'running'>('off');
-  const [transcodeState, setTranscodeState] = useState<TranscodeHandle | null>(null);
+  const [media, setMedia] = useState<Media | null>(null);
+  const [convert, setConvert] = useState<Convert | null>(null);
+  const convertRef = useRef<Convert | null>(null);
+  convertRef.current = convert;
+  /** A calm message (not an error), e.g. "Converting on the server". */
+  const [notice, setNotice] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<{ percent: number; speed: number } | null>(null);
   const [nextUp, setNextUp] = useState<{ index: number; name: string } | null>(null);
   const [nextReleases, setNextReleases] = useState<Hit[] | null>(null);
@@ -149,11 +169,47 @@ function PlayerInner() {
     else v.pause();
   }, []);
 
-  const skip = useCallback((by: number) => {
-    const v = videoRef.current;
-    if (!v) return;
-    v.currentTime = Math.max(0, Math.min(v.duration || 0, v.currentTime + by));
-  }, []);
+  /** Where in the film playback is, in either mode. */
+  const clockNow = useCallback(
+    () => (convertRef.current?.offset ?? 0) + (videoRef.current?.currentTime ?? 0),
+    []
+  );
+
+  /** Switch to (or restart) the server conversion at `at` seconds. */
+  const startConvert = useCallback(
+    (opts: { audio: number; encode: boolean }, at: number) => {
+      const v = videoRef.current;
+      const f = engine && fileIndex != null ? engine.findFile(fileIndex) : null;
+      if (!v || !f) return;
+      const start = Math.max(0, Math.floor(at));
+      const q = new URLSearchParams({ t: String(start), audio: String(opts.audio) });
+      if (opts.encode) q.set('video', 'encode');
+      const next = { ...opts, offset: start };
+      convertRef.current = next;
+      setConvert(next);
+      setTime(start);
+      setBuffering(true);
+      v.src = `${f.streamURL}/play?${q}`;
+      void v.play().catch(() => {});
+    },
+    [engine, fileIndex]
+  );
+
+  /** Seek in either mode: a converted stream has no ranges, so it restarts. */
+  const seekTo = useCallback(
+    (seconds: number) => {
+      const v = videoRef.current;
+      if (!v) return;
+      const end = media?.duration || v.duration || 0;
+      const to = Math.max(0, end ? Math.min(end - 1, seconds) : seconds);
+      const c = convertRef.current;
+      if (c) startConvert(c, to);
+      else v.currentTime = to;
+    },
+    [media, startConvert]
+  );
+
+  const skip = useCallback((by: number) => seekTo(clockNow() + by), [seekTo, clockNow]);
 
   /** Fullscreen, and on a phone turn to landscape with it — the lock is only
    *  allowed while fullscreen, and not at all on iOS, hence the catches. */
@@ -245,9 +301,13 @@ function PlayerInner() {
   /** Seek to the saved position once the new source knows its length. */
   const resumeAt = useCallback((v: HTMLVideoElement, pos: number | undefined) => {
     if (!pos) return;
+    const src = v.src;
     v.addEventListener(
       'loadedmetadata',
       () => {
+        // Only for the source it was meant for — the probe may have switched
+        // to a converted stream, which starts at the position and cannot seek.
+        if (v.src !== src) return;
         if (pos > 0 && pos < (v.duration || 1) - 5) v.currentTime = pos;
       },
       { once: true }
@@ -399,10 +459,12 @@ function PlayerInner() {
     const v = video();
     const item = historyItem;
     if (!v || !item || fileIndex == null) return;
-    if (Number.isFinite(v.duration) && v.duration > 0)
-      void setDuration(item, fileIndex, v.duration);
-    void setPosition(item, fileIndex, v.currentTime);
-  }, [historyItem, fileIndex]);
+    // A converted stream reports no real duration and a clock from its own
+    // start — the probe and the offset give the film's.
+    const d = media?.duration || v.duration;
+    if (Number.isFinite(d) && d > 0) void setDuration(item, fileIndex, d);
+    void setPosition(item, fileIndex, clockNow());
+  }, [historyItem, fileIndex, media, clockNow]);
 
   useEffect(() => {
     const t = setInterval(flush, 5000);
@@ -424,6 +486,9 @@ function PlayerInner() {
       const url = engine.findFile(index)?.streamURL;
       if (!url) return;
       setFileIndex(index);
+      convertRef.current = null;
+      setConvert(null);
+      setMedia(null);
       const v = video();
       if (v) {
         v.src = url;
@@ -459,62 +524,121 @@ function PlayerInner() {
         return;
       }
       setSubBusy(s.url);
+      // Built-in tracks are read out of the whole file — say so, it takes a while.
+      const builtIn = s.url.includes('/subtitle?');
+      if (builtIn) setNotice('Loading built-in subtitles — this reads through the whole file');
       try {
-        const text = s.online
-          ? await downloadSubtitle(s.url, { season, episode })
-          : await (await fetch(s.url)).text();
-        setActiveSub({ url: subtitleBlob(text), label: s.label });
+        let text: string;
+        if (s.online) text = await downloadSubtitle(s.url, { season, episode });
+        else {
+          const res = await fetch(s.url);
+          if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? `answered ${res.status}`);
+          text = await res.text();
+        }
+        setActiveSub({ text, label: s.label });
         if (historyItem && fileIndex != null)
           void setFileSubs(historyItem, fileIndex, [{ path: s.url, label: s.label }]);
       } catch (e) {
         setError(`Subtitle failed: ${String((e as Error)?.message ?? e)}`);
       }
+      if (builtIn) setNotice(null);
       setSubBusy(null);
     },
     [historyItem, fileIndex, season, episode]
   );
 
   /**
-   * Subtitle candidates: in-torrent files, then SubDL. The one chosen last time
-   * for this file is put back on — it used to be saved and never restored.
+   * The Subtitles sheet lists the subtitle files that came with the torrent —
+   * online results live in Find subs. The one chosen last time for this file
+   * (from either place) is put back on.
    */
   useEffect(() => {
     if (!engine || fileIndex == null) return;
-    let live = true;
-    const local: SubOption[] = engine.files
-      .filter((x) => x.isSubtitle)
-      .map((f) => ({ label: f.name.split('/').pop() ?? f.name, url: f.streamURL, online: false }));
-    setSubs(local);
-    setSubNote(null);
-
+    setSubs(
+      engine.files
+        .filter((x) => x.isSubtitle)
+        .map((f) => ({ label: f.name.split('/').pop() ?? f.name, url: f.streamURL, online: false }))
+    );
     const saved = historyItem?.subtitles?.[fileIndex]?.[0];
     if (saved?.path) {
       void applySub({ label: saved.label, url: saved.path, online: saved.path.startsWith('https://') });
     }
-
-    findSubtitles(subQueryFor())
-      .then((found) => {
-        if (!live) return;
-        setSubs([...local, ...found.map(onlineOption)]);
-        if (!found.length && !local.length) setSubNote('No subtitles found. Try Find subs with another name.');
-      })
-      .catch((e) => {
-        if (live) setSubNote(String((e as Error)?.message ?? e));
-      });
-    return () => {
-      live = false;
-    };
     // Once per file; historyItem changes on every checkpoint.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engine, fileIndex]);
 
-  /** Blob URLs hold the whole subtitle in memory until revoked. */
+  /**
+   * What is inside the file — audio tracks, built-in subtitles, codecs — from
+   * the server's ffmpeg. Audio the browser cannot decode (AC-3, DTS…) plays
+   * silently in Chrome instead of failing, so that switches to conversion
+   * straight away.
+   */
   useEffect(() => {
-    const url = activeSub?.url;
+    if (!engine || fileIndex == null) return;
+    const f = engine.findFile(fileIndex);
+    if (!f?.isVideo) return;
+    let live = true;
+    fetch(`${f.streamURL}/probe`)
+      .then((r) => (r.ok ? (r.json() as Promise<Media>) : null))
+      .then((m) => {
+        if (!live || !m) return;
+        setMedia(m);
+        if (m.duration) setDurationState(m.duration);
+        const first = m.audio[0];
+        if (first && !BROWSER_AUDIO.test(first.codec) && !convertRef.current) {
+          log(`audio is ${first.codec}: converting on the server`);
+          setNotice(`This release's audio (${first.codec.toUpperCase()}) needs converting — playing through the server`);
+          startConvert({ audio: 0, encode: m.needsVideoEncode }, clockNow() || (historyItem?.positions?.[fileIndex] ?? 0));
+        }
+      })
+      .catch(() => {});
     return () => {
-      if (url) URL.revokeObjectURL(url);
+      live = false;
     };
-  }, [activeSub]);
+    // Once per file.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine, fileIndex]);
+
+  /** Built-in text subtitles join the sheet once the probe has found them. */
+  useEffect(() => {
+    if (!engine || fileIndex == null || !media?.subtitles.length) return;
+    const f = engine.findFile(fileIndex);
+    if (!f) return;
+    const builtIn = media.subtitles.map((t) => ({
+      label: t.title || (t.language ? t.language.toUpperCase() : `Track ${t.index + 1}`),
+      url: `${f.streamURL}/subtitle?track=${t.index}`,
+      online: false,
+      meta: ['Built in', t.language?.toUpperCase(), t.codec].filter(Boolean).join(' · '),
+    }));
+    setSubs((all) => [...all.filter((s) => !s.url.includes('/subtitle?')), ...builtIn]);
+  }, [engine, fileIndex, media]);
+
+  /** Pick an audio track: the first plays directly, any other through the
+   *  server — a browser only ever plays the first. */
+  const pickAudio = useCallback(
+    (index: number) => {
+      const current = convertRef.current?.audio ?? 0;
+      if (index === current) return;
+      startConvert({ audio: index, encode: convertRef.current?.encode ?? !!media?.needsVideoEncode }, clockNow());
+    },
+    [startConvert, clockNow, media]
+  );
+
+  /**
+   * The subtitle as a blob URL, cue times shifted by the converted stream's
+   * offset so they line up with its clock. Revoked when replaced — each one
+   * holds the whole subtitle in memory.
+   */
+  const [subUrl, setSubUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!activeSub) {
+      setSubUrl(null);
+      return;
+    }
+    const url = subtitleBlob(activeSub.text, convert?.offset ?? 0);
+    setSubUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [activeSub, convert?.offset]);
 
   /** Find subs sheet: search by any name. */
   const runSubSearch = useCallback(
@@ -540,9 +664,9 @@ function PlayerInner() {
     const v = video();
     if (!v) return;
     for (const t of Array.from(v.textTracks)) {
-      if (t.kind === 'subtitles') t.mode = activeSub ? 'showing' : 'hidden';
+      if (t.kind === 'subtitles') t.mode = subUrl ? 'showing' : 'hidden';
     }
-  }, [activeSub]);
+  }, [subUrl]);
 
   /** Swarm stats, once a second — the poll also tells the server we are still
    *  watching, so the stream data is not swept as idle. */
@@ -580,15 +704,19 @@ function PlayerInner() {
     if (!v || !engine || fileIndex == null || reopening.current) return false;
     if (await liveStats(engine.infoHash)) return false;
     reopening.current = true;
-    const at = v.currentTime;
+    const at = clockNow();
     setBuffering(true);
     try {
       const again = await getTorrent(engine.uri);
       const url = again.findFile(fileIndex)?.streamURL;
       if (url) {
-        v.src = url;
-        resumeAt(v, at);
-        void v.play().catch(() => {});
+        const c = convertRef.current;
+        if (c) startConvert(c, at);
+        else {
+          v.src = url;
+          resumeAt(v, at);
+          void v.play().catch(() => {});
+        }
       }
       return true;
     } catch {
@@ -596,7 +724,7 @@ function PlayerInner() {
     } finally {
       reopening.current = false;
     }
-  }, [engine, fileIndex, resumeAt]);
+  }, [engine, fileIndex, resumeAt, clockNow, startConvert]);
 
   /** Peer count while the metadata is still being chased. */
   const [waiting, setWaiting] = useState<{ peers: number; seconds: number } | null>(null);
@@ -663,44 +791,35 @@ function PlayerInner() {
       ? { name: `Episode ${episode + 1}`, go: () => goNextRelease(nextReleases[0]) }
       : null;
 
-  /** Universal mode: transcode this file with ffmpeg.wasm. */
-  const runUniversal = useCallback(
-    async (job: Job) => {
-      if (!engine || fileIndex == null) return;
-      const f = engine.findFile(fileIndex);
-      if (!f) return;
-      setUniversal('prep');
-      setTranscodeState(null);
-      setError(null);
-      try {
-        await getFFmpeg();
-        const file =
-          f.size <= 1.5 * 1024 ** 3 ? (await engine.blobOf(f)).file : await pickLocalFile();
-        if (!file) {
-          setUniversal('off');
-          return;
-        }
-        if (file.size > 2.5 * 1024 ** 3) {
-          setError('Files over 2.5 GB are too big for in-browser ffmpeg — pick a smaller release.');
-          setUniversal('off');
-          return;
-        }
-        setUniversal('running');
-        const url = await transcode(file, file.name, job, setTranscodeState);
-        const v = video();
-        if (v) {
-          v.src = url;
-          resumeAt(v, historyItem?.positions?.[fileIndex]);
-          void v.play().catch(() => {});
-        }
-        setUniversal('off');
-      } catch (e) {
-        setUniversal('off');
-        setError(`Universal encode failed: ${String((e as Error)?.message ?? e)}`);
-      }
-    },
-    [engine, fileIndex, historyItem, resumeAt]
-  );
+  /**
+   * Universal: play through the server's ffmpeg — audio to AAC, and video
+   * re-encoded when the probe says a browser cannot decode it. Pressed again,
+   * back to the direct stream.
+   */
+  const toggleUniversal = useCallback(() => {
+    setError(null);
+    const at = clockNow();
+    if (convertRef.current) {
+      const v = video();
+      const f = engine && fileIndex != null ? engine.findFile(fileIndex) : null;
+      if (!v || !f) return;
+      convertRef.current = null;
+      setConvert(null);
+      setNotice(null);
+      v.src = f.streamURL;
+      resumeAt(v, at);
+      void v.play().catch(() => {});
+      return;
+    }
+    startConvert({ audio: 0, encode: !!media?.needsVideoEncode }, at);
+  }, [clockNow, engine, fileIndex, media, resumeAt, startConvert]);
+
+  /** Calm notices fade on their own. */
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 6000);
+    return () => clearTimeout(t);
+  }, [notice]);
 
   const file = engine && fileIndex != null ? engine.findFile(fileIndex) : null;
   const title =
@@ -736,7 +855,6 @@ function PlayerInner() {
 
   const upNextVisible =
     !!next && !dismissedNext && duration > 0 && duration - time <= UP_NEXT_SECONDS;
-  const cannotDecode = !!error && error.startsWith('The browser cannot play');
 
   return (
     <div
@@ -756,10 +874,11 @@ function PlayerInner() {
         onWaiting={() => setBuffering(true)}
         onPlaying={() => setBuffering(false)}
         onCanPlay={() => setBuffering(false)}
-        onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
+        onTimeUpdate={(e) => setTime((convert?.offset ?? 0) + e.currentTarget.currentTime)}
         onDurationChange={(e) => {
+          // A converted stream has no length of its own; the probe's stands.
           const d = e.currentTarget.duration;
-          if (Number.isFinite(d)) {
+          if (!convertRef.current && Number.isFinite(d) && !media?.duration) {
             setDurationState(d);
             if (historyItem && fileIndex != null) void setDuration(historyItem, fileIndex, d);
           }
@@ -768,7 +887,7 @@ function PlayerInner() {
           const v = e.currentTarget;
           for (let i = 0; i < v.buffered.length; i++) {
             if (v.buffered.start(i) <= v.currentTime && v.currentTime <= v.buffered.end(i)) {
-              setBuffered(v.buffered.end(i));
+              setBuffered((convert?.offset ?? 0) + v.buffered.end(i));
             }
           }
         }}
@@ -777,16 +896,30 @@ function PlayerInner() {
         }}
         onError={async (e) => {
           const v = e.currentTarget;
-          if (!v.error || universal !== 'off') return;
-          log('video error', v.error.code, v.error.message);
+          if (!v.error) return;
+          log('video error', v.error.code, v.error.message, convertRef.current ? '(converted)' : '(direct)');
           const message = v.error.message;
           if (await recover()) return;
+          const at = clockNow() || (fileIndex != null ? (historyItem?.positions?.[fileIndex] ?? 0) : 0);
+          const c = convertRef.current;
+          // The browser cannot decode this release: convert on the server —
+          // first copying the video, then, if even that fails, re-encoding it.
+          if (!c) {
+            setNotice('The browser cannot play this format — converting on the server');
+            startConvert({ audio: 0, encode: !!media?.needsVideoEncode }, at);
+            return;
+          }
+          if (!c.encode) {
+            setNotice('Re-encoding the video for this browser');
+            startConvert({ ...c, encode: true }, at);
+            return;
+          }
           setBuffering(false);
-          setError(`The browser cannot play this release (${message || 'unsupported format'}).`);
+          setError(`This release could not be played (${message || 'unsupported format'}).`);
         }}
       >
         {/* Inside the element, or the browser never attaches it. */}
-        {activeSub && <track key={activeSub.url} kind="subtitles" src={activeSub.url} default />}
+        {subUrl && <track key={subUrl} kind="subtitles" src={subUrl} default />}
       </video>
 
       {/* Tap target for the picture — see lastTap above. */}
@@ -876,8 +1009,7 @@ function PlayerInner() {
                 value={duration ? time / duration : 0}
                 buffered={duration ? buffered / duration : 0}
                 onSeek={(ratio) => {
-                  const v = video();
-                  if (v && duration) v.currentTime = ratio * duration;
+                  if (duration) seekTo(ratio * duration);
                   bumpUi();
                 }}
               />
@@ -943,7 +1075,7 @@ function PlayerInner() {
                 </Action>
               )}
               {file && (
-                <Action label="Universal" on={universal !== 'off'} onClick={() => runUniversal('fast')}>
+                <Action label="Universal" on={!!convert} onClick={() => { toggleUniversal(); bumpUi(); }}>
                   <ZapIcon />
                 </Action>
               )}
@@ -957,6 +1089,26 @@ function PlayerInner() {
 
       {picking && (
         <div className="pl-sheet">
+          {media && media.audio.length > 1 && (
+            <>
+              <div className="pl-sheet-title">Audio</div>
+              {media.audio.map((t) => (
+                <TrackOption
+                  key={t.index}
+                  label={t.title || (t.language ? t.language.toUpperCase() : `Track ${t.index + 1}`)}
+                  note={[t.title && t.language ? t.language.toUpperCase() : null, t.codec.toUpperCase(), t.channels]
+                    .filter(Boolean)
+                    .join(' · ')}
+                  active={(convert?.audio ?? 0) === t.index}
+                  onClick={() => {
+                    pickAudio(t.index);
+                    setPicking(false);
+                  }}
+                />
+              ))}
+              <div className="pl-sheet-rule" />
+            </>
+          )}
           <div className="pl-sheet-title">Subtitles</div>
           <TrackOption
             label="Off"
@@ -977,7 +1129,14 @@ function PlayerInner() {
               onClick={() => { void applySub(s); setPicking(false); }}
             />
           ))}
-          {subs.length === 0 && <div className="pl-nosubs">{subNote ?? 'Looking for subtitles…'}</div>}
+          {/* A subtitle picked in Find subs is on — show it, so there is
+              something to see as selected and a way to tell what is playing. */}
+          {activeSub && !subs.some((s) => s.label === activeSub.label) && (
+            <TrackOption label={activeSub.label} note="From Find subs" active onClick={() => setPicking(false)} />
+          )}
+          {subs.length === 0 && (
+            <div className="pl-nosubs">No subtitles in this torrent. Use Find subs to search online.</div>
+          )}
         </div>
       )}
 
@@ -1010,7 +1169,6 @@ function PlayerInner() {
               active={activeSub?.label === s.label}
               onClick={async () => {
                 await applySub(s);
-                setSubs((all) => (all.some((x) => x.url === s.url) ? all : [...all, s]));
                 setSearch((x) => ({ ...x, open: false }));
               }}
             />
@@ -1064,16 +1222,13 @@ function PlayerInner() {
       {!!error && (
         <div className="pl-pill pl-pill-bad pl-failure">
           <span>{error}</span>
-          {cannotDecode && (
-            <button className="pl-pill-btn" onClick={() => runUniversal('fast')}>
-              Try Universal
-            </button>
-          )}
           <button className="pl-pill-x" aria-label="Dismiss" onClick={() => setError(null)}>
             ×
           </button>
         </div>
       )}
+
+      {!error && notice && <div className="pl-pill pl-failure">{notice}</div>}
 
       {saveState && (
         <div className="pl-modal">
@@ -1089,31 +1244,6 @@ function PlayerInner() {
         </div>
       )}
 
-      {universal !== 'off' && (
-        <div className="pl-modal">
-          <div className="pl-modal-card">
-            <div className="pl-modal-title">
-              {universal === 'prep' ? 'Preparing Universal mode' : 'Converting for the browser'}
-            </div>
-            {transcodeState ? (
-              <>
-                <div className="pl-bar">
-                  <div style={{ width: `${transcodeState.progress * 100}%` }} />
-                </div>
-                <div className="pl-prep-meta">
-                  {Math.round(transcodeState.progress * 100)}% · {clock(transcodeState.time)} processed
-                  {duration > 0 && ` · ${left(Math.max(0, (duration - transcodeState.time) * 3))}`}
-                </div>
-              </>
-            ) : (
-              <div className="pl-spinner" style={{ margin: '14px auto' }} />
-            )}
-            <div className="pl-modal-note">
-              Video is kept as-is and audio converted to AAC. Bitmap subtitles (PGS/VOBSUB) can’t be converted.
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

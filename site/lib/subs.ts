@@ -66,7 +66,38 @@ export function srtToVtt(srt: string): string {
   );
 }
 
-/** Blob URL for one subtitle text, ready for `<track src>`. */
-export function subtitleBlob(text: string): string {
-  return URL.createObjectURL(new Blob([srtToVtt(text)], { type: 'text/vtt' }));
+/**
+ * Every cue moved `seconds` earlier; cues that end before zero are dropped.
+ * A converted stream starts its clock at zero wherever in the film it began.
+ */
+export function shiftVtt(vtt: string, seconds: number): string {
+  if (!seconds) return vtt;
+  const toSec = (t: string) => {
+    const p = t.split(':').map(Number);
+    return p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + p[1];
+  };
+  const fmt = (s: number) => {
+    const v = Math.max(0, s);
+    const h = Math.floor(v / 3600);
+    const m = Math.floor((v % 3600) / 60);
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${(v % 60).toFixed(3).padStart(6, '0')}`;
+  };
+  const TIME = /((?:\d+:)?\d{2}:\d{2}\.\d{3})\s*-->\s*((?:\d+:)?\d{2}:\d{2}\.\d{3})([^\n]*)/;
+  return vtt
+    .split(/\n\n+/)
+    .map((block) => {
+      const found = TIME.exec(block);
+      if (!found) return block;
+      const end = toSec(found[2]) - seconds;
+      if (end <= 0) return null;
+      return block.replace(TIME, `${fmt(toSec(found[1]) - seconds)} --> ${fmt(end)}${found[3]}`);
+    })
+    .filter((b): b is string => b !== null)
+    .join('\n\n');
+}
+
+/** Blob URL for one subtitle text, ready for `<track src>`. `shift` moves
+ *  every cue that many seconds earlier. */
+export function subtitleBlob(text: string, shift = 0): string {
+  return URL.createObjectURL(new Blob([shiftVtt(srtToVtt(text), shift)], { type: 'text/vtt' }));
 }

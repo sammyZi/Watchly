@@ -69,13 +69,3 @@ export async function saveUrlToDisk(
   onProgress({ bytes, total, percent: total ? bytes / total : 1, speed, done: true });
   return { path: fileName, size: bytes };
 }
-
-/** Re-pick a previously saved file — that is what the universal encoder eats. */
-export async function pickLocalFile(extensions: string[] = []): Promise<File | null> {
-  const types = extensions.length
-    ? [{ description: 'Media', accept: Object.fromEntries(extensions.map((e) => [e, []])) }]
-    : undefined;
-  const handles = await (window as any).showOpenFilePicker?.({ multiple: false, types });
-  const file = await handles?.[0]?.getFile();
-  return file ?? null;
-}

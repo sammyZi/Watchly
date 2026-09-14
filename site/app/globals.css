@@ -2059,3 +2059,10 @@ html {
     opacity: 0.55;
   }
 }
+
+.pl-sheet-rule {
+  height: 1px;
+  margin: 6px 4px;
+  background: rgb(255 255 255 / 12%);
+  flex: none;
+}

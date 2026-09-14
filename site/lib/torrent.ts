@@ -17,8 +17,6 @@ export type Engine = Omit<Described, 'files'> & {
   /** The uri this torrent was opened from (magnet / .torrent url). */
   uri: string;
   findFile(index: number): TorrentFile | null;
-  /** Full file as a blob — the universal-encoder input. */
-  blobOf(file: TorrentFile): Promise<{ blob: Blob; file: File }>;
 };
 
 const log = (...parts: unknown[]) => console.log('[torrent]', ...parts);
@@ -33,10 +31,6 @@ function wrap(d: Described, uri: string): Engine {
     uri,
     files,
     findFile: (index) => files.find((f) => f.index === index) ?? null,
-    async blobOf(file) {
-      const blob = await (await fetch(file.streamURL)).blob();
-      return { blob, file: new File([blob], file.name.split('/').pop() ?? file.name) };
-    },
   };
 }
 

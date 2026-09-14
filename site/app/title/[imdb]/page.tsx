@@ -515,8 +515,8 @@ function DetailInner() {
       <p className="faint" style={{ fontSize: 11, marginTop: 18, lineHeight: '16px' }}>
         Peer-to-peer streaming: the Watchly server joins the swarm and streams
         the file to this page with byte-range requests.
-        Whole-file “Save” keeps a local copy; Universal goes through ffmpeg.wasm
-        when the browser cannot decode a release.
+        “Save” keeps a copy on your device; releases the browser cannot decode
+        are converted on the server as they play.
       </p>
         </aside>
       </div>
