@@ -999,7 +999,20 @@ function PlayerInner() {
           const message = v.error.message;
           if (await recover()) return;
           setBuffering(false);
-          setError(`This browser cannot play this release (${message || 'unsupported format'}) — try another release.`);
+          // The browser says "Format error" for a 404 as much as for a codec it
+          // lacks, so ask the stream itself which it was.
+          const status = await fetch(v.currentSrc, { headers: { Range: 'bytes=0-0' } })
+            .then((r) => (r.body?.cancel(), r.status))
+            .catch(() => 0);
+          const codec = media?.video?.codec.toUpperCase();
+          if (status >= 400 || status === 0) {
+            setError(`The server could not stream this file (${status ? `answered ${status}` : 'no answer'}) — reopen it.`);
+          } else {
+            const ext = file?.name.split('.').pop()?.toUpperCase();
+            setError(
+              `This browser cannot play ${[codec && `${codec} video`, ext && `in ${ext}`].filter(Boolean).join(' ') || 'this format'} (${message || 'unsupported format'}) — try another release.`
+            );
+          }
         }}
       >
         {/* Inside the element, or the browser never attaches it. */}

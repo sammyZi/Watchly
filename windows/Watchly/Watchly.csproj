@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Watchly</RootNamespace>
+    <AssemblyName>Watchly</AssemblyName>
+    <Version>1.0.0</Version>
+    <Product>Watchly</Product>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+  </PropertyGroup>
+
+  <!--
+    The SubDL key the phone app ships with (EXPO_PUBLIC_SUBDL_KEY in the repo's
+    .env), baked in at build time the same way Expo inlines it — nothing to type,
+    nothing stored. Missing .env just means online subtitle search is off.
+  -->
+  <PropertyGroup Condition="Exists('..\..\.env')">
+    <SubdlKey>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)\..\..\.env')), 'EXPO_PUBLIC_SUBDL_KEY=(\S+)').Groups[1].Value)</SubdlKey>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="SubdlKey" Value="$(SubdlKey)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\Fonts\*.ttf" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="LibVLCSharp.WPF" Version="3.10.1" />
+    <PackageReference Include="MonoTorrent" Version="3.0.2" />
+    <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" />
+  </ItemGroup>
+
+</Project>

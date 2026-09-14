@@ -1,0 +1,15 @@
+<Application x:Class="Watchly.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnMainWindowClose">
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <!-- Index 0 is swapped between Dark and Light at runtime — see Theme.Apply. -->
+        <ResourceDictionary Source="Theme/Dark.xaml" />
+        <ResourceDictionary Source="Theme/Styles.xaml" />
+        <ResourceDictionary Source="Theme/Templates.xaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+</Application>
