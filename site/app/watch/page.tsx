@@ -176,6 +176,28 @@ function PlayerInner() {
     else v.pause();
   }, []);
 
+  /**
+   * Films are mixed far quieter than YouTube, and 5.1 folded to laptop
+   * speakers loses more. A compressor (its defaults level speech against
+   * explosions) then 2x gain, so full volume is actually loud. Built on the
+   * first play — Web Audio needs a user gesture, and an element can only be
+   * wired once.
+   */
+  const audioRef = useRef<AudioContext | null>(null);
+  const boostAudio = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (!audioRef.current) {
+      const ctx = new AudioContext();
+      const gain = ctx.createGain();
+      gain.gain.value = 2;
+      ctx.createMediaElementSource(v).connect(ctx.createDynamicsCompressor()).connect(gain).connect(ctx.destination);
+      audioRef.current = ctx;
+    }
+    void audioRef.current.resume();
+  }, []);
+  useEffect(() => () => void audioRef.current?.close(), []);
+
   /** Where in the film playback is, in either mode. */
   const clockNow = useCallback(
     () => (convertRef.current?.offset ?? 0) + (videoRef.current?.currentTime ?? 0),
@@ -988,7 +1010,10 @@ function PlayerInner() {
         playsInline
         muted={muted}
         onVolumeChange={(e) => setMuted(e.currentTarget.muted)}
-        onPlay={() => setPlaying(true)}
+        onPlay={() => {
+          boostAudio();
+          setPlaying(true);
+        }}
         onPause={() => {
           setPlaying(false);
           setShowUi(true);
