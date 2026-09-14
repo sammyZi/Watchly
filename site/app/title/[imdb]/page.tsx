@@ -222,16 +222,23 @@ function DetailInner() {
     return `/watch?${q}`;
   };
 
+  // Loading: the page's own shape, empty — not the raw IMDb id (tt1375666)
+  // as a heading, which is what flashed at the top before the title arrived.
   if (!title) {
     return (
       <main className="page">
-        <div className="page-head">
-          <Link href="/" className="back-btn" aria-label="Back">
+        <div className="page-head detail-bar">
+          <button
+            className="back-btn"
+            aria-label="Back"
+            onClick={() => (window.history.length > 1 ? router.back() : router.push('/'))}
+          >
             <BackIcon />
-          </Link>
-          <h1 className="page-title">{imdb}</h1>
+          </button>
         </div>
-        <div className="spinner" />
+        <div className="detail-backdrop skeleton" />
+        <div className="skeleton skeleton-line" style={{ width: '60%', marginTop: 20 }} />
+        <div className="skeleton skeleton-line" style={{ width: '35%', marginTop: 10 }} />
       </main>
     );
   }

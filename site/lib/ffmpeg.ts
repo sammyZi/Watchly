@@ -38,10 +38,15 @@ export function getFFmpeg(): Promise<FFmpeg> {
   if (!loading) {
     loading = (async () => {
       const f = new FFmpeg();
+      // Absolute URLs: the library resolves these against its own
+      // `import.meta.url`, which under the bundler is a file:// path — so
+      // '/ffmpeg/worker.js' became file:///ffmpeg/worker.js and the page was
+      // refused the worker.
+      const at = (path: string) => new URL(path, window.location.origin).href;
       await f.load({
-        coreURL: '/ffmpeg/ffmpeg-core.js',
-        wasmURL: '/ffmpeg/ffmpeg-core.wasm',
-        classWorkerURL: '/ffmpeg/worker.js',
+        coreURL: at('/ffmpeg/ffmpeg-core.js'),
+        wasmURL: at('/ffmpeg/ffmpeg-core.wasm'),
+        classWorkerURL: at('/ffmpeg/worker.js'),
       });
       ffmpeg = f;
       return f;
