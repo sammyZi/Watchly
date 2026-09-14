@@ -2,9 +2,7 @@
  * Server-side ffmpeg (ffmpeg-static): what a browser cannot do with a release.
  *
  *  - probe: audio tracks, built-in subtitles, codecs, duration
- *  - remux: a fragmented MP4 the <video> element can play as it arrives —
- *           a chosen audio track, audio always AAC stereo, video copied when
- *           browsers decode it and re-encoded to H.264 when they do not
+ *  - aacAudio: the soundtrack as AAC, for audio browsers cannot decode
  *  - subtitle: one built-in text subtitle track as WebVTT
  *
  * Input is the torrent's own range-request URL, so ffmpeg seeks through the
@@ -64,40 +62,17 @@ export function probe(input: string): Promise<Probe> {
 }
 
 /**
- * A fragmented MP4 from `start` seconds, streamed as ffmpeg writes it.
- * ponytail: input seeking snaps to the keyframe before `start` when video is
- * copied, so the picture can begin a second or two early.
+ * Audio track `track` from `start` seconds as AAC stereo (ADTS), streamed as
+ * ffmpeg writes it — for audio a browser cannot decode (AC-3, E-AC-3, DTS),
+ * and for any track but the first, which is the only one a browser plays.
+ * Only audio is encoded, so it is cheap; the video keeps playing straight
+ * from the torrent with its own seeking.
  */
-export function remux(
-  input: string,
-  opts: { start: number; audio: number; encodeVideo: boolean }
-): ChildProcessByStdio<null, Readable, null> {
+export function aacAudio(input: string, start: number, track: number): ChildProcessByStdio<null, Readable, null> {
   const args = ['-hide_banner', '-loglevel', 'error', ...ffmpegAuthArgs()];
-  if (opts.start > 0) args.push('-ss', String(opts.start));
-  args.push(
-    '-i', input,
-    '-map', '0:v:0',
-    '-map', `0:a:${opts.audio}?`,
-    '-sn', '-dn',
-    '-c:a', 'aac', '-ac', '2', '-b:a', '192k'
-  );
-  if (opts.encodeVideo) {
-    // 10-bit and 4K sources: 8-bit 4:2:0 at most 1080p is what decodes
-    // everywhere and what a CPU can encode in real time.
-    args.push(
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
-      '-pix_fmt', 'yuv420p', '-vf', "scale=-2:'min(1080,ih)'"
-    );
-  } else {
-    args.push('-c:v', 'copy');
-  }
-  args.push(
-    '-avoid_negative_ts', 'make_zero',
-    '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
-    '-f', 'mp4', 'pipe:1'
-  );
-  // stderr to the server log (errors only, -loglevel error): a failed
-  // conversion otherwise reaches the player as an empty, unopenable stream.
+  if (start > 0) args.push('-ss', String(start));
+  args.push('-i', input, '-map', `0:a:${track}`, '-vn', '-sn', '-dn', '-c:a', 'aac', '-ac', '2', '-b:a', '160k', '-f', 'adts', 'pipe:1');
+  // stderr (errors only) to the server log, or a failure is just silence.
   return spawn(bin(), args, { stdio: ['ignore', 'pipe', 'inherit'] });
 }
 

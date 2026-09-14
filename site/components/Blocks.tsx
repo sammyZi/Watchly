@@ -361,24 +361,6 @@ export function CheckIcon() {
   );
 }
 
-/** Universal mode — ffmpeg re-encode. */
-export function ZapIcon() {
-  return (
-    <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden>
-      <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8Z" {...stroke} />
-    </svg>
-  );
-}
-
-export function SoundIcon({ muted }: { muted?: boolean }) {
-  return (
-    <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden>
-      <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4Z" {...stroke} />
-      <path d={muted ? 'm16 9.5 5 5m0-5-5 5' : 'M16 9a4.2 4.2 0 0 1 0 6m2.8-8.8a8 8 0 0 1 0 11.6'} {...stroke} />
-    </svg>
-  );
-}
-
 /** Picture scaling (fit / stretch / crop). */
 export function ScaleIcon() {
   return (
