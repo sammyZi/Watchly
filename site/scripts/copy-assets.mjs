@@ -1,6 +1,5 @@
 /**
- * Copies the ffmpeg WASM runtime and the WebTorrent service worker out of
- * node_modules into public/. Run after install (npm run setup) — the assets
+ * Copies the ffmpeg WASM runtime out of node_modules into public/. Run after install (npm run setup) — the assets
  * are too large (30MB+ of wasm) to commit.
  */
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
@@ -17,7 +16,6 @@ const copies = [
   [from('@ffmpeg', 'ffmpeg', 'dist', 'esm', 'worker.js'), to('ffmpeg', 'worker.js')],
   [from('@ffmpeg', 'ffmpeg', 'dist', 'esm', 'const.js'), to('ffmpeg', 'const.js')],
   [from('@ffmpeg', 'ffmpeg', 'dist', 'esm', 'errors.js'), to('ffmpeg', 'errors.js')],
-  [from('webtorrent', 'dist', 'sw.min.js'), to('sw.min.js')],
 ];
 
 for (const [src, dest] of copies) {

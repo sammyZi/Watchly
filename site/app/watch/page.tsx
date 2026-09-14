@@ -1,35 +1,34 @@
 'use client';
 /**
- * The player. Opens a magnet with the WebTorrent engine (service-worker HTTP
- * server + range requests), picks the file the release intended, and streams
- * it with resume, subtitles, stats and up-next — and when the browser cannot
- * decode a release, hands it to the ffmpeg.wasm transcode path.
+ * The player. Opens a magnet on the server-side engine (HTTP range requests
+ * from /api/torrent), picks the file the release intended, and streams it with
+ * resume, subtitles, stats and up-next — and when the browser cannot decode a
+ * release, hands it to the ffmpeg.wasm transcode path.
+ *
+ * Layout copies the Android player (src/screens/PlayerScreen.tsx): everything
+ * floats over the picture, transport in the centre, scrubber and a labelled
+ * action row at the bottom, track sheet top right.
  */
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
+import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import {
-  getTorrent,
-  liveStats,
-  pendingStats,
-  startServer,
-  type Engine,
-} from '../../lib/torrent';
+import { getTorrent, hashOf, liveStats, type Engine } from '../../lib/torrent';
 import { pickFile, nextEpisode } from '../../lib/pick';
 import {
   BackIcon,
   CcIcon,
+  CheckIcon,
   DownloadIcon,
   FullscreenIcon,
   LockIcon,
   NextIcon,
   PauseIcon,
   PlayIcon,
+  ScaleIcon,
+  SearchIcon,
   SkipIcon,
+  UsersIcon,
+  ZapIcon,
 } from '../../components/Blocks';
-
-/** Same prefix style as the engine, so one console reads as one session. */
-const log = (...parts: unknown[]) => console.log('[player]', ...parts);
 import {
   loadHistory,
   put as putHistory,
@@ -42,18 +41,41 @@ import {
 import { linkEpisode } from '../../lib/watched';
 import { loadSettings } from '../../lib/settings';
 import { withTrackers } from '../../lib/magnet';
-import { searchEpisode, episodeTag, type Hit } from '../../lib/search';
-import { searchSubtitles, type Sub } from '../../lib/subdl';
-import { fetchSubZip, subtitleBlob, SUB_EXT } from '../../lib/subs';
+import { searchEpisode, type Hit } from '../../lib/search';
+import { downloadSubtitle, findSubtitles, subtitleBlob, type Sub } from '../../lib/subs';
 import { saveUrlToDisk, supportsSaveAPI, pickLocalFile } from '../../lib/save';
-import {
-  getFFmpeg,
-  transcode,
-  type Job,
-  type TranscodeHandle,
-} from '../../lib/ffmpeg';
-import { titleOf } from '../../lib/title';
+import { getFFmpeg, transcode, type Job, type TranscodeHandle } from '../../lib/ffmpeg';
+import { searchableName, titleOf } from '../../lib/title';
 import { clock, bytes, speed, left } from '../../lib/format';
+
+/** Same prefix style as the engine, so one console reads as one session. */
+const log = (...parts: unknown[]) => console.log('[player]', ...parts);
+
+const SKIP_SECONDS = 10;
+/** How long before the end the "up next" card appears. */
+const UP_NEXT_SECONDS = 30;
+const RATES = [0.75, 1, 1.25, 1.5, 2];
+const SCALES = [
+  { fit: 'contain', label: 'Best fit' },
+  { fit: 'fill', label: 'Stretch' },
+  { fit: 'cover', label: 'Crop' },
+  { fit: 'none', label: 'Original' },
+] as const;
+/** Controls hide after this long without a pointer move while playing. */
+const HIDE_MS = 4000;
+
+/** A subtitle the sheet can offer: an in-torrent file, or a SubDL download. */
+type SubOption = { label: string; url: string; online: boolean; meta?: string };
+
+/** SubDL links are .zip; the server hands back the .srt inside. */
+const onlineOption = (s: Sub): SubOption => ({
+  label: `${(s.release || s.name || 'subtitle').replace(/\.(zip|srt)$/i, '')}.srt`,
+  url: s.url,
+  online: true,
+  meta: [s.language || 'EN', 'SubDL', s.season != null ? `S${s.season}` : null, s.episode != null ? `E${s.episode}` : null]
+    .filter(Boolean)
+    .join(' · '),
+});
 
 function PlayerInner() {
   const params = useSearchParams();
@@ -76,37 +98,72 @@ function PlayerInner() {
   const [error, setError] = useState<string | null>(null);
   const [fileIndex, setFileIndex] = useState<number | null>(null);
   const [historyItem, setHistoryItem] = useState<Item | null>(null);
-  const [canPlay, setCanPlay] = useState(false);
   const [playing, setPlaying] = useState(false);
+  const [buffering, setBuffering] = useState(false);
   const [time, setTime] = useState(0);
   const [duration, setDurationState] = useState(0);
   const [buffered, setBuffered] = useState(0);
-  const [showOverlay, setShowOverlay] = useState(true);
-  const [speedRate, setSpeedRate] = useState(1);
-  const [fit, setFit] = useState<'contain' | 'cover'>('contain');
+  const [showUi, setShowUi] = useState(true);
+  const [rate, setRate] = useState(1);
+  const [scaleIdx, setScaleIdx] = useState(0);
   const [locked, setLocked] = useState(false);
-  const [startOver, setStartOver] = useState(false);
   const [stats, setStats] = useState({ progress: 0, dl: 0, ul: 0, peers: 0 });
-  const [subs, setSubs] = useState<{ label: string; url: string | null; kind: string }[]>([]);
-  const [activeSub, setActiveSub] = useState<string | null>(null);
-  const [subMenu, setSubMenu] = useState(false);
-  const [universal, setUniversal] = useState<null | 'off' | 'prep' | 'running'>('off');
+  const [subs, setSubs] = useState<SubOption[]>([]);
+  const [activeSub, setActiveSub] = useState<{ url: string; label: string } | null>(null);
+  const [picking, setPicking] = useState(false);
+  /** Why the subtitle list is empty (no server key, SubDL down, nothing found). */
+  const [subNote, setSubNote] = useState<string | null>(null);
+  /** The subtitle being downloaded, for its spinner. */
+  const [subBusy, setSubBusy] = useState<string | null>(null);
+  const [search, setSearch] = useState<{
+    open: boolean;
+    query: string;
+    busy: boolean;
+    results: SubOption[];
+    note: string | null;
+  }>({ open: false, query: '', busy: false, results: [], note: null });
+  const [universal, setUniversal] = useState<'off' | 'prep' | 'running'>('off');
   const [transcodeState, setTranscodeState] = useState<TranscodeHandle | null>(null);
-  const [transcodedUrl, setTranscodedUrl] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<{ percent: number; speed: number } | null>(null);
   const [nextUp, setNextUp] = useState<{ index: number; name: string } | null>(null);
   const [nextReleases, setNextReleases] = useState<Hit[] | null>(null);
-  const [showNextReleases, setShowNextReleases] = useState(false);
-  const [usingTrackers, setUsingTrackers] = useState(true);
+  const [dismissedNext, setDismissedNext] = useState(false);
+  /** Bumped by every interaction, so the hide timer restarts. */
+  const [poke, setPoke] = useState(0);
 
   const video = () => videoRef.current;
+  const bumpUi = useCallback(() => {
+    setShowUi(true);
+    setPoke((n) => n + 1);
+  }, []);
+
+  const exit = useCallback(() => {
+    if (window.history.length > 1) router.back();
+    else router.push('/');
+  }, [router]);
+
+  const togglePlay = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) void v.play();
+    else v.pause();
+  }, []);
+
+  const skip = useCallback((by: number) => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.currentTime = Math.max(0, Math.min(v.duration || 0, v.currentTime + by));
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    void (document.fullscreenElement
+      ? document.exitFullscreen()
+      : document.documentElement.requestFullscreen());
+  }, []);
 
   /**
-   * Keyboard control.
-   *
-   * The one thing a player on a laptop is expected to have and this had none:
-   * space to pause, arrows to scrub, f for fullscreen, m to mute. Ignored while
-   * typing in a field, and while the controls are locked.
+   * Keyboard control: space/k to pause, arrows to scrub and set volume, f for
+   * fullscreen, m to mute. Ignored while typing and while the controls are locked.
    */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -116,23 +173,19 @@ function PlayerInner() {
       }
       const v = videoRef.current;
       if (!v || locked) return;
-      const seek = (by: number) => {
-        v.currentTime = Math.max(0, Math.min(v.duration || 0, v.currentTime + by));
-      };
       switch (e.key) {
         case ' ':
         case 'k':
           e.preventDefault();
-          if (v.paused) void v.play();
-          else v.pause();
+          togglePlay();
           break;
         case 'ArrowLeft':
           e.preventDefault();
-          seek(-10);
+          skip(-SKIP_SECONDS);
           break;
         case 'ArrowRight':
           e.preventDefault();
-          seek(10);
+          skip(SKIP_SECONDS);
           break;
         case 'ArrowUp':
           e.preventDefault();
@@ -146,43 +199,43 @@ function PlayerInner() {
           v.muted = !v.muted;
           break;
         case 'f':
-          void (document.fullscreenElement
-            ? document.exitFullscreen()
-            : document.documentElement.requestFullscreen());
+          toggleFullscreen();
+          break;
+        case 'Escape':
+          setPicking(false);
+          setSearch((s) => ({ ...s, open: false }));
           break;
         default:
           return;
       }
-      setShowOverlay(true);
+      bumpUi();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [locked]);
+  }, [locked, togglePlay, skip, toggleFullscreen, bumpUi]);
+
+  /** Seek to the saved position once the new source knows its length. */
+  const resumeAt = useCallback((v: HTMLVideoElement, pos: number | undefined) => {
+    if (!pos) return;
+    v.addEventListener(
+      'loadedmetadata',
+      () => {
+        if (pos > 0 && pos < (v.duration || 1) - 5) v.currentTime = pos;
+      },
+      { once: true }
+    );
+  }, []);
 
   /** Attach the picked file to the element once both exist. */
   useEffect(() => {
-    if (!engine || fileIndex == null || !videoRef.current) return;
+    const v = videoRef.current;
+    if (!engine || fileIndex == null || !v) return;
     const f = engine.findFile(fileIndex);
-    if (!f?.streamURL || videoRef.current.src) return;
-    videoRef.current.src = f.streamURL;
-    setCanPlay(true);
-    const pos = historyItem?.positions?.[fileIndex];
-    if (pos && !startOver && !params.get('fresh')) {
-      videoRef.current.addEventListener(
-        'loadedmetadata',
-        () => {
-          const v = video();
-          if (v && pos > 0 && pos < (v.duration || 1) - 5) v.currentTime = pos;
-        },
-        { once: true }
-      );
-    }
-  }, [engine, fileIndex, historyItem, startOver, params]);
-
-  /** Trackers setting feeds the magnet on open. */
-  useEffect(() => {
-    loadSettings().then((s) => setUsingTrackers(s.addTrackers));
-  }, []);
+    if (!f?.streamURL || v.getAttribute('src')) return;
+    v.src = f.streamURL;
+    if (!params.get('fresh')) resumeAt(v, historyItem?.positions?.[fileIndex]);
+    void v.play().catch(() => {});
+  }, [engine, fileIndex, historyItem, params, stage, resumeAt]);
 
   /** Open the swarm, pick the file, load resume + subtitles. */
   useEffect(() => {
@@ -192,54 +245,77 @@ function PlayerInner() {
       return;
     }
     let live = true;
-    const magnet = usingTrackers ? withTrackers(uri) : uri;
+    let magnet = uri;
     setStage('meta');
-    startServer().then(() => {
-      getTorrent(magnet)
-        .then(async (e) => {
-          if (!live) return;
-          log(`opened ${e.torrentName} — ${e.files.length} file(s)`);
-          setEngine(e);
-          const files = e.files;
-          const picked = pickFile(
-            files.map((f) => ({ index: f.index, name: f.name, size: f.size, isVideo: f.isVideo })),
-            tag
-          );
-          const item = (await loadHistory()).find((x) => x.uri === magnet) ?? {
-            uri: magnet,
-            title: e.torrentName || titleOf(uri),
-            at: Date.now(),
-            torrentName: e.torrentName,
-          };
-          const files2: StoredFile[] = files.map((f) => ({
-            index: f.index,
-            name: f.name,
-            size: f.size,
-            isVideo: f.isVideo,
-            isSubtitle: f.isSubtitle,
-          }));
-          await putHistory({ ...item, files: files2, torrentName: e.torrentName });
-          if (epId) await linkEpisode(epId, magnet);
-          setHistoryItem({ ...item, files: files2 });
-          if (picked != null) {
-            log('playing file', picked, e.files[picked]?.name);
-            setFileIndex(picked);
-          } else {
-            log('no playable file found in', e.torrentName);
-          }
-          if (dlOnOpen) {
-            const f = files[picked ?? 0];
-            if (f?.streamURL) doSave(f);
-          }
-          setStage('ready');
-        })
-        .catch((err) => {
-          if (!live) return;
-          log('open failed:', err?.message ?? err);
-          setError(String(err?.message ?? err));
-          setStage('error');
-        });
-    });
+    // The trackers setting has to be read before the add, not after — the
+    // open used to race it and always injected trackers.
+    loadSettings()
+      .then((s) => {
+        magnet = s.addTrackers ? withTrackers(uri) : uri;
+        return getTorrent(magnet);
+      })
+      .then(async (e) => {
+        if (!live) return;
+        log(`opened ${e.torrentName} — ${e.files.length} file(s)`);
+        setEngine(e);
+        const files = e.files;
+        // `file` comes from Continue watching: the exact file that was playing.
+        const asked = params.get('file');
+        const picked =
+          asked != null && files.some((f) => f.index === Number(asked))
+            ? Number(asked)
+            : pickFile(
+                files.map((f) => ({ index: f.index, name: f.name, size: f.size, isVideo: f.isVideo })),
+                tag
+              );
+        // By hash as well: the same torrent reached with a different tracker
+        // list must still find its resume point.
+        const hash = hashOf(magnet);
+        const item = (await loadHistory()).find(
+          (x) => x.uri === magnet || (!!hash && hashOf(x.uri) === hash)
+        ) ?? {
+          uri: magnet,
+          title: e.torrentName || titleOf(uri),
+          at: Date.now(),
+          torrentName: e.torrentName,
+        };
+        const files2: StoredFile[] = files.map((f) => ({
+          index: f.index,
+          name: f.name,
+          size: f.size,
+          isVideo: f.isVideo,
+          isSubtitle: f.isSubtitle,
+        }));
+        // What the title page and Home match on — without these, resume from a
+        // title page and Continue-watching artwork never worked.
+        const known: Partial<Item> = {
+          ...(imdb && { imdb }),
+          ...(params.get('kind') && { kind }),
+          ...(titleName && { titleName }),
+          ...(poster && { poster }),
+        };
+        const stored: Item = { ...item, ...known, files: files2, torrentName: e.torrentName, at: Date.now() };
+        await putHistory(stored);
+        if (epId) await linkEpisode(epId, item.uri);
+        setHistoryItem(stored);
+        if (picked != null) {
+          log('playing file', picked, e.files[picked]?.name);
+          setFileIndex(picked);
+        } else {
+          log('no playable file found in', e.torrentName);
+        }
+        if (dlOnOpen) {
+          const f = files[picked ?? 0];
+          if (f?.streamURL) doSave(f);
+        }
+        setStage('ready');
+      })
+      .catch((err) => {
+        if (!live) return;
+        log('open failed:', err?.message ?? err);
+        setError(String(err?.message ?? err));
+        setStage('error');
+      });
     return () => {
       live = false;
     };
@@ -250,7 +326,7 @@ function PlayerInner() {
     async (f: { streamURL: string | null; name: string; index: number }) => {
       if (!f.streamURL) return;
       if (!supportsSaveAPI()) {
-        setError('Your browser cannot write files to disk — use a Chromium browser or Universal mode.');
+        setError('Your browser cannot write files to disk — use a Chromium browser.');
         return;
       }
       setSaveState({ percent: 0, speed: 0 });
@@ -259,14 +335,12 @@ function PlayerInner() {
           setSaveState({ percent: p.percent, speed: p.speed })
         );
         setSaveState({ percent: 1, speed: 0 });
-        const entry = {
+        await putHistory({
           uri: `saved:${Date.now()}:${f.name}`,
           title: f.name,
           at: Date.now(),
           files: [{ index: 0, name: path, size, isVideo: true, isSubtitle: false }] as StoredFile[],
-        };
-        await putHistory(entry);
-        alert(`Saved ${path} (${bytes(size)}) to your Downloads.`);
+        });
       } catch (e) {
         setError(
           e instanceof Error && e.name === 'AbortError'
@@ -283,7 +357,7 @@ function PlayerInner() {
   const flush = useCallback(() => {
     const v = video();
     const item = historyItem;
-    if (!v || !item || !fileIndex) return;
+    if (!v || !item || fileIndex == null) return;
     if (Number.isFinite(v.duration) && v.duration > 0)
       void setDuration(item, fileIndex, v.duration);
     void setPosition(item, fileIndex, v.currentTime);
@@ -306,141 +380,158 @@ function PlayerInner() {
   const switchFile = useCallback(
     (index: number) => {
       if (!engine) return;
-      const f = engine.findFile(index);
-      const url = f?.streamURL;
+      const url = engine.findFile(index)?.streamURL;
       if (!url) return;
       setFileIndex(index);
       const v = video();
       if (v) {
-        const pos = historyItem?.positions?.[index];
         v.src = url;
-        if (pos && !startOver) {
-          v.addEventListener(
-            'loadedmetadata',
-            () => {
-              const el = video();
-              if (el && pos > 0 && pos < (el.duration || 1) - 5) el.currentTime = pos;
-            },
-            { once: true }
-          );
-        }
-        setCanPlay(true);
+        resumeAt(v, historyItem?.positions?.[index]);
+        void v.play().catch(() => {});
       }
       setActiveSub(null);
       setSubs([]);
+      setError(null);
+      setDismissedNext(false);
     },
-    [engine, historyItem, startOver]
+    [engine, historyItem, resumeAt]
   );
 
-  /** Load subtitle candidates: in-torrent first, then SubDL when keyed. */
-  useEffect(() => {
-    if (!engine || fileIndex == null) return;
-    let live = true;
-    (async () => {
-      const list: { label: string; url: string | null; kind: string }[] = [];
-      for (const f of engine.files.filter((x) => x.isSubtitle)) {
-        const url = f.streamURL;
-        const label = f.name.split('/').pop() ?? f.name;
-        list.push({ label, url, kind: /\.ass$/i.test(f.name) ? 'ass' : 'srt' });
-      }
-      const key = localStorage.getItem('subdlKey');
-      if (key) {
-        try {
-          const found = await searchSubtitles(
-            titleName ?? engine.torrentName,
-            key,
-            season != null && episode != null ? { season, episode } : undefined
-          );
-          for (const s of found.filter((x) => x.language.startsWith('EN'))) {
-            list.push({ label: `SubDL: ${s.release.slice(0, 50)}`, url: s.url, kind: 'zip' });
-          }
-        } catch {
-          // No key / refused: in-torrent subs still work.
-        }
-      }
-      if (live) setSubs(list);
-    })();
-    return () => {
-      live = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine, fileIndex]);
+  /** What SubDL is asked for: exact IMDb id when known, else a cleaned name. */
+  const subQueryFor = useCallback(
+    (query?: string) => ({
+      query: query ?? titleName ?? searchableName(engine?.torrentName ?? ''),
+      // A typed query means the id was the wrong title — search by name.
+      imdb: query ? undefined : imdb,
+      kind,
+      season,
+      episode,
+    }),
+    [engine, titleName, imdb, kind, season, episode]
+  );
 
   const applySub = useCallback(
-    async (s: { label: string; url: string | null; kind: string }, index: number) => {
-      const v = video();
-      if (!v || !s.url) {
-        setActiveSub(null);
+    async (s: SubOption) => {
+      if (/\.(ass|ssa)$/i.test(s.label)) {
+        // <track> only speaks WebVTT, and ASS styling does not survive the trip.
+        setError('ASS/SSA subtitles are not supported in the browser — pick an SRT.');
         return;
       }
+      setSubBusy(s.url);
       try {
-        let text: string;
-        if (s.kind === 'zip') {
-          const files = await fetchSubZip(s.url);
-          const srt = [...files.entries()].find(([name]) => /\.srt$/i.test(name)) ?? [...files.entries()][0];
-          text = srt[1];
-        } else if (s.kind === 'ass') {
-          const res = await fetch(s.url);
-          text = await res.text();
-          const blob = new Blob([text], { type: 'text/plain' });
-          const a = document.createElement('a');
-          a.href = URL.createObjectURL(blob);
-          a.download = s.label.replace(/[^\w.-]+/g, '_') + '.ass';
-          a.click();
-          setActiveSub(null);
-          return;
-        } else {
-          const res = await fetch(s.url);
-          text = await res.text();
-        }
-        const url = subtitleBlob(text, 'srt');
-        setActiveSub(url);
-        if (historyItem && typeof index === 'number')
-          setFileSubs(historyItem, index, [{ path: s.label.split(':')[0], label: s.label }]);
+        const text = s.online
+          ? await downloadSubtitle(s.url, { season, episode })
+          : await (await fetch(s.url)).text();
+        setActiveSub({ url: subtitleBlob(text), label: s.label });
+        if (historyItem && fileIndex != null)
+          void setFileSubs(historyItem, fileIndex, [{ path: s.url, label: s.label }]);
       } catch (e) {
         setError(`Subtitle failed: ${String((e as Error)?.message ?? e)}`);
       }
+      setSubBusy(null);
     },
-    [historyItem]
+    [historyItem, fileIndex, season, episode]
   );
 
-  /** Pause the previous source's subtitles — vtt tracks stick to the element. */
+  /**
+   * Subtitle candidates: in-torrent files, then SubDL. The one chosen last time
+   * for this file is put back on — it used to be saved and never restored.
+   */
+  useEffect(() => {
+    if (!engine || fileIndex == null) return;
+    let live = true;
+    const local: SubOption[] = engine.files
+      .filter((x) => x.isSubtitle)
+      .map((f) => ({ label: f.name.split('/').pop() ?? f.name, url: f.streamURL, online: false }));
+    setSubs(local);
+    setSubNote(null);
+
+    const saved = historyItem?.subtitles?.[fileIndex]?.[0];
+    if (saved?.path) {
+      void applySub({ label: saved.label, url: saved.path, online: saved.path.startsWith('https://') });
+    }
+
+    findSubtitles(subQueryFor())
+      .then((found) => {
+        if (!live) return;
+        setSubs([...local, ...found.map(onlineOption)]);
+        if (!found.length && !local.length) setSubNote('No subtitles found. Try Find subs with another name.');
+      })
+      .catch((e) => {
+        if (live) setSubNote(String((e as Error)?.message ?? e));
+      });
+    return () => {
+      live = false;
+    };
+    // Once per file; historyItem changes on every checkpoint.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine, fileIndex]);
+
+  /** Blob URLs hold the whole subtitle in memory until revoked. */
+  useEffect(() => {
+    const url = activeSub?.url;
+    return () => {
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [activeSub]);
+
+  /** Find subs sheet: search by any name. */
+  const runSubSearch = useCallback(
+    async (query: string) => {
+      setSearch((s) => ({ ...s, busy: true, note: null }));
+      try {
+        const found = await findSubtitles(subQueryFor(query.trim() || undefined));
+        setSearch((s) => ({
+          ...s,
+          busy: false,
+          results: found.map(onlineOption),
+          note: found.length ? null : 'No subtitles found',
+        }));
+      } catch (e) {
+        setSearch((s) => ({ ...s, busy: false, results: [], note: String((e as Error)?.message ?? e) }));
+      }
+    },
+    [subQueryFor]
+  );
+
+  /** Show the chosen track; hide the rest — tracks stick to the element. */
   useEffect(() => {
     const v = video();
-    if (!v || !fileIndex) return;
-    const track = [...(v as HTMLVideoElement & { textTracks?: TextTrackList }).textTracks ?? []] as TextTrack[];
-    track.forEach((t) => {
-      const mode = t.kind === 'subtitles' ? (activeSub ? 'showing' : 'hidden') : t.mode;
-      t.mode = mode;
-    });
-  }, [activeSub, fileIndex]);
+    if (!v) return;
+    for (const t of Array.from(v.textTracks)) {
+      if (t.kind === 'subtitles') t.mode = activeSub ? 'showing' : 'hidden';
+    }
+  }, [activeSub]);
 
-  /** Swarm stats, a beat behind the event loop. */
+  /** Swarm stats, once a second. */
   useEffect(() => {
-    const t = setInterval(() => {
-      if (!engine) return;
-      const s = liveStats(engine.infoHash);
-      setStats({ progress: s.progress, dl: s.downloadSpeed, ul: s.uploadSpeed, peers: s.numPeers });
+    if (!engine) return;
+    const t = setInterval(async () => {
+      const s = await liveStats(engine.infoHash);
+      if (s) setStats({ progress: s.progress, dl: s.downloadSpeed, ul: s.uploadSpeed, peers: s.numPeers });
     }, 1000);
     return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engine]);
 
   /** Peer count while the metadata is still being chased. */
   const [waiting, setWaiting] = useState<{ peers: number; seconds: number } | null>(null);
   useEffect(() => {
-    if (stage !== 'meta' || !uri) return;
-    const magnet = usingTrackers ? withTrackers(uri) : uri;
-    const tick = setInterval(() => setWaiting(pendingStats(magnet)), 1000);
+    const hash = hashOf(uri);
+    if (stage !== 'meta' || !hash) return;
+    const started = Date.now();
+    const tick = setInterval(async () => {
+      const s = await liveStats(hash);
+      setWaiting({ peers: s?.numPeers ?? 0, seconds: Math.round((Date.now() - started) / 1000) });
+    }, 1000);
     return () => clearInterval(tick);
-  }, [stage, uri, usingTrackers]);
+  }, [stage, uri]);
 
-  /** Overlay auto-hide on play. */
+  /** Controls auto-hide while playing, unless a sheet is open. */
   useEffect(() => {
-    if (!playing || locked) return;
-    const t = setTimeout(() => setShowOverlay(false), 3200);
+    if (!playing || picking || search.open || !showUi) return;
+    const t = setTimeout(() => setShowUi(false), HIDE_MS);
     return () => clearTimeout(t);
-  }, [playing, locked, showOverlay]);
+  }, [playing, picking, search.open, showUi, poke]);
 
   /** Up next: inside the torrent first, then a release search for the next ep. */
   useEffect(() => {
@@ -449,17 +540,13 @@ function PlayerInner() {
       engine.files.map((f) => ({ index: f.index, name: f.name, size: f.size, isVideo: f.isVideo })),
       fileIndex
     );
+    setNextReleases(null);
     if (next) {
-      setNextUp({ index: next.index, name: next.name });
-      setNextReleases(null);
-      return;
-    }
-    if (!imdb || season == null || episode == null) {
-      setNextUp(null);
+      setNextUp({ index: next.index, name: next.name.split('/').pop() ?? next.name });
       return;
     }
     setNextUp(null);
-    setNextReleases(null);
+    if (!imdb || season == null || episode == null) return;
     let live = true;
     searchEpisode(titleName ?? imdb, season, episode + 1, undefined, imdb).then((hits) => {
       if (live) setNextReleases(hits);
@@ -471,11 +558,7 @@ function PlayerInner() {
   }, [engine, fileIndex, imdb, season, episode]);
 
   const goNextRelease = (h: Hit) => {
-    const q = new URLSearchParams({
-      uri: h.magnet,
-      name: h.name,
-      kind,
-    });
+    const q = new URLSearchParams({ uri: h.magnet, name: h.name, kind });
     if (titleName) q.set('titleName', titleName);
     if (poster) q.set('poster', poster);
     if (imdb) {
@@ -488,6 +571,13 @@ function PlayerInner() {
     window.location.href = `/watch?${q}`;
   };
 
+  // ponytail: best-seeded release for the next episode, no chooser; add one if picks go wrong.
+  const next = nextUp
+    ? { name: nextUp.name, go: () => switchFile(nextUp.index) }
+    : nextReleases?.length && episode != null
+      ? { name: `Episode ${episode + 1}`, go: () => goNextRelease(nextReleases[0]) }
+      : null;
+
   /** Universal mode: transcode this file with ffmpeg.wasm. */
   const runUniversal = useCallback(
     async (job: Job) => {
@@ -496,42 +586,27 @@ function PlayerInner() {
       if (!f) return;
       setUniversal('prep');
       setTranscodeState(null);
+      setError(null);
       try {
         await getFFmpeg();
-        let file: File | null = null;
-        if (f.size <= 1.5 * 1024 ** 3) {
-          const { blob } = await engine.blobOf(f);
-          file = new File([blob], f.name.split('/').pop() ?? 'input.mkv');
-        } else {
-          const picked = await pickLocalFile();
-          file = picked;
-        }
+        const file =
+          f.size <= 1.5 * 1024 ** 3 ? (await engine.blobOf(f)).file : await pickLocalFile();
         if (!file) {
           setUniversal('off');
           return;
         }
         if (file.size > 2.5 * 1024 ** 3) {
-          setError('Files over 2.5 GB are too big for in-browser ffmpeg — save to disk and pick a smaller release.');
+          setError('Files over 2.5 GB are too big for in-browser ffmpeg — pick a smaller release.');
           setUniversal('off');
           return;
         }
         setUniversal('running');
         const url = await transcode(file, file.name, job, setTranscodeState);
-        setTranscodedUrl(url);
         const v = video();
         if (v) {
-          const pos = historyItem?.positions?.[fileIndex];
           v.src = url;
-          if (pos && !startOver) {
-            v.addEventListener(
-              'loadedmetadata',
-              () => {
-                const el = video();
-                if (el && pos && pos < (el.duration || 1) - 5) el.currentTime = pos;
-              },
-              { once: true }
-            );
-          }
+          resumeAt(v, historyItem?.positions?.[fileIndex]);
+          void v.play().catch(() => {});
         }
         setUniversal('off');
       } catch (e) {
@@ -539,377 +614,485 @@ function PlayerInner() {
         setError(`Universal encode failed: ${String((e as Error)?.message ?? e)}`);
       }
     },
-    [engine, fileIndex, historyItem, startOver]
+    [engine, fileIndex, historyItem, resumeAt]
   );
 
-  if (stage === 'error' || !uri) {
+  const file = engine && fileIndex != null ? engine.findFile(fileIndex) : null;
+  const title =
+    epName ?? titleName ?? file?.name.split('/').pop() ?? engine?.torrentName ?? params.get('name') ?? titleOf(uri);
+
+  if (stage !== 'ready' || !engine) {
     return (
-      <main className="page">
-        <div className="page-head">
-          <Link href="/downloads" className="back-btn" aria-label="Back"><BackIcon /></Link>
-          <h1 className="page-title">Player</h1>
-        </div>
-        <p className="center danger-text">{error ?? 'Missing torrent.'}</p>
-      </main>
-    );
-  }
-
-  if (stage === 'meta' || !engine) {
-    return (
-      <main className="page" style={{ paddingTop: 40 }}>
-        <div className="spinner" />
-        <p className="center">Finding peers…</p>
-        {/* Peers and seconds, because "0 peers after 40s" is the difference
-            between waiting and waiting for nothing. */}
-        <p className="center muted" style={{ fontSize: 13, marginTop: 6 }}>
-          {waiting
-            ? `${waiting.peers} peer${waiting.peers === 1 ? '' : 's'} · ${waiting.seconds}s`
-            : 'Starting…'}
-        </p>
-        <p className="center faint" style={{ fontSize: 12, marginTop: 14, maxWidth: 420, marginInline: 'auto', lineHeight: 1.6 }}>
-          In a browser this only reaches peers running WebTorrent. Releases with
-          no web seeders will not start here — the Android app has no such limit.
-        </p>
-      </main>
-    );
-  }
-
-  const file = fileIndex != null ? engine.findFile(fileIndex) : null;
-
-  return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: '#000' }}>
-      <div
-        style={{
-          position: 'relative',
-          background: '#000',
-          flex: 1,
-          minHeight: 0,
-          maxHeight: 'calc(100vh - 8px)',
-          overflow: 'hidden',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-        className={showOverlay ? undefined : 'player-idle'}
-        onMouseMove={() => setShowOverlay(true)}
-        onMouseLeave={() => playing && setShowOverlay(false)}
-        onDoubleClick={() => {
-          const v = video();
-          if (v) {
-            void (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen());
-          }
-        }}
-      >
-        <video
-          ref={videoRef}
-          style={{ width: '100%', height: '100%', objectFit: fit }}
-          playsInline
-          autoPlay={false}
-          onClick={() => {
-            const v = video();
-            if (!v) return;
-            if (v.paused) void v.play();
-            else v.pause();
-          }}
-          onPlay={() => setPlaying(true)}
-          onPause={() => setPlaying(false)}
-          onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
-          onDurationChange={(e) => {
-            const d = e.currentTarget.duration;
-            if (Number.isFinite(d)) {
-              setDurationState(d);
-              if (historyItem) void setDuration(historyItem, fileIndex!, d);
-            }
-          }}
-          onProgress={(e) => {
-            const v = e.currentTarget;
-            if (v.buffered.length) {
-              setBuffered(v.buffered.end(v.buffered.length - 1));
-              if (file && canPlay) {
-                const progress = Math.min(1, v.currentTime / Math.max(1, v.duration));
-                setStats((s) => ({ ...s, progress: Math.max(s.progress, progress) }));
-              }
-            }
-          }}
-          onError={(e) => {
-            const v = e.currentTarget;
-            if (v.error) log('video error', v.error.code, v.error.message);
-            if (v.error && universal === 'off') {
-              setError(`The browser cannot play this release (${v.error.message ?? 'error'}). Try Universal mode — it decodes anything.`);
-            }
-          }}
-        />
-        {activeSub && (
-          <track kind="subtitles" src={activeSub} default />
-        )}
-
-        {nextUp && playing && duration - time < 30 && (
-          <div style={{ position: 'absolute', right: 18, bottom: 28, zIndex: 5, background: 'var(--surface)', borderRadius: 12, padding: 14, maxWidth: 260, boxShadow: '0 8px 30px rgba(0,0,0,.5)' }}>
-            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.6 }}>Up next</div>
-            <div style={{ fontWeight: 600, fontSize: 13, margin: '4px 0 8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nextUp.name}</div>
-            <button className="btn btn-primary" style={{ padding: '8px 14px', fontSize: 12 }} onClick={() => switchFile(nextUp.index)}>Play</button>
-          </div>
-        )}
-
-        {showOverlay && (
-          <div className="player-ui" style={{ position: 'absolute', inset: 0, zIndex: 4, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', background: 'linear-gradient(to top, rgba(0,0,0,.72), transparent 45%, rgba(0,0,0,.45))', pointerEvents: 'none' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 14, pointerEvents: 'auto' }}>
-              <button className="icon-btn" aria-label="Back" onClick={() => router.back()}>
-                <BackIcon />
-              </button>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: 17, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {epName ?? file?.name.split('/').pop() ?? engine.torrentName}
-                </div>
-                {epName && <div style={{ fontSize: 13, color: 'rgba(255,255,255,.6)' }}>{engine.torrentName}</div>}
+      <div className="pl-screen">
+        <button className="pl-round pl-exit" aria-label="Back" onClick={exit}>
+          <BackIcon />
+        </button>
+        <div className="pl-preparing">
+          {!!title && <div className="pl-prep-title">{title}</div>}
+          {stage === 'error' ? (
+            <div className="pl-pill pl-pill-bad">{error ?? 'Missing torrent.'}</div>
+          ) : (
+            <>
+              <div className="pl-spinner" />
+              <div className="pl-prep-text">
+                {waiting && waiting.peers > 0 ? 'Reading torrent' : 'Finding peers'}
               </div>
-              <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-                <button className={`icon-btn ${activeSub ? 'on' : ''}`} title="Subtitles" onClick={() => setSubMenu(!subMenu)}>
-                  <CcIcon />
-                </button>
-                <button className="icon-btn" title={`Fit: ${fit}`} onClick={() => setFit(fit === 'contain' ? 'cover' : 'contain')}>
-                  <FullscreenIcon on={fit === 'cover'} />
-                </button>
-                <button className="icon-btn" title="Speed" onClick={() => {
-                  const v = video();
-                  if (!v) return;
-                  const rates = [0.5, 0.75, 1, 1.25, 1.5, 2];
-                  const i = rates.indexOf(v.playbackRate);
-                  v.playbackRate = rates[(i + 1) % rates.length];
-                  setSpeedRate(v.playbackRate);
-                }}>{speedRate}×</button>
-                <button className={`icon-btn ${locked ? 'on' : ''}`} title={locked ? 'Unlock' : 'Lock'} onClick={() => setLocked(!locked)}>
-                  <LockIcon on={locked} />
-                </button>
-              </div>
-            </div>
-
-            <div style={{ padding: '0 14px 16px', pointerEvents: 'auto' }}>
-              {subMenu && subs.length > 0 && (
-                <div style={{ background: 'var(--surface)', borderRadius: 12, padding: 8, marginBottom: 10, maxHeight: 220, overflowY: 'auto' }}>
-                  <button
-                    className="row-sub"
-                    style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 10px', borderRadius: 8, color: activeSub === null ? 'var(--accent)' : 'var(--muted)' }}
-                    onClick={() => { setActiveSub(null); setSubMenu(false); }}
-                  >
-                    Off
-                  </button>
-                  {subs.map((s, i) => (
-                    <button
-                      key={s.label + i}
-                      style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 10px', borderRadius: 8, fontSize: 12, color: 'var(--muted)' }}
-                      onClick={() => { void applySub(s, i); setSubMenu(false); }}
-                    >
-                      {s.label}
-                    </button>
-                  ))}
+              {waiting && (
+                <div className="pl-prep-meta">
+                  {waiting.peers} peer{waiting.peers === 1 ? '' : 's'} · {waiting.seconds}s
                 </div>
               )}
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span style={{ fontSize: 13, width: 48, color: '#fff', fontVariantNumeric: 'tabular-nums' }}>{clock(time)}</span>
-                <div
-                  style={{ flex: 1, height: 22, position: 'relative', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                  onClick={(e) => {
-                    const v = video();
-                    if (!v) return;
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const frac = (e.clientX - rect.left) / rect.width;
-                    v.currentTime = frac * (v.duration || 0);
-                  }}
-                >
-                  <div style={{ position: 'absolute', left: 0, right: 0, height: 5, borderRadius: 3, background: 'rgba(255,255,255,.22)' }} />
-                  <div
-                    style={{
-                      position: 'absolute', left: 0, height: 5, borderRadius: 3, background: '#fff',
-                      width: `${duration ? (buffered / duration) * 100 : 0}%`, opacity: 0.28,
-                    }}
-                  />
-                  <div
-                    style={{
-                      position: 'absolute', left: 0, height: 5, borderRadius: 3, background: 'var(--accent)',
-                      width: `${duration ? (time / duration) * 100 : 0}%`,
-                    }}
-                  />
-                  {/* The knob: without it there is nothing to aim at, and no
-                      sign the bar is draggable at all. */}
-                  <div
-                    style={{
-                      position: 'absolute',
-                      left: `${duration ? (time / duration) * 100 : 0}%`,
-                      width: 13,
-                      height: 13,
-                      marginLeft: -6.5,
-                      borderRadius: '50%',
-                      background: 'var(--accent)',
-                      boxShadow: '0 0 0 3px rgba(0,0,0,.35)',
-                    }}
-                  />
-                </div>
-                <span style={{ fontSize: 13, width: 48, color: 'rgba(255,255,255,.65)', fontVariantNumeric: 'tabular-nums', textAlign: 'right' }}>{clock(duration)}</span>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
-                <button className="icon-btn" aria-label="Back 10 seconds" onClick={() => { const v = video(); if (v) v.currentTime = Math.max(0, v.currentTime - 10); }}>
-                  <SkipIcon back />
-                </button>
-                <button
-                  className="btn btn-primary"
-                  style={{ width: 52, height: 52, borderRadius: '50%', padding: 0, justifyContent: 'center' }}
-                  onClick={() => {
-                    const v = video();
-                    if (!v) return;
-                    if (v.paused) void v.play();
-                    else v.pause();
-                  }}
-                >
-                  {playing ? <PauseIcon /> : <PlayIcon />}
-                </button>
-                <button className="icon-btn" aria-label="Forward 10 seconds" onClick={() => { const v = video(); if (v) v.currentTime = Math.min(v.duration || 0, v.currentTime + 10); }}>
-                  <SkipIcon />
-                </button>
-
-                <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <span style={{ fontSize: 13, color: 'rgba(255,255,255,.72)', fontVariantNumeric: 'tabular-nums' }}>
-                    {Math.round(stats.progress * 100)}% · {speed(stats.dl)} · {stats.peers} peers
-                  </span>
-                  {engine.findFile(fileIndex ?? -1)?.streamURL && (
-                    <>
-                      <button
-                        className="icon-btn"
-                        title="Download this file"
-                        onClick={() => file && doSave({ streamURL: file.streamURL!, name: file.name.split('/').pop() ?? file.name, index: file.index })}
-                      >
-                        <DownloadIcon />
-                      </button>
-                      {!nextUp && nextReleases && nextReleases.length > 0 && (
-                        <button className="icon-btn" title="Next episode" onClick={() => setShowNextReleases(!showNextReleases)}>
-                          <NextIcon />
-                        </button>
-                      )}
-                      <button className="icon-btn" title="Universal mode — decodes anything" onClick={() => runUniversal('fast')}>
-                        ˄˄
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {saveState && (
-          <div style={{ position: 'absolute', inset: 0, zIndex: 6, background: 'rgba(0,0,0,.75)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ background: 'var(--surface)', padding: 22, borderRadius: 14, width: 300, textAlign: 'center' }}>
-              <div style={{ fontWeight: 600 }}>Saving to disk…</div>
-              <div style={{ height: 4, borderRadius: 2, background: 'var(--line)', margin: '12px 0', overflow: 'hidden' }}>
-                <div style={{ width: `${saveState.percent * 100}%`, height: '100%', background: 'var(--accent)' }} />
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--muted)' }}>{Math.round(saveState.percent * 100)}% · {speed(saveState.speed)}</div>
-            </div>
-          </div>
-        )}
-
-        {(universal === 'prep' || universal === 'running') && (
-          <div style={{ position: 'absolute', inset: 0, zIndex: 7, background: 'rgba(0,0,0,.78)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ background: 'var(--surface)', padding: 24, borderRadius: 14, width: 340, textAlign: 'center' }}>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                {universal === 'prep' ? 'Loading ffmpeg.wasm…' : 'Transcoding — decodes any codec'}
-              </div>
-              {transcodeState && (
-                <>
-                  <div style={{ height: 4, borderRadius: 2, background: 'var(--line)', margin: '10px 0', overflow: 'hidden' }}>
-                    <div style={{ width: `${transcodeState.progress * 100}%`, height: '100%', background: 'var(--accent)' }} />
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
-                    {Math.round(transcodeState.progress * 100)}% · {clock(transcodeState.time)} processed
-                    {duration > 0 && ` · ${left(Math.max(0, (duration - transcodeState.time) * 3))}`}
-                  </div>
-                </>
-              )}
-              <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 10 }}>
-                Fast: video as-is, audio → AAC. Full: everything re-encoded. Bitmap subs (PGS/VOBSUB) can’t be converted.
-              </div>
-            </div>
-          </div>
-        )}
-
-        {showNextReleases && nextReleases && (
-          <div style={{ position: 'absolute', right: 18, bottom: 60, zIndex: 5, background: 'var(--surface)', borderRadius: 12, padding: 10, width: 320, boxShadow: '0 8px 30px rgba(0,0,0,.5)' }}>
-            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.6, padding: '0 4px 6px' }}>
-              Next episode releases
-            </div>
-            {nextReleases.slice(0, 4).map((h) => (
-              <button key={h.id} style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 8px', borderRadius: 8, fontSize: 12, color: 'var(--muted)' }} onClick={() => goNextRelease(h)}>
-                {h.name.slice(0, 70)} · {h.seeders} seeds
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {fileIndex == null && (
-        <div style={{ padding: 18 }}>
-          <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 10 }}>Choose a file</h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {engine.files.filter((f) => f.isVideo).map((f) => (
-              <button
-                key={f.index}
-                style={{ display: 'flex', justifyContent: 'space-between', padding: 12, borderRadius: 12, background: 'var(--surface)', fontSize: 13 }}
-                onClick={() => switchFile(f.index)}
-              >
-                <span>{f.name.split('/').pop()}</span>
-                <span className="faint">{bytes(f.size)}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {(error || !canPlay) && (
-        <div style={{ padding: '10px 18px' }}>
-          {error && <p className="danger-text" style={{ fontSize: 13, marginBottom: 8 }}>{error}</p>}
-          {!canPlay && (
-            <p className="faint" style={{ fontSize: 13 }}>
-              Ready to stream — press play. Swarm stats below.
-            </p>
+            </>
           )}
         </div>
+      </div>
+    );
+  }
+
+  const upNextVisible =
+    !!next && !dismissedNext && duration > 0 && duration - time <= UP_NEXT_SECONDS;
+  const cannotDecode = !!error && error.startsWith('The browser cannot play');
+
+  return (
+    <div
+      className={`pl-screen${showUi ? '' : ' pl-idle'}`}
+      onMouseMove={bumpUi}
+    >
+      <video
+        ref={videoRef}
+        className="pl-video"
+        style={{ objectFit: SCALES[scaleIdx].fit }}
+        playsInline
+        onPlay={() => setPlaying(true)}
+        onPause={() => {
+          setPlaying(false);
+          setShowUi(true);
+        }}
+        onWaiting={() => setBuffering(true)}
+        onPlaying={() => setBuffering(false)}
+        onCanPlay={() => setBuffering(false)}
+        onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
+        onDurationChange={(e) => {
+          const d = e.currentTarget.duration;
+          if (Number.isFinite(d)) {
+            setDurationState(d);
+            if (historyItem && fileIndex != null) void setDuration(historyItem, fileIndex, d);
+          }
+        }}
+        onProgress={(e) => {
+          const v = e.currentTarget;
+          for (let i = 0; i < v.buffered.length; i++) {
+            if (v.buffered.start(i) <= v.currentTime && v.currentTime <= v.buffered.end(i)) {
+              setBuffered(v.buffered.end(i));
+            }
+          }
+        }}
+        onEnded={() => {
+          if (next && !dismissedNext) next.go();
+        }}
+        onError={(e) => {
+          const v = e.currentTarget;
+          if (!v.error || universal !== 'off') return;
+          log('video error', v.error.code, v.error.message);
+          setBuffering(false);
+          setError(`The browser cannot play this release (${v.error.message || 'unsupported format'}).`);
+        }}
+      >
+        {/* Inside the element, or the browser never attaches it. */}
+        {activeSub && <track key={activeSub.url} kind="subtitles" src={activeSub.url} default />}
+      </video>
+
+      {/* Tap target for the picture: toggles the controls, like the phone. */}
+      <div
+        className={`pl-tap${showUi && !locked ? ' pl-dim' : ''}`}
+        onClick={() => {
+          if (picking || search.open) {
+            setPicking(false);
+            setSearch((s) => ({ ...s, open: false }));
+          } else if (showUi) setShowUi(false);
+          else bumpUi();
+        }}
+        onDoubleClick={toggleFullscreen}
+      />
+
+      {showUi && locked && (
+        <div className="pl-lockdock">
+          <button className="pl-round pl-lock" aria-label="Unlock controls" onClick={() => { setLocked(false); bumpUi(); }}>
+            <LockIcon on />
+          </button>
+        </div>
       )}
 
-      {engine && file?.index !== undefined && (
-        <div style={{ padding: '0 18px 24px', display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
-          <button
-            className="btn btn-primary"
-            style={{ padding: '10px 16px', fontSize: 13 }}
-            onClick={() => runUniversal('fast')}
-            disabled={universal !== 'off'}
+      {showUi && !locked && (
+        <div className="pl-overlay">
+          <div className="pl-top">
+            <button className="pl-round" aria-label="Back" onClick={exit}>
+              <BackIcon />
+            </button>
+            <div className="pl-title">{title}</div>
+            <div className="pl-stats" title={`${Math.round(stats.progress * 100)}% downloaded`}>
+              <UsersIcon />
+              <span>{stats.peers}</span>
+              <DownloadIcon size={12} />
+              <span className="pl-speed">{speed(stats.dl)}</span>
+            </div>
+          </div>
+
+          <div className="pl-center">
+            <button className="pl-skip" aria-label={`Back ${SKIP_SECONDS} seconds`} onClick={() => { skip(-SKIP_SECONDS); bumpUi(); }}>
+              <SkipIcon back />
+            </button>
+            {buffering ? (
+              <div className="pl-play">
+                <div className="pl-spinner" />
+              </div>
+            ) : (
+              <button className="pl-play" aria-label={playing ? 'Pause' : 'Play'} onClick={() => { togglePlay(); bumpUi(); }}>
+                {playing ? <PauseIcon size={28} /> : <PlayIcon size={28} />}
+              </button>
+            )}
+            <button className="pl-skip" aria-label={`Forward ${SKIP_SECONDS} seconds`} onClick={() => { skip(SKIP_SECONDS); bumpUi(); }}>
+              <SkipIcon />
+            </button>
+          </div>
+
+          <div className="pl-bottom">
+            <div className="pl-seekrow">
+              <span className="pl-time">{clock(time)}</span>
+              <SeekBar
+                value={duration ? time / duration : 0}
+                buffered={duration ? buffered / duration : 0}
+                onSeek={(ratio) => {
+                  const v = video();
+                  if (v && duration) v.currentTime = ratio * duration;
+                  bumpUi();
+                }}
+              />
+              <span className="pl-time pl-time-end">{clock(duration)}</span>
+            </div>
+
+            <div className="pl-actions">
+              <Action label="Lock" onClick={() => { setLocked(true); setPicking(false); bumpUi(); }}>
+                <LockIcon on />
+              </Action>
+              {next && (
+                <Action label="Next" onClick={next.go}>
+                  <NextIcon />
+                </Action>
+              )}
+              <Action
+                label={SCALES[scaleIdx].label}
+                on={scaleIdx !== 0}
+                onClick={() => { setScaleIdx((i) => (i + 1) % SCALES.length); bumpUi(); }}
+              >
+                <ScaleIcon />
+              </Action>
+              <Action
+                label="Subtitles"
+                on={!!activeSub}
+                onClick={() => { setSearch((s) => ({ ...s, open: false })); setPicking((p) => !p); bumpUi(); }}
+              >
+                <CcIcon />
+              </Action>
+              <Action
+                label="Find subs"
+                on={search.open}
+                onClick={() => {
+                  setPicking(false);
+                  const open = !search.open;
+                  const query = search.query || titleName || searchableName(engine.torrentName);
+                  setSearch((s) => ({ ...s, open, query }));
+                  if (open && !search.results.length) void runSubSearch('');
+                  bumpUi();
+                }}
+              >
+                <SearchIcon />
+              </Action>
+              <Action
+                label="Speed"
+                on={rate !== 1}
+                onClick={() => {
+                  const r = RATES[(RATES.indexOf(rate) + 1) % RATES.length];
+                  const v = video();
+                  if (v) v.playbackRate = r;
+                  setRate(r);
+                  bumpUi();
+                }}
+              >
+                <span className="pl-action-text">{rate}x</span>
+              </Action>
+              {file && (
+                <Action
+                  label="Save"
+                  onClick={() => doSave({ streamURL: file.streamURL, name: file.name.split('/').pop() ?? file.name, index: file.index })}
+                >
+                  <DownloadIcon />
+                </Action>
+              )}
+              {file && (
+                <Action label="Universal" on={universal !== 'off'} onClick={() => runUniversal('fast')}>
+                  <ZapIcon />
+                </Action>
+              )}
+              <Action label="Fullscreen" onClick={toggleFullscreen}>
+                <FullscreenIcon />
+              </Action>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {picking && (
+        <div className="pl-sheet">
+          <div className="pl-sheet-title">Subtitles</div>
+          <TrackOption
+            label="Off"
+            active={!activeSub}
+            onClick={() => {
+              setActiveSub(null);
+              if (historyItem && fileIndex != null) void setFileSubs(historyItem, fileIndex, []);
+              setPicking(false);
+            }}
+          />
+          {subs.map((s) => (
+            <TrackOption
+              key={s.url}
+              label={s.label}
+              note={s.meta}
+              busy={subBusy === s.url}
+              active={activeSub?.label === s.label}
+              onClick={() => { void applySub(s); setPicking(false); }}
+            />
+          ))}
+          {subs.length === 0 && <div className="pl-nosubs">{subNote ?? 'Looking for subtitles…'}</div>}
+        </div>
+      )}
+
+      {search.open && (
+        <div className="pl-sheet pl-search">
+          <div className="pl-sheet-title">Find subtitles</div>
+          <form
+            className="pl-search-row"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void runSubSearch(search.query);
+            }}
           >
-            ˄˄ Universal (fast)
+            <input
+              autoFocus
+              value={search.query}
+              placeholder="Search by title…"
+              onChange={(e) => setSearch((s) => ({ ...s, query: e.target.value }))}
+            />
+            <button type="submit" className="pl-search-btn" aria-label="Search">
+              {search.busy ? <div className="pl-spinner pl-spinner-sm" /> : <SearchIcon />}
+            </button>
+          </form>
+          {search.results.map((s) => (
+            <TrackOption
+              key={s.url}
+              label={s.label}
+              note={s.meta}
+              busy={subBusy === s.url}
+              active={activeSub?.label === s.label}
+              onClick={async () => {
+                await applySub(s);
+                setSubs((all) => (all.some((x) => x.url === s.url) ? all : [...all, s]));
+                setSearch((x) => ({ ...x, open: false }));
+              }}
+            />
+          ))}
+          {!search.busy && search.note && <div className="pl-nosubs">{search.note}</div>}
+        </div>
+      )}
+
+      {fileIndex == null && (
+        <div className="pl-sheet pl-sheet-center">
+          <div className="pl-sheet-title">Choose a file</div>
+          {engine.files.filter((f) => f.isVideo).map((f) => (
+            <TrackOption
+              key={f.index}
+              label={f.name.split('/').pop() ?? f.name}
+              note={bytes(f.size)}
+              active={false}
+              onClick={() => switchFile(f.index)}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* When the controls are hidden the overlay's spinner is too. */}
+      {buffering && !showUi && (
+        <div className="pl-waiting">
+          <div className="pl-spinner" />
+          <div className="pl-prep-text">Buffering</div>
+          <div className="pl-prep-meta">
+            {speed(stats.dl)} · {stats.peers} peers
+          </div>
+        </div>
+      )}
+
+      {upNextVisible && (
+        <div className="pl-upnext">
+          <div className="pl-upnext-text">
+            <div className="pl-upnext-label">Up next in {Math.max(0, Math.ceil(duration - time))}s</div>
+            <div className="pl-upnext-name">{next!.name}</div>
+          </div>
+          <button className="pl-upnext-cancel" onClick={() => setDismissedNext(true)}>
+            Cancel
           </button>
-          <button
-            className="btn btn-soft"
-            style={{ padding: '10px 16px', fontSize: 13 }}
-            onClick={() => runUniversal('full')}
-            disabled={universal !== 'off'}
-          >
-            ˄˄ Universal (full)
+          <button className="pl-upnext-play" onClick={next!.go}>
+            <PlayIcon size={14} />
+            Play
           </button>
-          <button className="btn btn-soft" style={{ padding: '10px 16px', fontSize: 13 }} onClick={() => file && switchFile(file.index)}>
-            ↺ Restart
+        </div>
+      )}
+
+      {!!error && (
+        <div className="pl-pill pl-pill-bad pl-failure">
+          <span>{error}</span>
+          {cannotDecode && (
+            <button className="pl-pill-btn" onClick={() => runUniversal('fast')}>
+              Try Universal
+            </button>
+          )}
+          <button className="pl-pill-x" aria-label="Dismiss" onClick={() => setError(null)}>
+            ×
           </button>
-          <span className="faint" style={{ fontSize: 12 }}>
-            {bytes(engine.size)} · {nextReleases ? 'next episode available' : ''}
-          </span>
+        </div>
+      )}
+
+      {saveState && (
+        <div className="pl-modal">
+          <div className="pl-modal-card">
+            <div className="pl-modal-title">Saving to disk</div>
+            <div className="pl-bar">
+              <div style={{ width: `${saveState.percent * 100}%` }} />
+            </div>
+            <div className="pl-prep-meta">
+              {Math.round(saveState.percent * 100)}% · {speed(saveState.speed)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {universal !== 'off' && (
+        <div className="pl-modal">
+          <div className="pl-modal-card">
+            <div className="pl-modal-title">
+              {universal === 'prep' ? 'Preparing Universal mode' : 'Converting for the browser'}
+            </div>
+            {transcodeState ? (
+              <>
+                <div className="pl-bar">
+                  <div style={{ width: `${transcodeState.progress * 100}%` }} />
+                </div>
+                <div className="pl-prep-meta">
+                  {Math.round(transcodeState.progress * 100)}% · {clock(transcodeState.time)} processed
+                  {duration > 0 && ` · ${left(Math.max(0, (duration - transcodeState.time) * 3))}`}
+                </div>
+              </>
+            ) : (
+              <div className="pl-spinner" style={{ margin: '14px auto' }} />
+            )}
+            <div className="pl-modal-note">
+              Video is kept as-is and audio converted to AAC. Bitmap subtitles (PGS/VOBSUB) can’t be converted.
+            </div>
+          </div>
         </div>
       )}
     </div>
   );
 }
 
+/** One control in the bottom row: glyph over a label, tinted when active. */
+function Action({
+  label,
+  on,
+  onClick,
+  children,
+}: {
+  label: string;
+  on?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button className={`pl-action${on ? ' on' : ''}`} aria-label={label} onClick={onClick}>
+      <span className="pl-action-glyph">{children}</span>
+      <span className="pl-action-label">{label}</span>
+    </button>
+  );
+}
+
+function TrackOption({
+  label,
+  note,
+  active,
+  busy,
+  onClick,
+}: {
+  label: string;
+  note?: string;
+  active: boolean;
+  busy?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button className={`pl-option${active ? ' on' : ''}`} onClick={onClick} title={label}>
+      <span className="pl-option-body">
+        <span className="pl-option-text">{label}</span>
+        {note && <span className="pl-option-note">{note}</span>}
+      </span>
+      {busy ? <span className="pl-spinner pl-spinner-sm" /> : active && <CheckIcon />}
+    </button>
+  );
+}
+
+/** Thin scrubber — click anywhere on the track, or drag the head, to seek. */
+function SeekBar({
+  value,
+  buffered,
+  onSeek,
+}: {
+  value: number;
+  buffered: number;
+  onSeek: (ratio: number) => void;
+}) {
+  const [drag, setDrag] = useState<number | null>(null);
+  const ratio = (e: React.PointerEvent<HTMLDivElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+  };
+  const pct = Math.max(0, Math.min(1, drag ?? value)) * 100;
+  return (
+    <div
+      className={`pl-scrub${drag != null ? ' dragging' : ''}`}
+      onPointerDown={(e) => {
+        e.currentTarget.setPointerCapture(e.pointerId);
+        setDrag(ratio(e));
+      }}
+      onPointerMove={(e) => {
+        if (drag != null) setDrag(ratio(e));
+      }}
+      onPointerUp={(e) => {
+        if (drag != null) onSeek(ratio(e));
+        setDrag(null);
+      }}
+      onPointerCancel={() => setDrag(null)}
+    >
+      <div className="pl-track">
+        <div className="pl-buffered" style={{ width: `${Math.min(1, buffered) * 100}%` }} />
+        <div className="pl-fill" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="pl-knob" style={{ left: `${pct}%` }} />
+    </div>
+  );
+}
+
 export default function PlayerScreen() {
   return (
-    <Suspense fallback={<div style={{ height: '100vh' }} />}>
+    <Suspense fallback={<div className="pl-screen" />}>
       <PlayerInner />
     </Suspense>
   );

@@ -2,60 +2,71 @@
 /**
  * Subtitle helpers for the web player.
  *
- * SubDL only serves zip files, so the download and unpack happen here in the
- * browser (fflate) — the same job the native module did on Android. In-torrent
- * subtitle files are streamed off the WebTorrent file directly.
+ * Online search and zip unpacking run on the server (/api/subs) so the SubDL
+ * key stays there. In-torrent subtitle files stream off the engine directly.
  */
-import { unzipSync, strFromU8 } from 'fflate';
+import type { Sub, SubQuery } from './subdl';
+
+export type { Sub };
 
 /** Subtitle extensions the engine should expose in the track picker. */
 export const SUB_EXT = /\.(srt|ass|ssa|vtt)$/i;
 
-/** Download and unpack a SubDL zip; returns one text subtitle per entry. */
-export async function fetchSubZip(url: string): Promise<Map<string, string>> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Subtitle download returned ${res.status}`);
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  const files = new Map<string, string>();
-  const entries = unzipSync(bytes);
-  for (const [name, data] of Object.entries(entries)) {
-    if (!SUB_EXT.test(name)) continue;
-    files.set(name, strFromU8(data));
-  }
-  return files;
+async function answer(res: Response) {
+  if (res.ok) return res;
+  const body = await res.json().catch(() => null);
+  throw new Error(body?.error ?? `Subtitles answered ${res.status}`);
 }
 
-/** Fetch a text subtitle by URL and keep only its real name. */
-export async function fetchSubText(url: string): Promise<string> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Subtitle download returned ${res.status}`);
-  return res.text();
+/** Search SubDL through the server. */
+export async function findSubtitles(q: SubQuery): Promise<Sub[]> {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries({
+    q: q.query,
+    imdb: q.imdb,
+    kind: q.kind,
+    lang: q.language,
+    season: q.season,
+    episode: q.episode,
+  })) {
+    if (v != null && v !== '') p.set(k, String(v));
+  }
+  return (await answer(await fetch(`/api/subs?${p}`))).json();
+}
+
+/** One SubDL result's subtitle text, unzipped by the server. The episode picks
+ *  the right file out of a season pack. */
+export async function downloadSubtitle(
+  url: string,
+  at?: { season?: number; episode?: number }
+): Promise<string> {
+  const p = new URLSearchParams({ url });
+  if (at?.season != null) p.set('season', String(at.season));
+  if (at?.episode != null) p.set('episode', String(at.episode));
+  return (await answer(await fetch(`/api/subs?${p}`))).text();
 }
 
 /**
- * SRT -> WebVTT, because `<track>` only speaks WebVTT. ASS/SSA is left alone:
- * the browser cannot read it either, so the player offers it as a raw
- * download instead. Rough but honest — text stays text.
+ * SRT -> WebVTT, because `<track>` only speaks WebVTT. Text that is already
+ * WebVTT passes through.
  */
 export function srtToVtt(srt: string): string {
+  const text = srt.replace(/^﻿/, '').replace(/\r\n?/g, '\n');
+  if (text.startsWith('WEBVTT')) return text;
   return (
     'WEBVTT\n\n' +
-    srt
-      .replace(/^\uFEFF/, '')
-      .replace(/\r\n?/g, '\n')
-      .replace(
-        /(\d{1,2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2}),(\d{3})/g,
-        (_m, ...g: string[]) => {
-          const t = (h: string, m: string, s: string, ms: string) =>
-            `${h.padStart(2, '0')}:${m}:${s}.${ms}`;
-          return `${t(g[0], g[1], g[2], g[3])} --> ${t(g[4], g[5], g[6], g[7])}`;
-        }
-      )
+    text.replace(
+      /(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})/g,
+      (_m, ...g: string[]) => {
+        const t = (h: string, m: string, s: string, ms: string) =>
+          `${h.padStart(2, '0')}:${m}:${s}.${ms}`;
+        return `${t(g[0], g[1], g[2], g[3])} --> ${t(g[4], g[5], g[6], g[7])}`;
+      }
+    )
   );
 }
 
 /** Blob URL for one subtitle text, ready for `<track src>`. */
-export function subtitleBlob(text: string, kind: 'srt' | 'vtt'): string {
-  const vtt = kind === 'srt' ? srtToVtt(text) : text;
-  return URL.createObjectURL(new Blob([vtt], { type: 'text/vtt' }));
+export function subtitleBlob(text: string): string {
+  return URL.createObjectURL(new Blob([srtToVtt(text)], { type: 'text/vtt' }));
 }

@@ -1,117 +1,262 @@
 'use client';
 /**
- * Home: hero + popularity shelves, personalised by what you actually watch.
+ * Home — same sections, same order as the Android HomeScreen:
+ * hero, Continue watching, Watch later, Favourites, genres chosen in Settings,
+ * recommendations from watch history, then the fixed charts.
  */
 import { useEffect, useMemo, useState } from 'react';
-import { loadCatalog, peekCatalog, watchedGenres, type Title } from '../lib/meta';
-import { loadHistory } from '../lib/history';
+import {
+  ANIME_GENRE,
+  kindOfGenre,
+  loadCatalog,
+  peekCatalog,
+  watchedGenres,
+  type Title,
+} from '../lib/meta';
+import { loadHistory, type Item } from '../lib/history';
 import { loadSettings } from '../lib/settings';
-import { loadSaved } from '../lib/saved';
+import { asTitle, inList, loadSaved, type Saved } from '../lib/saved';
+import { parseEpisode } from '../lib/search';
+import { clock } from '../lib/format';
 import { Hero, Poster, Shelf, titleHref } from '../components/Blocks';
 
-type ShelfSpec = { genre: string; kind: 'movie' | 'tv' };
+type ShelfSpec = { title: string; kind: 'movie' | 'tv'; genre?: string };
+
+const SHELVES: ShelfSpec[] = [
+  { title: 'Trending films', kind: 'movie' },
+  { title: 'Popular series', kind: 'tv' },
+  { title: 'Anime', kind: 'tv', genre: ANIME_GENRE },
+];
+
+/** Mirrors `hues` in src/theme.ts. */
+const HUES = ['#d42f37', '#7c5cff', '#00b8d4', '#f5a623', '#38c172'];
+
+const shelfKey = (s: ShelfSpec) => `${s.kind}:${s.genre ?? ''}`;
+
+const catalogHref = (s: ShelfSpec) =>
+  `/catalog/${encodeURIComponent(s.genre || (s.kind === 'movie' ? 'films' : 'series'))}?kind=${s.kind}`;
+
+/** Still watching — has a resume point short of the end. */
+function resumeRatio(item: Item): number {
+  const i = item.lastFileIndex;
+  if (i == null) return 0;
+  const position = item.positions?.[i];
+  const duration = item.durations?.[i];
+  return position && duration ? Math.min(0.99, position / duration) : 0;
+}
+
+function resumeStamp(item: Item): string | null {
+  const i = item.lastFileIndex;
+  if (i == null) return null;
+  const file = item.files?.find((f) => f.index === i);
+  const at = parseEpisode(file?.name ?? item.title);
+  const ep = at ? (at.season === 0 ? `Sp ${at.episode}` : `S${at.season} E${at.episode}`) : null;
+  const position = item.positions?.[i];
+  return [ep, position ? clock(position) : null].filter(Boolean).join('  ·  ') || null;
+}
+
+/** History as a shelf card. */
+function fromHistory(item: Item, saved: Saved[]): Title {
+  const book = saved.find((s) => s.imdb && s.imdb === item.imdb);
+  return asTitle({
+    imdb: item.imdb ?? item.uri,
+    kind: item.kind ?? book?.kind ?? 'movie',
+    title: item.titleName ?? book?.title ?? item.title,
+    poster: item.poster ?? book?.poster ?? null,
+    year: null,
+    rating: null,
+    list: 'later',
+    at: item.at,
+  });
+}
+
+/** Straight back into the player at the saved file and position. */
+function resumeHref(item: Item): string {
+  const q = new URLSearchParams({ uri: item.uri, file: String(item.lastFileIndex) });
+  if (item.titleName) q.set('titleName', item.titleName);
+  if (item.imdb) q.set('imdb', item.imdb);
+  if (item.kind) q.set('kind', item.kind);
+  if (item.poster) q.set('poster', item.poster);
+  return `/watch?${q}`;
+}
 
 export default function HomeScreen() {
-  const [shelves, setShelves] = useState<Title[][] | null>(null);
-  const [personal, setPersonal] = useState<ShelfSpec[]>([]);
-  /** Which of the top recommendations the hero is showing. */
+  const [recent, setRecent] = useState<Item[]>([]);
+  const [saved, setSaved] = useState<Saved[]>([]);
+  const [genres, setGenres] = useState<string[]>([]);
+  const [picks, setPicks] = useState<ShelfSpec[]>([]);
+  const [loaded, setLoaded] = useState<Record<string, Title[]>>(() =>
+    Object.fromEntries(
+      SHELVES.map((s) => [shelfKey(s), peekCatalog(s.kind, s.genre)]).filter(([, t]) => t)
+    )
+  );
   const [heroAt, setHeroAt] = useState(0);
 
-  const spec = useMemo<ShelfSpec[]>(
-    () => [
-      ...personal,
-      { genre: '', kind: 'movie' },
-      { genre: '', kind: 'tv' },
-      { genre: 'Anime', kind: 'tv' },
-    ],
-    [personal]
-  );
-
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      const [history, settings, saved] = await Promise.all([
-        loadHistory(),
-        loadSettings(),
-        loadSaved(),
-      ]);
-      const seen = history
-        .filter((h) => h.imdb && h.kind)
-        .map((h) => ({ imdb: h.imdb!, kind: h.kind! }));
-      saved.forEach((s) => seen.push({ imdb: s.imdb, kind: s.kind }));
-      const fromHistory = await watchedGenres(seen, 3);
-      const fromSettings = settings.genres
-        .slice(0, 3)
-        .map((g) => ({ genre: g, kind: (g === 'Anime' ? 'tv' : 'movie') as 'movie' | 'tv' }));
-      const merged = [...fromSettings, ...fromHistory]
-        .filter((s, i, all) => all.findIndex((x) => x.genre === s.genre) === i)
-        .slice(0, 4);
-      if (!alive) return;
-      setPersonal(merged);
-    })();
-    return () => {
-      alive = false;
-    };
+    Promise.all([loadHistory(), loadSaved(), loadSettings()]).then(([h, s, settings]) => {
+      setRecent(h);
+      setSaved(s);
+      setGenres(settings.genres);
+    });
   }, []);
 
+  /** Shelves built from what has actually been watched — in-progress first. */
   useEffect(() => {
-    let alive = true;
-    const firstRender = () => {
-      const rows = spec.map((s) => peekCatalog(s.kind, s.genre));
-      if (rows.some(Boolean)) {
-        const got = rows.map((r, i) => r ?? []);
-        if (alive) setShelves(got);
-      }
-    };
-    firstRender();
-    Promise.all(
-      spec.map((s) => loadCatalog(s.kind, s.genre || undefined).catch(() => [] as Title[]))
-    ).then((rows) => {
-      if (alive) setShelves(rows);
+    const identified = (items: Item[]) =>
+      items
+        .filter((h): h is Item & { imdb: string } => !!h.imdb)
+        .map((h) => ({ imdb: h.imdb, kind: h.kind ?? ('movie' as const) }));
+    const continuing = recent.filter((h) => resumeRatio(h) > 0 && resumeRatio(h) < 0.9);
+    const rest = recent.filter((h) => !continuing.includes(h));
+    const seen = [
+      ...identified(continuing),
+      ...identified(rest),
+      ...saved.map((s) => ({ imdb: s.imdb, kind: s.kind })),
+    ].slice(0, 30);
+    if (!seen.length) return;
+    let live = true;
+    watchedGenres(seen, 4).then((found) => {
+      if (!live) return;
+      setPicks(
+        found.map(({ genre, kind }, i) => ({
+          title: i === 0 ? 'Recommended for you' : `Because you like ${genre}`,
+          kind,
+          genre,
+        }))
+      );
     });
     return () => {
-      alive = false;
+      live = false;
     };
-    // spec changes identity per render through useMemo deps [personal] — fine.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(spec)]);
+  }, [recent, saved]);
 
-  if (!shelves) {
-    return (
-      <main className="page">
-        <div className="spinner" />
-      </main>
-    );
-  }
+  /** Genres picked in Settings are a statement; they lead. */
+  const chosen = useMemo<ShelfSpec[]>(
+    () =>
+      genres.map((genre) => ({
+        title: genre === ANIME_GENRE ? 'Anime' : genre,
+        kind: kindOfGenre(genre),
+        genre,
+      })),
+    [genres]
+  );
 
-  // The top of the first shelf that actually loaded, paged rather than pinned
-  // to one title — five recommendations is more use than one.
-  const top = (shelves.find((s) => s.length) ?? []).slice(0, 5);
-  const hero = top[heroAt] ?? top[0];
+  // Chosen, then recommendations, then the charts — no catalogue twice.
+  const shelves = useMemo(() => {
+    const taken = new Set(chosen.map(shelfKey));
+    const rest = picks.filter((p) => !taken.has(shelfKey(p)));
+    rest.forEach((p) => taken.add(shelfKey(p)));
+    return [...chosen, ...rest, ...SHELVES.filter((s) => !taken.has(shelfKey(s)))];
+  }, [chosen, picks]);
+
+  useEffect(() => {
+    let live = true;
+    for (const shelf of shelves) {
+      loadCatalog(shelf.kind, shelf.genre)
+        .then((titles) => {
+          if (live && titles.length) setLoaded((all) => ({ ...all, [shelfKey(shelf)]: titles }));
+        })
+        .catch(() => {});
+    }
+    return () => {
+      live = false;
+    };
+  }, [shelves]);
+
+  const watchedIds = useMemo(
+    () => new Set(recent.map((h) => h.imdb).filter(Boolean) as string[]),
+    [recent]
+  );
+  const heroShelf = chosen[0] ?? picks[0] ?? SHELVES[0];
+  const heroPersonal = !!loaded[shelfKey(heroShelf)];
+  const featured = (loaded[shelfKey(heroShelf)] ?? loaded[shelfKey(SHELVES[0])] ?? [])
+    .filter((t) => !watchedIds.has(t.imdb))
+    .slice(0, 5);
+  const eyebrow = heroPersonal
+    ? chosen[0]
+      ? `in ${chosen[0].genre}`
+      : picks[0]
+        ? 'for you'
+        : 'today'
+    : 'today';
+
+  /** Hero advances every 10s; picking a dot restarts the clock. */
+  useEffect(() => {
+    if (featured.length < 2) return;
+    const t = setTimeout(() => setHeroAt((i) => (i + 1) % featured.length), 10_000);
+    return () => clearTimeout(t);
+  }, [featured.length, heroAt]);
+
+  const resumable = recent.filter((h) => resumeRatio(h) > 0 && resumeRatio(h) < 0.9);
+  const later = inList(saved, 'later');
+  const favorites = inList(saved, 'favorite');
+  const hero = featured[Math.min(heroAt, featured.length - 1)];
 
   return (
     <main className="page">
-      {hero && (
+      {hero ? (
         <Hero
           title={hero}
+          eyebrow={`#${Math.min(heroAt, featured.length - 1) + 1} ${eyebrow}`}
           actionHref={titleHref(hero)}
-          actionLabel={`Browse ${hero.kind === 'movie' ? 'Film' : 'Series'}`}
-          page={{ count: top.length, index: Math.min(heroAt, top.length - 1), onPick: setHeroAt }}
+          actionLabel="Watch"
+          page={{ count: featured.length, index: Math.min(heroAt, featured.length - 1), onPick: setHeroAt }}
         />
+      ) : (
+        <div className="spinner" style={{ margin: '120px auto' }} />
       )}
-      {spec.map((s, i) =>
-        shelves[i]?.length ? (
+
+      {resumable.length > 0 && (
+        <Shelf title="Continue watching" hue={HUES[0]} href="/library">
+          {resumable.map((item) => (
+            <Poster
+              key={item.uri}
+              title={fromHistory(item, saved)}
+              href={resumeHref(item)}
+              progress={resumeRatio(item)}
+              stamp={resumeStamp(item)}
+            />
+          ))}
+        </Shelf>
+      )}
+
+      {later.length > 0 && (
+        <Shelf title="Watch later" hue={HUES[1]} href="/library">
+          {later.map((s) => (
+            <Poster key={s.imdb} title={asTitle(s)} />
+          ))}
+        </Shelf>
+      )}
+
+      {favorites.length > 0 && (
+        <Shelf title="Favourites" hue={HUES[2]} href="/library">
+          {favorites.map((s) => (
+            <Poster key={s.imdb} title={asTitle(s)} />
+          ))}
+        </Shelf>
+      )}
+
+      {shelves.map((shelf, i) => {
+        const raw = loaded[shelfKey(shelf)];
+        // Genre shelves are recommendations: drop anything already watched.
+        const data = raw && shelf.genre ? raw.filter((t) => !watchedIds.has(t.imdb)) : raw;
+        return (
           <Shelf
-            key={`${s.kind}:${s.genre}`}
-            title={s.genre || (s.kind === 'movie' ? 'Popular films' : 'Popular series')}
-            href={`/catalog/${encodeURIComponent(s.genre || (s.kind === 'movie' ? 'films' : 'series'))}?kind=${s.kind}`}
+            key={shelfKey(shelf)}
+            title={shelf.title}
+            hue={HUES[(i + 3) % HUES.length]}
+            href={data?.length ? catalogHref(shelf) : undefined}
           >
-            {shelves[i].slice(0, 14).map((t) => (
-              <Poster key={t.imdb} title={t} width={168} />
-            ))}
+            {data ? (
+              data.slice(0, 20).map((t) => <Poster key={t.imdb} title={t} />)
+            ) : (
+              <div className="shelf-loading">
+                <div className="spinner" />
+              </div>
+            )}
           </Shelf>
-        ) : null
-      )}
+        );
+      })}
     </main>
   );
 }

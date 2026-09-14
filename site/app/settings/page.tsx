@@ -1,5 +1,5 @@
 'use client';
-/** Settings: theme, home shelves, trackers, subtitle key, cache control. */
+/** Settings: theme, home shelves, trackers, cache control. */
 import { useEffect, useState } from 'react';
 import { GENRES } from '../../lib/meta';
 import { loadSettings, saveSettings, type Settings } from '../../lib/settings';
@@ -8,17 +8,15 @@ import { clearHistory } from '../../lib/history';
 import { clearSearches } from '../../lib/searches';
 import { useThemeChanger } from '../../components/Chrome';
 
-const SUBDL_KEY = 'subdlKey';
-
 export default function SettingsScreen() {
   const { mode, change } = useThemeChanger();
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [key, setKey] = useState('');
   const [msg, setMsg] = useState('');
 
   useEffect(() => {
     loadSettings().then(setSettings);
-    setKey(localStorage.getItem(SUBDL_KEY) ?? '');
+    // The SubDL key used to live here in the browser; it is server env now.
+    localStorage.removeItem('subdlKey');
   }, []);
 
   if (!settings) return <main className="page"><div className="spinner" /></main>;
@@ -33,12 +31,6 @@ export default function SettingsScreen() {
       ? settings.genres.filter((x) => x !== g)
       : [...settings.genres, g];
     update({ ...settings, genres });
-  };
-
-  const saveKey = () => {
-    localStorage.setItem(SUBDL_KEY, key.trim());
-    setMsg(key.trim() ? 'SubDL key saved — online subtitles in the player.' : 'Key removed.');
-    setTimeout(() => setMsg(''), 3000);
   };
 
   return (
@@ -90,19 +82,6 @@ export default function SettingsScreen() {
         />
       </div>
 
-      <h2 className="shelf-title" style={{ margin: '18px 0 4px' }}>Subtitles</h2>
-      <div className="field">
-        <div>
-          <div className="field-label">SubDL API key</div>
-          <div className="field-sub">Free key from subdl.com for online subtitle search</div>
-        </div>
-      </div>
-      <div style={{ display: 'flex', gap: 8 }}>
-        <input className="input" placeholder="subdl key" value={key} onChange={(e) => setKey(e.target.value)} />
-        <button className="btn btn-primary" onClick={saveKey}>Save</button>
-      </div>
-      {msg && <p className="good-text" style={{ fontSize: 12, marginTop: 8 }}>{msg}</p>}
-
       <h2 className="shelf-title" style={{ margin: '18px 0 4px' }}>Storage</h2>
       <div className="field" style={{ border: 'none' }}>
         <div>
@@ -126,6 +105,7 @@ export default function SettingsScreen() {
           Metadata only
         </button>
       </div>
+      {msg && <p className="good-text" style={{ fontSize: 12, marginTop: 8 }}>{msg}</p>}
     </main>
   );
 }

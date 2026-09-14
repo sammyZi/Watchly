@@ -1,8 +1,7 @@
 'use client';
 /** A whole shelf as a grid. */
-import { Suspense, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
-import { useParams, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { ANIME_GENRE, loadCatalog, type Title } from '../../../lib/meta';
 import { useOnline } from '../../../lib/net';
 import { BackIcon, Poster } from '../../../components/Blocks';
@@ -10,6 +9,7 @@ import { BackIcon, Poster } from '../../../components/Blocks';
 function CatalogInner() {
   const { genre } = useParams<{ genre: string }>();
   const params = useSearchParams();
+  const router = useRouter();
   const decoded = decodeURIComponent(genre ?? '');
   const isFilmList = decoded === 'films' || decoded === 'series';
   const kind = decoded === ANIME_GENRE
@@ -21,14 +21,17 @@ function CatalogInner() {
   const online = useOnline();
 
   const [titles, setTitles] = useState<Title[] | null>(null);
-  const loaded = useRef<string | null>(null);
 
+  // Re-runs when the connection returns; a failed load shows the empty state
+  // instead of spinning forever.
   useEffect(() => {
-    const key = `${kind}:${genreName}`;
-    if (loaded.current === key) return;
-    loaded.current = key;
-    setTitles(null);
-    loadCatalog(kind, genreName || undefined).then(setTitles);
+    let live = true;
+    loadCatalog(kind, genreName || undefined)
+      .then((t) => live && setTitles(t))
+      .catch(() => live && setTitles([]));
+    return () => {
+      live = false;
+    };
   }, [kind, genreName, online]);
 
   const name =
@@ -43,9 +46,13 @@ function CatalogInner() {
   return (
     <main className="page">
       <div className="page-head">
-        <Link href="/" className="back-btn" aria-label="Back">
+        <button
+          className="back-btn"
+          aria-label="Back"
+          onClick={() => (window.history.length > 1 ? router.back() : router.push('/'))}
+        >
           <BackIcon />
-        </Link>
+        </button>
         <h1 className="page-title">{name}</h1>
       </div>
       {!titles && <div className="spinner" />}
