@@ -36,6 +36,7 @@ static class Smoke
         var log = Path.Combine(Path.GetTempPath(), "watchly-smoke.log");
         try
         {
+            try { _ = Engine.TorrentEngine.Instance; } catch (Exception ex) { Failures.Add($"torrent engine: {ex}"); }
             Logic();
             Screens();
         }

@@ -50,6 +50,13 @@ public static class Ui
     public static Border Card(UIElement child, string background = "Surface", double radius = 18, Thickness? padding = null) =>
         Brushed(new Border { Child = child, CornerRadius = new CornerRadius(radius), Padding = padding ?? new Thickness(12) }, background);
 
+    /// <summary>Round the ends fully, whatever height the border lays out at — see PillRadius.</summary>
+    public static T Pill<T>(T border) where T : Border
+    {
+        border.SizeChanged += (_, e) => border.CornerRadius = new CornerRadius(Math.Min(e.NewSize.Height, e.NewSize.Width) / 2);
+        return border;
+    }
+
     public static T Brushed<T>(T border, string key) where T : Border
     {
         border.SetResourceReference(Border.BackgroundProperty, key);
@@ -116,28 +123,22 @@ public static class Ui
         VirtualizingPanel.SetIsVirtualizing(list, true);
         VirtualizingPanel.SetVirtualizationMode(list, VirtualizationMode.Recycling);
         VirtualizingPanel.SetScrollUnit(list, ScrollUnit.Pixel);
-        var panel = new FrameworkElementFactory(typeof(VirtualizingStackPanel));
-        panel.SetValue(StackPanel.OrientationProperty, Orientation.Horizontal);
-        list.ItemsPanel = new ItemsPanelTemplate(panel);
-
-        // The ScrollViewer has to sit inside the ItemsControl's own template for
-        // the panel to virtualise, so the template is built here.
-        var shellTemplate = new ControlTemplate(typeof(ItemsControl));
-        var sv = new FrameworkElementFactory(typeof(ScrollViewer));
-        sv.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty, ScrollBarVisibility.Hidden);
-        sv.SetValue(ScrollViewer.VerticalScrollBarVisibilityProperty, ScrollBarVisibility.Disabled);
-        sv.SetValue(ScrollViewer.CanContentScrollProperty, true);
-        sv.SetValue(Control.PaddingProperty, new Thickness(sidePadding, 0, sidePadding, 0));
-        sv.AppendChild(new FrameworkElementFactory(typeof(ItemsPresenter)));
-        shellTemplate.VisualTree = sv;
-        list.Template = shellTemplate;
+        // Panel and scroller come from Templates.xaml: the ScrollViewer has to sit
+        // inside the ItemsControl's own template for the row to virtualise.
+        list.ItemsPanel = (ItemsPanelTemplate)Application.Current.FindResource("RailPanel");
+        list.Template = (ControlTemplate)Application.Current.FindResource("RailTemplate");
+        list.Padding = new Thickness(sidePadding, 0, sidePadding, 0);
         list.Height = height;
 
         var grid = new Grid();
         grid.Children.Add(list);
         list.Loaded += (_, _) =>
         {
-            if (VisualTreeHelper.GetChildrenCount(list) > 0 && VisualTreeHelper.GetChild(list, 0) is ScrollViewer inner) PassWheel(inner);
+            if (VisualTreeHelper.GetChildrenCount(list) > 0 && VisualTreeHelper.GetChild(list, 0) is ScrollViewer inner)
+            {
+                PassWheel(inner);
+                DragScroll(inner);
+            }
         };
 
         Button Arrow(string icon, HorizontalAlignment side, Action<ScrollViewer> move)
@@ -153,14 +154,117 @@ public static class Ui
             b.Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 12, ShadowDepth = 2, Opacity = 0.35 };
             return b;
         }
-        var left = Arrow("chevron-left", HorizontalAlignment.Left, sv2 => sv2.PageLeft());
-        var right = Arrow("chevron-right", HorizontalAlignment.Right, sv2 => sv2.PageRight());
+        var left = Arrow("chevron-left", HorizontalAlignment.Left, sv2 => PageRail(sv2, -1));
+        var right = Arrow("chevron-right", HorizontalAlignment.Right, sv2 => PageRail(sv2, 1));
         grid.Children.Add(left);
         grid.Children.Add(right);
         grid.MouseEnter += (_, _) => left.Opacity = right.Opacity = 0.92;
         grid.MouseLeave += (_, _) => left.Opacity = right.Opacity = 0;
         grid.Background = Brushes.Transparent;
         return grid;
+    }
+
+    /// <summary>One card plus the gap after it — PosterCard's 150 wide and 14 margin.</summary>
+    const double CardStep = 164;
+
+    /// <summary>
+    /// The arrows move a whole screenful of cards, landing on a card edge, so the
+    /// next set starts where the last one ended rather than a few pixels along.
+    /// </summary>
+    static void PageRail(ScrollViewer rail, int direction)
+    {
+        var cards = Math.Max(1, Math.Floor(rail.ViewportWidth / CardStep));
+        var start = animating.TryGetValue(rail, out var pending) ? pending : rail.HorizontalOffset;
+        var target = Math.Round((start + direction * cards * CardStep) / CardStep) * CardStep;
+        SmoothScroll(rail, Math.Clamp(target, 0, rail.ScrollableWidth));
+    }
+
+    static readonly Dictionary<ScrollViewer, double> animating = new();
+
+    static void SmoothScroll(ScrollViewer rail, double to)
+    {
+        var from = rail.HorizontalOffset;
+        animating[rail] = to;
+        var started = DateTime.UtcNow;
+        var timer = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(12) };
+        timer.Tick += (_, _) =>
+        {
+            if (!animating.TryGetValue(rail, out var current) || current != to) { timer.Stop(); return; }
+            var t = Math.Min(1, (DateTime.UtcNow - started).TotalMilliseconds / 320);
+            var eased = 1 - Math.Pow(1 - t, 3);
+            rail.ScrollToHorizontalOffset(from + (to - from) * eased);
+            if (t >= 1)
+            {
+                timer.Stop();
+                animating.Remove(rail);
+            }
+        };
+        timer.Start();
+    }
+
+    /// <summary>
+    /// Click and drag to swipe a shelf, like a thumb on the phone. Past a few
+    /// pixels the drag takes the mouse from the card under it, so letting go
+    /// does not also open that card; a quick fling carries on for a moment.
+    /// </summary>
+    public static void DragScroll(ScrollViewer rail)
+    {
+        Point? start = null;
+        double origin = 0;
+        var dragging = false;
+        var samples = new List<(DateTime At, double X)>();
+
+        rail.PreviewMouseLeftButtonDown += (_, e) =>
+        {
+            animating.Remove(rail);
+            start = e.GetPosition(rail);
+            origin = rail.HorizontalOffset;
+            dragging = false;
+            samples.Clear();
+        };
+        rail.PreviewMouseMove += (_, e) =>
+        {
+            if (start is null) return;
+            if (e.LeftButton != MouseButtonState.Pressed) { start = null; return; }
+            var x = e.GetPosition(rail).X;
+            var dx = x - start.Value.X;
+            if (!dragging)
+            {
+                if (Math.Abs(dx) < 6) return;
+                dragging = true;
+                rail.CaptureMouse();
+                rail.Cursor = Cursors.ScrollWE;
+            }
+            samples.Add((DateTime.UtcNow, x));
+            if (samples.Count > 6) samples.RemoveAt(0);
+            rail.ScrollToHorizontalOffset(origin - dx);
+            e.Handled = true;
+        };
+        void End(MouseButtonEventArgs? e)
+        {
+            if (dragging)
+            {
+                dragging = false;
+                rail.Cursor = null;
+                if (rail.IsMouseCaptured) rail.ReleaseMouseCapture();
+                if (e is not null) e.Handled = true;
+                // Fling: keep going the way the pointer was moving, then settle.
+                if (samples.Count >= 2)
+                {
+                    var (t0, x0) = samples[0];
+                    var (t1, x1) = samples[^1];
+                    var ms = (t1 - t0).TotalMilliseconds;
+                    if (ms > 0 && ms < 200 && (DateTime.UtcNow - t1).TotalMilliseconds < 80)
+                    {
+                        var velocity = (x1 - x0) / ms;
+                        SmoothScroll(rail, Math.Clamp(rail.HorizontalOffset - velocity * 260, 0, rail.ScrollableWidth));
+                    }
+                }
+            }
+            start = null;
+        }
+        rail.PreviewMouseLeftButtonUp += (_, e) => End(e);
+        rail.LostMouseCapture += (_, _) => { if (dragging) End(null); };
     }
 
     /// <summary>A wrapping grid of posters — PosterGrid, sized for a window rather than a phone.</summary>

@@ -8,6 +8,7 @@
   <c:ImageUrl x:Key="Img" />
   <c:HueBrush x:Key="Hue" />
   <c:Initials x:Key="Initials" />
+  <c:PillRadius x:Key="PillRadius" />
 
   <!-- src/theme.ts `type`. -->
   <Style x:Key="Display" TargetType="TextBlock">
@@ -57,8 +58,13 @@
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="ButtonBase">
-          <Border x:Name="Box" Background="{TemplateBinding Background}" CornerRadius="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}, TargetNullValue=0}"
-                  Padding="{TemplateBinding Padding}">
+          <Border x:Name="Box" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+            <Border.CornerRadius>
+              <MultiBinding Converter="{StaticResource PillRadius}">
+                <Binding Path="Tag" RelativeSource="{RelativeSource TemplatedParent}" />
+                <Binding Path="ActualHeight" RelativeSource="{RelativeSource Self}" />
+              </MultiBinding>
+            </Border.CornerRadius>
             <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                               VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
           </Border>

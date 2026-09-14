@@ -28,6 +28,7 @@ public sealed record DownloadJob
     public string? Kind { get; init; }
     public bool Paused { get; init; }
 
+    [System.Text.Json.Serialization.JsonIgnore]
     public string Label => TitleName ?? Title ?? "Download";
 }
 
@@ -243,13 +244,25 @@ public sealed class Downloads
         }
     }
 
+    bool ticking;
+
     async Task Tick()
     {
-        foreach (var row in Live.ToList())
+        // A copy into the downloads folder can outlast a tick; never run two at once.
+        if (ticking) return;
+        ticking = true;
+        try
         {
-            if (row.Manager is null) continue;
-            await Collect(row);
-            Update(row);
+            foreach (var row in Live.ToList())
+            {
+                if (row.Manager is null) continue;
+                await Collect(row);
+                Update(row);
+            }
+        }
+        finally
+        {
+            ticking = false;
         }
     }
 
@@ -266,6 +279,23 @@ public sealed class Downloads
             row.SavedSet.Add(i);
             fresh = true;
             var info = row.Meta!.Files[i];
+            var path = file.DownloadCompleteFullPath;
+            // A download that took over the torrent being watched writes into the
+            // stream cache; the finished file still belongs in the downloads folder.
+            if (!path.StartsWith(row.SaveDir, StringComparison.OrdinalIgnoreCase))
+            {
+                var target = Path.Combine(row.SaveDir, info.Path.Replace('/', Path.DirectorySeparatorChar));
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                    await Task.Run(() => File.Copy(path, target, true));
+                    path = target;
+                }
+                catch (Exception e)
+                {
+                    Failed?.Invoke($"Could not copy {info.Name} to the downloads folder: {e.Message}");
+                }
+            }
             if (info.IsVideo || row.Job.All)
             {
                 SavedDownloads.Record(new SavedDownload
@@ -273,7 +303,7 @@ public sealed class Downloads
                     Name = info.Name,
                     Size = info.Size,
                     At = Store.Now,
-                    Path = file.DownloadCompleteFullPath,
+                    Path = path,
                     Poster = row.Job.Poster,
                     TitleName = row.Job.All ? null : row.Job.TitleName,
                 });
@@ -407,8 +437,12 @@ public sealed class Downloads
     }
 
     /// <summary>The finished file for a queue row, for playing straight off disk.</summary>
-    public static string? FilePath(ActiveDownload row, int index) =>
-        row.Manager is not null && row.SavedSet.Contains(index) ? row.Manager.Files[index].DownloadCompleteFullPath : null;
+    public static string? FilePath(ActiveDownload row, int index)
+    {
+        if (row.Manager is null || row.Meta is null || !row.SavedSet.Contains(index)) return null;
+        var copied = Path.Combine(row.SaveDir, row.Meta.Files[index].Path.Replace('/', Path.DirectorySeparatorChar));
+        return File.Exists(copied) ? copied : row.Manager.Files[index].DownloadCompleteFullPath;
+    }
 
     public async Task StopAll()
     {

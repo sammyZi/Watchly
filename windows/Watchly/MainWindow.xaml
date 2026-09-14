@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:c="clr-namespace:Watchly.Controls"
         xmlns:local="clr-namespace:Watchly"
-        Title="Watchly" Width="1280" Height="840" MinWidth="760" MinHeight="560"
+        Title="Watchly" Icon="pack://application:,,,/Assets/app.ico" Width="1280" Height="840" MinWidth="760" MinHeight="560"
         Background="{DynamicResource Bg}" FontFamily="{StaticResource Noto}"
         TextOptions.TextFormattingMode="Ideal" UseLayoutRounding="True"
         WindowStartupLocation="CenterScreen" AllowDrop="True">

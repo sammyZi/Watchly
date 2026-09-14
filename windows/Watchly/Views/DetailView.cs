@@ -290,7 +290,7 @@ public sealed class DetailView : UserControl, IDisposable
                 segment.Background = on ? (Brush)FindResource("SurfaceAlt") : Brushes.Transparent;
                 bar.Children.Add(segment);
             }
-            var track = Ui.Card(bar, "Surface", 999, new Thickness(3));
+            var track = Ui.Pill(Ui.Card(bar, "Surface", 0, new Thickness(3)));
             track.Margin = new Thickness(40, 12, 40, 0);
             track.MaxWidth = 720;
             track.HorizontalAlignment = HorizontalAlignment.Left;
@@ -573,7 +573,7 @@ public sealed class DetailView : UserControl, IDisposable
                 var body = new StackPanel { Margin = new Thickness(12, 0, 12, 0), VerticalAlignment = VerticalAlignment.Center, Children = { name, Ui.Text(meta, "Meta", "Faint", 11) } };
                 var pill = Ui.Brushed(new Border
                 {
-                    CornerRadius = new CornerRadius(999),
+                    CornerRadius = new CornerRadius(11),
                     Padding = new Thickness(8, 4, 8, 4),
                     VerticalAlignment = VerticalAlignment.Center,
                     Child = new StackPanel

@@ -260,6 +260,8 @@ public sealed class HomeView : UserControl
         var name = Ui.Text(title.Name, "Display", "Text", 34);
         name.TextWrapping = TextWrapping.Wrap;
         name.MaxWidth = 640;
+        // Left, not the default stretch — a capped width on a stretched block centres it.
+        name.HorizontalAlignment = HorizontalAlignment.Left;
         var body = new StackPanel
         {
             VerticalAlignment = VerticalAlignment.Bottom,

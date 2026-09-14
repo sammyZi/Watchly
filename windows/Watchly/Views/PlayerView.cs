@@ -360,7 +360,9 @@ public sealed class PlayerView : UserControl, IDisposable
         SavePosition();
         dismissedNext = true;
         var go = next.Go;
-        _ = Close().ContinueWith(_ => Ui(() => go()));
+        // Hand the screen back first: if the next episode has to be searched for
+        // and nothing turns up, the page underneath is where that is said.
+        _ = Close().ContinueWith(_ => Ui(() => { Exited?.Invoke(); go(); }));
     }
 
     // ── Controls ────────────────────────────────────────────────────────────
@@ -767,7 +769,7 @@ public sealed class PlayerView : UserControl, IDisposable
             // Left edge: volume, a point at a time — the phone's brightness rail.
             var rail = new Border
             {
-                CornerRadius = new CornerRadius(999),
+                CornerRadius = new CornerRadius(22),
                 Background = Black(0x73),
                 Padding = new Thickness(0, 4, 0, 4),
                 HorizontalAlignment = HorizontalAlignment.Left,
@@ -853,7 +855,7 @@ public sealed class PlayerView : UserControl, IDisposable
         {
             chrome.Children.Add(new Border
             {
-                CornerRadius = new CornerRadius(999),
+                CornerRadius = new CornerRadius(18),
                 Background = Black(0xcc),
                 Padding = new Thickness(16, 9, 16, 9),
                 HorizontalAlignment = HorizontalAlignment.Center,
@@ -873,7 +875,7 @@ public sealed class PlayerView : UserControl, IDisposable
         if (failure is null) return;
         var banner = new Border
         {
-            CornerRadius = new CornerRadius(999),
+            CornerRadius = new CornerRadius(17),
             Background = failureFatal ? new SolidColorBrush(Color.FromRgb(0xd0, 0x48, 0x3c)) : Black(0xcc),
             Padding = new Thickness(16, 8, 16, 8),
             HorizontalAlignment = HorizontalAlignment.Center,

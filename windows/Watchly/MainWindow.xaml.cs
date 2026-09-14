@@ -98,6 +98,8 @@ public partial class MainWindow : Window
             _ = BackfillPosters();
             if (openOnStart is not null) OpenIncoming(openOnStart);
         };
+        SourceInitialized += (_, _) => Theme.TitleBar(this);
+        Theme.Changed += () => Theme.TitleBar(this);
         Drop += OnDropSource;
         PreviewKeyDown += OnKey;
         MouseDown += (_, e) =>
@@ -379,7 +381,7 @@ public partial class MainWindow : Window
         }
         catch (Exception e)
         {
-            if (opening == cts) Toast(e.Message, true);
+            if (opening == cts) Toast(e.GetBaseException().Message, true);
             return false;
         }
         finally
