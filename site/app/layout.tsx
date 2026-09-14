@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { Noto_Sans } from 'next/font/google';
+import { Analytics } from '@vercel/analytics/next';
 import './globals.css';
 import { ThemeProvider, Nav, OfflineStrip } from '../components/Chrome';
 
@@ -34,6 +35,7 @@ export default function RootLayout({ children }: LayoutProps<'/'>) {
           <OfflineStrip />
           {children}
         </ThemeProvider>
+        <Analytics />
       </body>
     </html>
   );
