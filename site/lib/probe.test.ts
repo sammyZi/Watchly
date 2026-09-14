@@ -1,6 +1,6 @@
-// node --experimental-strip-types site/lib/media.test.ts
+// node --experimental-strip-types site/lib/probe.test.ts
 import assert from 'node:assert';
-import { needsVideoEncode, parseProbe } from './media.ts';
+import { needsVideoEncode, parseProbe } from './probe.ts';
 
 // Real banner from Big Buck Bunny (MP4: mp3 + AC-3 audio).
 const mp4 = parseProbe(`Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'http://127.0.0.1:3000/api/torrent/x/1':
@@ -44,4 +44,4 @@ assert.deepEqual(
 // The SRT is the second subtitle stream (after the PGS), and only it is offered.
 assert.deepEqual(mkv.subtitles.map((s) => [s.index, s.codec, s.title]), [[1, 'subrip', 'English SDH']]);
 
-console.log('media ok');
+console.log('probe ok');

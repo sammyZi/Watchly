@@ -82,6 +82,23 @@ export default function SettingsScreen() {
         />
       </div>
 
+      <h2 className="shelf-title" style={{ margin: '18px 0 4px' }}>Account</h2>
+      <div className="field">
+        <div>
+          <div className="field-label">Sign out</div>
+          <div className="field-sub">This device will need the site password again</div>
+        </div>
+        <button
+          className="btn btn-soft"
+          onClick={async () => {
+            await fetch('/api/login', { method: 'DELETE' }).catch(() => {});
+            window.location.replace('/login');
+          }}
+        >
+          Sign out
+        </button>
+      </div>
+
       <h2 className="shelf-title" style={{ margin: '18px 0 4px' }}>Storage</h2>
       <div className="field" style={{ border: 'none' }}>
         <div>
