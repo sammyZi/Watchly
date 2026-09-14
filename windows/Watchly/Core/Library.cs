@@ -37,6 +37,7 @@ public sealed record HistoryItem
         return Math.Clamp(position.Value / duration.Value, 0, 0.99);
     }
 
+    [System.Text.Json.Serialization.JsonIgnore]
     public string DisplayName => TitleName ?? TorrentName ?? Title;
 }
 
@@ -224,6 +225,7 @@ public sealed record AppSettings
 
     public void Save() => Store.Save(Key, this);
 
+    [System.Text.Json.Serialization.JsonIgnore]
     public string DownloadDir => string.IsNullOrWhiteSpace(DownloadFolder) ? Paths.DefaultDownloads : DownloadFolder!;
 }
 

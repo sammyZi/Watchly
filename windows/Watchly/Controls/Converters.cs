@@ -91,6 +91,22 @@ public sealed class HueBrush : IValueConverter
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) => throw new NotSupportedException();
 }
 
+/// <summary>
+/// A corner radius no bigger than half the height. WPF stretches an oversized
+/// radius into an ellipse instead of clamping it, so "999 for a pill" drew ovals.
+/// </summary>
+public sealed class PillRadius : IMultiValueConverter
+{
+    public object Convert(object[] values, Type targetType, object parameter, CultureInfo culture)
+    {
+        var wanted = double.TryParse(values[0]?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var t) ? t : 0;
+        var height = values[1] is double h && h > 0 ? h : 0;
+        return new CornerRadius(height > 0 ? Math.Min(wanted, height / 2) : wanted >= 999 ? 0 : wanted);
+    }
+
+    public object[] ConvertBack(object value, Type[] targetTypes, object parameter, CultureInfo culture) => throw new NotSupportedException();
+}
+
 /// <summary>" · Series" after the year for a series, nothing for a film.</summary>
 public sealed class KindSuffix : IValueConverter
 {

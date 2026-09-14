@@ -22,10 +22,10 @@ public sealed record Progress(double Percent, double Speed, double UploadSpeed, 
 /// </summary>
 public sealed class TorrentEngine
 {
+    static readonly string MetaDir = Path.Combine(Paths.EngineCache, "torrents");
     public static TorrentEngine Instance { get; } = new();
 
     readonly ClientEngine engine;
-    static readonly string MetaDir = Path.Combine(Paths.EngineCache, "torrents");
 
     TorrentEngine()
     {
@@ -186,8 +186,8 @@ public sealed class TorrentEngine
     {
         try
         {
+            // Fast-resume data is written per torrent as it stops; jobs re-add themselves next launch.
             await engine.StopAllAsync(TimeSpan.FromSeconds(3));
-            await engine.SaveStateAsync(Path.Combine(Paths.EngineCache, "engine.state"));
         }
         catch { }
         engine.Dispose();

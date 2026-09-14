@@ -5,6 +5,18 @@
                     xmlns:v="clr-namespace:Watchly.Views"
                     xmlns:local="clr-namespace:Watchly">
 
+  <!-- A shelf: one virtualised row, scrolled by its arrows (Ui.Rail). -->
+  <ItemsPanelTemplate x:Key="RailPanel">
+    <VirtualizingStackPanel Orientation="Horizontal" />
+  </ItemsPanelTemplate>
+  <ControlTemplate x:Key="RailTemplate" TargetType="ItemsControl">
+    <!-- PanningMode: a finger on a touch screen swipes the row, as on the phone. -->
+    <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled" CanContentScroll="True"
+                  Padding="{TemplateBinding Padding}" Focusable="False" PanningMode="HorizontalFirst">
+      <ItemsPresenter />
+    </ScrollViewer>
+  </ControlTemplate>
+
   <!-- A poster on a shelf or in a grid: HomeScreen's Poster / PosterGrid's card. -->
   <DataTemplate x:Key="PosterCard" DataType="{x:Type core:Title}">
     <Button Style="{StaticResource Bare}" Width="150" Margin="0,0,14,0" VerticalAlignment="Top"
