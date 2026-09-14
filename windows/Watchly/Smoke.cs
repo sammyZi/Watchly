@@ -51,6 +51,8 @@ static class Smoke
 
     static void Logic()
     {
+        Ok(SubDL.Key != null && SubDL.Key.StartsWith("subdl_"), "SubDL key resolved");
+
         // search.test.ts
         var rows = (JsonArray)JsonNode.Parse("""
             [{"id":"0","name":"x","info_hash":"0000000000000000000000000000000000000000","seeders":"5","leechers":"1","size":"1","category":"207"},

@@ -6,6 +6,7 @@
         Title="Watchly" Icon="pack://application:,,,/Assets/app.ico" Width="1280" Height="840" MinWidth="760" MinHeight="560"
         Background="{DynamicResource Bg}" FontFamily="{StaticResource Noto}"
         TextOptions.TextFormattingMode="Ideal" UseLayoutRounding="True"
+        WindowState="Maximized"
         WindowStartupLocation="CenterScreen" AllowDrop="True">
   <Window.CommandBindings>
     <CommandBinding Command="{x:Static local:Cmd.OpenTitle}" Executed="OnOpenTitle" />
@@ -29,7 +30,7 @@
     <!-- Pages drawn over the tabs: shelf grid, title page, file list. Last child is on top. -->
     <Grid x:Name="Layers" />
 
-    <ContentControl x:Name="PlayerHost" Focusable="False" />
+    <ContentControl x:Name="PlayerHost" Focusable="False" Background="Black" Panel.ZIndex="100" Visibility="Collapsed" />
 
     <!-- A torrent being read — the swarm has to answer before anything can play. -->
     <Border x:Name="BusyCard" Visibility="Collapsed" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,96"

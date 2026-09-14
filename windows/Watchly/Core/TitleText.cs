@@ -63,6 +63,13 @@ public static class TitleText
         "udp://exodus.desync.com:6969/announce",
         "udp://tracker.openbittorrent.com:6969/announce",
         "udp://explodie.org:6969/announce",
+        "udp://open.demonii.com:1337/announce",
+        "udp://tracker.coppersurfer.tk:6969/announce",
+        "udp://tracker.leechers-paradise.org:6969/announce",
+        "udp://p4p.arenabg.com:1337/announce",
+        "udp://tracker.internetwarriors.net:1337/announce",
+        "http://tracker.opentrackr.org:1337/announce",
+        "http://tracker.openbittorrent.com:80/announce",
     };
 
     /// <summary>Bare magnet links crawl on DHT alone; attach well-known open trackers.</summary>
