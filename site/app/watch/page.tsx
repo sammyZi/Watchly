@@ -27,6 +27,7 @@ import {
   ScaleIcon,
   SearchIcon,
   SkipIcon,
+  SoundIcon,
   UsersIcon,
   ZapIcon,
 } from '../../components/Blocks';
@@ -120,6 +121,8 @@ function PlayerInner() {
   const [historyItem, setHistoryItem] = useState<Item | null>(null);
   const [playing, setPlaying] = useState(false);
   const [buffering, setBuffering] = useState(false);
+  /** Starts silent; the Sound button or `m` unmutes. */
+  const [muted, setMuted] = useState(true);
   const [time, setTime] = useState(0);
   const [duration, setDurationState] = useState(0);
   const [buffered, setBuffered] = useState(0);
@@ -596,8 +599,8 @@ function PlayerInner() {
   /**
    * What is inside the file — audio tracks, built-in subtitles, codecs — from
    * the server's ffmpeg. Audio the browser cannot decode (AC-3, DTS…) plays
-   * silently in Chrome instead of failing, so that switches to conversion
-   * straight away.
+   * silently in Chrome instead of failing, so that gets a hint to turn on
+   * Universal.
    */
   useEffect(() => {
     if (!engine || fileIndex == null) return;
@@ -611,10 +614,10 @@ function PlayerInner() {
         setMedia(m);
         if (m.duration) setDurationState(m.duration);
         const first = m.audio[0];
+        // Universal stays off by default; only point at it.
         if (first && !BROWSER_AUDIO.test(first.codec) && !convertRef.current) {
-          log(`audio is ${first.codec}: converting on the server`);
-          setNotice(`This release's audio (${first.codec.toUpperCase()}) needs converting — playing through the server`);
-          startConvert({ audio: 0, encode: m.needsVideoEncode }, clockNow() || (historyItem?.positions?.[fileIndex] ?? 0));
+          log(`audio is ${first.codec}: may be silent without Universal`);
+          setNotice(`This release's audio (${first.codec.toUpperCase()}) may be silent — turn on Universal`);
         }
       })
       .catch(() => {});
@@ -983,6 +986,8 @@ function PlayerInner() {
         className="pl-video"
         style={{ objectFit: SCALES[scaleIdx].fit }}
         playsInline
+        muted={muted}
+        onVolumeChange={(e) => setMuted(e.currentTarget.muted)}
         onPlay={() => setPlaying(true)}
         onPause={() => {
           setPlaying(false);
@@ -1206,6 +1211,9 @@ function PlayerInner() {
                   <ZapIcon />
                 </Action>
               )}
+              <Action label={muted ? 'Unmute' : 'Mute'} on={muted} onClick={() => { setMuted(!muted); bumpUi(); }}>
+                <SoundIcon muted={muted} />
+              </Action>
               <Action label="Fullscreen" onClick={toggleFullscreen}>
                 <FullscreenIcon />
               </Action>
