@@ -96,6 +96,26 @@ export function shiftVtt(vtt: string, seconds: number): string {
     .join('\n\n');
 }
 
+export type Cue = { start: number; end: number; text: string };
+
+/** WebVTT -> cues, times in seconds. Enough for what ffmpeg writes. */
+export function parseVtt(vtt: string): Cue[] {
+  const toSec = (t: string) => {
+    const p = t.split(':').map(Number);
+    return p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + p[1];
+  };
+  const cues: Cue[] = [];
+  for (const block of vtt.replace(/\r\n?/g, '\n').split(/\n\n+/)) {
+    const lines = block.split('\n');
+    const at = lines.findIndex((l) => l.includes('-->'));
+    if (at < 0) continue;
+    const m = /((?:\d+:)?\d{2}:\d{2}\.\d{3})\s*-->\s*((?:\d+:)?\d{2}:\d{2}\.\d{3})/.exec(lines[at]);
+    const text = lines.slice(at + 1).join('\n').trim();
+    if (m && text) cues.push({ start: toSec(m[1]), end: toSec(m[2]), text });
+  }
+  return cues;
+}
+
 /** Blob URL for one subtitle text, ready for `<track src>`. `shift` moves
  *  every cue that many seconds earlier. */
 export function subtitleBlob(text: string, shift = 0): string {
