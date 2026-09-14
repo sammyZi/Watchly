@@ -68,7 +68,6 @@ export function srtToVtt(srt: string): string {
 
 /**
  * Every cue moved `seconds` earlier; cues that end before zero are dropped.
- * A converted stream starts its clock at zero wherever in the film it began.
  */
 export function shiftVtt(vtt: string, seconds: number): string {
   if (!seconds) return vtt;

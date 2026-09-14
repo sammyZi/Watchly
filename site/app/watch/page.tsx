@@ -2,9 +2,8 @@
 /**
  * The player. Opens a magnet on the server-side engine (HTTP range requests
  * from /api/torrent), picks the file the release intended, and streams it with
- * resume, subtitles, stats and up-next — and when the browser cannot decode a
- * release, or another audio track is picked, switches to the server's ffmpeg
- * conversion (/play), which streams as it converts.
+ * resume, subtitles, stats and up-next. The browser decodes the file itself;
+ * a format it cannot play is reported, not converted.
  *
  * Layout copies the Android player (src/screens/PlayerScreen.tsx): everything
  * floats over the picture, transport in the centre, scrubber and a labelled
@@ -27,9 +26,7 @@ import {
   ScaleIcon,
   SearchIcon,
   SkipIcon,
-  SoundIcon,
   UsersIcon,
-  ZapIcon,
 } from '../../components/Blocks';
 import {
   loadHistory,
@@ -82,12 +79,6 @@ type Media = Probe & { needsVideoEncode: boolean };
  *  from the probe. */
 const BROWSER_AUDIO = /^(aac|mp3|opus|vorbis|flac|pcm_\w+)$/;
 
-/**
- * Server conversion in use. The converted stream starts at zero wherever it
- * was started, so `offset` is where in the film that zero is.
- */
-type Convert = { audio: number; encode: boolean; offset: number };
-
 /** SubDL links are .zip; the server hands back the .srt inside. */
 const onlineOption = (s: Sub): SubOption => ({
   label: `${(s.release || s.name || 'subtitle').replace(/\.(zip|srt)$/i, '')}.srt`,
@@ -121,8 +112,6 @@ function PlayerInner() {
   const [historyItem, setHistoryItem] = useState<Item | null>(null);
   const [playing, setPlaying] = useState(false);
   const [buffering, setBuffering] = useState(false);
-  /** Starts silent; the Sound button or `m` unmutes. */
-  const [muted, setMuted] = useState(true);
   const [time, setTime] = useState(0);
   const [duration, setDurationState] = useState(0);
   const [buffered, setBuffered] = useState(0);
@@ -132,8 +121,7 @@ function PlayerInner() {
   const [locked, setLocked] = useState(false);
   const [stats, setStats] = useState({ progress: 0, dl: 0, ul: 0, peers: 0 });
   const [subs, setSubs] = useState<SubOption[]>([]);
-  /** The subtitle on screen, as text — its blob URL is rebuilt per `convert`
-   *  offset so cues stay in sync with a converted stream. */
+  /** The subtitle on screen, as text. */
   const [activeSub, setActiveSub] = useState<{ text: string; label: string } | null>(null);
   const [picking, setPicking] = useState(false);
   /** The subtitle being downloaded, for its spinner. */
@@ -146,10 +134,7 @@ function PlayerInner() {
     note: string | null;
   }>({ open: false, query: '', busy: false, results: [], note: null });
   const [media, setMedia] = useState<Media | null>(null);
-  const [convert, setConvert] = useState<Convert | null>(null);
-  const convertRef = useRef<Convert | null>(null);
-  convertRef.current = convert;
-  /** A calm message (not an error), e.g. "Converting on the server". */
+  /** A calm message (not an error), e.g. an audio format warning. */
   const [notice, setNotice] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<{ percent: number; speed: number } | null>(null);
   const [nextUp, setNextUp] = useState<{ index: number; name: string } | null>(null);
@@ -176,61 +161,9 @@ function PlayerInner() {
     else v.pause();
   }, []);
 
-  /**
-   * Films are mixed far quieter than YouTube, and 5.1 folded to laptop
-   * speakers loses more. A compressor (its defaults level speech against
-   * explosions) then 2x gain, so full volume is actually loud. Built on the
-   * first play — Web Audio needs a user gesture, and an element can only be
-   * wired once. Mute is the gain at 0: once routed through Web Audio, Chrome
-   * on Android plays on regardless of the element's own `muted`.
-   */
-  const audioRef = useRef<AudioContext | null>(null);
-  const gainRef = useRef<GainNode | null>(null);
-  const boostAudio = useCallback(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    if (!audioRef.current) {
-      const ctx = new AudioContext();
-      const gain = ctx.createGain();
-      gain.gain.value = v.muted ? 0 : 2;
-      ctx.createMediaElementSource(v).connect(ctx.createDynamicsCompressor()).connect(gain).connect(ctx.destination);
-      audioRef.current = ctx;
-      gainRef.current = gain;
-    }
-    void audioRef.current.resume();
-  }, []);
-  useEffect(() => () => void audioRef.current?.close(), []);
-  useEffect(() => {
-    if (gainRef.current) gainRef.current.gain.value = muted ? 0 : 2;
-  }, [muted]);
+  /** Where in the film playback is. */
+  const clockNow = useCallback(() => videoRef.current?.currentTime ?? 0, []);
 
-  /** Where in the film playback is, in either mode. */
-  const clockNow = useCallback(
-    () => (convertRef.current?.offset ?? 0) + (videoRef.current?.currentTime ?? 0),
-    []
-  );
-
-  /** Switch to (or restart) the server conversion at `at` seconds. */
-  const startConvert = useCallback(
-    (opts: { audio: number; encode: boolean }, at: number) => {
-      const v = videoRef.current;
-      const f = engine && fileIndex != null ? engine.findFile(fileIndex) : null;
-      if (!v || !f) return;
-      const start = Math.max(0, Math.floor(at));
-      const q = new URLSearchParams({ t: String(start), audio: String(opts.audio) });
-      if (opts.encode) q.set('video', 'encode');
-      const next = { ...opts, offset: start };
-      convertRef.current = next;
-      setConvert(next);
-      setTime(start);
-      setBuffering(true);
-      v.src = `${f.streamURL}/play?${q}`;
-      void v.play().catch(() => {});
-    },
-    [engine, fileIndex]
-  );
-
-  /** Seek in either mode: a converted stream has no ranges, so it restarts. */
   /**
    * Where a seek is headed until playback gets there. Over a torrent the
    * element keeps reporting the old position while it waits for data, which
@@ -246,11 +179,9 @@ function PlayerInner() {
       const to = Math.max(0, end ? Math.min(end - 1, seconds) : seconds);
       seekTarget.current = { to, at: Date.now() };
       setTime(to);
-      const c = convertRef.current;
-      if (c) startConvert(c, to);
-      else v.currentTime = to;
+      v.currentTime = to;
     },
-    [media, startConvert]
+    [media]
   );
 
   // From the pending target, so quick repeated skips add up instead of each
@@ -296,7 +227,7 @@ function PlayerInner() {
 
   /**
    * Keyboard control: space/k to pause, arrows to scrub and set volume, f for
-   * fullscreen, m to mute. Ignored while typing and while the controls are locked.
+   * fullscreen. Ignored while typing and while the controls are locked.
    */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -328,9 +259,6 @@ function PlayerInner() {
           e.preventDefault();
           v.volume = Math.max(0, v.volume - 0.1);
           break;
-        case 'm':
-          v.muted = !v.muted;
-          break;
         case 'f':
           toggleFullscreen();
           break;
@@ -354,8 +282,7 @@ function PlayerInner() {
     v.addEventListener(
       'loadedmetadata',
       () => {
-        // Only for the source it was meant for — the probe may have switched
-        // to a converted stream, which starts at the position and cannot seek.
+        // Only for the source it was meant for — the file may have changed.
         if (v.src !== src) return;
         if (pos > 0 && pos < (v.duration || 1) - 5) v.currentTime = pos;
       },
@@ -508,8 +435,6 @@ function PlayerInner() {
     const v = video();
     const item = historyItem;
     if (!v || !item || fileIndex == null) return;
-    // A converted stream reports no real duration and a clock from its own
-    // start — the probe and the offset give the film's.
     const d = media?.duration || v.duration;
     if (Number.isFinite(d) && d > 0) void setDuration(item, fileIndex, d);
     void setPosition(item, fileIndex, clockNow());
@@ -536,9 +461,8 @@ function PlayerInner() {
       if (!url) return;
       setFileIndex(index);
       seekTarget.current = null;
-      convertRef.current = null;
-      setConvert(null);
       setMedia(null);
+      setAudioTrack(0);
       const v = video();
       if (v) {
         v.src = url;
@@ -627,8 +551,7 @@ function PlayerInner() {
   /**
    * What is inside the file — audio tracks, built-in subtitles, codecs — from
    * the server's ffmpeg. Audio the browser cannot decode (AC-3, DTS…) plays
-   * silently in Chrome instead of failing, so that gets a hint to turn on
-   * Universal.
+   * silently in Chrome instead of failing, so that gets a warning.
    */
   useEffect(() => {
     if (!engine || fileIndex == null) return;
@@ -642,10 +565,9 @@ function PlayerInner() {
         setMedia(m);
         if (m.duration) setDurationState(m.duration);
         const first = m.audio[0];
-        // Universal stays off by default; only point at it.
-        if (first && !BROWSER_AUDIO.test(first.codec) && !convertRef.current) {
-          log(`audio is ${first.codec}: may be silent without Universal`);
-          setNotice(`This release's audio (${first.codec.toUpperCase()}) may be silent — turn on Universal`);
+        if (first && !BROWSER_AUDIO.test(first.codec)) {
+          log(`audio is ${first.codec}: playing it as AAC from the server`);
+          setNotice(`${first.codec.toUpperCase()} audio — converting it on the server`);
         }
       })
       .catch(() => {});
@@ -655,6 +577,71 @@ function PlayerInner() {
     // Once per file.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engine, fileIndex]);
+
+  /**
+   * Audio a browser cannot decode (AC-3, E-AC-3, DTS) plays from the server as
+   * AAC in a hidden <audio>, while the video streams straight from the torrent
+   * as usual. The AAC stream cannot seek, so it is started a little ahead of
+   * the picture and held until the picture gets there; a seek, drift or a
+   * dropped stream starts it again from where the picture is. A browser only
+   * ever plays the first audio track, so any other picked track goes the same
+   * way.
+   */
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [audioTrack, setAudioTrack] = useState(0);
+  const aac =
+    !!media?.audio[audioTrack] && (audioTrack > 0 || !BROWSER_AUDIO.test(media.audio[0].codec));
+  const aacUrl =
+    aac && engine && fileIndex != null ? `${engine.findFile(fileIndex)?.streamURL}/audio?audio=${audioTrack}` : null;
+  useEffect(() => {
+    const a = audioRef.current;
+    if (!a || !aacUrl) return;
+    let start = 0; // where in the film the stream begins
+    let lead = 2; // seconds ahead of the picture to start it; grows if it arrives late
+    let failures = 0;
+    const restart = (at: number) => {
+      start = Math.floor(at + lead);
+      a.src = `${aacUrl}&t=${start}`;
+    };
+    const id = setInterval(() => {
+      const v = videoRef.current;
+      if (!v) return;
+      if (a.playbackRate !== v.playbackRate) a.playbackRate = v.playbackRate;
+      if (a.volume !== v.volume) a.volume = v.volume;
+      if (a.error) {
+        if (++failures >= 3) {
+          clearInterval(id);
+          setNotice("Could not convert this release's audio");
+          return;
+        }
+        return restart(v.currentTime);
+      }
+      if (v.paused || v.readyState < 3) {
+        if (!a.paused) a.pause();
+        return;
+      }
+      if (a.ended && v.duration - v.currentTime < lead + 1) return; // the film's own end
+      if (!a.getAttribute('src') || a.ended) return restart(v.currentTime);
+      const drift = start + a.currentTime - v.currentTime;
+      if (drift > 10) return restart(v.currentTime); // seeked back
+      if (drift < -0.5) {
+        // Seeked forward, or the stream reached the picture too late.
+        if (a.paused) lead = Math.min(lead * 2, 16);
+        return restart(v.currentTime);
+      }
+      if (!a.paused) {
+        if (drift > 0.5) a.pause();
+      } else if (drift <= 0.05 && a.readyState >= 3) {
+        a.play().then(() => (failures = 0), () => {});
+      }
+    }, 100);
+    return () => {
+      clearInterval(id);
+      a.pause();
+      a.removeAttribute('src');
+      a.load();
+    };
+  }, [aacUrl]);
 
   /** Built-in text subtitles join the sheet once the probe has found them. */
   useEffect(() => {
@@ -670,21 +657,9 @@ function PlayerInner() {
     setSubs((all) => [...all.filter((s) => !s.url.includes('/subtitle?')), ...builtIn]);
   }, [engine, fileIndex, media]);
 
-  /** Pick an audio track: the first plays directly, any other through the
-   *  server — a browser only ever plays the first. */
-  const pickAudio = useCallback(
-    (index: number) => {
-      const current = convertRef.current?.audio ?? 0;
-      if (index === current) return;
-      startConvert({ audio: index, encode: convertRef.current?.encode ?? !!media?.needsVideoEncode }, clockNow());
-    },
-    [startConvert, clockNow, media]
-  );
-
   /**
-   * The subtitle as a blob URL, cue times shifted by the converted stream's
-   * offset so they line up with its clock. Revoked when replaced — each one
-   * holds the whole subtitle in memory.
+   * The subtitle as a blob URL. Revoked when replaced — each one holds the
+   * whole subtitle in memory.
    */
   const [subUrl, setSubUrl] = useState<string | null>(null);
   useEffect(() => {
@@ -692,10 +667,10 @@ function PlayerInner() {
       setSubUrl(null);
       return;
     }
-    const url = subtitleBlob(activeSub.text, convert?.offset ?? 0);
+    const url = subtitleBlob(activeSub.text);
     setSubUrl(url);
     return () => URL.revokeObjectURL(url);
-  }, [activeSub, convert?.offset]);
+  }, [activeSub]);
 
   /** Find subs sheet: search by any name. */
   const runSubSearch = useCallback(
@@ -733,8 +708,7 @@ function PlayerInner() {
    * the server extracts WINDOW seconds around where playback is, the cues go
    * straight onto one live text track, and the next window is fetched before
    * playback reaches the end of this one. A seek outside what is loaded
-   * fetches the window there. Cue times are the film's; they are shifted by
-   * the converted stream's offset when there is one.
+   * fetches the window there.
    */
   const [builtIn, setBuiltIn] = useState<{ track: number; label: string; url: string } | null>(null);
   const builtInTrack = useRef<TextTrack | null>(null);
@@ -743,16 +717,12 @@ function PlayerInner() {
   const builtInLoading = useRef<AbortController | null>(null);
   const [builtInWaiting, setBuiltInWaiting] = useState(false);
 
-  /** Redraw every known cue onto the track, relative to the current stream. */
+  /** Redraw every known cue onto the track. */
   const drawBuiltIn = useCallback(() => {
     const t = builtInTrack.current;
     if (!t) return;
     for (const cue of Array.from(t.cues ?? [])) t.removeCue(cue);
-    const offset = convertRef.current?.offset ?? 0;
-    for (const c of builtInCues.current.values()) {
-      if (c.end - offset <= 0) continue;
-      t.addCue(new VTTCue(Math.max(0, c.start - offset), c.end - offset, c.text));
-    }
+    for (const c of builtInCues.current.values()) t.addCue(new VTTCue(c.start, c.end, c.text));
   }, []);
 
   // Choosing (or dropping) a built-in track resets what is loaded.
@@ -771,11 +741,6 @@ function PlayerInner() {
     }
     setBuiltInWaiting(!!builtIn);
   }, [builtIn, drawBuiltIn]);
-
-  // The converted stream's clock moved: same cues, new offset.
-  useEffect(() => {
-    if (builtIn) drawBuiltIn();
-  }, [convert?.offset, builtIn, drawBuiltIn]);
 
   // Keep a window loaded ahead of playback.
   useEffect(() => {
@@ -858,13 +823,9 @@ function PlayerInner() {
       const again = await getTorrent(engine.uri);
       const url = again.findFile(fileIndex)?.streamURL;
       if (url) {
-        const c = convertRef.current;
-        if (c) startConvert(c, at);
-        else {
-          v.src = url;
-          resumeAt(v, at);
-          void v.play().catch(() => {});
-        }
+        v.src = url;
+        resumeAt(v, at);
+        void v.play().catch(() => {});
       }
       return true;
     } catch {
@@ -872,7 +833,7 @@ function PlayerInner() {
     } finally {
       reopening.current = false;
     }
-  }, [engine, fileIndex, resumeAt, clockNow, startConvert]);
+  }, [engine, fileIndex, resumeAt, clockNow]);
 
   /** Peer count while the metadata is still being chased. */
   const [waiting, setWaiting] = useState<{ peers: number; seconds: number } | null>(null);
@@ -939,29 +900,6 @@ function PlayerInner() {
       ? { name: `Episode ${episode + 1}`, go: () => goNextRelease(nextReleases[0]) }
       : null;
 
-  /**
-   * Universal: play through the server's ffmpeg — audio to AAC, and video
-   * re-encoded when the probe says a browser cannot decode it. Pressed again,
-   * back to the direct stream.
-   */
-  const toggleUniversal = useCallback(() => {
-    setError(null);
-    const at = clockNow();
-    if (convertRef.current) {
-      const v = video();
-      const f = engine && fileIndex != null ? engine.findFile(fileIndex) : null;
-      if (!v || !f) return;
-      convertRef.current = null;
-      setConvert(null);
-      setNotice(null);
-      v.src = f.streamURL;
-      resumeAt(v, at);
-      void v.play().catch(() => {});
-      return;
-    }
-    startConvert({ audio: 0, encode: !!media?.needsVideoEncode }, at);
-  }, [clockNow, engine, fileIndex, media, resumeAt, startConvert]);
-
   /** Calm notices fade on their own. */
   useEffect(() => {
     if (!notice) return;
@@ -1014,12 +952,9 @@ function PlayerInner() {
         className="pl-video"
         style={{ objectFit: SCALES[scaleIdx].fit }}
         playsInline
-        muted={muted}
-        onVolumeChange={(e) => setMuted(e.currentTarget.muted)}
-        onPlay={() => {
-          boostAudio();
-          setPlaying(true);
-        }}
+        // The server's AAC plays instead of audio the browser cannot decode.
+        muted={aac}
+        onPlay={() => setPlaying(true)}
         onPause={() => {
           setPlaying(false);
           setShowUi(true);
@@ -1028,7 +963,7 @@ function PlayerInner() {
         onPlaying={() => setBuffering(false)}
         onCanPlay={() => setBuffering(false)}
         onTimeUpdate={(e) => {
-          const t = (convertRef.current?.offset ?? 0) + e.currentTarget.currentTime;
+          const t = e.currentTarget.currentTime;
           const target = seekTarget.current;
           if (target) {
             // Still the old position: hold the slider on the target. Given up
@@ -1039,9 +974,9 @@ function PlayerInner() {
           setTime(t);
         }}
         onDurationChange={(e) => {
-          // A converted stream has no length of its own; the probe's stands.
+          // The probe's length, when it has one, stands.
           const d = e.currentTarget.duration;
-          if (!convertRef.current && Number.isFinite(d) && !media?.duration) {
+          if (Number.isFinite(d) && !media?.duration) {
             setDurationState(d);
             if (historyItem && fileIndex != null) void setDuration(historyItem, fileIndex, d);
           }
@@ -1050,7 +985,7 @@ function PlayerInner() {
           const v = e.currentTarget;
           for (let i = 0; i < v.buffered.length; i++) {
             if (v.buffered.start(i) <= v.currentTime && v.currentTime <= v.buffered.end(i)) {
-              setBuffered((convert?.offset ?? 0) + v.buffered.end(i));
+              setBuffered(v.buffered.end(i));
             }
           }
         }}
@@ -1060,30 +995,18 @@ function PlayerInner() {
         onError={async (e) => {
           const v = e.currentTarget;
           if (!v.error) return;
-          log('video error', v.error.code, v.error.message, convertRef.current ? '(converted)' : '(direct)');
+          log('video error', v.error.code, v.error.message);
           const message = v.error.message;
           if (await recover()) return;
-          const at = clockNow() || (fileIndex != null ? (historyItem?.positions?.[fileIndex] ?? 0) : 0);
-          const c = convertRef.current;
-          // The browser cannot decode this release: convert on the server —
-          // first copying the video, then, if even that fails, re-encoding it.
-          if (!c) {
-            setNotice('The browser cannot play this format — converting on the server');
-            startConvert({ audio: 0, encode: !!media?.needsVideoEncode }, at);
-            return;
-          }
-          if (!c.encode) {
-            setNotice('Re-encoding the video for this browser');
-            startConvert({ ...c, encode: true }, at);
-            return;
-          }
           setBuffering(false);
-          setError(`This release could not be played (${message || 'unsupported format'}).`);
+          setError(`This browser cannot play this release (${message || 'unsupported format'}) — try another release.`);
         }}
       >
         {/* Inside the element, or the browser never attaches it. */}
         {subUrl && <track key={subUrl} kind="subtitles" src={subUrl} default />}
       </video>
+      {/* No controls, so never drawn; driven by the AAC effect above. */}
+      <audio ref={audioRef} preload="auto" />
 
       {/* Tap target for the picture — see lastTap above. */}
       <div
@@ -1180,10 +1103,6 @@ function PlayerInner() {
             </div>
 
             <div className="pl-actions">
-              {/* First, so it is on screen on a phone without scrolling the row. */}
-              <Action label={muted ? 'Unmute' : 'Mute'} on={muted} onClick={() => { setMuted(!muted); bumpUi(); }}>
-                <SoundIcon muted={muted} />
-              </Action>
               <Action label="Lock" onClick={() => { setLocked(true); setPicking(false); bumpUi(); }}>
                 <LockIcon on />
               </Action>
@@ -1200,7 +1119,7 @@ function PlayerInner() {
                 <ScaleIcon />
               </Action>
               <Action
-                label="Subtitles"
+                label={media && media.audio.length > 1 ? 'Audio & subs' : 'Subtitles'}
                 on={!!activeSub || !!builtIn}
                 onClick={() => { setSearch((s) => ({ ...s, open: false })); setPicking((p) => !p); bumpUi(); }}
               >
@@ -1241,11 +1160,6 @@ function PlayerInner() {
                   <DownloadIcon />
                 </Action>
               )}
-              {file && (
-                <Action label="Universal" on={!!convert} onClick={() => { toggleUniversal(); bumpUi(); }}>
-                  <ZapIcon />
-                </Action>
-              )}
               <Action label="Fullscreen" onClick={toggleFullscreen}>
                 <FullscreenIcon />
               </Action>
@@ -1266,9 +1180,9 @@ function PlayerInner() {
                   note={[t.title && t.language ? t.language.toUpperCase() : null, t.codec.toUpperCase(), t.channels]
                     .filter(Boolean)
                     .join(' · ')}
-                  active={(convert?.audio ?? 0) === t.index}
+                  active={audioTrack === t.index}
                   onClick={() => {
-                    pickAudio(t.index);
+                    setAudioTrack(t.index);
                     setPicking(false);
                   }}
                 />

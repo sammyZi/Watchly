@@ -515,8 +515,8 @@ function DetailInner() {
       <p className="faint" style={{ fontSize: 11, marginTop: 18, lineHeight: '16px' }}>
         Peer-to-peer streaming: the Watchly server joins the swarm and streams
         the file to this page with byte-range requests.
-        “Save” keeps a copy on your device; releases the browser cannot decode
-        are converted on the server as they play.
+        “Save” keeps a copy on your device. Releases with AC-3 or DTS audio, or
+        HEVC video, may not play in a browser — pick an AAC / H.264 one.
       </p>
         </aside>
       </div>
