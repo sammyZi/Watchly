@@ -4,16 +4,18 @@
  * hero, Continue watching, Watch later, Favourites, genres chosen in Settings,
  * recommendations from watch history, then the fixed charts.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ANIME_GENRE,
+  GENRES,
   kindOfGenre,
   loadCatalog,
   peekCatalog,
+  resolveTitle,
   watchedGenres,
   type Title,
 } from '../lib/meta';
-import { loadHistory, type Item } from '../lib/history';
+import { loadHistory, patch, type Item } from '../lib/history';
 import { loadSettings } from '../lib/settings';
 import { asTitle, inList, loadSaved, type Saved } from '../lib/saved';
 import { parseEpisode } from '../lib/search';
@@ -100,6 +102,32 @@ export default function HomeScreen() {
     });
   }, []);
 
+  /**
+   * Poster backfill. Torrents opened from a magnet, or before titles were
+   * recorded, are stored under their release name only — look each one up
+   * once and write the real title and artwork back, as the Android app does.
+   */
+  const [backfilled, setBackfilled] = useState(false);
+  useEffect(() => {
+    if (backfilled || !recent.length) return;
+    setBackfilled(true);
+    const missing = recent.filter((h) => !h.poster && !h.uri.startsWith('saved:')).slice(0, 12);
+    (async () => {
+      for (const item of missing) {
+        const found = await resolveTitle(item.torrentName ?? item.title).catch(() => null);
+        if (!found) continue;
+        const fields: Partial<Item> = {
+          imdb: item.imdb ?? found.imdb,
+          kind: item.kind ?? found.kind,
+          titleName: item.titleName ?? found.title,
+          ...(found.poster && { poster: found.poster }),
+        };
+        await patch(item.uri, fields);
+        setRecent((all) => all.map((h) => (h.uri === item.uri ? { ...h, ...fields } : h)));
+      }
+    })();
+  }, [recent, backfilled]);
+
   /** Shelves built from what has actually been watched — in-progress first. */
   useEffect(() => {
     const identified = (items: Item[]) =>
@@ -141,27 +169,52 @@ export default function HomeScreen() {
     [genres]
   );
 
-  // Chosen, then recommendations, then the charts — no catalogue twice.
+  // Chosen, then recommendations, then the charts, then every other genre —
+  // no catalogue twice.
   const shelves = useMemo(() => {
-    const taken = new Set(chosen.map(shelfKey));
-    const rest = picks.filter((p) => !taken.has(shelfKey(p)));
-    rest.forEach((p) => taken.add(shelfKey(p)));
-    return [...chosen, ...rest, ...SHELVES.filter((s) => !taken.has(shelfKey(s)))];
+    const taken = new Set<string>();
+    const fresh = (list: ShelfSpec[]) =>
+      list.filter((s) => !taken.has(shelfKey(s)) && taken.add(shelfKey(s)));
+    const everyGenre = GENRES.map((genre) => ({
+      title: genre,
+      kind: kindOfGenre(genre),
+      genre,
+    }));
+    return [...fresh(chosen), ...fresh(picks), ...fresh(SHELVES), ...fresh(everyGenre)];
   }, [chosen, picks]);
 
+  /**
+   * Shelves load as they come near the screen — with every genre on the page
+   * that is twenty-odd catalogues, too many to fetch up front on a phone.
+   */
+  const [near, setNear] = useState<Set<string>>(() => new Set());
+  const observer = useRef<IntersectionObserver | null>(null);
+  const watchShelf = (el: HTMLElement | null) => {
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+    observer.current ??= new IntersectionObserver(
+      (entries) => {
+        const keys = entries.filter((e) => e.isIntersecting).map((e) => (e.target as HTMLElement).dataset.shelf!);
+        if (keys.length) setNear((s) => new Set([...s, ...keys]));
+      },
+      { rootMargin: '800px 0px' }
+    );
+    observer.current.observe(el);
+  };
+  useEffect(() => () => observer.current?.disconnect(), []);
+
+  const requested = useRef(new Set<string>());
   useEffect(() => {
-    let live = true;
-    for (const shelf of shelves) {
+    for (const shelf of shelves.filter((s, i) => i < 4 || near.has(shelfKey(s)))) {
+      const key = shelfKey(shelf);
+      if (requested.current.has(key)) continue;
+      requested.current.add(key);
+      // An empty or failed catalogue is recorded too, so its shelf hides
+      // instead of spinning forever.
       loadCatalog(shelf.kind, shelf.genre)
-        .then((titles) => {
-          if (live && titles.length) setLoaded((all) => ({ ...all, [shelfKey(shelf)]: titles }));
-        })
-        .catch(() => {});
+        .catch(() => [] as Title[])
+        .then((titles) => setLoaded((all) => ({ ...all, [key]: titles })));
     }
-    return () => {
-      live = false;
-    };
-  }, [shelves]);
+  }, [shelves, near]);
 
   const watchedIds = useMemo(
     () => new Set(recent.map((h) => h.imdb).filter(Boolean) as string[]),
@@ -240,6 +293,7 @@ export default function HomeScreen() {
         const raw = loaded[shelfKey(shelf)];
         // Genre shelves are recommendations: drop anything already watched.
         const data = raw && shelf.genre ? raw.filter((t) => !watchedIds.has(t.imdb)) : raw;
+        if (data && !data.length) return null;
         return (
           <Shelf
             key={shelfKey(shelf)}
@@ -250,7 +304,7 @@ export default function HomeScreen() {
             {data ? (
               data.slice(0, 20).map((t) => <Poster key={t.imdb} title={t} />)
             ) : (
-              <div className="shelf-loading">
+              <div className="shelf-loading" data-shelf={shelfKey(shelf)} ref={watchShelf}>
                 <div className="spinner" />
               </div>
             )}

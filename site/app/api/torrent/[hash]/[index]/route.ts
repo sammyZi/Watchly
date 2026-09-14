@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { find } from '../../../../../lib/engine';
+import { find, reading } from '../../../../../lib/engine';
 
 /** Container types a browser's media stack keys off. Chrome's WebM demuxer is
  *  its Matroska demuxer, so .mkv goes out as webm. */
@@ -25,7 +25,9 @@ export async function GET(request: NextRequest, ctx: RouteContext<'/api/torrent/
   const headers: Record<string, string> = {
     'Accept-Ranges': 'bytes',
     'Content-Type': type,
-    'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+    // ?download=1: a plain browser download — how Save works on phones, which
+    // have no File System Access API.
+    'Content-Disposition': `${request.nextUrl.searchParams.get('download') ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(file.name)}`,
   };
 
   const range = /bytes=(\d*)-(\d*)/.exec(request.headers.get('range') ?? '');
@@ -47,18 +49,26 @@ export async function GET(request: NextRequest, ctx: RouteContext<'/api/torrent/
 
   if (size === 0) return new Response(null, { status: 200, headers });
   const iterator = file[Symbol.asyncIterator]({ start, end });
+  // A live read holds the torrent's data — a Save in progress is one long
+  // read, so it can never be swept out from under the download.
+  const finished = reading(hash);
+  request.signal.addEventListener('abort', finished, { once: true });
   // Seeking aborts the old request; returning the iterator deselects its pieces.
   const body = new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
         const { value, done } = await iterator.next();
-        if (done) controller.close();
-        else controller.enqueue(new Uint8Array(value));
+        if (done) {
+          finished();
+          controller.close();
+        } else controller.enqueue(new Uint8Array(value));
       } catch (e) {
+        finished();
         controller.error(e);
       }
     },
     cancel() {
+      finished();
       void iterator.return?.();
     },
   });

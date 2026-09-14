@@ -10,7 +10,7 @@ declare module 'webtorrent' {
     once(event: string, cb: (arg?: any) => void): this;
     get(torrentId: string): unknown;
     removeListener(event: string, cb: (...args: any[]) => void): this;
-    add(torrentId: string, opts?: unknown): unknown;
+    add(torrentId: string, opts?: { path?: string }): any;
     createServer(opts: { controller: unknown }): unknown;
     remove(torrent: unknown, opts?: { destroyStore?: boolean }, cb?: (err?: Error) => void): void;
     torrents: any[];

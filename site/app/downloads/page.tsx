@@ -54,8 +54,9 @@ export default function DownloadsScreen() {
           <div className="row-body">
             <div className="row-title">{e.torrentName}</div>
             <div className="row-sub">
-              {e.done ? 'Done · seeding' : `${Math.round(e.progress * 100)}%`} · {bytes(e.size)} ·{' '}
-              {speed(e.downloadSpeed)} down / {speed(e.uploadSpeed)} up · {e.numPeers} peers
+              {e.done
+                ? `Downloaded · ${bytes(e.size)} · not seeding`
+                : `${Math.round(e.progress * 100)}% · ${bytes(e.size)} · ${speed(e.downloadSpeed)} down / ${speed(e.uploadSpeed)} up · ${e.numPeers} peers`}
             </div>
             <div style={{ height: 3, borderRadius: 2, background: 'var(--line)', marginTop: 6, overflow: 'hidden' }}>
               <div style={{ width: `${e.progress * 100}%`, height: '100%', background: 'var(--accent)' }} />

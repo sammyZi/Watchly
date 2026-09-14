@@ -73,6 +73,16 @@ export async function activeTorrents(): Promise<Engine[]> {
   return ((await res.json()) as Described[]).map((d) => wrap(d, `magnet:?xt=urn:btih:${d.infoHash}`));
 }
 
+/**
+ * The player is done with this torrent: the server deletes its data after a
+ * short grace. `keepalive`, so it still goes out while the page unloads.
+ */
+export function releaseTorrent(infoHash: string) {
+  void fetch(`/api/torrent?hash=${infoHash}&release=1`, { method: 'DELETE', keepalive: true }).catch(
+    () => {}
+  );
+}
+
 /** Stop a torrent and delete its data. */
 export async function dropTorrent(infoHash: string): Promise<void> {
   await fetch(`/api/torrent?hash=${infoHash}`, { method: 'DELETE' }).catch(() => {});

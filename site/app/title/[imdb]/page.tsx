@@ -238,7 +238,7 @@ function DetailInner() {
 
   return (
     <main className="page">
-      <div className="page-head" style={{ paddingBottom: 12 }}>
+      <div className="page-head detail-bar">
         <button
           className="back-btn"
           aria-label="Back"
@@ -267,7 +267,7 @@ function DetailInner() {
         </div>
       </div>
 
-      <div style={{ position: 'relative', height: 360, borderRadius: 20, overflow: 'hidden', background: 'var(--surface)' }}>
+      <div className="detail-backdrop">
         {(title.backdrop ?? title.poster) && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -299,10 +299,10 @@ function DetailInner() {
           half further down. One column below 1000px, unchanged. */}
       <div className="detail-grid">
         <div className="detail-main">
-      <div style={{ display: 'flex', gap: 16, marginTop: -46, padding: '0 4px', position: 'relative', zIndex: 1, alignItems: 'flex-end' }}>
+      <div className="detail-head">
         <Thumb name={title.title} size={132} poster={title.poster} radius={14} />
         <div style={{ flex: 1, minWidth: 0, paddingBottom: 4 }}>
-          <h1 style={{ fontSize: 30, fontWeight: 700, lineHeight: '36px', letterSpacing: '-0.5px' }}>{title.title}</h1>
+          <h1 className="detail-title">{title.title}</h1>
           <div style={{ fontSize: 14, color: 'var(--muted)', marginTop: 6, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             {title.rating && <span className="warn-text">★ {title.rating}</span>}
             <span style={{ color: 'var(--accent)' }}>{title.year} · {title.runtime} · {title.kind === 'tv' ? 'Series' : 'Film'}</span>
