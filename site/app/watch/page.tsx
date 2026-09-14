@@ -11,7 +11,7 @@
  */
 import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { getTorrent, hashOf, liveStats, type Engine } from '../../lib/torrent';
+import { getTorrent, hashOf, liveStats, releaseTorrent, type Engine } from '../../lib/torrent';
 import { pickFile, nextEpisode } from '../../lib/pick';
 import {
   BackIcon,
@@ -155,11 +155,39 @@ function PlayerInner() {
     v.currentTime = Math.max(0, Math.min(v.duration || 0, v.currentTime + by));
   }, []);
 
-  const toggleFullscreen = useCallback(() => {
-    void (document.fullscreenElement
-      ? document.exitFullscreen()
-      : document.documentElement.requestFullscreen());
+  /** Fullscreen, and on a phone turn to landscape with it — the lock is only
+   *  allowed while fullscreen, and not at all on iOS, hence the catches. */
+  const toggleFullscreen = useCallback(async () => {
+    const orientation = screen.orientation as ScreenOrientation & {
+      lock?: (o: string) => Promise<void>;
+    };
+    try {
+      if (document.fullscreenElement) {
+        orientation.unlock?.();
+        await document.exitFullscreen();
+      } else {
+        await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+        if (matchMedia('(pointer: coarse)').matches) await orientation.lock?.('landscape');
+      }
+    } catch {
+      // No fullscreen or orientation API here (iOS Safari): nothing to do.
+    }
   }, []);
+
+  /**
+   * Touch on the picture, like the Android player: one tap toggles the
+   * controls, a double tap on either half seeks ten seconds, and further taps
+   * on that side keep adding. The single tap waits a beat so a double tap
+   * does not flash the controls on and off. Mouse clicks toggle at once.
+   */
+  const lastTap = useRef<{ at: number; side: 'left' | 'right' } | null>(null);
+  const tapTimer = useRef<number | undefined>(undefined);
+  const [nudge, setNudge] = useState<{ side: 'left' | 'right'; total: number; at: number } | null>(null);
+  useEffect(() => {
+    if (!nudge) return;
+    const t = setTimeout(() => setNudge(null), 700);
+    return () => clearTimeout(t);
+  }, [nudge]);
 
   /**
    * Keyboard control: space/k to pause, arrows to scrub and set volume, f for
@@ -326,7 +354,20 @@ function PlayerInner() {
     async (f: { streamURL: string | null; name: string; index: number }) => {
       if (!f.streamURL) return;
       if (!supportsSaveAPI()) {
-        setError('Your browser cannot write files to disk — use a Chromium browser.');
+        // Phones (and Firefox/Safari): hand it to the browser's own download
+        // manager. The live read keeps the server copy until it finishes.
+        const a = document.createElement('a');
+        a.href = `${f.streamURL}?download=1`;
+        a.download = f.name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        await putHistory({
+          uri: `saved:${Date.now()}:${f.name}`,
+          title: f.name,
+          at: Date.now(),
+          files: [{ index: 0, name: f.name, size: 0, isVideo: true, isSubtitle: false }] as StoredFile[],
+        });
         return;
       }
       setSaveState({ percent: 0, speed: 0 });
@@ -503,7 +544,8 @@ function PlayerInner() {
     }
   }, [activeSub]);
 
-  /** Swarm stats, once a second. */
+  /** Swarm stats, once a second — the poll also tells the server we are still
+   *  watching, so the stream data is not swept as idle. */
   useEffect(() => {
     if (!engine) return;
     const t = setInterval(async () => {
@@ -512,6 +554,49 @@ function PlayerInner() {
     }, 1000);
     return () => clearInterval(t);
   }, [engine]);
+
+  /**
+   * Stream data is not kept: leaving the player releases it, and the server
+   * deletes it shortly after. Saving a copy is what Save is for. `pagehide`
+   * covers closing the tab, where React never unmounts.
+   */
+  useEffect(() => {
+    if (!engine) return;
+    const leave = () => releaseTorrent(engine.infoHash);
+    window.addEventListener('pagehide', leave);
+    return () => {
+      window.removeEventListener('pagehide', leave);
+      leave();
+    };
+  }, [engine]);
+
+  /**
+   * Back after the data was swept (a phone asleep for ten minutes): open the
+   * torrent again and pick up where the picture stopped.
+   */
+  const reopening = useRef(false);
+  const recover = useCallback(async () => {
+    const v = video();
+    if (!v || !engine || fileIndex == null || reopening.current) return false;
+    if (await liveStats(engine.infoHash)) return false;
+    reopening.current = true;
+    const at = v.currentTime;
+    setBuffering(true);
+    try {
+      const again = await getTorrent(engine.uri);
+      const url = again.findFile(fileIndex)?.streamURL;
+      if (url) {
+        v.src = url;
+        resumeAt(v, at);
+        void v.play().catch(() => {});
+      }
+      return true;
+    } catch {
+      return false;
+    } finally {
+      reopening.current = false;
+    }
+  }, [engine, fileIndex, resumeAt]);
 
   /** Peer count while the metadata is still being chased. */
   const [waiting, setWaiting] = useState<{ peers: number; seconds: number } | null>(null);
@@ -690,30 +775,58 @@ function PlayerInner() {
         onEnded={() => {
           if (next && !dismissedNext) next.go();
         }}
-        onError={(e) => {
+        onError={async (e) => {
           const v = e.currentTarget;
           if (!v.error || universal !== 'off') return;
           log('video error', v.error.code, v.error.message);
+          const message = v.error.message;
+          if (await recover()) return;
           setBuffering(false);
-          setError(`The browser cannot play this release (${v.error.message || 'unsupported format'}).`);
+          setError(`The browser cannot play this release (${message || 'unsupported format'}).`);
         }}
       >
         {/* Inside the element, or the browser never attaches it. */}
         {activeSub && <track key={activeSub.url} kind="subtitles" src={activeSub.url} default />}
       </video>
 
-      {/* Tap target for the picture: toggles the controls, like the phone. */}
+      {/* Tap target for the picture — see lastTap above. */}
       <div
         className={`pl-tap${showUi && !locked ? ' pl-dim' : ''}`}
-        onClick={() => {
-          if (picking || search.open) {
-            setPicking(false);
-            setSearch((s) => ({ ...s, open: false }));
-          } else if (showUi) setShowUi(false);
-          else bumpUi();
+        onClick={(e) => {
+          const toggle = () => {
+            if (picking || search.open) {
+              setPicking(false);
+              setSearch((s) => ({ ...s, open: false }));
+            } else if (showUi) setShowUi(false);
+            else bumpUi();
+          };
+          if (!matchMedia('(pointer: coarse)').matches) return toggle();
+
+          const rect = e.currentTarget.getBoundingClientRect();
+          const side = e.clientX - rect.left < rect.width / 2 ? 'left' : 'right';
+          const now = Date.now();
+          const prev = lastTap.current;
+          lastTap.current = { at: now, side };
+          const chaining = nudge?.side === side && now - nudge.at < 700;
+          if (!locked && (chaining || (prev && prev.side === side && now - prev.at < 300))) {
+            window.clearTimeout(tapTimer.current);
+            skip(side === 'left' ? -SKIP_SECONDS : SKIP_SECONDS);
+            setNudge({ side, total: (chaining ? nudge.total : 0) + SKIP_SECONDS, at: now });
+            return;
+          }
+          tapTimer.current = window.setTimeout(toggle, 260);
         }}
-        onDoubleClick={toggleFullscreen}
+        onDoubleClick={() => {
+          if (!matchMedia('(pointer: coarse)').matches) void toggleFullscreen();
+        }}
       />
+
+      {nudge && (
+        <div className={`pl-ripple pl-ripple-${nudge.side}`}>
+          {nudge.side === 'left' ? <SkipIcon back /> : <SkipIcon />}
+          <span>{nudge.total} seconds</span>
+        </div>
+      )}
 
       {showUi && locked && (
         <div className="pl-lockdock">

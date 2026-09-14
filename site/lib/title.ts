@@ -31,6 +31,11 @@ export function hueOf(name: string): number {
  */
 export function searchableName(name: string): string {
   return name
+    // Tracker/site tags up front: "www.UIndex.org - Andor…", "[TGx] Dune…".
+    // The bracket one matters most — the cut below drops everything after the
+    // first bracket, which on a leading tag was the whole name.
+    .replace(/^\s*(?:\[[^\]]*\]|\([^)]*\)|\{[^}]*\})\s*[-–:]?\s*/, '')
+    .replace(/^\s*(?:www\.)?[a-z0-9-]+\.(?:org|com|net|to|cc|me|io|info|xyz|se|nz|ws)\s*[-–:|]\s*/i, '')
     .replace(/\.[a-z0-9]{2,4}$/i, '')
     .replace(/[._]+/g, ' ')
     .split(

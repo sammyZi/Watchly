@@ -8,6 +8,11 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: join(dirname(fileURLToPath(import.meta.url))),
   },
+  // Phones on the same Wi-Fi open the dev server by the laptop's LAN address.
+  // `next dev` refuses its JS chunks to any origin but localhost by default, so
+  // the page arrived with no script and stayed on the black pre-theme screen.
+  // Private ranges only; production (`next start`) has no such block.
+  allowedDevOrigins: ['192.168.*.*', '10.*.*.*', '172.*.*.*', '*.local'],
   // Browser console output in the terminal beside the server logs. The default
   // is 'warn', which silently dropped every console.log the engine and player
   // emit — the whole point of having them.
