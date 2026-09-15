@@ -165,6 +165,9 @@ public static class Ui
         VirtualizingPanel.SetIsVirtualizing(list, true);
         VirtualizingPanel.SetVirtualizationMode(list, VirtualizationMode.Recycling);
         VirtualizingPanel.SetScrollUnit(list, ScrollUnit.Pixel);
+        // A screenful realised either side, so dragging reveals posters already laid out.
+        VirtualizingPanel.SetCacheLengthUnit(list, VirtualizationCacheLengthUnit.Page);
+        VirtualizingPanel.SetCacheLength(list, new VirtualizationCacheLength(1));
         // Panel and scroller come from Templates.xaml: the ScrollViewer has to sit
         // inside the ItemsControl's own template for the row to virtualise.
         list.ItemsPanel = (ItemsPanelTemplate)Application.Current.FindResource("RailPanel");
@@ -309,7 +312,10 @@ public static class Ui
             start = null;
         }
         rail.PreviewMouseLeftButtonUp += (_, e) => End(e);
-        rail.LostMouseCapture += (_, _) => { if (dragging) End(null); };
+        // Only the rail's own capture ending ends the drag. Taking the mouse from the poster
+        // pressed under it raises the poster's LostMouseCapture, which bubbles up here too
+        // and used to cut every drag off a few pixels in.
+        rail.LostMouseCapture += (_, e) => { if (dragging && e.OriginalSource == rail) End(null); };
     }
 
     /// <summary>A wrapping grid of posters — PosterGrid, sized for a window rather than a phone.</summary>
