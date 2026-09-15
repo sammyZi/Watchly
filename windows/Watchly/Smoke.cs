@@ -187,6 +187,15 @@ static class Smoke
         Eq(string.Join(",", Pick.SeasonFiles(pack, 1)), "0,1,2", "seasonFiles pack");
         Eq(string.Join(",", Pick.SeasonFiles(season, 1)), "2,1,0", "seasonFiles order");
         Eq(string.Join(",", Pick.SeasonFiles(season, 2)), "3", "seasonFiles season 2");
+        Ok(Pick.IsUnsafe("Movie.2020.1080p/Codec Installer.exe"), "isUnsafe exe");
+        Ok(Pick.IsUnsafe("Movie.mp4.exe"), "isUnsafe double extension");
+        Ok(Pick.IsUnsafe("Movie.mp4.lnk"), "isUnsafe shortcut");
+        Ok(Pick.IsUnsafe("setup.exe. "), "isUnsafe trailing dot");
+        Ok(Pick.IsUnsafe("Show/../../AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/x.mkv"), "isUnsafe path climbs out");
+        Ok(Pick.IsUnsafe("C:/Windows/x.mkv"), "isUnsafe drive path");
+        Ok(!Pick.IsUnsafe("The.Matrix.1999/The.Matrix.1999.1080p.mkv"), "isUnsafe video ok");
+        Ok(!Pick.IsUnsafe("Show S01/Subs/English.srt"), "isUnsafe subtitle ok");
+        Ok(!Pick.IsUnsafe("Movie...2019/Movie.mkv"), "isUnsafe dotted folder ok");
         var batch = new[] { F(0, "Show/[Group] Show - 28 [1080p].mkv", 100), F(1, "Show/[Group] Show - 29 [1080p].mkv", 100), F(2, "Show/[Group] Show - 30 [1080p].mkv", 100) };
         Eq(Pick.PickFile(batch, "S02E05#29"), 1, "pickFile anime running number");
         Eq(Pick.PickFile(batch, "S02E09#33"), null, "pickFile anime missing episode");

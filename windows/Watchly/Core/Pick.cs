@@ -30,6 +30,30 @@ public static class Pick
     public static bool IsVideoName(string name) => VideoExt.Contains(System.IO.Path.GetExtension(name));
     public static bool IsSubtitleName(string name) => SubExt.Contains(System.IO.Path.GetExtension(name));
 
+    /// <summary>
+    /// Files Windows runs when opened — programs, installers, scripts, shortcuts. Torrents
+    /// are a common way malware travels ("codec.exe", "Movie.mp4.exe", "Play.lnk"), and
+    /// nothing a viewer wants is one, so these are never downloaded.
+    /// </summary>
+    static readonly HashSet<string> RunnableExt = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".exe", ".com", ".scr", ".pif", ".cpl", ".msi", ".msix", ".msixbundle", ".msp", ".appx", ".appxbundle", ".application",
+        ".bat", ".cmd", ".ps1", ".psm1", ".psd1", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh", ".hta", ".jar",
+        ".dll", ".sys", ".ocx", ".lnk", ".url", ".reg", ".inf", ".scf", ".msc", ".gadget", ".chm", ".vb", ".sct", ".ws",
+    };
+
+    /// <summary>
+    /// A file that must not reach the disk: something runnable, or a path that climbs out
+    /// of the download folder ("../../Startup/x") or names a drive or absolute location.
+    /// </summary>
+    public static bool IsUnsafe(string path)
+    {
+        var p = path.Replace('\\', '/');
+        if (p.StartsWith('/') || p.Contains(':') || p.Split('/').Any(part => part.Trim() == "..")) return true;
+        // Windows drops trailing dots and spaces, so "setup.exe. " is still an .exe.
+        return RunnableExt.Contains(System.IO.Path.GetExtension(p.TrimEnd(' ', '.')));
+    }
+
     static TorrentFileInfo Biggest(IEnumerable<TorrentFileInfo> files) => files.Aggregate((a, b) => b.Size > a.Size ? b : a);
 
     /// <summary>

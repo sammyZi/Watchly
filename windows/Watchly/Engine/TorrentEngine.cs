@@ -375,14 +375,15 @@ public sealed class TorrentEngine
         var percent = fileIndex is int i && i >= 0 && i < m.Files.Count
             ? m.Files[i].BitField.PercentComplete
             : m.PartialProgress;
+        var paused = m.State is TorrentState.Paused or TorrentState.Stopped;
         return new Progress(
             percent,
-            m.Monitor.DownloadRate,
-            m.Monitor.UploadRate,
+            paused ? 0 : m.Monitor.DownloadRate, // the monitor keeps its last reading while paused
+            paused ? 0 : m.Monitor.UploadRate,
             m.Peers.Seeds,
             m.Peers.Leechs,
             m.State.ToString(),
-            m.State is TorrentState.Paused or TorrentState.Stopped);
+            paused);
     }
 
     public async Task Shutdown()
@@ -431,6 +432,8 @@ public sealed class StreamSession : IAsyncDisposable
     public static async Task<StreamSession> Start(Torrent torrent, int fileIndex, bool deleteFilesAfter, string? sourceUri = null, CancellationToken ct = default)
     {
         var engine = TorrentEngine.Instance;
+        if (Pick.IsUnsafe(torrent.Files[fileIndex].Path))
+            throw new InvalidOperationException("That file could run on your PC (a program, script or shortcut), so it isn't downloaded.");
         var hex = torrent.InfoHashes.V1OrV2.ToHex().ToLowerInvariant();
         await engine.Settled(hex);
         // Running because the file list was just fetched is ours to take; running for a download is borrowed.
@@ -451,7 +454,7 @@ public sealed class StreamSession : IAsyncDisposable
                 {
                     await manager.SetFilePriorityAsync(manager.Files[i], Priority.Normal);
                 }
-                else if (info.IsSubtitle && info.Size < 10_000_000)
+                else if (info.IsSubtitle && info.Size < 10_000_000 && !Pick.IsUnsafe(info.Path))
                 {
                     await manager.SetFilePriorityAsync(manager.Files[i], Priority.Highest);
                 }
@@ -483,6 +486,48 @@ public sealed class StreamSession : IAsyncDisposable
     }
 
     public Progress Progress => TorrentEngine.ProgressOf(Manager, FileIndex);
+
+    const double BufferAhead = 5 * 60, BufferRefill = 4 * 60;
+    bool holding, adjusting;
+
+    /// <summary>
+    /// Watching, not downloading: fetch until five minutes past the playhead are on
+    /// disk, then pause the torrent (peers stay connected); pick up again once under
+    /// four, or at once after a seek into missing data. Playback never waits for the
+    /// five minutes — this only stops the rest of the film downloading behind it.
+    /// A download sharing the torrent wants every piece, so it is left alone then.
+    /// </summary>
+    public async Task KeepBuffer(double positionSeconds, double durationSeconds)
+    {
+        if (adjusting || durationSeconds <= 0 || Manager.Torrent is not { } torrent) return;
+        var file = Manager.Files[FileIndex];
+        var bytesPerSecond = file.Length / durationSeconds;
+        var from = file.OffsetInTorrent + (long)(Math.Clamp(positionSeconds, 0, durationSeconds) * bytesPerSecond);
+        var end = file.OffsetInTorrent + file.Length;
+        var upTo = from;
+        for (var piece = (int)(from / torrent.PieceLength); piece <= file.EndPieceIndex && Manager.Bitfield[piece]; piece++)
+            upTo = (piece + 1L) * torrent.PieceLength;
+        var ahead = upTo >= end ? double.PositiveInfinity : (upTo - from) / bytesPerSecond;
+
+        var hold = !Borrowed && ahead >= (holding ? BufferRefill : BufferAhead);
+        if (hold == holding) return;
+        adjusting = true;
+        try
+        {
+            if (hold && Manager.State == TorrentState.Downloading) await Manager.PauseAsync();
+            else if (!hold && Manager.State == TorrentState.Paused) await Manager.StartAsync();
+            holding = hold;
+            Log.Stream(hold ? $"{Math.Min(ahead, 99999):0}s ahead on disk — holding" : $"{ahead:0}s ahead on disk — fetching");
+        }
+        catch (Exception e)
+        {
+            Log.Warn("stream", $"buffer control: {e.Message}");
+        }
+        finally
+        {
+            adjusting = false;
+        }
+    }
 
     /// <summary>Subtitle files from this torrent that have finished downloading.</summary>
     public IEnumerable<string> ReadySubtitles() => Meta.Files
