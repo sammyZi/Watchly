@@ -161,6 +161,7 @@ public partial class MainWindow : Window
         page.SetResourceReference(BackgroundProperty, "Bg");
         Layers.Children.Add(page);
         TabDock.Visibility = Visibility.Collapsed;
+        ShowTopLayerOnly();
     }
 
     public void CloseLayer(FrameworkElement page)
@@ -168,6 +169,20 @@ public partial class MainWindow : Window
         Layers.Children.Remove(page);
         (page as IDisposable)?.Dispose();
         if (Layers.Children.Count == 0) TabDock.Visibility = Visibility.Visible;
+        ShowTopLayerOnly();
+    }
+
+    /// <summary>
+    /// Pages are opaque, so only the top one needs drawing. The home tab and every
+    /// page below used to render underneath it (25 shelves of posters behind a title
+    /// page). Hidden, not collapsed: they keep their layout and scroll position.
+    /// </summary>
+    void ShowTopLayerOnly()
+    {
+        var count = Layers.Children.Count;
+        for (var i = 0; i < count; i++) Layers.Children[i].Visibility = i == count - 1 ? Visibility.Visible : Visibility.Hidden;
+        if (PlayerHost.Content is null || PlayerHost.Visibility != Visibility.Visible)
+            Tabs.Visibility = count > 0 ? Visibility.Hidden : Visibility.Visible;
     }
 
     /// <summary>The title page on top, if any — up-next and saved art read from it.</summary>
@@ -572,8 +587,9 @@ public partial class MainWindow : Window
         player.Exited += async () =>
         {
             if (PlayerHost.Content == player) PlayerHost.Visibility = Visibility.Collapsed;
-            Tabs.Visibility = Layers.Visibility = TabDock.Visibility = Visibility.Visible;
-            if (Layers.Children.Count > 0) TabDock.Visibility = Visibility.Collapsed;
+            Layers.Visibility = Visibility.Visible;
+            TabDock.Visibility = Layers.Children.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
+            ShowTopLayerOnly();
             LibraryChanged?.Invoke();
             // Hidden now, removed once libVLC has let go: destroying the video
             // window while it still draws into it can block this thread.

@@ -195,11 +195,10 @@ public static class Ui
             b.HorizontalAlignment = side;
             b.VerticalAlignment = VerticalAlignment.Top;
             b.Margin = new Thickness(6, height * 0.32, 6, 0);
-            // Hidden, not Opacity 0: an invisible shadowed button is still composited
-            // on every frame, two per shelf, which is what made the page scroll stutter.
+            // Hidden until hover, and no shadow effect: an effect over a moving shelf is
+            // redrawn every frame of a scroll.
             b.Visibility = Visibility.Hidden;
             b.Opacity = 0.92;
-            b.Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 12, ShadowDepth = 2, Opacity = 0.35 };
             return b;
         }
         var left = Arrow("chevron-left", HorizontalAlignment.Left, sv2 => PageRail(sv2, -1));
