@@ -202,6 +202,11 @@ public sealed class PlayerView : UserControl, IDisposable
         player.Playing += (_, _) => Ui(() =>
         {
             buffering = false;
+            // The audio output exists now, and it picks up whatever mute Windows remembered
+            // for this app (a pause in an older build muted it); only the viewer's M mutes.
+            // Likewise the saved volume: set before playback there is no output to take it.
+            if (player.Mute != userMuted) player.Mute = userMuted;
+            if (player.Volume != shell.Settings.Volume) player.Volume = shell.Settings.Volume;
             OnPlaying();
             Bump();
             Render();
@@ -364,6 +369,14 @@ public sealed class PlayerView : UserControl, IDisposable
         started = true;
         buffering = true;
         current = (long)(startSeconds * 1000);
+        if (old is not null)
+        {
+            // A reload opens a new video window: black loading screen again until it plays,
+            // and the new media needs its external subtitles attached afresh.
+            firstPlay = true;
+            addedSlaves.Clear();
+            slaveTrackLabels.Clear();
+        }
         player.Play(media);
         player.SetRate((float)rate);
         old?.Dispose();
@@ -515,7 +528,13 @@ public sealed class PlayerView : UserControl, IDisposable
         !disposed && player.NativeReference != IntPtr.Zero ? player.AudioTrackCount : 0,
         stats != null, subLoading, subResults.Count);
 
-    bool Preparing => !started || (buffering && current <= 0 && !IsPlayingSafe);
+    /// <summary>
+    /// Until libVLC has actually started playing, the video window under the controls is
+    /// unpainted (white), so the black loading screen stays up. Keying this on the clock
+    /// ("current &lt;= 0") broke on resume: the clock starts at the resume point, the
+    /// see-through controls went up at once, and the white showed through as grey.
+    /// </summary>
+    bool Preparing => !started || firstPlay;
 
     void Refresh()
     {
@@ -846,21 +865,11 @@ public sealed class PlayerView : UserControl, IDisposable
     void TogglePlay()
     {
         if (!started || disposed) return;
-        if (IsPlayingSafe)
-        {
-            player.SetPause(true);
-            if (!userMuted) player.Mute = true;
-        }
-        else if (SafeState == VLCState.Ended || SafeState == VLCState.Stopped)
-        {
-            if (!userMuted) player.Mute = false;
-            player.Play();
-        }
-        else
-        {
-            if (!userMuted) player.Mute = false;
-            player.SetPause(false);
-        }
+        // No muting around pause: libVLC's mute is Windows' mute for this app's audio session,
+        // which Windows remembers — pause, close, and every later launch started silent.
+        if (IsPlayingSafe) player.SetPause(true);
+        else if (SafeState == VLCState.Ended || SafeState == VLCState.Stopped) player.Play();
+        else player.SetPause(false);
         Render();
     }
 
@@ -942,30 +951,60 @@ public sealed class PlayerView : UserControl, IDisposable
         player.Scale = mode.Scale;
     }
 
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    struct RECT { public int Left, Top, Right, Bottom; }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    struct MONITORINFO { public int Size; public RECT Monitor, Work; public uint Flags; }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+    const uint SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010, SWP_FRAMECHANGED = 0x0020;
+
+    /// <summary>Where the window sat before fullscreen, to put it back exactly.</summary>
+    RECT windowedRect;
+
+    /// <summary>
+    /// Straight to the monitor's edges and straight back, by window rectangle. Going through
+    /// WindowState.Normal (needed to make a borderless maximized WPF window cover the taskbar)
+    /// shrank the window for a frame each way, and whatever was behind it flashed through.
+    /// </summary>
     void ToggleFullscreen()
     {
         var window = Window.GetWindow(this) ?? Application.Current?.MainWindow;
         if (window is null) return;
-        fullscreen = !fullscreen;
-        if (fullscreen)
+        SetFullscreen(window, !fullscreen);
+        ShowHud(fullscreen ? "Fullscreen" : "Windowed");
+        Dispatcher.BeginInvoke(ApplyScale, DispatcherPriority.Background);
+        Render();
+    }
+
+    void SetFullscreen(Window window, bool on)
+    {
+        var hwnd = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+        fullscreen = on;
+        if (on)
         {
+            GetWindowRect(hwnd, out windowedRect);
+            var info = new MONITORINFO { Size = System.Runtime.InteropServices.Marshal.SizeOf<MONITORINFO>() };
+            GetMonitorInfo(MonitorFromWindow(hwnd, 2 /* nearest */), ref info);
             window.Topmost = true;
             window.WindowStyle = WindowStyle.None;
             window.ResizeMode = ResizeMode.NoResize;
-            window.WindowState = WindowState.Normal;
-            window.WindowState = WindowState.Maximized;
-            ShowHud("Fullscreen");
+            var m = info.Monitor;
+            SetWindowPos(hwnd, IntPtr.Zero, m.Left, m.Top, m.Right - m.Left, m.Bottom - m.Top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
         }
         else
         {
             window.Topmost = false;
             window.WindowStyle = WindowStyle.SingleBorderWindow;
             window.ResizeMode = ResizeMode.CanResize;
-            window.WindowState = WindowState.Maximized;
-            ShowHud("Windowed");
+            var r = windowedRect;
+            if (r.Right > r.Left)
+                SetWindowPos(hwnd, IntPtr.Zero, r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
         }
-        Dispatcher.BeginInvoke(ApplyScale, DispatcherPriority.Background);
-        Render();
     }
 
     void SaveCopy()
@@ -1635,12 +1674,15 @@ public sealed class PlayerView : UserControl, IDisposable
         var m = media;
         var s = session;
         // All of it off the UI thread, stream last: libVLC reads from it until it stops.
-        await Task.Run(async () =>
+        var stopped = Task.Run(() =>
         {
             try { p.Stop(); } catch { }
             try { m?.Dispose(); p.Dispose(); } catch { }
-            if (s is not null) await s.DisposeAsync();
         });
+        await stopped;
+        // libVLC has let go of the video window: close it and the controls window for good.
+        video.Dispose();
+        if (s is not null) await Task.Run(async () => await s.DisposeAsync());
     }
 
     public Task Shutdown() => Close();
@@ -1653,14 +1695,7 @@ public sealed class PlayerView : UserControl, IDisposable
         try
         {
             var window = Window.GetWindow(this) ?? Application.Current?.MainWindow;
-            if (window != null && fullscreen)
-            {
-                fullscreen = false;
-                window.Topmost = false;
-                window.WindowStyle = WindowStyle.SingleBorderWindow;
-                window.ResizeMode = ResizeMode.CanResize;
-                window.WindowState = WindowState.Maximized;
-            }
+            if (window != null && fullscreen) SetFullscreen(window, false);
         }
         catch { }
         overlay.MouseMove -= OnOverlayMouseMove;
@@ -1673,6 +1708,10 @@ public sealed class PlayerView : UserControl, IDisposable
         tick.Stop();
         hideTimer.Stop();
         clickTimer.Stop();
+        // The controls live in LibVLCSharp's own see-through window over the video, which
+        // only hides when the VideoView unloads — and that waits for libVLC and the torrent
+        // to finish closing, seconds after Back or closing the app. Hide it now.
+        if (Window.GetWindow(overlay) is { } controls && controls != Window.GetWindow(this)) controls.Hide();
         video.MediaPlayer = null;
     }
 }

@@ -24,8 +24,10 @@ A distributable folder (runs on any Windows 10/11 x64 PC, no .NET install needed
 dotnet publish windows/Watchly -c Release -r win-x64 --self-contained -o windows/dist
 ```
 
-`windows/dist` is just `Watchly.exe` (the .NET runtime and WPF bundled inside)
-and `libvlc\`, VLC's codecs, which have to stay on disk beside it. Ship both.
+`windows/dist` is a single `Watchly.exe` (~270 MB): the .NET runtime, WPF and
+libVLC with its codecs are all inside. VLC can only load codecs from disk, so the
+first launch of each build unpacks everything (~250 MB, a few seconds) to
+`%TEMP%\.net\Watchly\` and runs from there; later launches start straight away.
 Publish doesn't clear old files, so delete `windows/dist` before re-publishing.
 Wrap it with Inno Setup or similar for a single installer.
 

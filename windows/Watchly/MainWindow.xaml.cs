@@ -596,8 +596,9 @@ public partial class MainWindow : Window
             await player.Closed;
             if (PlayerHost.Content == player) PlayerHost.Content = null;
         };
-        // The video surface is its own window; nothing underneath needs drawing.
-        Tabs.Visibility = Layers.Visibility = TabDock.Visibility = Visibility.Collapsed;
+        // The video surface is its own window; nothing underneath needs drawing. Hidden, not
+        // collapsed: the pages keep their layout, so coming back doesn't lay out every shelf again.
+        Tabs.Visibility = Layers.Visibility = TabDock.Visibility = Visibility.Hidden;
         PlayerHost.Content = player;
     }
 
@@ -714,13 +715,15 @@ public partial class MainWindow : Window
         e.Cancel = true;
         shuttingDown = true;
         Hide();
-        try
+        async Task Cleanup()
         {
             if (PlayerHost.Content is PlayerView player) await player.Shutdown();
             await Downloads.Instance.StopAll();
             await TorrentEngine.Instance.Shutdown();
         }
-        catch { }
+        // Out of sight already; fast-resume data is saved within this, but a tracker that
+        // never answers must not keep the process alive in the background for long.
+        try { await Cleanup().WaitAsync(TimeSpan.FromSeconds(8)); } catch { }
         Application.Current.Shutdown();
     }
 }

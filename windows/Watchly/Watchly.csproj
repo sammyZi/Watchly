@@ -19,25 +19,20 @@
   </PropertyGroup>
 
   <!--
-    Publish as one Watchly.exe (runtime, WPF natives and translations bundled in),
-    so dist is just the exe plus libvlc\ — VLC loads its codec plugins from disk.
+    Publish as one Watchly.exe, libVLC included. VLC can only load its codec plugins
+    from disk, so everything is unpacked on first launch to
+    %TEMP%\.net\Watchly\<build id>\ (again only for a new build, or if Temp was
+    cleaned) and the app runs from there — AppContext.BaseDirectory is that folder,
+    which is where PlayerView looks for libvlc\ and writes VLC's plugin cache.
   -->
   <PropertyGroup>
     <PublishSingleFile>true</PublishSingleFile>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
     <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
     <!-- The app is win-x64 only; the package ships x86 and arm64 VLC too. -->
     <VlcWindowsX86Enabled>false</VlcWindowsX86Enabled>
     <VlcWindowsArm64Enabled>false</VlcWindowsArm64Enabled>
   </PropertyGroup>
-  <!-- VideoLAN.LibVLC.Windows adds libvlc\ as Content in a target, so mark it there. -->
-  <Target Name="KeepVlcOutOfBundle" AfterTargets="CollectVlcFilesToCopyWindows">
-    <ItemGroup>
-      <Content Condition="$([System.String]::Copy('%(Content.Link)').StartsWith('libvlc'))">
-        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
-      </Content>
-    </ItemGroup>
-  </Target>
 
   <!--
     The SubDL key the phone app ships with (EXPO_PUBLIC_SUBDL_KEY in the repo's
