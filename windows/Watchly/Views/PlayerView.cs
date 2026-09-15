@@ -447,7 +447,11 @@ public sealed class PlayerView : UserControl, IDisposable
     void OnTick()
     {
         if (disposed) return;
-        if (session is not null) stats = session.Progress;
+        if (session is not null)
+        {
+            stats = session.Progress;
+            _ = session.KeepBuffer(current / 1000.0, duration / 1000.0);
+        }
 
         // The stall libVLC never reports: the socket blocks on a piece that has
         // not landed, the picture freezes, and no event fires. A clock that stops
@@ -649,17 +653,21 @@ public sealed class PlayerView : UserControl, IDisposable
             case Key.Right or Key.L:
                 Skip(SkipSeconds);
                 break;
+            // Volume shows its own little readout; it must not pull up the whole control bar.
             case Key.Up:
                 StepVolume(5);
-                break;
+                e.Handled = true;
+                return;
             case Key.Down:
                 StepVolume(-5);
-                break;
+                e.Handled = true;
+                return;
             case Key.M:
                 userMuted = !userMuted;
                 player.Mute = userMuted;
                 ShowHud(player.Mute ? "Muted" : $"Volume {player.Volume}%");
-                break;
+                e.Handled = true;
+                return;
             case Key.A:
                 CycleAudio();
                 break;

@@ -201,9 +201,19 @@ public sealed class Downloads
                 if (Pick.PickFile(meta.Files, job.Auto == "best" ? null : job.Auto) is int picked) indices = new() { picked };
             }
             if (indices.Count == 0 && Pick.PickFile(meta.Files) is int fallback) indices = new() { fallback };
-            if (indices.Count == 0) throw new InvalidOperationException("No video in this torrent");
 
-            var queue = job.QueueIndices is { Count: > 0 } q ? q.Where(i => i < meta.Files.Count).ToList() : indices;
+            // Programs, scripts and shortcuts never reach the disk, however the download was started.
+            var unsafeFiles = indices.Where(i => Pick.IsUnsafe(meta.Files[i].Path)).ToList();
+            if (unsafeFiles.Count > 0)
+            {
+                indices = indices.Except(unsafeFiles).ToList();
+                var names = string.Join(", ", unsafeFiles.Take(3).Select(i => meta.Files[i].Name));
+                Log.Warn("download", $"'{meta.Name}': skipped {unsafeFiles.Count} runnable/unsafe file(s): {string.Join(", ", unsafeFiles.Select(i => meta.Files[i].Path))}");
+                Failed?.Invoke($"Skipped {unsafeFiles.Count} file{(unsafeFiles.Count == 1 ? "" : "s")} that could run on your PC ({names}{(unsafeFiles.Count > 3 ? "…" : "")}) — torrents are a common way malware spreads.");
+            }
+            if (indices.Count == 0) throw new InvalidOperationException(unsafeFiles.Count > 0 ? "This torrent holds only programs or scripts, not videos — nothing was downloaded." : "No video in this torrent");
+
+            var queue = job.QueueIndices is { Count: > 0 } q ? q.Where(i => i < meta.Files.Count && !Pick.IsUnsafe(meta.Files[i].Path)).ToList() : indices;
             row.Job = job with { FileIndices = indices, QueueIndices = queue };
             row.Wanted.Clear();
             foreach (var i in indices) row.Wanted.Add(i);
@@ -232,7 +242,8 @@ public sealed class Downloads
             for (var i = 0; i < manager.Files.Count; i++)
             {
                 var watched = StreamSession.Current?.Manager == manager && StreamSession.Current.FileIndex == i;
-                await manager.SetFilePriorityAsync(manager.Files[i], row.Wanted.Contains(i) || watched ? Priority.Normal : Priority.DoNotDownload);
+                var wanted = (row.Wanted.Contains(i) || watched) && !Pick.IsUnsafe(meta.Files[i].Path);
+                await manager.SetFilePriorityAsync(manager.Files[i], wanted ? Priority.Normal : Priority.DoNotDownload);
             }
             if (!row.Paused && manager.State is TorrentState.Stopped or TorrentState.Paused or TorrentState.Error)
                 await manager.StartAsync();
@@ -320,6 +331,7 @@ public sealed class Downloads
                     Failed?.Invoke($"Could not copy {info.Name} to the downloads folder: {e.Message}");
                 }
             }
+            MarkFromInternet(path);
             if (info.IsVideo || row.Job.All)
             {
                 SavedDownloads.Record(new SavedDownload
@@ -448,8 +460,18 @@ public sealed class Downloads
         Update(row);
     }
 
+    /// <summary>
+    /// Tag a finished file as downloaded from the internet (the Mark of the Web a browser
+    /// adds), so Windows SmartScreen and Office warn before anything in it is opened or run.
+    /// </summary>
+    static void MarkFromInternet(string path)
+    {
+        try { File.WriteAllText(path + ":Zone.Identifier", "[ZoneTransfer]\r\nZoneId=3\r\n"); } catch { }
+    }
+
     public async Task Include(ActiveDownload row, int index)
     {
+        if (row.Meta is { } meta && index < meta.Files.Count && Pick.IsUnsafe(meta.Files[index].Path)) return;
         row.Wanted.Add(index);
         row.Seeding = false;
         if (row.Manager is not null)
