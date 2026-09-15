@@ -85,6 +85,48 @@ public static class Ui
         };
     }
 
+    /// <summary>
+    /// Smooth vertical wheel scrolling. The stock ScrollViewer jumps 48px a notch
+    /// and rounds touchpad deltas into the same steps; this glides to the target
+    /// once per rendered frame. Shift is left alone so shelves still get Shift+wheel.
+    /// </summary>
+    public static void SmoothWheel(ScrollViewer sv)
+    {
+        double target = 0;
+        var running = false;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var last = TimeSpan.Zero;
+
+        void Tick(object? s, EventArgs e)
+        {
+            var now = clock.Elapsed;
+            var dt = (now - last).TotalSeconds;
+            last = now;
+            target = Math.Clamp(target, 0, sv.ScrollableHeight);
+            var off = sv.VerticalOffset;
+            var next = off + (target - off) * (1 - Math.Exp(-dt * 16));
+            if (Math.Abs(target - next) < 0.5)
+            {
+                next = target;
+                CompositionTarget.Rendering -= Tick;
+                running = false;
+            }
+            sv.ScrollToVerticalOffset(next);
+        }
+
+        sv.PreviewMouseWheel += (_, e) =>
+        {
+            if (Keyboard.Modifiers == ModifierKeys.Shift) return;
+            e.Handled = true;
+            if (!running) target = sv.VerticalOffset;
+            target = Math.Clamp(target - e.Delta, 0, sv.ScrollableHeight);
+            if (running) return;
+            running = true;
+            last = clock.Elapsed;
+            CompositionTarget.Rendering += Tick;
+        };
+    }
+
     /// <summary>Heading row: colour tick, title, optional "See all".</summary>
     public static FrameworkElement Head(string title, string hue, Action? seeAll, double sidePadding = 24)
     {
@@ -150,7 +192,10 @@ public static class Ui
             b.HorizontalAlignment = side;
             b.VerticalAlignment = VerticalAlignment.Top;
             b.Margin = new Thickness(6, height * 0.32, 6, 0);
-            b.Opacity = 0;
+            // Hidden, not Opacity 0: an invisible shadowed button is still composited
+            // on every frame, two per shelf, which is what made the page scroll stutter.
+            b.Visibility = Visibility.Hidden;
+            b.Opacity = 0.92;
             b.Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 12, ShadowDepth = 2, Opacity = 0.35 };
             return b;
         }
@@ -158,8 +203,8 @@ public static class Ui
         var right = Arrow("chevron-right", HorizontalAlignment.Right, sv2 => PageRail(sv2, 1));
         grid.Children.Add(left);
         grid.Children.Add(right);
-        grid.MouseEnter += (_, _) => left.Opacity = right.Opacity = 0.92;
-        grid.MouseLeave += (_, _) => left.Opacity = right.Opacity = 0;
+        grid.MouseEnter += (_, _) => left.Visibility = right.Visibility = Visibility.Visible;
+        grid.MouseLeave += (_, _) => left.Visibility = right.Visibility = Visibility.Hidden;
         grid.Background = Brushes.Transparent;
         return grid;
     }
@@ -276,7 +321,8 @@ public static class Ui
             ItemTemplate = (DataTemplate)Application.Current.FindResource(template),
             Focusable = false,
         };
-        var panel = new FrameworkElementFactory(typeof(WrapPanel));
+        var panel = new FrameworkElementFactory(typeof(ColumnWrap));
+        panel.SetValue(ColumnWrap.MinColumnProperty, 164.0);
         list.ItemsPanel = new ItemsPanelTemplate(panel);
         list.ItemContainerStyle = new Style(typeof(ContentPresenter)) { Setters = { new Setter(FrameworkElement.MarginProperty, new Thickness(0, 0, 0, 18)) } };
         return list;
@@ -400,5 +446,29 @@ public static class Ui
     public static void Open(string url)
     {
         try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+    }
+}
+
+/// <summary>
+/// A WrapPanel that shares its width out in equal columns, as many as fit
+/// <see cref="MinColumn"/> — so a list built for a phone fills a desktop window
+/// instead of hugging its left edge. Fixed-width children sit centred in their column.
+/// </summary>
+public sealed class ColumnWrap : WrapPanel
+{
+    public static readonly DependencyProperty MinColumnProperty = DependencyProperty.Register(nameof(MinColumn), typeof(double), typeof(ColumnWrap),
+        new FrameworkPropertyMetadata(520.0, FrameworkPropertyMetadataOptions.AffectsMeasure));
+
+    public double MinColumn
+    {
+        get => (double)GetValue(MinColumnProperty);
+        set => SetValue(MinColumnProperty, value);
+    }
+
+    protected override Size MeasureOverride(Size available)
+    {
+        if (!double.IsInfinity(available.Width) && available.Width > 0)
+            ItemWidth = Math.Floor(available.Width / Math.Max(1, Math.Floor(available.Width / MinColumn)));
+        return base.MeasureOverride(available);
     }
 }

@@ -24,8 +24,10 @@ A distributable folder (runs on any Windows 10/11 x64 PC, no .NET install needed
 dotnet publish windows/Watchly -c Release -r win-x64 --self-contained -o windows/dist
 ```
 
-`windows/dist/Watchly.exe` is the app; ship the whole folder (libVLC's codecs
-live beside it). Wrap it with Inno Setup or similar for a single installer.
+`windows/dist` is just `Watchly.exe` (the .NET runtime and WPF bundled inside)
+and `libvlc\`, VLC's codecs, which have to stay on disk beside it. Ship both.
+Publish doesn't clear old files, so delete `windows/dist` before re-publishing.
+Wrap it with Inno Setup or similar for a single installer.
 
 The SubDL key is read from the repo's `.env` (`EXPO_PUBLIC_SUBDL_KEY`) at build
 time, like the phone app; without it online subtitle search is off.

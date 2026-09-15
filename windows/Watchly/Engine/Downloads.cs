@@ -97,9 +97,12 @@ public sealed partial class ActiveDownload : ObservableObject
     public ObservableCollection<QueueFile> Queue { get; } = new();
 
     [ObservableProperty] string headline;
-    [ObservableProperty] string stage = "Starting…";
+    [ObservableProperty] string stage = "Getting the file list…";
     [ObservableProperty] string counts = "";
-    [ObservableProperty] string sizeLine = "Starting…";
+    [ObservableProperty] string sizeLine = "";
+    /// <summary>Why it stopped — the card shows it with Retry instead of the row vanishing.</summary>
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(HasError))] string? error;
+    public bool HasError => Error is not null;
     [ObservableProperty] string etaLine = "";
     [ObservableProperty] string swarmLine = "";
     [ObservableProperty] double overall;
@@ -238,10 +241,31 @@ public sealed class Downloads
         }
         catch (Exception e)
         {
-            Failed?.Invoke($"Download failed: {e.Message}");
-            Live.Remove(row);
+            if (!Live.Contains(row)) return;
+            Log.Error("download", $"'{row.Headline}' failed", e);
+            row.Error = e is UnauthorizedAccessException or IOException
+                ? $"Can't write to {(row.SaveDir.Length > 0 ? row.SaveDir : settings.DownloadDir)} — {e.Message} Change the download folder and retry."
+                : e.GetBaseException().Message;
+            row.Starting = false;
+            row.Stage = "Couldn't start";
             Persist();
         }
+    }
+
+    /// <summary>Try a failed download again, from scratch — picking up a download folder changed since.</summary>
+    public async Task Retry(ActiveDownload row)
+    {
+        if (row.Manager is { } old)
+        {
+            row.Manager = null;
+            if (StreamSession.Current?.Manager != old) await TorrentEngine.Instance.Remove(old, false);
+        }
+        row.Error = null;
+        row.Paused = false;
+        row.Starting = true;
+        row.Stage = "Getting the file list…";
+        row.SizeLine = "";
+        await Begin(row, AppSettings.Load());
     }
 
     bool ticking;
@@ -339,8 +363,10 @@ public sealed class Downloads
         var rate = paused ? 0 : progress.Speed;
 
         row.Overall = total > 0 ? Math.Min(100, have / total * 100) : 0;
-        row.Starting = !paused && m.State is TorrentState.Metadata or TorrentState.Starting or TorrentState.Hashing || (have <= 0 && rate <= 0 && !paused);
-        row.Stage = paused ? "Paused"
+        if (m.State == TorrentState.Error) row.Error = m.Error?.Exception?.GetBaseException().Message ?? "Disk or network failure";
+        row.Starting = row.Error is null && !paused && (m.State is TorrentState.Metadata or TorrentState.Starting or TorrentState.Hashing || (have <= 0 && rate <= 0));
+        row.Stage = row.Error is not null ? "Stopped with an error"
+            : paused ? "Paused"
             : row.Seeding ? "Seeding"
             : m.State switch
             {
@@ -348,10 +374,9 @@ public sealed class Downloads
                 TorrentState.Metadata or TorrentState.Starting => "Starting…",
                 TorrentState.Downloading => rate > 0 ? "Downloading" : "Finding peers…",
                 TorrentState.Seeding => "Finishing…",
-                TorrentState.Error => $"Error: {m.Error?.Exception?.Message ?? "disk or network failure"}",
                 _ => "Starting…",
             };
-        row.SizeLine = total > 0 ? $"{Format.Bytes(have)} of {Format.Bytes(total)}" + (paused ? " · Paused" : $" · {Format.Speed(rate)}") : "Starting…";
+        row.SizeLine = total > 0 ? $"{Format.Bytes(have)} of {Format.Bytes(total)}" + (paused ? "" : $" · {Format.Speed(rate)}") : "";
         row.EtaLine = paused || row.Overall >= 100 ? "" : Format.Eta(total - have, rate);
         row.SwarmLine = $"{progress.Seeds} seeds · {progress.Peers} peers · ↑ {Format.Speed(progress.UploadSpeed)}";
 

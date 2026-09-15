@@ -36,8 +36,25 @@ public sealed class PlayerView : UserControl, IDisposable
         ("Original", null, false, 1),
     };
 
-    static LibVLC? vlc;
-    static LibVLC Vlc => vlc ??= new LibVLC("--no-video-title-show", "--no-osd", "--quiet");
+    /// <summary>
+    /// Starting libVLC loads every plugin DLL (300+) unless plugins.dat caches
+    /// them, and the package ships none — seconds on a cold disk, which froze the
+    /// window on first play. App warms it on a worker at launch; the first run
+    /// also writes the cache (if the folder is writable) so later ones skip the scan.
+    /// </summary>
+    static readonly Lazy<LibVLC> vlc = new(() =>
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        LibVLCSharp.Shared.Core.Initialize();
+        var plugins = Path.Combine(AppContext.BaseDirectory, "libvlc", "win-x64", "plugins");
+        var args = new List<string> { "--no-video-title-show", "--no-osd", "--quiet" };
+        if (!File.Exists(Path.Combine(plugins, "plugins.dat"))) args.Add("--reset-plugins-cache");
+        var made = new LibVLC(args.ToArray());
+        Log.Player($"libVLC ready in {clock.ElapsedMilliseconds} ms");
+        return made;
+    });
+    static LibVLC Vlc => vlc.Value;
+    public static void Warm() => _ = Task.Run(() => vlc.Value);
 
     public event Action? Exited;
 
@@ -292,7 +309,8 @@ public sealed class PlayerView : UserControl, IDisposable
         }
     }
 
-    static void Ui(Action action) => Application.Current?.Dispatcher.BeginInvoke(action);
+    /// <summary>libVLC events arrive on its own threads; one queued just before closing must not touch a disposed player.</summary>
+    void Ui(Action action) => Dispatcher.BeginInvoke(() => { if (!disposed) action(); });
 
     // ── Source ──────────────────────────────────────────────────────────────
 
@@ -565,7 +583,7 @@ public sealed class PlayerView : UserControl, IDisposable
         var go = next.Go;
         // Hand the screen back first: if the next episode has to be searched for
         // and nothing turns up, the page underneath is where that is said.
-        _ = Close().ContinueWith(_ => Ui(() => { Exited?.Invoke(); go(); }));
+        _ = Close().ContinueWith(_ => Dispatcher.BeginInvoke(() => { Exited?.Invoke(); go(); }));
     }
 
     // ── Controls ────────────────────────────────────────────────────────────
@@ -1564,18 +1582,28 @@ public sealed class PlayerView : UserControl, IDisposable
 
     // ── Leaving ─────────────────────────────────────────────────────────────
 
-    public async void RequestExit()
+    /// <summary>
+    /// Back to the page underneath at once. Stopping libVLC and letting go of the
+    /// torrent (tracker goodbyes, flushing the disk cache, deleting the stream
+    /// files) takes seconds; that used to happen before the screen came back.
+    /// </summary>
+    public void RequestExit()
     {
-        overlay.Background = Brushes.Black;
-        Background = Brushes.Black;
-        await Close();
+        if (disposed) return;
+        _ = Close();
         Exited?.Invoke();
     }
 
+    Task? closing;
+
+    /// <summary>Finishes when libVLC and the stream are fully shut down — the host keeps the video window until then.</summary>
+    public Task Closed => closing ?? Task.CompletedTask;
+
     /// <summary>Checkpoint, stop the picture and the stream, give the window back.</summary>
-    async Task Close()
+    Task Close() => closing ??= CloseCore();
+
+    async Task CloseCore()
     {
-        if (disposed) return;
         overlay.Background = Brushes.Black;
         Background = Brushes.Black;
         SavePosition();
@@ -1583,12 +1611,14 @@ public sealed class PlayerView : UserControl, IDisposable
         Dispose();
         var p = player;
         var m = media;
-        await Task.Run(() =>
+        var s = session;
+        // All of it off the UI thread, stream last: libVLC reads from it until it stops.
+        await Task.Run(async () =>
         {
             try { p.Stop(); } catch { }
             try { m?.Dispose(); p.Dispose(); } catch { }
+            if (s is not null) await s.DisposeAsync();
         });
-        if (session is not null) await session.DisposeAsync();
     }
 
     public Task Shutdown() => Close();

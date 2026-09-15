@@ -76,8 +76,20 @@ public sealed class TorrentEngine
 
     static string Hex(InfoHashes hashes) => hashes.V1OrV2.ToHex().ToLowerInvariant();
 
-    public TorrentManager? Find(string hashHex) =>
-        engine.Torrents.FirstOrDefault(m => Hex(m.InfoHashes) == hashHex);
+    /// <summary>
+    /// Torrents being stopped and removed, by hash. Closing the player removes its
+    /// torrent in the background; playing or downloading the same one again in
+    /// those seconds must not pick up the dying manager (it ends Stopped, then
+    /// unregistered, and the new stream or download sits at "Starting…" forever).
+    /// </summary>
+    readonly System.Collections.Concurrent.ConcurrentDictionary<string, Task> leaving = new();
+
+    /// <summary>Completes once no removal of this torrent is still in flight.</summary>
+    public Task Settled(string hashHex) => leaving.TryGetValue(hashHex, out var t) ? t : Task.CompletedTask;
+
+    public TorrentManager? Find(string hashHex) => leaving.ContainsKey(hashHex)
+        ? null
+        : engine.Torrents.FirstOrDefault(m => Hex(m.InfoHashes) == hashHex);
 
     /// <summary>
     /// Resolve a magnet, .torrent URL or local .torrent into its file list.
@@ -91,6 +103,7 @@ public sealed class TorrentEngine
             var link = MagnetLink.Parse(TitleText.WithTrackers(uri));
             var hex = Hex(link.InfoHashes);
             var cached = Path.Combine(MetaDir, hex + ".torrent");
+            if (!File.Exists(cached)) await Settled(hex);
             var running = Find(hex);
             if (running is { HasMetadata: true })
             {
@@ -146,6 +159,7 @@ public sealed class TorrentEngine
     /// <summary>Add (or reuse) a manager for <paramref name="torrent"/>, saving into <paramref name="saveDir"/>.</summary>
     public async Task<TorrentManager> Manager(Torrent torrent, string saveDir, string? sourceUri = null)
     {
+        await Settled(Hex(torrent.InfoHashes));
         var existing = Find(Hex(torrent.InfoHashes));
         if (existing is not null)
         {
@@ -191,7 +205,16 @@ public sealed class TorrentEngine
         try { _ = manager.LocalPeerAnnounceAsync(); } catch { }
     }
 
-    public async Task Remove(TorrentManager manager, bool deleteFiles)
+    public Task Remove(TorrentManager manager, bool deleteFiles)
+    {
+        var hex = Hex(manager.InfoHashes);
+        var task = RemoveCore(manager, deleteFiles);
+        leaving[hex] = task;
+        _ = task.ContinueWith(_ => leaving.TryRemove(new KeyValuePair<string, Task>(hex, task)), TaskScheduler.Default);
+        return task;
+    }
+
+    async Task RemoveCore(TorrentManager manager, bool deleteFiles)
     {
         try
         {
@@ -270,6 +293,7 @@ public sealed class StreamSession : IAsyncDisposable
     {
         var engine = TorrentEngine.Instance;
         var hex = torrent.InfoHashes.V1OrV2.ToHex().ToLowerInvariant();
+        await engine.Settled(hex);
         var borrowed = engine.Find(hex) is not null;
         var manager = await engine.Manager(torrent, Path.Combine(Paths.StreamCache, hex), sourceUri);
         var meta = TorrentEngine.MetaOf(torrent);
