@@ -29,7 +29,8 @@ export type Progress = {
 };
 
 export type PlayOptions = {
-  /** MB of the file head buffered before playback starts. */
+  /** Most MB of the file head buffered before playback starts. A swarm faster
+   *  than the file's bitrate starts after one piece. */
   prepareMb?: number;
   /** Pieces kept hot ahead of the playback head. Omit — the native side sizes
    *  it in bytes, which is the only way that holds across piece sizes. */

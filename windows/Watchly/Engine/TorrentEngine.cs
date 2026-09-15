@@ -115,19 +115,14 @@ public sealed class TorrentEngine
             }
             else
             {
-                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts.CancelAfter(timeout);
-                ReadOnlyMemory<byte> data;
                 try
                 {
-                    data = await engine.DownloadMetadataAsync(link, cts.Token);
+                    torrent = await FetchMetadata(link, hex, cached, uri).WaitAsync(timeout, ct);
                 }
-                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                catch (Exception e) when (e is TimeoutException or OperationCanceledException && !ct.IsCancellationRequested)
                 {
                     throw new TimeoutException("No peers answered with this torrent's file list. Try a release with more seeders.");
                 }
-                torrent = Torrent.Load(data.Span);
-                await File.WriteAllBytesAsync(cached, data.ToArray(), CancellationToken.None);
             }
         }
         else if (uri.StartsWith("http", StringComparison.OrdinalIgnoreCase))
@@ -144,6 +139,134 @@ public sealed class TorrentEngine
         return (torrent, MetaOf(torrent));
     }
 
+    /// <summary>
+    /// File-list fetches in flight, by hash — everyone asking for the same magnet
+    /// waits on the one fetch (a second registration of a torrent is refused:
+    /// "A manager for this torrent has already been registered").
+    /// </summary>
+    readonly Dictionary<string, Task<Torrent>> fetching = new();
+
+    Task<Torrent>? Fetching(string hex)
+    {
+        lock (fetching) return fetching.GetValueOrDefault(hex);
+    }
+
+    /// <summary>
+    /// Magnets fetched for their file list and not yet taken by a stream or a
+    /// download, by hash. They stay connected so playing right after starts on
+    /// peers already found; one nobody takes is dropped after a few minutes.
+    /// </summary>
+    readonly HashSet<string> probes = new();
+
+    /// <summary>Take over a fetched magnet's manager. True if there was one to take.</summary>
+    public bool Claim(string hex)
+    {
+        lock (probes) return probes.Remove(hex);
+    }
+
+    bool IsProbe(string hex)
+    {
+        lock (probes) return probes.Contains(hex);
+    }
+
+    static TorrentSettings StreamSettings() => new TorrentSettingsBuilder
+    {
+        CreateContainingDirectory = false,
+        MaximumConnections = 250,
+        AllowDht = true,
+        AllowPeerExchange = true,
+    }.ToSettings();
+
+    /// <summary>
+    /// Why not engine.DownloadMetadataAsync: it puts every tracker of the magnet in
+    /// one tier, which MonoTorrent tries a tracker at a time — a few dead ones ate
+    /// the whole timeout (The Matrix YIFY, ~800 seeders: 12 s, then 60 s and
+    /// nothing). It also throws its peers away, so the stream had to find them all
+    /// again. Adding the magnet itself with each tracker in its own tier announces
+    /// to all of them at once (2–8 s for the same torrent) and keeps the peers.
+    /// </summary>
+    Task<Torrent> FetchMetadata(MagnetLink link, string hex, string cachePath, string sourceUri)
+    {
+        lock (fetching)
+        {
+            if (fetching.TryGetValue(hex, out var running)) return running;
+            var task = Fetch();
+            fetching[hex] = task;
+            // Added before this can run, so a fetch that fails at once is still cleared.
+            _ = task.ContinueWith(_ =>
+            {
+                lock (fetching) if (fetching.GetValueOrDefault(hex) == task) fetching.Remove(hex);
+            }, TaskScheduler.Default);
+            return task;
+        }
+
+        async Task<Torrent> Fetch()
+        {
+            TorrentManager manager;
+            await registering.WaitAsync();
+            try
+            {
+                if (Find(hex) is { } running)
+                {
+                    manager = running;
+                }
+                else
+                {
+                    var dir = Path.Combine(Paths.StreamCache, hex);
+                    Directory.CreateDirectory(dir);
+                    // Bare: the magnet's trackers are added below, one tier each.
+                    manager = await engine.AddStreamingAsync(new MagnetLink(link.InfoHashes, link.Name, null, null, link.Size), dir, StreamSettings());
+                    lock (probes) probes.Add(hex);
+                }
+            }
+            finally
+            {
+                registering.Release();
+            }
+
+            if (IsProbe(hex))
+            {
+                await AddTrackersAsync(manager, sourceUri);
+                if (manager.State is TorrentState.Stopped) await manager.StartAsync();
+            }
+
+            // Callers give up on their own timeouts; the shared fetch stops at the longest of them.
+            var clock = Stopwatch.StartNew();
+            while (!manager.HasMetadata)
+            {
+                if (clock.Elapsed > TimeSpan.FromSeconds(90) || !engine.Torrents.Contains(manager))
+                {
+                    if (Claim(hex)) await Remove(manager, false);
+                    throw new OperationCanceledException();
+                }
+                await Task.Delay(100);
+            }
+            Log.Torrent($"file list for '{manager.Torrent!.Name}' in {clock.ElapsedMilliseconds} ms from {manager.OpenConnections} peers");
+
+            if (IsProbe(hex))
+            {
+                // A streaming manager starts on every file once it knows them; nothing is wanted until someone picks.
+                foreach (var file in manager.Files) await manager.SetFilePriorityAsync(file, Priority.DoNotDownload);
+                _ = DropIfUnclaimed(hex, manager);
+            }
+            try
+            {
+                if (File.Exists(manager.MetadataPath)) File.Copy(manager.MetadataPath, cachePath, true);
+            }
+            catch { }
+            return manager.Torrent;
+        }
+    }
+
+    async Task DropIfUnclaimed(string hex, TorrentManager manager)
+    {
+        await Task.Delay(TimeSpan.FromMinutes(3));
+        if (Claim(hex)) await Remove(manager, false);
+    }
+
+    /// <summary>One registration at a time: two callers could otherwise both find no manager and both add one.</summary>
+    readonly SemaphoreSlim registering = new(1, 1);
+
     public static TorrentMeta MetaOf(Torrent torrent) => new(
         torrent.Name,
         torrent.Files.Select((f, i) => new TorrentFileInfo
@@ -159,25 +282,41 @@ public sealed class TorrentEngine
     /// <summary>Add (or reuse) a manager for <paramref name="torrent"/>, saving into <paramref name="saveDir"/>.</summary>
     public async Task<TorrentManager> Manager(Torrent torrent, string saveDir, string? sourceUri = null)
     {
-        await Settled(Hex(torrent.InfoHashes));
-        var existing = Find(Hex(torrent.InfoHashes));
-        if (existing is not null)
+        var hex = Hex(torrent.InfoHashes);
+        await Settled(hex);
+        // A file-list fetch for this torrent still holds its registration.
+        if (Fetching(hex) is { } fetch) try { await fetch; } catch { }
+
+        // A fetched magnet saving somewhere else (a download, not the stream cache)
+        // can't be moved while it runs; start that one afresh.
+        if (Find(hex) is { } probe && IsProbe(hex) && !SamePath(probe.SavePath, saveDir) && Claim(hex))
+            await Remove(probe, false);
+
+        TorrentManager manager;
+        await registering.WaitAsync();
+        try
         {
-            await AddTrackersAsync(existing, sourceUri);
-            return existing;
+            if (Find(hex) is { } existing)
+            {
+                manager = existing;
+                Claim(hex);
+            }
+            else
+            {
+                Directory.CreateDirectory(saveDir);
+                manager = await engine.AddStreamingAsync(torrent, saveDir, StreamSettings());
+            }
         }
-        Directory.CreateDirectory(saveDir);
-        var settings = new TorrentSettingsBuilder
+        finally
         {
-            CreateContainingDirectory = false,
-            MaximumConnections = 250,
-            AllowDht = true,
-            AllowPeerExchange = true,
-        }.ToSettings();
-        var manager = await engine.AddStreamingAsync(torrent, saveDir, settings);
+            registering.Release();
+        }
         await AddTrackersAsync(manager, sourceUri);
         return manager;
     }
+
+    static bool SamePath(string a, string b) =>
+        string.Equals(Path.GetFullPath(a).TrimEnd('\\'), Path.GetFullPath(b).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
 
     public async Task AddTrackersAsync(TorrentManager manager, string? sourceUri = null)
     {
@@ -294,7 +433,8 @@ public sealed class StreamSession : IAsyncDisposable
         var engine = TorrentEngine.Instance;
         var hex = torrent.InfoHashes.V1OrV2.ToHex().ToLowerInvariant();
         await engine.Settled(hex);
-        var borrowed = engine.Find(hex) is not null;
+        // Running because the file list was just fetched is ours to take; running for a download is borrowed.
+        var borrowed = engine.Find(hex) is not null && !engine.Claim(hex);
         var manager = await engine.Manager(torrent, Path.Combine(Paths.StreamCache, hex), sourceUri);
         var meta = TorrentEngine.MetaOf(torrent);
         var file = manager.Files[fileIndex];
