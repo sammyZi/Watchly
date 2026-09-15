@@ -232,9 +232,10 @@ public partial class MainWindow : Window
     /// <summary>
     /// How far through each episode you are, by Cinemeta episode id — the join of
     /// episode -> torrent uri -> the history entry the player writes to, plus
-    /// whatever "S01E02" in stored file names says.
+    /// whatever "S01E02" in stored file names says — or, given the show's episodes,
+    /// an anime file's running number ("- 29").
     /// </summary>
-    public Dictionary<string, double> EpisodeProgress()
+    public Dictionary<string, double> EpisodeProgress(List<Episode>? episodes = null)
     {
         var @out = new Dictionary<string, double>();
         void Record(string id, double? position, double? duration)
@@ -252,6 +253,12 @@ public partial class MainWindow : Window
         {
             foreach (var file in entry.Files ?? new())
             {
+                var i = episodes is { Count: > 0 } && episodes[0].Id.StartsWith(entry.Imdb + ":") ? Meta.IndexOfEpisode(episodes, file.Name, file.Path) : -1;
+                if (i >= 0)
+                {
+                    Record(episodes![i].Id, entry.PositionOf(file.Index), entry.DurationOf(file.Index));
+                    continue;
+                }
                 var at = Search.ParseEpisode(file.Name);
                 if (at is null) continue;
                 Record($"{entry.Imdb}:{at.Value.Season}:{at.Value.Episode}", entry.PositionOf(file.Index), entry.DurationOf(file.Index));
@@ -526,16 +533,16 @@ public partial class MainWindow : Window
         if (Pick.NextEpisode(meta.Files, index) is { } following)
             return (following.Name, () => { Play(stored.Uri, torrent, meta, following.Index, true); return Task.CompletedTask; });
 
-        var at = Search.ParseEpisode(meta.Files[index].Name);
-        if (at is null || detail is not { Kind: "tv" }) return null;
+        if (detail is not { Kind: "tv" }) return null;
         var list = detail.Episodes;
-        var i = list.FindIndex(e => e.Season == at.Value.Season && e.Number == at.Value.Episode);
+        var i = Meta.IndexOfEpisode(list, meta.Files[index].Name, meta.Files[index].Path);
         if (i < 0 || i + 1 >= list.Count) return null;
         var next = list[i + 1];
         var tag = Search.EpisodeTag(next.Season, next.Number);
+        var absolute = Meta.AbsoluteNumber(list, next.Season, next.Number);
         return ($"{tag} · {next.Name}", async () =>
         {
-            var hits = await Search.SearchEpisode(detail.Name, next.Season, next.Number, default, detail.Imdb);
+            var hits = await Search.SearchEpisode(detail.Name, next.Season, next.Number, default, detail.Imdb, absolute);
             if (hits.Count == 0)
             {
                 Toast($"No releases found for {tag}", true);
@@ -543,7 +550,7 @@ public partial class MainWindow : Window
             }
             var local = await StreamUri(hits[0].Magnet, new OpenOptions
             {
-                Auto = tag,
+                Auto = Search.PickTag(next.Season, next.Number, absolute),
                 KeepProgress = true,
                 Imdb = detail.Imdb,
                 Kind = detail.Kind,

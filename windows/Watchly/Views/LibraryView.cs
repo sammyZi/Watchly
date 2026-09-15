@@ -298,13 +298,13 @@ public sealed class LibraryView : UserControl
     {
         var position = item.PositionOf(file.Index);
         var duration = item.DurationOf(file.Index);
-        var at = Search.ParseEpisode(file.Name);
+        var number = Search.ParseEpisode(file.Name)?.Episode ?? Search.ParseAbsolute(file.Name) ?? file.Index + 1;
         var mark = Ui.Brushed(new Border
         {
             Width = 36,
             Height = 36,
             CornerRadius = new CornerRadius(8),
-            Child = new Grid { Children = { Ui.Text(at is not null ? at.Value.Episode.ToString("00") : (file.Index + 1).ToString("00"), "Meta", "Faint", 12, FontWeights.SemiBold) } },
+            Child = new Grid { Children = { Ui.Text(number.ToString("00"), "Meta", "Faint", 12, FontWeights.SemiBold) } },
         }, "Control");
         ((FrameworkElement)((Grid)mark.Child).Children[0]).HorizontalAlignment = HorizontalAlignment.Center;
         ((FrameworkElement)((Grid)mark.Child).Children[0]).VerticalAlignment = VerticalAlignment.Center;

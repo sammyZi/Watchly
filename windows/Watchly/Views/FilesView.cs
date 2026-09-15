@@ -77,9 +77,10 @@ public sealed class FilesView : UserControl
     static FrameworkElement Row(TorrentFileInfo file, bool downloading, Action<TorrentFileInfo> play, Action<TorrentFileInfo> download)
     {
         var at = file.IsVideo ? Search.ParseEpisode(file.Name) : null;
+        var number = at?.Episode ?? (file.IsVideo ? Search.ParseAbsolute(file.Name) : null);
         var mark = Ui.Brushed(new Border { Width = 56, Height = 56, CornerRadius = new CornerRadius(8) }, file.IsVideo ? "AccentSoft" : file.IsSubtitle ? "Surface" : "Control");
-        mark.Child = at is not null
-            ? new Grid { Children = { Center(Ui.Text(at.Value.Episode.ToString(), "TitleText", "Accent", 16, FontWeights.SemiBold)) } }
+        mark.Child = number is not null
+            ? new Grid { Children = { Center(Ui.Text(number.Value.ToString(), "TitleText", "Accent", 16, FontWeights.SemiBold)) } }
             : new Grid { Children = { Ui.Glyph(file.IsVideo ? (downloading ? "download" : "play") : file.IsSubtitle ? "type" : "file", 14, file.IsVideo ? "Accent" : "Faint") } };
         ((Grid)mark.Child).Children[0].SetValue(HorizontalAlignmentProperty, HorizontalAlignment.Center);
 

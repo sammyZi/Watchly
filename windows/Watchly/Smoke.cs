@@ -91,6 +91,44 @@ static class Smoke
         Eq(Search.ParseEpisode("Show S1 E2.mkv"), (1, 2), "parseEpisode S1 E2");
         Eq(Search.ParseEpisode("Show 1x02.mkv"), (1, 2), "parseEpisode 1x02");
         Eq(Search.ParseEpisode("Some.Film.2024.1080p.mkv"), null, "parseEpisode film");
+        Eq(Search.ParseEpisode("One.Piece.S01E1071.1080p.mkv"), (1, 1071), "parseEpisode 4-digit episode");
+
+        // Anime: running episode numbers, no season.
+        Eq(Search.ParseAbsolute("[SubsPlease] Jujutsu Kaisen - 29 (1080p) [ABCD1234].mkv"), 29, "parseAbsolute dash");
+        Eq(Search.ParseAbsolute("One Piece E1071 1080p"), 1071, "parseAbsolute E1071");
+        Eq(Search.ParseAbsolute("Naruto Shippuden Episode 145 [720p]"), 145, "parseAbsolute Episode 145");
+        Eq(Search.ParseAbsolute("[Erai-raws] Show - 05v2 [1080p].mkv"), 5, "parseAbsolute v2");
+        Eq(Search.ParseAbsolute("Some Film - 1080p.mkv"), null, "parseAbsolute resolution");
+        Eq(Search.ParseAbsolute("Dune - 2021.mkv"), null, "parseAbsolute year");
+        Eq(Search.ParseAbsolute("Ted.Lasso.S01E02.mkv"), null, "parseAbsolute leaves SxxEyy");
+        Eq(Search.ParseAbsolute("[orion origin] Jujutsu Kaisen S2 [29] [1080p] [H265 AAC].mp4"), 29, "parseAbsolute bracketed");
+        Eq(Search.ParseAbsolute("[yibis]_One_Piece_588_[720p][C2543B95].mkv"), 588, "parseAbsolute underscores");
+        Eq(Search.ParseAbsolute("Show Season 12 [1080p]"), null, "parseAbsolute not a season number");
+        Eq(Search.ParseAbsolute("Show 1080p [GROUP]"), null, "parseAbsolute not a resolution");
+        Eq(Search.ScopeOf("[orion origin] Jujutsu Kaisen S2 [29] [1080p]"), "episode", "scope bracketed anime episode");
+        Eq(Search.ScopeOf("Jujutsu Kaisen S2 COMPLETE 1080p"), "season", "scope anime season pack");
+        Eq(Search.ParseAbsolute("Stranger.Things.S04.COMPLETE.1080p.x265"), null, "parseAbsolute pack");
+        Eq(Search.EpisodeSpan("[Judas] Show (01-24) [BD 1080p] [Batch]"), (1, 24), "episodeSpan batch");
+        Eq(Search.EpisodeSpan("Show Seasons 1-3"), (1, 3), "episodeSpan is only asked without season labels");
+        Eq(Search.NamesEpisode("[SubsPlease] Jujutsu Kaisen - 29 (1080p)", 2, 5, 29), true, "namesEpisode absolute");
+        Eq(Search.NamesEpisode("[SubsPlease] Jujutsu Kaisen - 05 (1080p)", 2, 5, 29), false, "namesEpisode not season 1's fifth");
+        Eq(Search.NamesEpisode("Jujutsu Kaisen Season 2 - 05", 2, 5, 29), true, "namesEpisode season label");
+        Eq(Search.NamesEpisode("[RH] Attack on Titan Season 2 - 05 [1080p]", 1, 5, 5), false, "namesEpisode other season's label");
+        Eq(Search.NamesEpisode("[orion origin] Jujutsu Kaisen S2 [29] [1080p]", 2, 5, 29), true, "namesEpisode season label + running number");
+        Eq(Search.NamesEpisode("Jujutsu Kaisen S02E05", 2, 5, 29), true, "namesEpisode SxxEyy");
+        Eq(Search.NamesEpisode("Jujutsu Kaisen S2 COMPLETE", 2, 5, 29), null, "namesEpisode pack names none");
+        Ok(Search.SameTitle("[SubsPlease] Jujutsu Kaisen - 29 (1080p)", "Jujutsu Kaisen"), "sameTitle anime group tag");
+        Ok(Search.SameTitle("One Piece 1071 1080p", "One Piece"), "sameTitle long episode number");
+        Eq(Search.PickTag(2, 5, 29), "S02E05#29", "pickTag absolute");
+        Eq(Search.PickTag(1, 5, 5), "S01E05", "pickTag plain");
+        var jjk = new List<Episode>();
+        for (var e = 1; e <= 24; e++) jjk.Add(new Episode { Id = $"tt:1:{e}", Season = 1, Number = e });
+        for (var e = 1; e <= 23; e++) jjk.Add(new Episode { Id = $"tt:2:{e}", Season = 2, Number = e });
+        jjk.Insert(0, new Episode { Id = "tt:0:1", Season = 0, Number = 1 });
+        Eq(Meta.AbsoluteNumber(jjk, 2, 5), 29, "absoluteNumber skips specials");
+        Eq(Meta.AbsoluteNumber(new[] { new Episode { Season = 21, Number = 892 }, new Episode { Season = 21, Number = 893 } }, 21, 893), 893, "absoluteNumber keeps running numbering");
+        Eq(jjk[Meta.IndexOfEpisode(jjk, "[SubsPlease] Jujutsu Kaisen - 29 (1080p).mkv", "JJK/[SubsPlease] Jujutsu Kaisen - 29 (1080p).mkv")].Id, "tt:2:5", "indexOfEpisode running number");
+        Eq(jjk[Meta.IndexOfEpisode(jjk, "Show - 05.mkv", "Show Season 2/Show - 05.mkv")].Id, "tt:2:5", "indexOfEpisode season folder");
 
         Eq(string.Join(",", Search.SeasonsIn("Stranger.Things.S04.COMPLETE.1080p")), "4", "seasonsIn S04");
         Eq(string.Join(",", Search.SeasonsIn("Stranger.Things.Season.5.Complete.2025.720p")), "5", "seasonsIn Season.5");
@@ -149,6 +187,13 @@ static class Smoke
         Eq(string.Join(",", Pick.SeasonFiles(pack, 1)), "0,1,2", "seasonFiles pack");
         Eq(string.Join(",", Pick.SeasonFiles(season, 1)), "2,1,0", "seasonFiles order");
         Eq(string.Join(",", Pick.SeasonFiles(season, 2)), "3", "seasonFiles season 2");
+        var batch = new[] { F(0, "Show/[Group] Show - 28 [1080p].mkv", 100), F(1, "Show/[Group] Show - 29 [1080p].mkv", 100), F(2, "Show/[Group] Show - 30 [1080p].mkv", 100) };
+        Eq(Pick.PickFile(batch, "S02E05#29"), 1, "pickFile anime running number");
+        Eq(Pick.PickFile(batch, "S02E09#33"), null, "pickFile anime missing episode");
+        var cour = new[] { F(0, "[Group] Show - 04.mkv", 100), F(1, "[Group] Show - 05.mkv", 100), F(2, "[Group] Show - 06.mkv", 100) };
+        Eq(Pick.PickFile(cour, "S02E05#29"), 1, "pickFile unlabelled season pack numbered from 1");
+        Eq(Pick.NextEpisode(batch, 1)?.Index, 2, "nextEpisode anime");
+        Eq(Pick.NextEpisode(cour, 2), null, "nextEpisode anime end");
 
         // title.test.ts
         Eq(TitleText.TitleOf("magnet:?xt=urn:btih:ABC123&dn=Big+Buck+Bunny%202008"), "Big Buck Bunny 2008", "titleOf dn");

@@ -45,7 +45,7 @@ public sealed class DetailView : UserControl, IDisposable
         title = seed;
         if (seed.Kind == "tv")
         {
-            picked = GuessEpisode(seed.Imdb, shell.EpisodeProgress());
+            picked = GuessEpisode(seed.Imdb, shell.EpisodeProgress(title.Episodes));
             season = picked.Season;
         }
 
@@ -95,7 +95,7 @@ public sealed class DetailView : UserControl, IDisposable
         title = full;
         if (title.Kind == "tv" && title.Episodes.Count > 0)
         {
-            var progress = shell.EpisodeProgress();
+            var progress = shell.EpisodeProgress(title.Episodes);
             var next = title.Episodes.FirstOrDefault(e => e.Season > 0 && progress.GetValueOrDefault(e.Id) < EpisodeLinks.Watched) ?? title.Episodes[0];
             // Swap the S01E01 guess for the real next episode once Cinemeta answers.
             if (picked is null || string.IsNullOrEmpty(picked.Name))
@@ -130,7 +130,8 @@ public sealed class DetailView : UserControl, IDisposable
     }
 
     string PickKey => picked is not null ? $"{picked.Season}:{picked.Number}" : $"movie:{title.Imdb}";
-    string? PickedTag => picked is not null ? Search.EpisodeTag(picked.Season, picked.Number) : null;
+    int? PickedAbsolute => picked is not null ? Meta.AbsoluteNumber(title.Episodes, picked.Season, picked.Number) : null;
+    string? PickedTag => picked is not null ? Search.PickTag(picked.Season, picked.Number, PickedAbsolute) : null;
 
     /// <summary>Releases for the selected episode (or the film), debounced across season flips.</summary>
     void FindReleases(bool debounce = false)
@@ -148,7 +149,7 @@ public sealed class DetailView : UserControl, IDisposable
         var key = PickKey;
         error = null;
         var job = picked is not null
-            ? Search.SearchEpisode(title.Name, picked.Season, picked.Number, cts.Token, title.Imdb)
+            ? Search.SearchEpisode(title.Name, picked.Season, picked.Number, cts.Token, title.Imdb, PickedAbsolute)
             : Search.SearchTorrents(title.Name, cts.Token, title.Imdb, title.Kind == "movie" ? title.Year?[..Math.Min(4, title.Year.Length)] : null);
         job.ContinueWith(t => Dispatcher.BeginInvoke(() =>
         {
@@ -170,7 +171,7 @@ public sealed class DetailView : UserControl, IDisposable
         content.Children.Clear();
         RenderSaveButtons();
 
-        var progress = shell.EpisodeProgress();
+        var progress = shell.EpisodeProgress(title.Episodes);
         var resume = title.Kind == "movie" ? shell.FilmProgress(title.Imdb) : null;
         var fresh = sourceKey == PickKey;
         var shown = wanted is not null ? sources?.Where(h => h.Quality == wanted).ToList() : sources;
@@ -621,7 +622,7 @@ public sealed class DetailView : UserControl, IDisposable
     {
         season = which;
         wholeSeason = false;
-        var progress = shell.EpisodeProgress();
+        var progress = shell.EpisodeProgress(title.Episodes);
         var list = title.Episodes.Where(e => e.Season == which).ToList();
         var next = list.FirstOrDefault(e => progress.GetValueOrDefault(e.Id) < EpisodeLinks.Watched) ?? list.FirstOrDefault();
         if (next is not null)

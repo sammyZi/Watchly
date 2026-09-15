@@ -30,30 +30,42 @@ public static class Pick
     public static bool IsVideoName(string name) => VideoExt.Contains(System.IO.Path.GetExtension(name));
     public static bool IsSubtitleName(string name) => SubExt.Contains(System.IO.Path.GetExtension(name));
 
-    static Regex? EpisodePattern(string tag)
-    {
-        var m = Regex.Match(tag, @"^s(\d+)e(\d+)$", RegexOptions.IgnoreCase);
-        if (!m.Success) return null;
-        var season = int.Parse(m.Groups[1].Value);
-        var episode = int.Parse(m.Groups[2].Value);
-        return new Regex($@"(?:s0*{season}[ ._-]*e0*{episode}|\b0*{season}x0*{episode})\b", RegexOptions.IgnoreCase);
-    }
-
     static TorrentFileInfo Biggest(IEnumerable<TorrentFileInfo> files) => files.Aggregate((a, b) => b.Size > a.Size ? b : a);
 
-    /// <summary>The episode matching <paramref name="tag"/>, else the biggest video. Null when there is no video.</summary>
+    /// <summary>
+    /// The episode matching <paramref name="tag"/> ("S02E05", or "S02E05#29" with the
+    /// number counted through the show — <see cref="Search.PickTag"/>), else the
+    /// biggest video. Null when there is no video, or a pack holds no such episode.
+    /// </summary>
     public static int? PickFile(IEnumerable<TorrentFileInfo> files, string? tag = null)
     {
         var videos = files.Where(f => f.IsVideo && !Junk.IsMatch(f.Name)).ToList();
         if (videos.Count == 0) return null;
         if (!string.IsNullOrEmpty(tag))
         {
-            var wanted = EpisodePattern(tag);
-            var match = wanted is null ? new() : videos.Where(f => wanted.IsMatch(f.Name)).ToList();
+            var m = Regex.Match(tag, @"^s(\d+)e(\d+)(?:#(\d+))?$", RegexOptions.IgnoreCase);
+            var match = new List<TorrentFileInfo>();
+            if (m.Success)
+            {
+                var season = int.Parse(m.Groups[1].Value);
+                var episode = int.Parse(m.Groups[2].Value);
+                int? absolute = m.Groups[3].Success ? int.Parse(m.Groups[3].Value) : null;
+                match = videos.Where(f => Search.NamesEpisode(f.Name, season, episode, absolute, ParentDir(f.Path, f.Name)) == true).ToList();
+                // A pack of one season numbered from 1 with no season label anywhere: "- 05" is the fifth.
+                if (match.Count == 0 && videos.All(f => Search.SeasonsIn(f.Path).Count == 0))
+                    match = videos.Where(f => Search.ParseAbsolute(f.Name) == episode).ToList();
+            }
             if (match.Count > 0) return Biggest(match).Index;
             if (videos.Count > 1) return null;
         }
         return Biggest(videos).Index;
+    }
+
+    /// <summary>Where a file sits in the show: SxxEyy, else its running number (in its folder's season, if labelled).</summary>
+    static (int Season, int Episode)? EpisodeKey(TorrentFileInfo f)
+    {
+        if ((Search.ParseEpisode(f.Name) ?? Search.ParseEpisode(f.Path)) is { } at) return at;
+        return Search.ParseAbsolute(f.Name) is int n ? (Search.SeasonsIn(f.Path).FirstOrDefault(), n) : null;
     }
 
     /// <summary>The episode that follows the one playing, inside the same torrent.</summary>
@@ -61,10 +73,10 @@ public static class Pick
     {
         var list = files.ToList();
         var playing = list.FirstOrDefault(f => f.Index == index);
-        if (playing is null || Search.ParseEpisode(playing.Name) is null) return null;
+        if (playing is null || EpisodeKey(playing) is null) return null;
         var ordered = list
             .Where(f => f.IsVideo && !Junk.IsMatch(f.Name))
-            .Select(f => (File: f, At: Search.ParseEpisode(f.Name)))
+            .Select(f => (File: f, At: EpisodeKey(f)))
             .Where(e => e.At is not null)
             .OrderBy(e => e.At!.Value.Season).ThenBy(e => e.At!.Value.Episode)
             .ToList();
@@ -83,8 +95,8 @@ public static class Pick
 
     public static int FileOrder(TorrentFileInfo a, TorrentFileInfo b)
     {
-        var ea = Search.ParseEpisode(a.Name) ?? Search.ParseEpisode(a.Path);
-        var eb = Search.ParseEpisode(b.Name) ?? Search.ParseEpisode(b.Path);
+        var ea = EpisodeKey(a);
+        var eb = EpisodeKey(b);
         if (ea is not null && eb is not null)
         {
             var byEp = ea.Value.Season != eb.Value.Season ? ea.Value.Season.CompareTo(eb.Value.Season) : ea.Value.Episode.CompareTo(eb.Value.Episode);

@@ -137,7 +137,7 @@ public partial class DownloadsView : UserControl
             .Select(g => (Title: g.Key, Poster: g.Select(d => d.Poster).FirstOrDefault(p => p is not null), Seasons: g
                 .GroupBy(d => Search.ParseEpisode(d.Name)?.Season)
                 .OrderBy(s => s.Key ?? 999)
-                .Select(s => (Season: s.Key, Items: s.OrderBy(d => Search.ParseEpisode(d.Name)?.Episode ?? 0).ThenBy(d => d.Name, Comparer<string>.Create(Format.Natural)).ToList()))
+                .Select(s => (Season: s.Key, Items: s.OrderBy(d => Search.ParseEpisode(d.Name)?.Episode ?? Search.ParseAbsolute(d.Name) ?? 0).ThenBy(d => d.Name, Comparer<string>.Create(Format.Natural)).ToList()))
                 .ToList()));
 
         foreach (var show in shows)
@@ -203,7 +203,8 @@ public partial class DownloadsView : UserControl
     FrameworkElement SavedRow(SavedDownload entry, bool nested)
     {
         var at = Search.ParseEpisode(entry.Name);
-        var ep = at is null ? null : at.Value.Season == 0 ? $"Special {at.Value.Episode}" : $"Episode {at.Value.Episode}";
+        var ep = at is null ? Search.ParseAbsolute(entry.Name) is int n ? $"Episode {n}" : null
+            : at.Value.Season == 0 ? $"Special {at.Value.Episode}" : $"Episode {at.Value.Episode}";
         var dock = new DockPanel();
         if (!nested)
         {
