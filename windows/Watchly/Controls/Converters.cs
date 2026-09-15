@@ -36,9 +36,23 @@ public sealed class ImageUrl : IValueConverter
 {
     public object? Convert(object value, Type targetType, object parameter, CultureInfo culture) => Load(value as string, parameter);
 
+    /// <summary>
+    /// Posters already decoded, newest last. A shelf recycles its cards as it scrolls;
+    /// without this each card coming into view fetched its poster again and showed
+    /// blank until it landed. Only small decodes (≈0.5 MB each) — not 1920px backdrops.
+    /// </summary>
+    static readonly Dictionary<string, ImageSource> Recent = new();
+    static readonly Queue<string> RecentOrder = new();
+    const int RecentMax = 200;
+    const int CacheableWidth = 400;
+
     public static ImageSource? Load(string? url, object? width = null)
     {
         if (!History.IsRemote(url)) return null;
+        var w = int.TryParse(width?.ToString(), out var parsed) && parsed > 0 ? parsed : 0;
+        var key = $"{w}|{url}";
+        var cacheable = w is > 0 and <= CacheableWidth;
+        if (cacheable && Recent.TryGetValue(key, out var hit)) return hit;
         try
         {
             var image = new BitmapImage();
@@ -46,8 +60,17 @@ public sealed class ImageUrl : IValueConverter
             image.UriSource = new Uri(url!);
             image.CacheOption = BitmapCacheOption.OnLoad;
             image.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
-            if (int.TryParse(width?.ToString(), out var w) && w > 0) image.DecodePixelWidth = w;
+            if (w > 0) image.DecodePixelWidth = w;
             image.EndInit();
+            if (cacheable)
+            {
+                // ponytail: FIFO, not LRU — enough to stop the flash while scrolling; LRU if eviction ever shows.
+                Recent[key] = image;
+                RecentOrder.Enqueue(key);
+                while (RecentOrder.Count > RecentMax) Recent.Remove(RecentOrder.Dequeue());
+                // A failed download must not stay cached as a blank.
+                image.DownloadFailed += (_, _) => Recent.Remove(key);
+            }
             return image;
         }
         catch
