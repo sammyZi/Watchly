@@ -37,44 +37,90 @@ public sealed class ImageUrl : IValueConverter
     public object? Convert(object value, Type targetType, object parameter, CultureInfo culture) => Load(value as string, parameter);
 
     /// <summary>
-    /// Posters already decoded, newest last. A shelf recycles its cards as it scrolls;
-    /// without this each card coming into view fetched its poster again and showed
-    /// blank until it landed. Only small decodes (≈0.5 MB each) — not 1920px backdrops.
+    /// Images already asked for, newest last — a shelf recycles its cards as it scrolls,
+    /// and a card coming back into view must not fetch its poster again. Posters are
+    /// ≈0.5 MB decoded; the few 1920px backdrops (≈8 MB) get a much shorter list.
     /// </summary>
     static readonly Dictionary<string, ImageSource> Recent = new();
-    static readonly Queue<string> RecentOrder = new();
-    const int RecentMax = 200;
-    const int CacheableWidth = 400;
+    static readonly Queue<string> Small = new(), Large = new();
+    const int SmallMax = 200, LargeMax = 6, SmallWidth = 400;
 
+    static readonly string DiskCache = System.IO.Path.Combine(Paths.LocalRoot, "images");
+    static readonly SemaphoreSlim Fetching = new(6);
+
+    /// <summary>
+    /// Returns at once with an image that fills in when the picture is ready. The
+    /// download, the disk cache and the decode all happen on a worker: decoding on
+    /// the UI thread (what a BitmapImage with a web address does) stalled scrolling
+    /// and every page with posters on it.
+    /// </summary>
     public static ImageSource? Load(string? url, object? width = null)
     {
         if (!History.IsRemote(url)) return null;
         var w = int.TryParse(width?.ToString(), out var parsed) && parsed > 0 ? parsed : 0;
         var key = $"{w}|{url}";
-        var cacheable = w is > 0 and <= CacheableWidth;
-        if (cacheable && Recent.TryGetValue(key, out var hit)) return hit;
+        if (Recent.TryGetValue(key, out var hit)) return hit;
+
+        // Empty until the bitmap lands; the brushes drawing it repaint when it does.
+        var drawing = new ImageDrawing();
+        var image = new DrawingImage(drawing);
+        Recent[key] = image;
+        var order = w is > 0 and <= SmallWidth ? Small : Large;
+        order.Enqueue(key);
+        while (order.Count > (order == Small ? SmallMax : LargeMax)) Recent.Remove(order.Dequeue());
+
+        var ui = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+        _ = Task.Run(() => Decode(url!, w)).ContinueWith(t => ui.BeginInvoke(() =>
+        {
+            if (t.Result is { } bitmap)
+            {
+                drawing.ImageSource = bitmap;
+                drawing.Rect = new Rect(0, 0, bitmap.PixelWidth, bitmap.PixelHeight);
+            }
+            else if (Recent.GetValueOrDefault(key) == image)
+            {
+                Recent.Remove(key); // failed: try again next time it is shown
+            }
+        }), TaskScheduler.Default);
+        return image;
+    }
+
+    static async Task<BitmapSource?> Decode(string url, int width)
+    {
+        var file = System.IO.Path.Combine(DiskCache, System.Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(url))));
         try
         {
-            var image = new BitmapImage();
-            image.BeginInit();
-            image.UriSource = new Uri(url!);
-            image.CacheOption = BitmapCacheOption.OnLoad;
-            image.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
-            if (w > 0) image.DecodePixelWidth = w;
-            image.EndInit();
-            if (cacheable)
+            byte[] bytes;
+            if (System.IO.File.Exists(file))
             {
-                // ponytail: FIFO, not LRU — enough to stop the flash while scrolling; LRU if eviction ever shows.
-                Recent[key] = image;
-                RecentOrder.Enqueue(key);
-                while (RecentOrder.Count > RecentMax) Recent.Remove(RecentOrder.Dequeue());
-                // A failed download must not stay cached as a blank.
-                image.DownloadFailed += (_, _) => Recent.Remove(key);
+                bytes = await System.IO.File.ReadAllBytesAsync(file);
             }
-            return image;
+            else
+            {
+                await Fetching.WaitAsync();
+                try { bytes = await Net.Http.GetByteArrayAsync(url); }
+                finally { Fetching.Release(); }
+                // ponytail: never pruned — posters are ~50 KB; add a size cap if the folder ever matters.
+                System.IO.Directory.CreateDirectory(DiskCache);
+                // Written aside then moved: the same poster at two sizes may land at once.
+                var part = $"{file}.{Guid.NewGuid():N}.part";
+                await System.IO.File.WriteAllBytesAsync(part, bytes);
+                System.IO.File.Move(part, file, true);
+            }
+            var bitmap = new BitmapImage();
+            bitmap.BeginInit();
+            bitmap.StreamSource = new System.IO.MemoryStream(bytes);
+            bitmap.CacheOption = BitmapCacheOption.OnLoad;
+            bitmap.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
+            if (width > 0) bitmap.DecodePixelWidth = width;
+            bitmap.EndInit();
+            bitmap.Freeze();
+            return bitmap;
         }
         catch
         {
+            // A half-written or non-image file must not keep failing from the cache.
+            try { System.IO.File.Delete(file); } catch { }
             return null;
         }
     }
