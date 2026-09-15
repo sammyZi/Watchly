@@ -53,8 +53,8 @@ public sealed partial class QueueFile : ObservableObject
     {
         get
         {
-            var at = Search.ParseEpisode(Name);
-            return at is not null ? at.Value.Episode.ToString("00") : (Index + 1).ToString("00");
+            var n = Search.ParseEpisode(Name)?.Episode ?? Search.ParseAbsolute(Name);
+            return (n ?? Index + 1).ToString("00");
         }
     }
 
@@ -63,7 +63,7 @@ public sealed partial class QueueFile : ObservableObject
         get
         {
             var at = Search.ParseEpisode(Name);
-            if (at is null) return Path.GetFileNameWithoutExtension(Name);
+            if (at is null) return Search.ParseAbsolute(Name) is int n ? $"Episode {n}" : Path.GetFileNameWithoutExtension(Name);
             return at.Value.Season == 0 ? $"Special {at.Value.Episode}" : $"Episode {at.Value.Episode}";
         }
     }

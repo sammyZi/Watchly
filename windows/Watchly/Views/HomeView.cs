@@ -81,7 +81,8 @@ public sealed class HomeView : UserControl
         if (item.LastFileIndex is not int index) return null;
         var file = item.Files?.FirstOrDefault(f => f.Index == index);
         var at = Search.ParseEpisode(file?.Name ?? item.Title);
-        var ep = at is null ? null : at.Value.Season == 0 ? $"Sp {at.Value.Episode}" : $"S{at.Value.Season} E{at.Value.Episode}";
+        var ep = at is null ? Search.ParseAbsolute(file?.Name ?? item.Title) is int n ? $"Ep {n}" : null
+            : at.Value.Season == 0 ? $"Sp {at.Value.Episode}" : $"S{at.Value.Season} E{at.Value.Episode}";
         var position = item.PositionOf(index);
         var bits = new[] { ep, position > 0 ? Format.Clock(position.Value) : null }.Where(b => b is not null);
         var stamp = string.Join("  ·  ", bits);

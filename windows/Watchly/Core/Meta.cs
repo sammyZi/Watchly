@@ -260,6 +260,33 @@ public static class Meta
         return @out;
     }
 
+    /// <summary>
+    /// The episode's number counted straight through the show, the way anime is
+    /// released: Jujutsu Kaisen S2E5 is "- 29". Specials don't count. A season whose
+    /// numbers already carry on from the last one (not starting at 1) is taken as is.
+    /// </summary>
+    public static int? AbsoluteNumber(IEnumerable<Episode> episodes, int season, int number)
+    {
+        if (season <= 0) return null;
+        var regular = episodes.Where(e => e.Season > 0).ToList();
+        var inSeason = regular.Where(e => e.Season == season).ToList();
+        if (inSeason.Count == 0) return null;
+        return inSeason.Min(e => e.Number) > 1 ? number : regular.Count(e => e.Season < season) + number;
+    }
+
+    /// <summary>
+    /// Which episode of <paramref name="list"/> a file is: by SxxEyy; else "- 05" in a
+    /// folder labelled with one season is that season's fifth; else the running number.
+    /// </summary>
+    public static int IndexOfEpisode(List<Episode> list, string fileName, string path)
+    {
+        int i;
+        if (Search.ParseEpisode(fileName) is { } at && (i = list.FindIndex(e => e.Season == at.Season && e.Number == at.Episode)) >= 0) return i;
+        if ((Search.ParseAbsolute(fileName) ?? Search.ParseEpisode(fileName)?.Episode) is not int n) return -1;
+        if (Search.SeasonsIn(path) is [var season] && (i = list.FindIndex(e => e.Season == season && e.Number == n)) >= 0) return i;
+        return list.FindIndex(e => AbsoluteNumber(list, e.Season, e.Number) == n);
+    }
+
     public static List<Episode> ToEpisodes(JsonArray? videos)
     {
         if (videos is null) return new();

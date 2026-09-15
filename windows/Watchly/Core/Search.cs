@@ -39,12 +39,64 @@ public static class Search
 
     public static string EpisodeTag(int season, int episode) => $"S{season:00}E{episode:00}";
 
+    /// <summary>
+    /// What picks a file in a pack: the tag, plus the number counted through the
+    /// show when that differs ("S02E05#29") — see <see cref="Pick.PickFile"/>.
+    /// </summary>
+    public static string PickTag(int season, int episode, int? absolute) =>
+        absolute is int a && a != episode ? $"{EpisodeTag(season, episode)}#{a}" : EpisodeTag(season, episode);
+
     public static (int Season, int Episode)? ParseEpisode(string? name)
     {
         if (string.IsNullOrEmpty(name)) return null;
-        var m = Regex.Match(name, @"\bs(\d{1,2})[ ._-]*e(\d{1,2})\b", I);
+        // Up to four digits: long-running anime is released as S01E1071.
+        var m = Regex.Match(name, @"\bs(\d{1,2})[ ._-]*e(\d{1,4})\b", I);
         if (!m.Success) m = Regex.Match(name, @"\b(\d{1,2})x(\d{1,2})\b", I);
         return m.Success ? (int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value)) : null;
+    }
+
+    /// <summary>
+    /// The episode number of a release that names no season — how anime is
+    /// released: "[SubsPlease] Jujutsu Kaisen - 29 (1080p)", "One Piece E1071",
+    /// "Naruto Shippuden Episode 145". Often counted straight through the show
+    /// rather than per season; see <see cref="Meta.AbsoluteNumber"/>.
+    /// </summary>
+    public static int? ParseAbsolute(string? name)
+    {
+        if (string.IsNullOrEmpty(name) || ParseEpisode(name) is not null) return null;
+        var m = Regex.Match(name, @"(?:^|[\s_\]\)])-[\s_]*(\d{1,4})(?:v\d)?(?=[\s_.\[\(]|$)", I);
+        if (!m.Success) m = Regex.Match(name, @"\b(?:episode|ep|e)[ ._-]?(\d{1,4})(?:v\d)?\b", I);
+        if (!m.Success) m = Regex.Match(name, @"(?:^|[\s_])\[(\d{1,4})(?:v\d)?\]"); // "Jujutsu Kaisen S2 [29]"
+        // "[yibis]_One_Piece_588_[720p]": a bare number right before the tags (not "Season 12 [1080p]").
+        if (!m.Success) m = Regex.Match(name, @"(?<!season[\s_]*)[\s_](\d{2,4})(?:v\d)?[\s_]*(?=[\[\(]|$)", I);
+        if (!m.Success) return null;
+        var n = int.Parse(m.Groups[1].Value);
+        return n is > 0 and < 1900 ? n : null;
+    }
+
+    /// <summary>"Show (01-24) [Batch]", "Show - 01~12": the episodes an anime batch claims.</summary>
+    public static (int From, int To)? EpisodeSpan(string name)
+    {
+        var m = Regex.Match(name, @"(?<![\w.])(\d{1,4})\s*[-~–]\s*(\d{1,4})(?![\w.])", I);
+        if (!m.Success) return null;
+        var (from, to) = (int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value));
+        return from < to && to < 1900 ? (from, to) : null;
+    }
+
+    /// <summary>
+    /// Is this name episode <paramref name="episode"/> of <paramref name="season"/>
+    /// (<paramref name="absolute"/> counting through the show)? Null when it names no
+    /// single episode. <paramref name="folder"/> is where season labels may live instead.
+    /// </summary>
+    public static bool? NamesEpisode(string name, int season, int episode, int? absolute, string? folder = null)
+    {
+        if (ParseEpisode(name) is { } at)
+            return at.Season == season && at.Episode == episode || at.Season == 1 && at.Episode == absolute;
+        if (ParseAbsolute(name) is not int n) return null;
+        // "- 29" is the 29th episode of the show. A season label decides which season:
+        // "Season 2 - 05" is the fifth of season 2 (never season 1's fifth), "S2 [29]" the 29th overall.
+        var claims = SeasonsIn($"{folder} {name}");
+        return claims.Count == 0 ? n == (absolute ?? episode) : claims.Contains(season) && (n == episode || n == absolute);
     }
 
     /// <summary>Which seasons a release name claims to hold. Empty when it names none.</summary>
@@ -74,6 +126,8 @@ public static class Search
     {
         if (Regex.IsMatch(name, @"\bs\d{1,2}\s?e\d{1,2}\s*[-–]\s*e?\d{1,2}\b", I)) return "season";
         if (Regex.IsMatch(name, @"\bs\d{1,2}\s?e\d{1,2}\b|\b\d{1,2}x\d{2}\b", I)) return "episode";
+        // "Show S2 [29]", "Show Season 2 - 05": one anime episode, not the season pack its label suggests.
+        if (ParseAbsolute(name) is not null) return "episode";
         if (Regex.IsMatch(name, @"\bseasons?\s*\d{1,2}\s*[-–]\s*\d{1,2}\b|\ball seasons\b|\bcomplete series\b", I)) return "complete";
         var span = Regex.Match(name, @"\bs(\d{1,2})\s*[-–]\s*s?(\d{1,2})\b", I);
         if (span.Success && int.Parse(span.Groups[1].Value) != int.Parse(span.Groups[2].Value)) return "complete";
@@ -456,10 +510,11 @@ public static class Search
     {
         var want = Tokens(title);
         if (want.Count == 0) return true;
-        var got = ReleaseTitle(release);
+        // Anime leads with the group — "[SubsPlease] Jujutsu Kaisen - 29" — and ends the title with the episode.
+        var got = ReleaseTitle(Regex.Replace(release, @"^\s*(?:\[[^\]]*\]\s*)+", ""));
         if (got.Count < want.Count) return false;
         for (var i = 0; i < want.Count; i++) if (got[i] != want[i]) return false;
-        return got.Skip(want.Count).All(w => w.Length <= 2);
+        return got.Skip(want.Count).All(w => w.Length <= 2 || w.All(char.IsDigit));
     }
 
     /// <summary>Search public indexes for video torrents.</summary>
@@ -512,13 +567,13 @@ public static class Search
     static readonly Dictionary<string, Task<List<Hit>>> EpisodeMemo = new();
 
     /// <summary>Every release that can play one episode — including the packs.</summary>
-    public static Task<List<Hit>> SearchEpisode(string show, int season, int episode, CancellationToken ct = default, string? imdb = null)
+    public static Task<List<Hit>> SearchEpisode(string show, int season, int episode, CancellationToken ct = default, string? imdb = null, int? absolute = null)
     {
         var key = $"{imdb ?? show}:{season}:{episode}";
         lock (EpisodeMemo)
         {
             if (EpisodeMemo.TryGetValue(key, out var cached)) return cached;
-            var pending = FindEpisode(show, season, episode, ct, imdb).ContinueWith(t =>
+            var pending = FindEpisode(show, season, episode, ct, imdb, absolute).ContinueWith(t =>
             {
                 var hits = t.IsCompletedSuccessfully ? t.Result : new List<Hit>();
                 if (hits.Count == 0) lock (EpisodeMemo) EpisodeMemo.Remove(key);
@@ -529,27 +584,38 @@ public static class Search
         }
     }
 
-    static async Task<List<Hit>> FindEpisode(string show, int season, int episode, CancellationToken ct, string? imdb)
+    static async Task<List<Hit>> FindEpisode(string show, int season, int episode, CancellationToken ct, string? imdb, int? absolute)
     {
         bool Plays(Hit h)
         {
-            var ep = ParseEpisode(h.Name);
-            if (ep is not null) return ep.Value.Season == season && ep.Value.Episode == episode;
+            if (NamesEpisode(h.Name, season, episode, absolute) is bool one) return one;
+            // Filed as a film and naming no episode: "Jujutsu Kaisen 0" is not a pack of the series.
+            // (Anime episodes are often filed as films too, so only the unlabelled ones go.)
+            if (h.Kind == "movie") return false;
             var claims = SeasonsIn(h.Name);
+            // An unlabelled anime batch says which episodes it holds.
+            if (claims.Count == 0 && EpisodeSpan(h.Name) is { } span)
+            {
+                var n = absolute ?? episode;
+                return n >= span.From && n <= span.To;
+            }
             return claims.Count == 0 || claims.Contains(season);
         }
 
         var sw = Stopwatch.StartNew();
         var tag = EpisodeTag(season, episode);
-        Log($"episode start \"{show}\" {tag} imdb={imdb ?? "-"}");
+        Log($"episode start \"{show}\" {tag} abs={absolute?.ToString() ?? "-"} imdb={imdb ?? "-"}");
 
         var looseJob = SearchTorrents(show, ct, imdb, suffix: tag);
         var packsJob = SearchTorrents(show, ct, imdb);
-        List<Hit> loose, packs;
+        // Anime is indexed by its running number, not S02E05.
+        var animeJob = SearchTorrents(show, ct, imdb, suffix: (absolute ?? episode).ToString("00"));
+        List<Hit> loose, packs, anime;
         try { loose = await looseJob; } catch { loose = new(); }
         try { packs = await packsJob; } catch { packs = new(); }
+        try { anime = await animeJob; } catch { anime = new(); }
 
-        var bayHits = RankEpisode(Merge(new[] { loose, packs }).Where(Plays), show, season);
+        var bayHits = RankEpisode(Merge(new[] { loose, anime, packs }).Where(Plays), show, season);
         if (bayHits.Count > 0)
         {
             Log($"episode done {sw.ElapsedMilliseconds}ms n={bayHits.Count} bay");
