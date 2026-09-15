@@ -16,6 +16,33 @@ using MediaPlayer = LibVLCSharp.Shared.MediaPlayer;
 namespace Watchly.Views;
 
 /// <summary>
+/// Starting libVLC loads every plugin DLL (300+) unless plugins.dat caches
+/// them, and the package ships none — seconds on a cold disk, which froze the
+/// window on first play. App warms it on a worker at launch; the first run
+/// also writes the cache (if the folder is writable) so later ones skip the scan.
+/// Its own class, not a PlayerView static: touching a PlayerView static from the
+/// worker ran PlayerView's type initializer there, and the brushes it made then
+/// belonged to that thread ("Cannot use a DependencyObject that belongs to a
+/// different thread than its parent Freezable").
+/// </summary>
+static class VlcLibrary
+{
+    public static readonly Lazy<LibVLC> Instance = new(() =>
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        LibVLCSharp.Shared.Core.Initialize();
+        var plugins = Path.Combine(AppContext.BaseDirectory, "libvlc", "win-x64", "plugins");
+        var args = new List<string> { "--no-video-title-show", "--no-osd", "--quiet" };
+        if (!File.Exists(Path.Combine(plugins, "plugins.dat"))) args.Add("--reset-plugins-cache");
+        var made = new LibVLC(args.ToArray());
+        Log.Player($"libVLC ready in {clock.ElapsedMilliseconds} ms");
+        return made;
+    });
+
+    public static void Warm() => _ = Task.Run(() => Instance.Value);
+}
+
+/// <summary>
 /// src/screens/PlayerScreen.tsx on libVLC — the same engine the phone uses, so
 /// every codec, container, audio track and subtitle format plays. The controls
 /// are ours, drawn over the video, because no engine ships an overlay that knows
@@ -36,25 +63,8 @@ public sealed class PlayerView : UserControl, IDisposable
         ("Original", null, false, 1),
     };
 
-    /// <summary>
-    /// Starting libVLC loads every plugin DLL (300+) unless plugins.dat caches
-    /// them, and the package ships none — seconds on a cold disk, which froze the
-    /// window on first play. App warms it on a worker at launch; the first run
-    /// also writes the cache (if the folder is writable) so later ones skip the scan.
-    /// </summary>
-    static readonly Lazy<LibVLC> vlc = new(() =>
-    {
-        var clock = System.Diagnostics.Stopwatch.StartNew();
-        LibVLCSharp.Shared.Core.Initialize();
-        var plugins = Path.Combine(AppContext.BaseDirectory, "libvlc", "win-x64", "plugins");
-        var args = new List<string> { "--no-video-title-show", "--no-osd", "--quiet" };
-        if (!File.Exists(Path.Combine(plugins, "plugins.dat"))) args.Add("--reset-plugins-cache");
-        var made = new LibVLC(args.ToArray());
-        Log.Player($"libVLC ready in {clock.ElapsedMilliseconds} ms");
-        return made;
-    });
-    static LibVLC Vlc => vlc.Value;
-    public static void Warm() => _ = Task.Run(() => vlc.Value);
+    static LibVLC Vlc => VlcLibrary.Instance.Value;
+    public static void Warm() => VlcLibrary.Warm();
 
     public event Action? Exited;
 
@@ -852,6 +862,8 @@ public sealed class PlayerView : UserControl, IDisposable
         var to = Math.Clamp(ms, 0, duration - 1000);
         seekAt = DateTime.UtcNow;
         current = to;
+        // The clock is held still for 1.2 s after a seek (see TimeChanged); don't read that as a stall.
+        lastMovedAt = seekAt.AddMilliseconds(1200);
         player.Time = to;
         UpdateClock();
     }
@@ -1024,8 +1036,10 @@ public sealed class PlayerView : UserControl, IDisposable
 
     static Brush White(byte alpha = 255) => new SolidColorBrush(Color.FromArgb(alpha, 255, 255, 255));
     static Brush Black(byte alpha) => new SolidColorBrush(Color.FromArgb(alpha, 0, 0, 0));
-    static readonly Brush Blue = new SolidColorBrush(Color.FromRgb(0x3b, 0x6f, 0xe0));
-    static readonly Brush BlueLight = new SolidColorBrush(Color.FromRgb(0x7a, 0xa2, 0xff));
+    // Frozen: a shared brush then belongs to no thread.
+    static readonly Brush Blue = Frozen(Color.FromRgb(0x3b, 0x6f, 0xe0));
+    static readonly Brush BlueLight = Frozen(Color.FromRgb(0x7a, 0xa2, 0xff));
+    static Brush Frozen(Color color) { var b = new SolidColorBrush(color); b.Freeze(); return b; }
 
     static Icon WIcon(string kind, double size, Brush? brush = null) => new() { Kind = kind, Size = size, Foreground = brush ?? Brushes.White };
 

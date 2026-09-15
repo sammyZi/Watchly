@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type Settings = {
-  /** MB buffered before playback starts. */
+  /** Most MB buffered before playback starts; fast swarms need less. */
   prepareMb: number;
   /** Attach public trackers to bare magnet links so metadata resolves faster. */
   addTrackers: boolean;

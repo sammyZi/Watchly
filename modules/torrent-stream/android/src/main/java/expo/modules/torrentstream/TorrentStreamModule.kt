@@ -187,10 +187,32 @@ private const val FREE_SPACE_MIN = 512L * 1024 * 1024
  */
 private const val REWIND_BYTES = 32L * 1024 * 1024
 
+/** Seconds of playback the pre-roll has to carry before the swarm catches up. */
+private const val PREROLL_LEAD_S = 10L
+
+/** Runtime used to guess a file's bitrate before the player has read it. Short
+ *  on purpose: over-estimating bitrate only means buffering a little more. */
+private const val ASSUMED_RUNTIME_S = 40L * 60
+
+/**
+ * How much of the start has to be on disk before the URL goes out.
+ *
+ * Playback eats roughly size/runtime a second; the swarm adds `rate`. Start
+ * once what is here covers the shortfall over the next PREROLL_LEAD_S. A link
+ * faster than the file needs only one piece; a crawling one waits for the
+ * whole `ceiling` (the user's buffer setting). `rate` is 0 for the first tick
+ * or two, so this starts at the ceiling and drops as the swarm warms up.
+ */
+// ponytail: bitrate guessed from size, pass the real duration when history has one
+internal fun prerollNeed(fileSize: Long, rate: Long, pieceLen: Long, ceiling: Long): Long {
+  val shortfall = (fileSize / ASSUMED_RUNTIME_S - rate) * PREROLL_LEAD_S
+  return shortfall.coerceIn(pieceLen, maxOf(pieceLen, ceiling))
+}
+
 class PlayOptions : Record {
-  /** MB of the file head buffered before the player is handed the URL. The
-   *  server blocks on data that has not arrived, so one piece is enough — the
-   *  player's own buffering covers the rest. */
+  /** Most MB of the file head buffered before the player is handed the URL —
+   *  a fast swarm starts sooner, see prerollNeed. The server blocks on data
+   *  that has not arrived, so the player's own buffering covers the rest. */
   @Field val prepareMb: Int = 1
 
   /** Pieces kept hot ahead of the playback head. Zero derives it from
@@ -2015,8 +2037,12 @@ class TorrentStreamModule : Module() {
     val headHave = contiguousFrom(h, ti, firstPiece)
     val startHave =
       if (startPiece == firstPiece) headHave else contiguousFrom(h, ti, startPiece)
-    val startNeed =
-      if (startPiece == firstPiece) maxOf(prepareBytes, headNeed) else prepareBytes
+    val startNeed = prerollNeed(
+      fileSize = ti.files().fileSize(fileIndex),
+      rate = status.downloadRate().toLong(),
+      pieceLen = pieceLen,
+      ceiling = prepareBytes,
+    )
 
     val buffered = minOf(startHave, headHave)
     val ready = headHave >= headNeed && startHave >= startNeed
@@ -2058,7 +2084,8 @@ class TorrentStreamModule : Module() {
 
       log(
         "ready in ${(System.currentTimeMillis() - readyAt) / 1000}s: " +
-          "header ${headHave / 1024 / 1024}MB, start ${startHave / 1024 / 1024}MB at piece " +
+          "header ${headHave / 1024 / 1024}MB, start ${startHave / 1024 / 1024}MB " +
+          "(needed ${startNeed / 1024}kB) at piece " +
           "$startPiece, at ${status.downloadRate() / 1024}kB/s (${status.numPeers()} peers) " +
           "-> ${srv.url}"
       )

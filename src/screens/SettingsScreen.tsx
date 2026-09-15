@@ -145,8 +145,8 @@ function SettingsScreenView({
           <View style={styles.choiceRow}>
             <Row
               icon="fast-forward"
-              title="Buffer before playback"
-              subtitle="Less buffer starts sooner but stalls more easily"
+              title="Max buffer before playback"
+              subtitle="Fast connections start sooner; slow ones wait for up to this much"
             />
             <View style={styles.choices}>
               {BUFFER_CHOICES.map((mb) => {
