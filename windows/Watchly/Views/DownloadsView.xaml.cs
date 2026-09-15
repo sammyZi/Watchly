@@ -25,8 +25,26 @@ public partial class DownloadsView : UserControl
         ActiveList.ItemsSource = Downloads.Instance.Live;
         Downloads.Instance.Live.CollectionChanged += (_, _) => RenderSaved();
         SavedDownloads.Changed += () => Dispatcher.BeginInvoke(RenderSaved);
-        IsVisibleChanged += (_, _) => { if (IsVisible) RenderSaved(); };
+        IsVisibleChanged += (_, _) => { if (IsVisible) { RenderSaved(); ShowFolder(); } };
+        shell.SettingsChanged += ShowFolder;
         RenderSaved();
+        ShowFolder();
+    }
+
+    void ShowFolder()
+    {
+        FolderText.Text = $"Saving to {shell.Settings.DownloadDir}";
+        FolderText.ToolTip = shell.Settings.DownloadDir;
+    }
+
+    void OnChangeFolder(object sender, RoutedEventArgs e)
+    {
+        var dir = shell.Settings.DownloadDir;
+        var dialog = new OpenFolderDialog { Title = "Where should downloads go?", InitialDirectory = Directory.Exists(dir) ? dir : null };
+        if (dialog.ShowDialog() != true) return;
+        shell.ChangeSettings(shell.Settings with { DownloadFolder = dialog.FolderName });
+        // A download that failed on the old folder picks the new one up straight away.
+        if (sender is FrameworkElement { DataContext: ActiveDownload { HasError: true } row }) _ = Downloads.Instance.Retry(row);
     }
 
     static ActiveDownload RowOf(object sender) => (ActiveDownload)((FrameworkElement)sender).DataContext;
@@ -34,7 +52,8 @@ public partial class DownloadsView : UserControl
     async void OnPauseResume(object sender, RoutedEventArgs e)
     {
         var row = RowOf(sender);
-        if (row.Paused) await Downloads.Instance.Resume(row);
+        if (row.HasError) await Downloads.Instance.Retry(row);
+        else if (row.Paused) await Downloads.Instance.Resume(row);
         else await Downloads.Instance.Pause(row);
     }
 
@@ -175,7 +194,8 @@ public partial class DownloadsView : UserControl
                 }
             }
             var card = Ui.Card(stack, "Surface", 18, new Thickness(12));
-            card.Margin = new Thickness(0, 0, 0, 8);
+            card.Margin = new Thickness(0, 0, 12, 12);
+            card.VerticalAlignment = VerticalAlignment.Top;
             SavedList.Children.Add(card);
         }
     }
@@ -220,7 +240,8 @@ public partial class DownloadsView : UserControl
             return button;
         }
         var card = Ui.Card(button, "Surface", 18, new Thickness(12));
-        card.Margin = new Thickness(0, 0, 0, 8);
+        card.Margin = new Thickness(0, 0, 12, 12);
+        card.VerticalAlignment = VerticalAlignment.Top;
         return card;
     }
 }

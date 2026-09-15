@@ -559,19 +559,19 @@ public partial class MainWindow : Window
 
     void OpenPlayer(PlaybackRequest request)
     {
-        if (PlayerHost.Content is PlayerView old) old.Dispose();
+        if (PlayerHost.Content is PlayerView old) _ = old.Shutdown();
         PlayerHost.Visibility = Visibility.Visible;
         var player = new PlayerView(request);
-        player.Exited += () =>
+        player.Exited += async () =>
         {
-            if (PlayerHost.Content == player)
-            {
-                PlayerHost.Content = null;
-                PlayerHost.Visibility = Visibility.Collapsed;
-            }
+            if (PlayerHost.Content == player) PlayerHost.Visibility = Visibility.Collapsed;
             Tabs.Visibility = Layers.Visibility = TabDock.Visibility = Visibility.Visible;
             if (Layers.Children.Count > 0) TabDock.Visibility = Visibility.Collapsed;
             LibraryChanged?.Invoke();
+            // Hidden now, removed once libVLC has let go: destroying the video
+            // window while it still draws into it can block this thread.
+            await player.Closed;
+            if (PlayerHost.Content == player) PlayerHost.Content = null;
         };
         // The video surface is its own window; nothing underneath needs drawing.
         Tabs.Visibility = Layers.Visibility = TabDock.Visibility = Visibility.Collapsed;

@@ -48,37 +48,56 @@
 
     <!-- The live card: artwork, stage, progress, swarm, controls, queue. -->
     <DataTemplate x:Key="ActiveCard" DataType="{x:Type e:ActiveDownload}">
-      <Border CornerRadius="18" Background="{DynamicResource Surface}" Padding="14" Margin="0,0,0,14">
+      <Border CornerRadius="18" Background="{DynamicResource Surface}" Padding="16" Margin="0,0,14,14" VerticalAlignment="Top">
         <StackPanel>
           <DockPanel>
-            <Grid DockPanel.Dock="Left" Width="80" Height="120">
+            <Grid DockPanel.Dock="Left" Width="84" Height="126">
               <Border CornerRadius="12" Background="{Binding Headline, Converter={StaticResource Hue}}" />
               <Border CornerRadius="12">
                 <Border.Background>
-                  <ImageBrush ImageSource="{Binding Poster, Converter={StaticResource Img}, ConverterParameter=160}" Stretch="UniformToFill" />
+                  <ImageBrush ImageSource="{Binding Poster, Converter={StaticResource Img}, ConverterParameter=168}" Stretch="UniformToFill" />
                 </Border.Background>
               </Border>
-              <ProgressBar Style="{StaticResource Bar}" Value="{Binding Overall, Mode=OneWay}" VerticalAlignment="Bottom" Background="#59ffffff" />
             </Grid>
-            <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
-              <TextBlock Text="{Binding Headline}" FontSize="17" FontWeight="SemiBold" Foreground="{DynamicResource Text}" TextWrapping="Wrap" MaxHeight="48" TextTrimming="CharacterEllipsis" />
-              <DockPanel Margin="0,6,0,0">
-                <TextBlock DockPanel.Dock="Right" Text="{Binding Counts}" FontSize="12" FontWeight="Medium" Foreground="{DynamicResource Accent}" />
-                <StackPanel Orientation="Horizontal">
-                  <ContentControl Style="{StaticResource Spinner}" Width="14" Height="14" Margin="0,0,8,0"
-                                  Visibility="{Binding Starting, Converter={StaticResource Vis}}" />
-                  <TextBlock x:Name="Stage" Text="{Binding Stage}" FontSize="12" FontWeight="Medium" Foreground="{DynamicResource Accent}" />
-                </StackPanel>
+            <StackPanel Margin="16,2,0,0" VerticalAlignment="Top">
+              <DockPanel>
+                <TextBlock DockPanel.Dock="Right" Text="{Binding Counts}" FontSize="12" FontWeight="Medium" Foreground="{DynamicResource Accent}" Margin="8,3,0,0" />
+                <TextBlock Text="{Binding Headline}" FontSize="17" FontWeight="SemiBold" Foreground="{DynamicResource Text}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Headline}" />
               </DockPanel>
-              <ProgressBar Style="{StaticResource Bar}" Height="6" Value="{Binding Overall, Mode=OneWay}" Margin="0,8,0,0" />
-              <TextBlock Text="{Binding SizeLine}" FontSize="12" Foreground="{DynamicResource Muted}" Margin="0,6,0,0" />
-              <DockPanel Margin="0,4,0,0">
-                <TextBlock DockPanel.Dock="Right" Text="{Binding EtaLine}" FontSize="12" Foreground="{DynamicResource Muted}" />
-                <TextBlock Text="{Binding Overall, StringFormat={}{0:0}%}" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource Text}" />
+              <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                <ContentControl Style="{StaticResource Spinner}" Width="13" Height="13" Margin="0,0,8,0"
+                                Visibility="{Binding Starting, Converter={StaticResource Vis}}" />
+                <TextBlock x:Name="Stage" Text="{Binding Stage}" FontSize="12" FontWeight="Medium" Foreground="{DynamicResource Accent}" />
+              </StackPanel>
+
+              <DockPanel Margin="0,14,0,0">
+                <TextBlock DockPanel.Dock="Right" Text="{Binding Overall, StringFormat={}{0:0}%}" FontSize="15" FontWeight="SemiBold"
+                           Foreground="{DynamicResource Text}" Margin="12,0,0,0" MinWidth="40" TextAlignment="Right" VerticalAlignment="Center" />
+                <ProgressBar Style="{StaticResource Bar}" Height="6" Value="{Binding Overall, Mode=OneWay}" VerticalAlignment="Center" />
               </DockPanel>
-              <TextBlock Text="{Binding SwarmLine}" FontSize="11" Foreground="{DynamicResource Faint}" Margin="0,4,0,0" />
+              <DockPanel Margin="0,8,0,0">
+                <TextBlock DockPanel.Dock="Right" Text="{Binding EtaLine}" FontSize="12" Foreground="{DynamicResource Muted}" Margin="8,0,0,0" />
+                <TextBlock Text="{Binding SizeLine}" FontSize="12" Foreground="{DynamicResource Muted}" TextTrimming="CharacterEllipsis" />
+              </DockPanel>
+              <TextBlock Text="{Binding SwarmLine}" FontSize="11" Foreground="{DynamicResource Faint}" Margin="0,4,0,0"
+                         Visibility="{Binding SwarmLine, Converter={StaticResource Vis}}" />
             </StackPanel>
           </DockPanel>
+
+          <!-- What went wrong, where it can be fixed. -->
+          <Border CornerRadius="12" Background="{DynamicResource DangerSoft}" Padding="12,10" Margin="0,14,0,0"
+                  Visibility="{Binding HasError, Converter={StaticResource Vis}}">
+            <DockPanel>
+              <Button DockPanel.Dock="Right" Style="{StaticResource Pill}" Height="32" Tag="16" Click="OnChangeFolder" Margin="10,0,0,0" VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal">
+                  <c:Icon Kind="folder" Size="13" Foreground="{DynamicResource Muted}" />
+                  <TextBlock Text="Change folder" Margin="6,0,0,0" />
+                </StackPanel>
+              </Button>
+              <c:Icon DockPanel.Dock="Left" Kind="x" Size="14" Foreground="{DynamicResource Danger}" VerticalAlignment="Top" Margin="0,1,8,0" />
+              <TextBlock Text="{Binding Error}" FontSize="12" Foreground="{DynamicResource Danger}" TextWrapping="Wrap" VerticalAlignment="Center" />
+            </DockPanel>
+          </Border>
 
           <Grid Margin="0,14,0,0">
             <Grid.ColumnDefinitions>
@@ -126,6 +145,11 @@
           <Setter TargetName="PauseIcon" Property="Kind" Value="play" />
           <Setter TargetName="PauseText" Property="Text" Value="Resume" />
         </DataTrigger>
+        <DataTrigger Binding="{Binding HasError}" Value="True">
+          <Setter TargetName="Stage" Property="Foreground" Value="{DynamicResource Danger}" />
+          <Setter TargetName="PauseIcon" Property="Kind" Value="rotate-cw" />
+          <Setter TargetName="PauseText" Property="Text" Value="Retry" />
+        </DataTrigger>
         <DataTrigger Binding="{Binding QueueOpen}" Value="False">
           <Setter TargetName="Chevron" Property="Kind" Value="chevron-down" />
         </DataTrigger>
@@ -146,9 +170,9 @@
     </DockPanel>
 
     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-      <StackPanel Margin="24,0,24,120" MaxWidth="1000" HorizontalAlignment="Left">
+      <StackPanel Margin="24,0,24,120">
         <!-- BitTorrent-style: paste a magnet or pick a .torrent and it downloads everything in it. -->
-        <Border CornerRadius="14" Background="{DynamicResource Surface}" Padding="14,0,6,0" Height="50" Margin="0,4,0,18">
+        <Border CornerRadius="14" Background="{DynamicResource Surface}" Padding="14,0,6,0" Height="50" Margin="0,4,0,10">
           <DockPanel>
             <c:Icon DockPanel.Dock="Left" Kind="link" Size="16" Foreground="{DynamicResource Faint}" Margin="0,0,12,0" />
             <Button DockPanel.Dock="Right" Style="{StaticResource PillAccent}" Height="38" Tag="19" Content="Add" Click="OnAdd" Margin="6,0,0,0" />
@@ -162,10 +186,25 @@
           </DockPanel>
         </Border>
 
-        <ItemsControl x:Name="ActiveList" ItemTemplate="{StaticResource ActiveCard}" Focusable="False" />
+        <!-- Where new downloads land, changeable right here as well as in Settings. -->
+        <DockPanel Margin="4,0,0,18">
+          <Button DockPanel.Dock="Right" Style="{StaticResource Bare}" Click="OnChangeFolder" VerticalAlignment="Center" Margin="12,0,0,0">
+            <TextBlock Text="Change" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Accent}" />
+          </Button>
+          <c:Icon DockPanel.Dock="Left" Kind="hard-drive" Size="13" Foreground="{DynamicResource Faint}" Margin="0,0,8,0" VerticalAlignment="Center" />
+          <TextBlock x:Name="FolderText" FontSize="12" Foreground="{DynamicResource Faint}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+        </DockPanel>
+
+        <ItemsControl x:Name="ActiveList" ItemTemplate="{StaticResource ActiveCard}" Focusable="False">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <c:ColumnWrap MinColumn="560" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+        </ItemsControl>
 
         <TextBlock x:Name="SavedHeading" Text="SAVED" Style="{StaticResource Overline}" Margin="4,8,0,12" />
-        <StackPanel x:Name="SavedList" />
+        <c:ColumnWrap x:Name="SavedList" MinColumn="480" />
         <ContentControl x:Name="EmptySlot" Focusable="False" />
       </StackPanel>
     </ScrollViewer>

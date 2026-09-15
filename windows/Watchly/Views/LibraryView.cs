@@ -84,8 +84,6 @@ public sealed class LibraryView : UserControl
             {
                 var (box, input, trailing) = Ui.SearchField("Search titles and files", 44, 22);
                 box.Margin = new Thickness(24, 8, 24, 0);
-                box.MaxWidth = 700;
-                box.HorizontalAlignment = HorizontalAlignment.Left;
                 input.TextChanged += (_, _) =>
                 {
                     trailing.Content = input.Text.Length > 0 ? Ui.Button(Ui.Glyph("x-circle", 15, "Faint"), () => input.Clear()) : null;
@@ -137,14 +135,13 @@ public sealed class LibraryView : UserControl
             return;
         }
 
-        var stack = new StackPanel { MaxWidth = 1000, HorizontalAlignment = HorizontalAlignment.Left };
         var count = Ui.Text(q.Length > 0
             ? $"{shown.Count} {(shown.Count == 1 ? "match" : "matches")}"
             : $"{history.Count} {(history.Count == 1 ? "torrent" : "torrents")} · right-click a row to remove it", "Meta");
         count.Margin = new Thickness(0, 0, 0, 12);
-        stack.Children.Add(count);
-        foreach (var item in shown) stack.Children.Add(Row(item, history));
-        list.Content = stack;
+        var rows = new ColumnWrap();
+        foreach (var item in shown) rows.Children.Add(Row(item, history));
+        list.Content = new StackPanel { Children = { count, rows } };
     }
 
     /// <summary>src/components/HistoryRow.tsx.</summary>
@@ -239,7 +236,8 @@ public sealed class LibraryView : UserControl
         }
 
         var border = Ui.Card(card, "Surface", 18, new Thickness(12));
-        border.Margin = new Thickness(0, 0, 0, 12);
+        border.Margin = new Thickness(0, 0, 12, 12);
+        border.VerticalAlignment = VerticalAlignment.Top;
         return border;
     }
 

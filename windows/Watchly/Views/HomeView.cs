@@ -49,15 +49,9 @@ public sealed class HomeView : UserControl
     public HomeView()
     {
         scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = page };
+        Ui.SmoothWheel(scroll);
         genreScroll.Content = genreChips;
-        genreScroll.PreviewMouseWheel += (_, e) =>
-        {
-            if (e.Delta != 0)
-            {
-                genreScroll.ScrollToHorizontalOffset(genreScroll.HorizontalOffset - e.Delta);
-                e.Handled = true;
-            }
-        };
+        Ui.PassWheel(genreScroll);
         Ui.DragScroll(genreScroll);
 
         page.Children.Add(hero);

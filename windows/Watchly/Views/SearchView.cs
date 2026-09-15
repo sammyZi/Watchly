@@ -41,8 +41,6 @@ public sealed class SearchView : UserControl
         input = field;
         trailing = trail;
         box.Margin = new Thickness(24, 4, 24, 12);
-        box.MaxWidth = 900;
-        box.HorizontalAlignment = HorizontalAlignment.Left;
 
         var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = results, Padding = new Thickness(24, 0, 24, 120) };
         var dock = new DockPanel();
@@ -199,7 +197,7 @@ public sealed class SearchView : UserControl
     {
         if (torrents)
         {
-            var list = new StackPanel { MaxWidth = 1100, HorizontalAlignment = HorizontalAlignment.Left };
+            var list = new StackPanel();
             if (hits is { Count: > 0 })
             {
                 list.Children.Add(Ui.Text($"{hits.Count} RELEASES", "Overline", "Faint"));

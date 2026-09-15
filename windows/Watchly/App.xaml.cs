@@ -33,7 +33,7 @@ public partial class App : Application
         }
 
         Log.Info("app", "Watchly starting up...");
-        LibVLCSharp.Shared.Core.Initialize();
+        Views.PlayerView.Warm();
         Theme.Apply(AppSettings.Load().ThemeMode);
 
         DispatcherUnhandledException += (_, args) =>

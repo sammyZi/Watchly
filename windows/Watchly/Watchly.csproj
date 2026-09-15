@@ -19,6 +19,27 @@
   </PropertyGroup>
 
   <!--
+    Publish as one Watchly.exe (runtime, WPF natives and translations bundled in),
+    so dist is just the exe plus libvlc\ — VLC loads its codec plugins from disk.
+  -->
+  <PropertyGroup>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
+    <!-- The app is win-x64 only; the package ships x86 and arm64 VLC too. -->
+    <VlcWindowsX86Enabled>false</VlcWindowsX86Enabled>
+    <VlcWindowsArm64Enabled>false</VlcWindowsArm64Enabled>
+  </PropertyGroup>
+  <!-- VideoLAN.LibVLC.Windows adds libvlc\ as Content in a target, so mark it there. -->
+  <Target Name="KeepVlcOutOfBundle" AfterTargets="CollectVlcFilesToCopyWindows">
+    <ItemGroup>
+      <Content Condition="$([System.String]::Copy('%(Content.Link)').StartsWith('libvlc'))">
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      </Content>
+    </ItemGroup>
+  </Target>
+
+  <!--
     The SubDL key the phone app ships with (EXPO_PUBLIC_SUBDL_KEY in the repo's
     .env), baked in at build time the same way Expo inlines it — nothing to type,
     nothing stored. Missing .env just means online subtitle search is off.
