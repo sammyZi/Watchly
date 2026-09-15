@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using MonoTorrent;
 using MonoTorrent.Client;
+using MonoTorrent.PiecePicking;
 using MonoTorrent.Streaming;
 using Watchly.Core;
 
@@ -410,21 +411,33 @@ public sealed class StreamSession : IAsyncDisposable
     public string Url { get; }
     public TorrentMeta Meta { get; }
     /// <summary>Owned by a download — leaving the player must not stop it. A download
-    /// started for the torrent being watched takes the manager over and sets this.</summary>
-    public bool Borrowed { get; set; }
+    /// started for the torrent being watched takes the manager over and sets this,
+    /// which also lifts the streaming window: a download wants every piece.</summary>
+    public bool Borrowed
+    {
+        get => borrowed;
+        set
+        {
+            borrowed = value;
+            if (window is not null) window.Open = value;
+        }
+    }
+    bool borrowed;
+    readonly WindowedRequester? window;
 
     /// <summary>The one stream open right now, if any.</summary>
     public static StreamSession? Current { get; private set; }
     readonly IHttpStream http;
     readonly bool deleteFiles;
 
-    StreamSession(TorrentManager manager, TorrentMeta meta, int fileIndex, IHttpStream http, bool borrowed, bool deleteFiles)
+    StreamSession(TorrentManager manager, TorrentMeta meta, int fileIndex, IHttpStream http, bool borrowed, bool deleteFiles, WindowedRequester? window)
     {
         Manager = manager;
         Meta = meta;
         FileIndex = fileIndex;
         this.http = http;
         Url = http.FullUri;
+        this.window = window;
         Borrowed = borrowed;
         this.deleteFiles = deleteFiles;
     }
@@ -479,54 +492,36 @@ public sealed class StreamSession : IAsyncDisposable
             }
         }
 
+        // Our own torrent: fetch only the window around the playhead, never the whole film.
+        WindowedRequester? window = null;
+        if (!borrowed)
+        {
+            window = new WindowedRequester(fileIndex);
+            await manager.ChangePickerAsync(window);
+        }
         if (manager.State is TorrentState.Stopped or TorrentState.Paused or TorrentState.Error) await manager.StartAsync();
         var http = await manager.StreamProvider!.CreateHttpStreamAsync(file, false, ct);
         Log.Stream($"Streaming HTTP ready at {http.FullUri} for '{file.Path}'");
-        return Current = new StreamSession(manager, meta, fileIndex, http, borrowed, deleteFilesAfter);
+        return Current = new StreamSession(manager, meta, fileIndex, http, borrowed, deleteFilesAfter, window);
     }
 
     public Progress Progress => TorrentEngine.ProgressOf(Manager, FileIndex);
 
-    const double BufferAhead = 5 * 60, BufferRefill = 4 * 60;
-    bool holding, adjusting;
+    const double WindowSeconds = 5 * 60, BehindSeconds = 5;
 
     /// <summary>
-    /// Watching, not downloading: fetch until five minutes past the playhead are on
-    /// disk, then pause the torrent (peers stay connected); pick up again once under
-    /// four, or at once after a seek into missing data. Playback never waits for the
-    /// five minutes — this only stops the rest of the film downloading behind it.
-    /// A download sharing the torrent wants every piece, so it is left alone then.
+    /// Watching, not downloading: the next five minutes past the playhead keep downloading,
+    /// continuously, the window moving with playback and jumping with a seek — and nothing
+    /// else of the film is fetched. Playback never waits for the five minutes. Called on
+    /// the player's tick; before libVLC knows the length only what it reads is fetched.
     /// </summary>
-    public async Task KeepBuffer(double positionSeconds, double durationSeconds)
+    public Task KeepBuffer(double positionSeconds, double durationSeconds)
     {
-        if (adjusting || durationSeconds <= 0 || Manager.Torrent is not { } torrent) return;
-        var file = Manager.Files[FileIndex];
-        var bytesPerSecond = file.Length / durationSeconds;
-        var from = file.OffsetInTorrent + (long)(Math.Clamp(positionSeconds, 0, durationSeconds) * bytesPerSecond);
-        var end = file.OffsetInTorrent + file.Length;
-        var upTo = from;
-        for (var piece = (int)(from / torrent.PieceLength); piece <= file.EndPieceIndex && Manager.Bitfield[piece]; piece++)
-            upTo = (piece + 1L) * torrent.PieceLength;
-        var ahead = upTo >= end ? double.PositiveInfinity : (upTo - from) / bytesPerSecond;
-
-        var hold = !Borrowed && ahead >= (holding ? BufferRefill : BufferAhead);
-        if (hold == holding) return;
-        adjusting = true;
-        try
-        {
-            if (hold && Manager.State == TorrentState.Downloading) await Manager.PauseAsync();
-            else if (!hold && Manager.State == TorrentState.Paused) await Manager.StartAsync();
-            holding = hold;
-            Log.Stream(hold ? $"{Math.Min(ahead, 99999):0}s ahead on disk — holding" : $"{ahead:0}s ahead on disk — fetching");
-        }
-        catch (Exception e)
-        {
-            Log.Warn("stream", $"buffer control: {e.Message}");
-        }
-        finally
-        {
-            adjusting = false;
-        }
+        if (window is null || durationSeconds <= 0) return Task.CompletedTask;
+        var bytesPerSecond = Manager.Files[FileIndex].Length / durationSeconds;
+        var from = (long)((positionSeconds - BehindSeconds) * bytesPerSecond);
+        window.SetWindow(from, from + (long)((WindowSeconds + BehindSeconds) * bytesPerSecond));
+        return Task.CompletedTask;
     }
 
     /// <summary>Subtitle files from this torrent that have finished downloading.</summary>
@@ -541,4 +536,86 @@ public sealed class StreamSession : IAsyncDisposable
         try { http.Dispose(); } catch { }
         if (!Borrowed) await TorrentEngine.Instance.Remove(Manager, deleteFiles);
     }
+}
+
+/// <summary>
+/// MonoTorrent's streaming picker fetches where the player reads — and, alongside, the rest
+/// of the torrent rarest-first, so watching quietly downloaded the whole film. This wraps it
+/// with one more "ignore these pieces" bitfield covering the watched file outside a window:
+/// where the player reads (plus the picker's own look-ahead) and the span the player's tick
+/// sets. Everything is applied on the engine's thread, just before the picker requests.
+/// </summary>
+sealed class WindowedRequester : IStreamingPieceRequester
+{
+    /// <summary>The look-ahead StreamingPieceRequester keeps past the read position (LowPriorityCount).</summary>
+    const int ReadAhead = 30;
+
+    readonly StreamingPieceRequester inner = new();
+    readonly int fileIndex;
+    IPieceRequesterData? data;
+    BitField? outside;
+
+    long wantFrom = -1, wantTo = -1;
+    volatile bool open;
+    (int Reader, long From, long To, bool Open) applied = (-1, -2, -2, false);
+
+    public WindowedRequester(int fileIndex) => this.fileIndex = fileIndex;
+
+    /// <summary>Byte span of the file to keep fetching; set from any thread.</summary>
+    public void SetWindow(long from, long to)
+    {
+        Interlocked.Exchange(ref wantFrom, from);
+        Interlocked.Exchange(ref wantTo, to);
+    }
+
+    /// <summary>No window at all — a download shares the torrent.</summary>
+    public bool Open { set => open = value; }
+
+    public void Initialise(IPieceRequesterData torrentData, IMessageEnqueuer enqueuer, ReadOnlySpan<ReadOnlyBitField> ignoringBitfields)
+    {
+        data = torrentData;
+        outside = new BitField(torrentData.PieceCount);
+        var all = new ReadOnlyBitField[ignoringBitfields.Length + 1];
+        ignoringBitfields.CopyTo(all);
+        all[^1] = outside;
+        inner.Initialise(torrentData, enqueuer, all);
+        applied = (-1, -2, -2, false);
+        Apply();
+    }
+
+    void Apply()
+    {
+        if (data is null || outside is null || fileIndex >= data.Files.Count) return;
+        var now = (inner.HighPriorityPieceIndex, Interlocked.Read(ref wantFrom), Interlocked.Read(ref wantTo), open);
+        if (now == applied) return;
+        applied = now;
+        var file = data.Files[fileIndex];
+        int PieceAt(long offset) => data.ByteOffsetToPieceIndex(file.OffsetInTorrent + Math.Clamp(offset, 0, Math.Max(0, file.Length - 1)));
+        var (reader, from, to, isOpen) = now;
+        int spanFrom = to > 0 ? PieceAt(from) : int.MaxValue, spanTo = to > 0 ? PieceAt(to) : int.MinValue;
+        for (var i = file.StartPieceIndex; i <= file.EndPieceIndex; i++)
+            outside[i] = !(isOpen || (i >= reader && i <= reader + ReadAhead) || (i >= spanFrom && i <= spanTo));
+    }
+
+    public bool InEndgameMode => inner.InEndgameMode;
+
+    public void AddRequests(ReadOnlySpan<(IRequester Peer, ReadOnlyBitField Available)> peers)
+    {
+        Apply();
+        inner.AddRequests(peers);
+    }
+
+    public void AddRequests(IRequester peer, ReadOnlyBitField available, ReadOnlySpan<ReadOnlyBitField> peers)
+    {
+        Apply();
+        inner.AddRequests(peer, available, peers);
+    }
+
+    public void SeekToPosition(ITorrentManagerFile file, long position) => inner.SeekToPosition(file, position);
+    public void ReadToPosition(ITorrentManagerFile file, long position) => inner.ReadToPosition(file, position);
+    public bool ValidatePiece(IRequester peer, PieceSegment pieceSegment, out bool pieceComplete, HashSet<IRequester> peersInvolved) => inner.ValidatePiece(peer, pieceSegment, out pieceComplete, peersInvolved);
+    public bool IsInteresting(IRequester peer, ReadOnlyBitField bitField) => inner.IsInteresting(peer, bitField);
+    public void CancelRequests(IRequester peer, int startIndex, int endIndex) => inner.CancelRequests(peer, startIndex, endIndex);
+    public void RequestRejected(IRequester peer, PieceSegment pieceRequest) => inner.RequestRejected(peer, pieceRequest);
+    public int CurrentRequestCount() => inner.CurrentRequestCount();
 }
