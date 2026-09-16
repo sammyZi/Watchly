@@ -46,6 +46,31 @@ export function parseEpisode(name: string): { season: number; episode: number } 
 }
 
 /**
+ * The episode number a file carries without naming a season: "Show - 05",
+ * "Show Ep05", "Show [29]", "Show.E05.mkv". Paired with a season read off the
+ * folder it names an episode; on its own it is the number counted straight
+ * through the show, which is how anime is released.
+ *
+ * Null when the name already says SxxEyy — that answer is better.
+ * Written without lookbehind on purpose: Hermes does not have it.
+ */
+export function parseAbsolute(name: string): number | null {
+  if (!name || parseEpisode(name)) return null;
+  const found =
+    /(?:^|[\s_\])])-[\s_]*(\d{1,4})(?:v\d)?(?=[\s_.[(]|$)/i.exec(name) ??
+    /\b(?:episode|ep|e)[ ._-]?(\d{1,4})(?:v\d)?\b/i.exec(name) ??
+    /(?:^|[\s_])\[(\d{1,4})(?:v\d)?\]/.exec(name) ??
+    // "[yibis]_One_Piece_588_[720p]" — a bare number right before the tags.
+    // Not "Season 12 [1080p]", which the season test below rules out.
+    (/\bseasons?[\s_]*\d/i.test(name)
+      ? null
+      : /[\s_](\d{2,4})(?:v\d)?[\s_]*(?=[[(]|$)/.exec(name));
+  if (!found) return null;
+  const n = Number(found[1]);
+  return n > 0 && n < 1900 ? n : null;
+}
+
+/**
  * Order matters: "S01.COMPLETE" is a season, "Seasons 1-3" is the lot, and
  * anything carrying an episode marker is a single episode whatever else it
  * says. Unmarked names are treated as one episode — for a film that is true,
