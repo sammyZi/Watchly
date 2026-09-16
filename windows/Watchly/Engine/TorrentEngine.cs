@@ -433,10 +433,21 @@ public sealed class StreamSession : IAsyncDisposable
         set
         {
             borrowed = value;
-            if (window is not null) window.Open = value;
+            if (window is not null) window.Open = borrowed || wholeFile;
         }
     }
-    bool borrowed;
+    bool borrowed, wholeFile;
+
+    /// <summary>The viewer's choice in the player: the whole file, or only the next five minutes.</summary>
+    public bool WholeFile
+    {
+        get => wholeFile;
+        set
+        {
+            wholeFile = value;
+            if (window is not null) window.Open = borrowed || wholeFile;
+        }
+    }
     readonly WindowedRequester? window;
 
     /// <summary>The one stream open right now, if any.</summary>

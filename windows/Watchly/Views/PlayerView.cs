@@ -342,6 +342,7 @@ public sealed class PlayerView : UserControl, IDisposable
             {
                 session = await StreamSession.Start(request.Torrent!, request.FileIndex, shell.Settings.RemoveFilesAfterStop, request.HistoryUri, life.Token);
                 if (disposed) { await session.DisposeAsync(); return; }
+                session.WholeFile = shell.Settings.StreamWholeFile;
                 url = session.Url;
             }
         }
@@ -737,7 +738,11 @@ public sealed class PlayerView : UserControl, IDisposable
                 ShowHud("Start (0:00)");
                 break;
             case Key.End:
-                if (duration > 0) SeekTo(Math.Max(0, duration - 10_000));
+                if (duration > 0)
+                {
+                    SeekTo(Math.Max(0, duration - 10_000));
+                    ShowHud($"End ({Format.Clock((duration - 10_000) / 1000.0)})");
+                }
                 break;
             case Key.H or Key.OemQuestion:
                 ShowShortcutsHelp();
@@ -761,7 +766,9 @@ public sealed class PlayerView : UserControl, IDisposable
                 return;
         }
         e.Handled = true;
-        Bump();
+        // Seeking shows its own little readout (like volume); only other keys bring up the controls.
+        if (e.Key is not (Key.Left or Key.Right or Key.J or Key.L or Key.Home or Key.End
+            or >= Key.D0 and <= Key.D9 or >= Key.NumPad0 and <= Key.NumPad9)) Bump();
     }
 
     void CycleAudio()
@@ -1005,6 +1012,19 @@ public sealed class PlayerView : UserControl, IDisposable
             if (r.Right > r.Left)
                 SetWindowPos(hwnd, IntPtr.Zero, r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
         }
+    }
+
+    /// <summary>
+    /// What streaming fetches: only the next five minutes past the playhead (the default,
+    /// light on data and disk), or the whole file so the rest plays without waiting.
+    /// Remembered for next time. "Save" is still what keeps a copy in Downloads.
+    /// </summary>
+    void ToggleWholeFile()
+    {
+        if (session is null) return;
+        session.WholeFile = !session.WholeFile;
+        shell.ChangeSettings(shell.Settings with { StreamWholeFile = session.WholeFile });
+        ShowHud(session.WholeFile ? "Downloading the whole file" : "Downloading only the next 5 minutes", 1800);
     }
 
     void SaveCopy()
@@ -1300,6 +1320,8 @@ public sealed class PlayerView : UserControl, IDisposable
                 player.SetRate((float)rate);
                 Render();
             }));
+            if (session is not null && !session.Borrowed)
+                actions.Children.Add(Action(session.WholeFile ? "hard-drive" : "clock", null, session.WholeFile ? "Whole file" : "Next 5 min", session.WholeFile, ToggleWholeFile));
             if (session is not null) actions.Children.Add(Action("download", null, "Save", false, SaveCopy));
             actions.Children.Add(Action(fullscreen ? "minimize" : "maximize", null, fullscreen ? "Exit full" : "Fullscreen", fullscreen, ToggleFullscreen));
             bottom.Children.Add(actions);

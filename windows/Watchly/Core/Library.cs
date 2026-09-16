@@ -213,6 +213,8 @@ public sealed record AppSettings
     /// <summary>Keep uploading a finished download until it is removed.</summary>
     public bool SeedAfterDownload { get; init; }
     public int Volume { get; init; } = 100;
+    /// <summary>While streaming, fetch the whole file instead of only the next five minutes.</summary>
+    public bool StreamWholeFile { get; init; }
 
     const string Key = "settings";
 
