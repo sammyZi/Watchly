@@ -1,6 +1,6 @@
 // node --experimental-strip-types src/lib/search.test.ts
 import assert from 'node:assert';
-import { aliasOf, episodeTag, merge, namesTitle, parseEpisode, releaseTitle, sameTitle, seasonsIn, health, kindOf, quality, rank, rankEpisode, scopeOf, toCsvHits, toEztvHits, toHits, toTorrentioHits, toYtsHits, type Hit } from './search.ts';
+import { aliasOf, episodeTag, merge, namesTitle, parseEpisode, parseAbsolute, releaseTitle, sameTitle, seasonsIn, health, kindOf, quality, rank, rankEpisode, scopeOf, toCsvHits, toEztvHits, toHits, toTorrentioHits, toYtsHits, type Hit } from './search.ts';
 
 const row = (over: Record<string, string | number> = {}) => ({
   id: '1',
@@ -304,3 +304,14 @@ assert.ok(
   pbRanked.findIndex((h) => h.scope === 'episode') <
     pbRanked.findIndex((h) => h.name.includes('Season 2'))
 );
+
+// A bare episode number, for names that never say SxxEyy.
+assert.equal(parseAbsolute('[Group] Jujutsu Kaisen - 29 [1080p].mkv'), 29);
+assert.equal(parseAbsolute('Show Ep05 1080p.mkv'), 5);
+assert.equal(parseAbsolute('Game of Thrones E05.mkv'), 5);
+assert.equal(parseAbsolute('Jujutsu Kaisen S2 [29].mkv'), 29);
+assert.equal(parseAbsolute('[yibis]_One_Piece_588_[720p].mkv'), 588);
+// SxxEyy already answers it, and a year is not an episode.
+assert.equal(parseAbsolute('Ted.Lasso.S01E02.1080p.mkv'), null);
+assert.equal(parseAbsolute('Some Film 2024 [1080p].mkv'), null);
+assert.equal(parseAbsolute('Stranger Things Season 12 [1080p].mkv'), null);

@@ -9,8 +9,8 @@ import { Marquee } from '../components/Marquee';
 import { Thumb } from '../components/Thumb';
 import { ProgressBar } from '../components/ProgressBar';
 import { Screen } from '../components/Screen';
-import { ago, bytes, speed } from '../lib/format';
-import { parseEpisode, seasonsIn } from '../lib/search';
+import { ago, bytes, left, speed } from '../lib/format';
+import { parseAbsolute, parseEpisode, seasonsIn } from '../lib/search';
 import { searchableName } from '../lib/title';
 import { font, radius, space, TAB_INSET, type, useColors, useThemedStyles } from '../theme';
 
@@ -84,10 +84,45 @@ export async function recordDownload(
   );
 }
 
+const POS_KEY = 'torrent-download-positions';
+
+/** Where each finished file was left off, in seconds, keyed by file name —
+ *  the same key a Completed row is identified by. */
+type Resume = { at: number; of: number };
+
+async function loadPositions(): Promise<Record<string, Resume>> {
+  try {
+    return JSON.parse((await AsyncStorage.getItem(POS_KEY)) ?? '{}');
+  } catch {
+    return {};
+  }
+}
+
+/** Seconds to resume a saved file at. Zero once it has been watched through —
+ *  reopening the credits is never what anyone meant. */
+export async function savedPosition(name: string): Promise<number> {
+  const mark = (await loadPositions())[name];
+  if (!mark || (mark.of > 0 && mark.at > mark.of * 0.97)) return 0;
+  return mark.at;
+}
+
+export async function saveDownloadPosition(
+  name: string,
+  mark: { at?: number; of?: number }
+) {
+  const all = await loadPositions();
+  const prev = all[name];
+  all[name] = { at: mark.at ?? prev?.at ?? 0, of: mark.of ?? prev?.of ?? 0 };
+  await AsyncStorage.setItem(POS_KEY, JSON.stringify(all));
+}
+
 async function removeDownloads(names: string[]): Promise<DownloadEntry[]> {
   const drop = new Set(names);
   const items = (await loadDownloads()).filter((d) => !drop.has(d.name));
   await AsyncStorage.setItem(KEY, JSON.stringify(items));
+  const marks = await loadPositions();
+  for (const name of names) delete marks[name];
+  await AsyncStorage.setItem(POS_KEY, JSON.stringify(marks));
   for (const name of names) {
     await TorrentStream.deleteDownload(name).catch(() => {});
   }
@@ -106,7 +141,9 @@ function groupSaved(items: DownloadEntry[]) {
   >();
   const order: string[] = [];
   for (const item of items) {
-    const at = parseEpisode(item.name);
+    const at = episodeOf(item);
+    // A pack that only labels the season on the folder still groups right.
+    const season = at?.season ?? seasonsIn(item.path ?? '')[0] ?? null;
     const title = item.titleName || searchableName(item.name) || item.name;
     let show = shows.get(title);
     if (!show) {
@@ -115,13 +152,13 @@ function groupSaved(items: DownloadEntry[]) {
       order.push(title);
     }
     if (!show.poster && item.poster) show.poster = item.poster;
-    const sk = at ? String(at.season) : '_';
-    let season = show.seasons.get(sk);
-    if (!season) {
-      season = { season: at ? at.season : null, items: [] };
-      show.seasons.set(sk, season);
+    const sk = season != null ? String(season) : '_';
+    let group = show.seasons.get(sk);
+    if (!group) {
+      group = { season, items: [] };
+      show.seasons.set(sk, group);
     }
-    season.items.push(item);
+    group.items.push(item);
   }
   return order.map((key) => {
     const show = shows.get(key)!;
@@ -130,8 +167,8 @@ function groupSaved(items: DownloadEntry[]) {
     );
     for (const season of seasons) {
       season.items.sort((a, b) => {
-        const ea = parseEpisode(a.name);
-        const eb = parseEpisode(b.name);
+        const ea = episodeOf(a);
+        const eb = episodeOf(b);
         if (ea && eb) return ea.episode - eb.episode;
         return a.name.localeCompare(b.name);
       });
@@ -154,11 +191,26 @@ function eta(remainingBytes: number, bytesPerSec: number): string {
   return `${Math.floor(secs / 3600)}h ${Math.round((secs % 3600) / 60)}m left`;
 }
 
+function episodeLabel(at: { season: number; episode: number } | null) {
+  if (!at) return '';
+  return at.season === 0 ? `Special ${at.episode}` : `Episode ${at.episode}`;
+}
+
+/** Episode marker of one file — packs that lay episodes out as
+ *  "Season 6/Show - 05.mkv" split it between the folder and the file name. */
+function episodeOf(file?: { name: string; path?: string } | null) {
+  if (!file) return null;
+  const direct = parseEpisode(file.name) ?? parseEpisode(file.path ?? '');
+  if (direct) return direct;
+  const seasons = seasonsIn(file.path ?? '');
+  const n = parseAbsolute(file.name);
+  return seasons.length === 1 && n != null
+    ? { season: seasons[0], episode: n }
+    : null;
+}
+
 function fileTitle(name: string) {
-  const at = parseEpisode(name);
-  if (!at) return name.replace(/\.[^.]+$/, '');
-  if (at.season === 0) return `Special ${at.episode}`;
-  return `Episode ${at.episode}`;
+  return episodeLabel(parseEpisode(name)) || name.replace(/\.[^.]+$/, '');
 }
 
 function showTitle(name: string, titleName?: string | null) {
@@ -186,6 +238,7 @@ function DownloadsScreenView({
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [openQueues, setOpenQueues] = useState<Record<string, boolean>>({});
   const [openSaved, setOpenSaved] = useState<Record<string, boolean>>({});
+  const [marks, setMarks] = useState<Record<string, Resume>>({});
   const colors = useColors();
   const styles = useThemedStyles((c) => ({
     flex: { flex: 1 },
@@ -315,6 +368,7 @@ function DownloadsScreenView({
     },
     rowPressed: { opacity: 0.65 },
     rowBody: { flex: 1, minWidth: 0, gap: 3 },
+    resume: { gap: 3, paddingTop: 2 },
     rowName: { ...type.body, fontFamily: font.semibold, color: c.text },
     rowMeta: { ...type.meta, color: c.faint },
     playMark: {
@@ -357,9 +411,14 @@ function DownloadsScreenView({
   }, [actives.map((a) => a.name).join('|'), actives.map((a) => a.progress?.progress).join('|')]);
 
   useEffect(() => {
-    const id = setInterval(() => {
+    const read = () => {
       loadDownloads().then(setItems);
-    }, 2000);
+      // Cheap, and it is how a row catches up with the player it just came
+      // back from.
+      loadPositions().then(setMarks);
+    };
+    read();
+    const id = setInterval(read, 2000);
     return () => clearInterval(id);
   }, []);
 
@@ -408,8 +467,8 @@ function DownloadsScreenView({
   const current = queued
     .filter((f) => f.label === 'Queued')
     .sort((a, b) => {
-      const ea = parseEpisode(a.name);
-      const eb = parseEpisode(b.name);
+      const ea = episodeOf(a);
+      const eb = episodeOf(b);
       if (ea && eb) return ea.season - eb.season || ea.episode - eb.episode;
       return a.index - b.index;
     })[0];
@@ -435,9 +494,16 @@ function DownloadsScreenView({
     totalSize > 0 ? Math.min(100, (haveBytes / totalSize) * 100) : pct;
   const remaining = Math.max(0, totalSize - haveBytes);
   const headline = showTitle(active.name);
-  const season = current
-    ? parseEpisode(current.name)?.season
-    : (parseEpisode(active.name)?.season ?? seasonsIn(active.name)[0]);
+  // Which episode is being fetched. `active.name` is the show for anything
+  // started from a title page, so only the file itself knows the episode —
+  // and a one-file job has no queue list underneath to spell it out.
+  const one = current ?? (active.queue?.length === 1 ? active.queue[0] : null);
+  const at = episodeOf(one) ?? parseEpisode(active.name);
+  const season =
+    at?.season ?? seasonsIn(one?.path || one?.name || active.name)[0];
+  const tags = [season != null ? seasonLabel(season) : '', episodeLabel(at)]
+    .filter(Boolean)
+    .join(' · ');
   const stage = stageLabel(active.progress?.state, paused);
   const sub = paused ? stage : pct >= 100 ? 'Saving to device…' : stage;
   const starting = !paused && pct < 1;
@@ -476,12 +542,12 @@ function DownloadsScreenView({
                         {season != null ? `${seasonLabel(season)} · ` : ''}
                         {doneCount} of {onQueue.length || queue.length}
                       </Text>
-                    ) : season != null ? (
+                    ) : tags ? (
                       <Text
                         numberOfLines={1}
                         style={[styles.stage, paused && styles.stagePaused]}
                       >
-                        {seasonLabel(season)}
+                        {tags}
                       </Text>
                     ) : null}
                   </View>
@@ -537,7 +603,7 @@ function DownloadsScreenView({
                       const off = file.label === 'Off';
                       const on = file.label === 'Downloading';
                       const done = file.label === 'Done';
-                      const at = parseEpisode(file.name);
+                      const at = episodeOf(file);
                       const mark = at
                         ? String(at.episode).padStart(2, '0')
                         : String(file.index + 1).padStart(2, '0');
@@ -664,13 +730,16 @@ function DownloadsScreenView({
         }
         renderItem={({ item: group }) => {
           const row = (entry: DownloadEntry, nested?: boolean) => {
-            const at = parseEpisode(entry.name);
+            const at = episodeOf(entry);
             const title = showTitle(entry.name, entry.titleName);
-            const ep = at
-              ? at.season === 0
-                ? `Special ${at.episode}`
-                : `Episode ${at.episode}`
-              : null;
+            const ep = episodeLabel(at) || null;
+            const mark = marks[entry.name];
+            // Where this was left off. Nothing once it has been watched
+            // through — a finished episode starts over.
+            const seen =
+              mark && mark.of > 0 && mark.at > 0 && mark.at < mark.of * 0.97
+                ? (mark.at / mark.of) * 100
+                : 0;
             return (
               <Pressable
                 key={`${entry.name}-${entry.at}`}
@@ -691,7 +760,9 @@ function DownloadsScreenView({
                 )}
                 <View style={styles.rowBody}>
                   <Text numberOfLines={1} style={styles.rowName}>
-                    {nested && ep ? ep : title}
+                    {/* Under a season header the show name is on the card
+                        already — the file name at least tells them apart. */}
+                    {nested ? (ep ?? fileTitle(entry.name)) : title}
                   </Text>
                   <Text style={styles.rowMeta}>
                     {[
@@ -702,6 +773,14 @@ function DownloadsScreenView({
                       .filter(Boolean)
                       .join(' · ')}
                   </Text>
+                  {seen > 0 && (
+                    <View style={styles.resume}>
+                      <ProgressBar value={seen} height={3} />
+                      <Text style={styles.rowMeta}>
+                        {left(mark.of - mark.at)}
+                      </Text>
+                    </View>
+                  )}
                 </View>
                 <View style={styles.playMark}>
                   <Icon name="play" size={14} color={colors.accent} />

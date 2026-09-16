@@ -48,7 +48,54 @@ export function useDownloads(
   const start = useCallback(
     (job: DownloadJob) => {
       const uri = settings.addTrackers ? withTrackers(job.uri) : job.uri;
-      if (liveRef.current.some((l) => l.job.uri === uri || l.job.uri === job.uri)) {
+      const existing = liveRef.current.find(
+        (l) => l.job.uri === uri || l.job.uri === job.uri
+      );
+      // More episodes out of a torrent that is already running: widen its
+      // wanted set. Bailing out here is why only the first one downloaded.
+      if (existing) {
+        const key = existing.job.uri;
+        const add = (job.fileIndices ?? []).filter(
+          (i) => i >= 0 && !existing.wanted.includes(i)
+        );
+        if (!add.length) return;
+        // Visible to the next tap before React re-renders.
+        liveRef.current = liveRef.current.map((l) =>
+          l.job.uri === key ? { ...l, wanted: [...l.wanted, ...add] } : l
+        );
+        // Behind the first start, so the torrent's `play()` has already run.
+        chain.current = chain.current
+          .then(async () => {
+            const cur = liveRef.current.find((l) => l.job.uri === key);
+            if (!cur) return;
+            const wanted = [...new Set([...cur.wanted, ...add])];
+            const files = [...cur.files];
+            for (const i of add) {
+              if (files.some((f) => f.index === i)) continue;
+              const f = cur.meta?.files.find((x) => x.index === i);
+              files.push({
+                index: i,
+                name: f?.name ?? `File ${i}`,
+                size: f?.size ?? 0,
+                path: f?.path,
+              });
+            }
+            setLive((prev) =>
+              prev.map((l) => (l.job.uri === key ? { ...l, wanted, files } : l))
+            );
+            for (const i of add) await TorrentStream.includeDownload(key, i);
+            await saveDownloadJob({
+              uri: key,
+              fileIndices: wanted,
+              queueIndices: [
+                ...new Set([
+                  ...(cur.job.queueIndices ?? []),
+                  ...files.map((f) => f.index),
+                ]),
+              ],
+            });
+          })
+          .catch((e) => console.warn('[download] add failed', e?.message ?? e));
         return;
       }
       const stored: DownloadJob = { ...job, uri };
@@ -61,6 +108,7 @@ export function useDownloads(
         files: [],
       };
       setLive((prev) => [...prev, row]);
+      liveRef.current = [...liveRef.current, row];
       saveDownloadJob(stored).catch(() => {});
       TorrentStream.setNotify(true).catch(() => {});
 

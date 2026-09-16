@@ -51,7 +51,12 @@ import { CatalogScreen } from './screens/CatalogScreen';
 import { DetailScreen } from './screens/DetailScreen';
 import { FilesScreen } from './screens/FilesScreen';
 import { HistoryScreen } from './screens/HistoryScreen';
-import { DownloadsScreen, recordDownload } from './screens/DownloadsScreen';
+import {
+  DownloadsScreen,
+  recordDownload,
+  saveDownloadPosition,
+  savedPosition,
+} from './screens/DownloadsScreen';
 import { HomeScreen, type Shelf } from './screens/HomeScreen';
 import { PlayerScreen } from './screens/PlayerScreen';
 import { SearchScreen } from './screens/SearchScreen';
@@ -312,9 +317,13 @@ function ShellApp({
   /** Episode id -> the torrent uri it was opened with. */
   const [episodeLinks, setEpisodeLinks] = useState<EpisodeLinks>({});
   /** Playing a finished file from Completed — no torrent session involved. */
-  const [localPlay, setLocalPlay] = useState<{ url: string; title: string } | null>(
-    null
-  );
+  const [localPlay, setLocalPlay] = useState<{
+    url: string;
+    title: string;
+    /** File name — the key its resume point is stored under. */
+    name: string;
+    resumeAt: number;
+  } | null>(null);
 
   useEffect(() => {
     // After the first paint with the real theme bg, drop the splash — never
@@ -715,7 +724,12 @@ function ShellApp({
     async (entry: { name: string; path?: string }) => {
       try {
         const uri = entry.path ?? (await TorrentStream.downloadUri(entry.name));
-        setLocalPlay({ url: uri, title: entry.name });
+        setLocalPlay({
+          url: uri,
+          title: entry.name,
+          name: entry.name,
+          resumeAt: await savedPosition(entry.name),
+        });
       } catch (e: any) {
         fail(String(e?.message ?? e));
       }
@@ -846,9 +860,14 @@ function ShellApp({
         title={localPlay.title}
         url={localPlay.url}
         fileIndex={-1}
+        resumeAt={localPlay.resumeAt}
         progress={null}
-        onSavePosition={() => {}}
-        onDuration={() => {}}
+        onSavePosition={(seconds) =>
+          void saveDownloadPosition(localPlay.name, { at: seconds })
+        }
+        onDuration={(seconds) =>
+          void saveDownloadPosition(localPlay.name, { of: seconds })
+        }
         onExit={() => setLocalPlay(null)}
       />
     );
@@ -1254,10 +1273,12 @@ function ShellApp({
                 onInclude: (index: number) => downloads.include(l.job.uri, index),
                 onPlayFile: (file) => {
                   TorrentStream.fileUri(file.index, l.job.uri)
-                    .then((uri) =>
+                    .then(async (uri) =>
                       setLocalPlay({
                         url: uri,
                         title: file.name.replace(/\.[^.]+$/, ''),
+                        name: file.name,
+                        resumeAt: await savedPosition(file.name),
                       })
                     )
                     .catch((e: any) => fail(String(e?.message ?? e)));
