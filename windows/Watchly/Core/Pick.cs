@@ -31,27 +31,34 @@ public static class Pick
     public static bool IsSubtitleName(string name) => SubExt.Contains(System.IO.Path.GetExtension(name));
 
     /// <summary>
-    /// Files Windows runs when opened — programs, installers, scripts, shortcuts. Torrents
-    /// are a common way malware travels ("codec.exe", "Movie.mp4.exe", "Play.lnk"), and
-    /// nothing a viewer wants is one, so these are never downloaded.
+    /// Everything that may reach the disk from a torrent: video, audio, subtitles, cover art,
+    /// release notes. An allow list, not a block list — torrents are a common way malware
+    /// travels, and not only as programs ("codec.exe", "Play.lnk"): archives and disk images
+    /// carry them past a filter (.zip, .rar, .iso, .vhd), web pages and macro documents run
+    /// code when opened (.html, .svg, .docm). Nothing a viewer wants is any of those.
     /// </summary>
-    static readonly HashSet<string> RunnableExt = new(StringComparer.OrdinalIgnoreCase)
+    static readonly HashSet<string> AllowedExt = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".exe", ".com", ".scr", ".pif", ".cpl", ".msi", ".msix", ".msixbundle", ".msp", ".appx", ".appxbundle", ".application",
-        ".bat", ".cmd", ".ps1", ".psm1", ".psd1", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh", ".hta", ".jar",
-        ".dll", ".sys", ".ocx", ".lnk", ".url", ".reg", ".inf", ".scf", ".msc", ".gadget", ".chm", ".vb", ".sct", ".ws",
+        // video
+        ".mkv", ".mp4", ".m4v", ".avi", ".mov", ".wmv", ".webm", ".ts", ".m2ts", ".mts", ".mpg", ".mpeg", ".flv", ".ogv", ".3gp", ".vob", ".divx", ".rmvb",
+        // audio
+        ".mka", ".mp3", ".flac", ".m4a", ".aac", ".ac3", ".eac3", ".dts", ".ogg", ".opus", ".wav",
+        // subtitles
+        ".srt", ".ass", ".ssa", ".vtt", ".sub", ".idx", ".smi", ".sup",
+        // art and notes
+        ".jpg", ".jpeg", ".png", ".webp", ".nfo", ".txt",
     };
 
     /// <summary>
-    /// A file that must not reach the disk: something runnable, or a path that climbs out
-    /// of the download folder ("../../Startup/x") or names a drive or absolute location.
+    /// A file that must not reach the disk: any type outside <see cref="AllowedExt"/>, or a path
+    /// that climbs out of the download folder ("../../Startup/x") or names a drive.
     /// </summary>
     public static bool IsUnsafe(string path)
     {
         var p = path.Replace('\\', '/');
         if (p.StartsWith('/') || p.Contains(':') || p.Split('/').Any(part => part.Trim() == "..")) return true;
         // Windows drops trailing dots and spaces, so "setup.exe. " is still an .exe.
-        return RunnableExt.Contains(System.IO.Path.GetExtension(p.TrimEnd(' ', '.')));
+        return !AllowedExt.Contains(System.IO.Path.GetExtension(p.TrimEnd(' ', '.')));
     }
 
     static TorrentFileInfo Biggest(IEnumerable<TorrentFileInfo> files) => files.Aggregate((a, b) => b.Size > a.Size ? b : a);

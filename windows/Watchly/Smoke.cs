@@ -216,6 +216,11 @@ static class Smoke
         Ok(!Pick.IsUnsafe("The.Matrix.1999/The.Matrix.1999.1080p.mkv"), "isUnsafe video ok");
         Ok(!Pick.IsUnsafe("Show S01/Subs/English.srt"), "isUnsafe subtitle ok");
         Ok(!Pick.IsUnsafe("Movie...2019/Movie.mkv"), "isUnsafe dotted folder ok");
+        Ok(Pick.IsUnsafe("Movie.2020/Movie.2020.1080p.rar"), "isUnsafe archive");
+        Ok(Pick.IsUnsafe("Movie.2020/Bonus.iso"), "isUnsafe disk image");
+        Ok(Pick.IsUnsafe("Movie.2020/Watch Online.html"), "isUnsafe web page");
+        Ok(Pick.IsUnsafe("README"), "isUnsafe no extension");
+        Ok(!Pick.IsUnsafe("Movie.2020/Cover.jpg") && !Pick.IsUnsafe("Movie.2020/Movie.nfo") && !Pick.IsUnsafe("Album/01.flac"), "isUnsafe art, notes, audio ok");
         var batch = new[] { F(0, "Show/[Group] Show - 28 [1080p].mkv", 100), F(1, "Show/[Group] Show - 29 [1080p].mkv", 100), F(2, "Show/[Group] Show - 30 [1080p].mkv", 100) };
         Eq(Pick.PickFile(batch, "S02E05#29"), 1, "pickFile anime running number");
         Eq(Pick.PickFile(batch, "S02E09#33"), null, "pickFile anime missing episode");

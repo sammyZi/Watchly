@@ -99,13 +99,24 @@ public static class SubDL
     public static async Task<string> Save(Sub sub)
     {
         Directory.CreateDirectory(Paths.Subtitles);
-        var bytes = await Net.Http.GetByteArrayAsync(sub.Url);
-        var stem = Paths.Safe(sub.DisplayName[..^4]);
+        // Only from SubDL over https, and small: a subtitle is kilobytes, so anything big is not one.
+        const int MaxBytes = 20 * 1024 * 1024;
+        if (!Uri.TryCreate(sub.Url, UriKind.Absolute, out var from) || from.Scheme != Uri.UriSchemeHttps)
+            throw new InvalidOperationException("That subtitle link isn't a secure web address");
+        using var res = await Net.Http.GetAsync(from, System.Net.Http.HttpCompletionOption.ResponseHeadersRead);
+        res.EnsureSuccessStatusCode();
+        if (res.Content.Headers.ContentLength > MaxBytes) throw new InvalidOperationException("That subtitle download is too large");
+        var bytes = await res.Content.ReadAsByteArrayAsync();
+        if (bytes.Length > MaxBytes) throw new InvalidOperationException("That subtitle download is too large");
+        var name = sub.DisplayName.Length > 4 ? sub.DisplayName[..^4] : "subtitle";
+        var stem = Paths.Safe(name);
         if (bytes.Length > 4 && bytes[0] == 'P' && bytes[1] == 'K')
         {
             using var zip = new ZipArchive(new MemoryStream(bytes));
+            // Saved under our own name with only the subtitle extension kept, so nothing in the zip
+            // chooses where it lands; the size cap stops a zip bomb.
             var entry = zip.Entries
-                .Where(e => Pick.IsSubtitleName(e.Name))
+                .Where(e => Pick.IsSubtitleName(e.Name) && e.Length is > 0 and < 10 * 1024 * 1024)
                 .OrderByDescending(e => e.Name.EndsWith(".srt", StringComparison.OrdinalIgnoreCase))
                 .ThenByDescending(e => e.Length)
                 .FirstOrDefault() ?? throw new InvalidOperationException("No subtitle inside that download");
