@@ -209,9 +209,9 @@ public sealed class Downloads
                 indices = indices.Except(unsafeFiles).ToList();
                 var names = string.Join(", ", unsafeFiles.Take(3).Select(i => meta.Files[i].Name));
                 Log.Warn("download", $"'{meta.Name}': skipped {unsafeFiles.Count} runnable/unsafe file(s): {string.Join(", ", unsafeFiles.Select(i => meta.Files[i].Path))}");
-                Failed?.Invoke($"Skipped {unsafeFiles.Count} file{(unsafeFiles.Count == 1 ? "" : "s")} that could run on your PC ({names}{(unsafeFiles.Count > 3 ? "…" : "")}) — torrents are a common way malware spreads.");
+                Failed?.Invoke($"Skipped {unsafeFiles.Count} file{(unsafeFiles.Count == 1 ? "" : "s")} that aren't video, audio, subtitles or images ({names}{(unsafeFiles.Count > 3 ? "…" : "")}) — programs, archives and disk images are how malware spreads.");
             }
-            if (indices.Count == 0) throw new InvalidOperationException(unsafeFiles.Count > 0 ? "This torrent holds only programs or scripts, not videos — nothing was downloaded." : "No video in this torrent");
+            if (indices.Count == 0) throw new InvalidOperationException(unsafeFiles.Count > 0 ? "This torrent holds no videos — only programs, archives or other files that aren't downloaded." : "No video in this torrent");
 
             var queue = job.QueueIndices is { Count: > 0 } q ? q.Where(i => i < meta.Files.Count && !Pick.IsUnsafe(meta.Files[i].Path)).ToList() : indices;
             row.Job = job with { FileIndices = indices, QueueIndices = queue };

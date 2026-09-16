@@ -32,7 +32,9 @@ static class VlcLibrary
         var clock = System.Diagnostics.Stopwatch.StartNew();
         LibVLCSharp.Shared.Core.Initialize();
         var plugins = Path.Combine(AppContext.BaseDirectory, "libvlc", "win-x64", "plugins");
-        var args = new List<string> { "--no-video-title-show", "--no-osd", "--quiet" };
+        // No metadata lookups on the internet and no Lua scripts (which do such lookups): what is
+        // played stays on this machine. The Lua plugin isn't shipped either — see Watchly.csproj.
+        var args = new List<string> { "--no-video-title-show", "--no-osd", "--quiet", "--no-metadata-network-access", "--no-lua" };
         if (!File.Exists(Path.Combine(plugins, "plugins.dat"))) args.Add("--reset-plugins-cache");
         var made = new LibVLC(args.ToArray());
         Log.Player($"libVLC ready in {clock.ElapsedMilliseconds} ms");

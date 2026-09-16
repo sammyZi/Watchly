@@ -36,7 +36,9 @@ public sealed class TorrentEngine
         {
             CacheDirectory = Paths.EngineCache,
             AllowPortForwarding = true,
-            AllowLocalPeerDiscovery = true,
+            // Off: it broadcasts the hash of every torrent you watch to the whole local network
+            // (office, hostel, café Wi-Fi), where anyone listening can see what it is.
+            AllowLocalPeerDiscovery = false,
             AutoSaveLoadDhtCache = true,
             AutoSaveLoadFastResume = true,
             AutoSaveLoadMagnetLinkMetadata = true,
@@ -391,7 +393,6 @@ public sealed class TorrentEngine
         Log.Torrent($"attached {added} trackers to '{manager.Name}'");
         try { _ = manager.TrackerManager.AnnounceAsync(CancellationToken.None); } catch { }
         try { _ = manager.DhtAnnounceAsync(); } catch { }
-        try { _ = manager.LocalPeerAnnounceAsync(); } catch { }
     }
 
     public Task Remove(TorrentManager manager, bool deleteFiles)
@@ -506,7 +507,7 @@ public sealed class StreamSession : IAsyncDisposable
     {
         var engine = TorrentEngine.Instance;
         if (Pick.IsUnsafe(torrent.Files[fileIndex].Path))
-            throw new InvalidOperationException("That file could run on your PC (a program, script or shortcut), so it isn't downloaded.");
+            throw new InvalidOperationException("That file isn't a video, so it isn't downloaded — torrents are a common way malware spreads.");
         var hex = torrent.InfoHashes.V1OrV2.ToHex().ToLowerInvariant();
         await engine.Settled(hex);
         // Running because the file list was just fetched is ours to take; running for a download is borrowed.

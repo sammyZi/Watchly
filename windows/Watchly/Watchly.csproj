@@ -35,6 +35,18 @@
   </PropertyGroup>
 
   <!--
+    Less of VLC than the package ships: playback needs none of these, and each is either
+    something that reaches out on its own or code that parses what arrives from outside.
+    Lua scripts fetch cover art and metadata from the web; UPnP/mDNS discovery scans the
+    local network; the add-on repository and audio fingerprinter call videolan.org and
+    AcoustID; stream_out, access_output and mux only send or record streams.
+  -->
+  <ItemGroup>
+    <VlcWindowsX64IncludeFiles Include="libvlc.%2A;libvlccore.%2A;hrtfs\%2A%2A;plugins\%2A%2A" />
+    <VlcWindowsX64ExcludeFiles Include="plugins\lua\%2A%2A;plugins\services_discovery\%2A%2A;plugins\stream_out\%2A%2A;plugins\access_output\%2A%2A;plugins\mux\%2A%2A;plugins\misc\libaddonsvorepository_plugin.dll;plugins\misc\libaddonsfsstorage_plugin.dll;plugins\misc\libfingerprinter_plugin.dll" />
+  </ItemGroup>
+
+  <!--
     The SubDL key the phone app ships with (EXPO_PUBLIC_SUBDL_KEY in the repo's
     .env), baked in at build time the same way Expo inlines it — nothing to type,
     nothing stored. Missing .env just means online subtitle search is off.

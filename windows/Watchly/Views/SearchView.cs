@@ -145,7 +145,14 @@ public sealed class SearchView : UserControl
             }
             shownFor = q;
             SetBusy(true);
-            var found = await Search.SearchTorrents(q).ContinueWith(t => t.IsCompletedSuccessfully ? t.Result : new List<Hit>());
+            // Show releases as each index answers; the spinner in the box stays until the last one has.
+            void Arrived(List<Hit> sofar) => Dispatcher.BeginInvoke(() =>
+            {
+                if (mine != latest) return;
+                hits = sofar;
+                Render();
+            });
+            var found = await Search.SearchTorrents(q, progress: Arrived).ContinueWith(t => t.IsCompletedSuccessfully ? t.Result : new List<Hit>());
             if (mine != latest) return;
             hits = found;
             SetBusy(false);

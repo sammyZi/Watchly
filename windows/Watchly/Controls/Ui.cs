@@ -448,9 +448,11 @@ public static class Ui
         _ => ("Dead", "Danger", "DangerSoft"),
     };
 
+    /// <summary>A web page in the browser. Only http(s): handed to the shell, a file path or other scheme would run.</summary>
     public static void Open(string url)
     {
-        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp)) return;
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); } catch { }
     }
 }
 

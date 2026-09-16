@@ -29,7 +29,15 @@ public static class Search
     const string Api = "https://apibay.org/q.php";
     const string Csv = "https://torrents-csv.com/service/search";
     const string Torrentio = "https://torrentio.strem.fun/stream";
-    const string Yts = "https://yts.mx/api/v2/list_movies.json";
+    /// <summary>Same stream format as Torrentio, a different (larger) index.</summary>
+    const string TorrentsDb = "https://torrentsdb.com/stream";
+    /// <summary>yts.mx no longer resolves on some networks; the mirrors serve the same API.</summary>
+    static readonly string[] YtsHosts = { "https://yts.mx", "https://yts.lt", "https://yts.am", "https://movies-api.accel.li" };
+    /// <summary>One search across many trackers (The Pirate Bay, 1337x, RuTracker, YTS, …) — reachable where apibay is blocked.</summary>
+    const string Knaben = "https://api.knaben.org/v1";
+    const string Bitsearch = "https://bitsearch.to/api/v1/search";
+    const string TheRarbg = "https://therarbg.com/get-posts/keywords:";
+    const string Nyaa = "https://nyaa.si/?page=rss&c=1_2&f=0&q=";
     const string Eztv = "https://eztv.tf/api/get-torrents";
     const int FastMs = 2000;
 
@@ -373,6 +381,12 @@ public static class Search
         return body?["streams"] is JsonArray streams ? ToTorrentioHits(streams, kind) : new();
     }
 
+    static async Task<List<Hit>> FromTorrentsDb(string path, string kind, CancellationToken ct)
+    {
+        var body = await Net.Json($"{TorrentsDb}/{path}.json", ct, true);
+        return body?["streams"] is JsonArray streams ? ToTorrentioHits(streams, kind) : new();
+    }
+
     static async Task<List<Hit>> FromCsv(string query, CancellationToken ct)
     {
         var body = await Net.Json($"{Csv}?q={Uri.EscapeDataString(query)}&size=50", ct, true);
@@ -380,17 +394,14 @@ public static class Search
         return rows is null ? new() : ToCsvHits(rows);
     }
 
-    /// <summary>apibay first; torrents-csv when the host is blocked.</summary>
-    static async Task<List<Hit>> FromBay(string query, CancellationToken ct)
+    static async Task<List<Hit>> FromBayOnly(string query, CancellationToken ct)
     {
-        var hits = await Limited(Task.Run(async () =>
-        {
-            var body = await Net.Json($"{Api}?q={Uri.EscapeDataString(query)}&cat=200", ct, true);
-            return body is JsonArray rows ? ToHits(rows) : new List<Hit>();
-        }, ct), 1200, new List<Hit>());
-        if (hits.Count > 0 || ct.IsCancellationRequested) return hits;
-        return await Limited(FromCsv(query, ct), 2000, new List<Hit>());
+        var body = await Net.Json($"{Api}?q={Uri.EscapeDataString(query)}&cat=200", ct, true);
+        return body is JsonArray rows ? ToHits(rows) : new List<Hit>();
     }
+
+    /// <summary>How long one index gets in a search before it is left out of the answer.</summary>
+    const int SourceMs = 4000;
 
     /// <summary>The job's answer, or <paramref name="fallback"/> if it fails or takes longer than <paramref name="ms"/>.</summary>
     static async Task<T> Limited<T>(Task<T> job, int ms, T fallback)
@@ -422,31 +433,110 @@ public static class Search
         }
     }
 
-    /// <summary>First source that actually has rows.</summary>
-    static async Task<List<Hit>> FirstHits(IEnumerable<Task<List<Hit>>> jobs)
+    static async Task<List<Hit>> FromYts(string query, CancellationToken ct)
     {
-        var pending = jobs.ToList();
-        while (pending.Count > 0)
+        foreach (var host in YtsHosts)
         {
-            var done = await Task.WhenAny(pending);
-            pending.Remove(done);
             try
             {
-                var hits = await done;
-                if (hits.Count > 0) return hits;
+                var body = await Net.Json($"{host}/api/v2/list_movies.json?query_term={Uri.EscapeDataString(query)}&limit=50", ct, true);
+                return body?["data"]?["movies"] is JsonArray movies ? ToYtsHits(movies) : new();
             }
-            catch
+            catch when (!ct.IsCancellationRequested)
             {
-                // Try the next one.
+                // Blocked or down here: the next mirror.
             }
         }
         return new();
     }
 
-    static async Task<List<Hit>> FromYts(string query, CancellationToken ct)
+    static Hit Row(string hash, string name, int seeders, int leechers, long size, string? kind = null) => new()
     {
-        var body = await Net.Json($"{Yts}?query_term={Uri.EscapeDataString(query)}&limit=50", ct, true);
-        return body?["data"]?["movies"] is JsonArray movies ? ToYtsHits(movies) : new();
+        Id = hash.ToLowerInvariant(),
+        Name = name,
+        Magnet = MagnetOf(hash.ToLowerInvariant(), name),
+        Seeders = seeders,
+        Leechers = leechers,
+        Size = size,
+        Quality = Quality(name),
+        Scope = ScopeOf(name),
+        Kind = kind ?? (ParseEpisode(name) is null ? "movie" : "tv"),
+    };
+
+    /// <summary>A category these indexes use for video.</summary>
+    static bool VideoCategory(string category) =>
+        Regex.IsMatch(category, @"^\s*(movies?|tv|anime)\b", I);
+
+    /// <summary>For an index with no usable category: the name reads like a video release.</summary>
+    static bool LooksLikeVideo(string name) =>
+        Quality(name) is not null || ParseEpisode(name) is not null ||
+        Regex.IsMatch(name, @"\b(x26[45]|h\.?26[45]|hevc|xvid|web-?dl|webrip|blu-?ray|bdrip|brrip|hdtv|dvdrip|hdrip|remux|mkv|mp4|avi)\b", I);
+
+    static async Task<List<Hit>> FromKnaben(string query, CancellationToken ct)
+    {
+        var request = new JsonObject
+        {
+            ["search_field"] = "title",
+            ["query"] = query,
+            ["order_by"] = "seeders",
+            ["order_direction"] = "desc",
+            ["size"] = 100,
+            ["hide_unsafe"] = true,
+            ["hide_xxx"] = true,
+        };
+        using var content = new System.Net.Http.StringContent(request.ToJsonString(), System.Text.Encoding.UTF8, "application/json");
+        using var res = await Net.Http.PostAsync(Knaben, content, ct);
+        res.EnsureSuccessStatusCode();
+        var body = JsonNode.Parse(await res.Content.ReadAsStringAsync(ct));
+        return body?["hits"] is JsonArray hits
+            ? hits.Where(h => h is not null && IsHash(Str(h["hash"])) && VideoCategory(Str(h["category"])))
+                .Select(h => Row(Str(h!["hash"]), Str(h["title"]), (int)Num(h["seeders"]), (int)Num(h["peers"]), (long)Num(h["bytes"]),
+                    Str(h["category"]).StartsWith("TV", StringComparison.OrdinalIgnoreCase) ? "tv" : null))
+                .ToList()
+            : new();
+    }
+
+    static async Task<List<Hit>> FromBitsearch(string query, CancellationToken ct)
+    {
+        var body = await Net.Json($"{Bitsearch}?q={Uri.EscapeDataString(query)}", ct, true);
+        return body?["results"] is JsonArray rows
+            ? rows.Where(r => r is not null && IsHash(Str(r["infohash"])) && LooksLikeVideo(Str(r["title"])))
+                .Select(r => Row(Str(r!["infohash"]), Str(r["title"]), (int)Num(r["seeders"]), (int)Num(r["leechers"]), (long)Num(r["size"])))
+                .ToList()
+            : new();
+    }
+
+    static async Task<List<Hit>> FromTheRarbg(string query, CancellationToken ct)
+    {
+        var body = await Net.Json($"{TheRarbg}{Uri.EscapeDataString(query)}/?format=json", ct, true);
+        return body?["results"] is JsonArray rows
+            ? rows.Where(r => r is not null && IsHash(Str(r["h"])) && VideoCategory(Str(r["c"])))
+                .Select(r => Row(Str(r!["h"]), Str(r["n"]), (int)Num(r["se"]), (int)Num(r["le"]), (long)Num(r["s"]),
+                    Str(r["c"]).Equals("TV", StringComparison.OrdinalIgnoreCase) ? "tv" : null))
+                .ToList()
+            : new();
+    }
+
+    /// <summary>nyaa.si, for anime: its RSS carries the info hash, seeders and a size like "1.2 GiB".</summary>
+    static async Task<List<Hit>> FromNyaa(string query, CancellationToken ct)
+    {
+        using var res = await Net.Send(Nyaa + Uri.EscapeDataString(query), ct, true);
+        res.EnsureSuccessStatusCode();
+        var xml = System.Xml.Linq.XDocument.Parse(await res.Content.ReadAsStringAsync(ct));
+        System.Xml.Linq.XNamespace nyaa = "https://nyaa.si/xmlns/nyaa";
+        long SizeOf(string text)
+        {
+            var m = Regex.Match(text, @"([\d.]+)\s*([KMGT])i?B", I);
+            return m.Success && double.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var n)
+                ? (long)(n * Unit(m.Groups[2].Value + "b"))
+                : 0;
+        }
+        return xml.Descendants("item")
+            .Select(item => (Name: (string?)item.Element("title") ?? "", Hash: (string?)item.Element(nyaa + "infoHash") ?? "",
+                Seeders: (int?)item.Element(nyaa + "seeders") ?? 0, Leechers: (int?)item.Element(nyaa + "leechers") ?? 0, Size: (string?)item.Element(nyaa + "size") ?? ""))
+            .Where(x => IsHash(x.Hash) && x.Name.Length > 0)
+            .Select(x => Row(x.Hash, x.Name, x.Seeders, x.Leechers, SizeOf(x.Size), "tv"))
+            .ToList();
     }
 
     static async Task<List<Hit>> FromEztv(string imdb, CancellationToken ct)
@@ -517,9 +607,13 @@ public static class Search
         return got.Skip(want.Count).All(w => w.Length <= 2 || w.All(char.IsDigit));
     }
 
-    /// <summary>Search public indexes for video torrents.</summary>
+    /// <summary>
+    /// Search public indexes for video torrents. <paramref name="progress"/>, if given, gets the
+    /// merged list so far each time another index answers — so results can show as they arrive.
+    /// </summary>
     public static async Task<List<Hit>> SearchTorrents(
-        string title, CancellationToken ct = default, string? imdb = null, string? year = null, string? suffix = null)
+        string title, CancellationToken ct = default, string? imdb = null, string? year = null, string? suffix = null,
+        Action<List<Hit>>? progress = null)
     {
         var tail = string.Join(' ', new[] { suffix, year }.Where(x => !string.IsNullOrEmpty(x)));
         var full = string.Join(' ', new[] { title, tail }.Where(x => !string.IsNullOrEmpty(x)));
@@ -527,39 +621,64 @@ public static class Search
         var sw = Stopwatch.StartNew();
         Log($"torrents start \"{full}\" imdb={imdb ?? "-"}");
 
-        var primaryJob = Timed("apibay", FromBay(full, ct));
-        var aliasJob = alias is not null
-            ? Timed("apibay-alias", FromBay(string.Join(' ', new[] { alias, tail }.Where(x => !string.IsNullOrEmpty(x))), ct))
-            : Task.FromResult(new List<Hit>());
-        List<Hit> primary, aliased;
-        try { primary = await primaryJob; } catch { primary = new(); }
-        try { aliased = await aliasJob; } catch { aliased = new(); }
-
-        var bags = new List<List<Hit>>
+        // Every index at once, each given a few seconds; the same torrent from several is one row
+        // (Merge, by info hash). Asking them in turn and stopping at the first answer left most
+        // releases unseen — apibay alone, unless it failed.
+        List<Hit> None() => new();
+        Task<List<Hit>> Ask(string source, Task<List<Hit>> job, int ms = SourceMs) => Timed(source, Limited(job, ms, None()));
+        var aliasQuery = alias is null ? null : string.Join(' ', new[] { alias, tail }.Where(x => !string.IsNullOrEmpty(x)));
+        // The alias ("Dune" for "Dune: Part One") catches differently named releases; with a year, only that year's.
+        var jobs = new List<(Task<List<Hit>> Job, bool Alias)>
         {
-            primary,
-            year is not null ? aliased.Where(h => h.Name.Contains(year)).ToList() : aliased,
+            (Ask("apibay", FromBayOnly(full, ct)), false),
+            (Ask("torrents-csv", FromCsv(full, ct)), false),
+            (Ask("knaben", FromKnaben(full, ct)), false),
+            (Ask("bitsearch", FromBitsearch(full, ct)), false),
+            (Ask("therarbg", FromTheRarbg(full, ct)), false),
+            (Ask("nyaa", FromNyaa(full, ct)), false),
         };
-
-        if (!bags.Any(b => b.Count > 0) && string.IsNullOrEmpty(suffix))
+        if (aliasQuery is not null)
         {
-            Log("torrents fallback yts/torrentio");
-            var jobs = new List<Task<List<Hit>>> { Timed("yts", Limited(FromYts(imdb ?? full, ct), FastMs, new List<Hit>())) };
+            jobs.Add((Ask("apibay-alias", FromBayOnly(aliasQuery, ct)), true));
+            jobs.Add((Ask("knaben-alias", FromKnaben(aliasQuery, ct)), true));
+        }
+        if (string.IsNullOrEmpty(suffix))
+        {
+            jobs.Add((Ask("yts", FromYts(imdb ?? full, ct)), false)); // films only — no use for an episode tag
             if (imdb is not null)
-                jobs.Add(Timed("torrentio", Limited(FromTorrentio($"movie/{imdb}", "movie", ct), FastMs * 3, new List<Hit>())));
-            var fast = await FirstHits(jobs);
-            if (fast.Count > 0) bags.Add(fast);
+            {
+                jobs.Add((Ask("torrentio", FromTorrentio($"movie/{imdb}", "movie", ct), SourceMs + 2000), false));
+                jobs.Add((Ask("torrentsdb", FromTorrentsDb($"movie/{imdb}", "movie", ct), SourceMs + 2000), false));
+            }
         }
 
-        var merged = imdb is not null
-            ? Merge(bags).Where(h => h.Imdb is null || h.Imdb == imdb).ToList()
-            : Merge(bags);
+        List<Hit> Combine(IEnumerable<List<Hit>> bags)
+        {
+            var merged = imdb is not null
+                ? Merge(bags).Where(h => h.Imdb is null || h.Imdb == imdb).ToList()
+                : Merge(bags);
+            var found = Rank(merged, full);
+            var name = alias ?? title;
+            var exact = found.Where(h => SameTitle(h.Name, name)).ToList();
+            var named = found.Where(h => NamesTitle(h.Name, name)).ToList();
+            return exact.Count > 0 ? exact : named.Count > 0 ? named : found;
+        }
 
-        var found = Rank(merged, full);
-        var name = alias ?? title;
-        var exact = found.Where(h => SameTitle(h.Name, name)).ToList();
-        var named = found.Where(h => NamesTitle(h.Name, name)).ToList();
-        var @out = exact.Count > 0 ? exact : named.Count > 0 ? named : found;
+        var arrived = new List<List<Hit>>();
+        var pending = jobs.ToList();
+        while (pending.Count > 0)
+        {
+            var done = await Task.WhenAny(pending.Select(p => p.Job));
+            var which = pending.First(p => p.Job == done);
+            pending.Remove(which);
+            var hits = await done; // Limited: never throws
+            if (which.Alias && year is not null) hits = hits.Where(h => h.Name.Contains(year)).ToList();
+            arrived.Add(hits);
+            if (progress is not null && hits.Count > 0 && pending.Count > 0 && !ct.IsCancellationRequested)
+                progress(Combine(arrived));
+        }
+
+        var @out = Combine(arrived);
         Log($"torrents done {sw.ElapsedMilliseconds}ms n={@out.Count}");
         return @out;
     }
@@ -625,8 +744,10 @@ public static class Search
 
         if (imdb is not null)
         {
-            var tio = await Timed("torrentio", Limited(FromTorrentio($"series/{imdb}:{season}:{episode}", "tv", ct), FastMs * 3, new List<Hit>()));
-            if (tio.Count > 0) return RankEpisode(Merge(new[] { tio }), show, season);
+            var tioJob = Timed("torrentio", Limited(FromTorrentio($"series/{imdb}:{season}:{episode}", "tv", ct), FastMs * 3, new List<Hit>()));
+            var dbJob = Timed("torrentsdb", Limited(FromTorrentsDb($"series/{imdb}:{season}:{episode}", "tv", ct), FastMs * 3, new List<Hit>()));
+            var tio = Merge(new[] { await tioJob, await dbJob });
+            if (tio.Count > 0) return RankEpisode(tio, show, season);
             if (ct.IsCancellationRequested) return new();
             var eztv = (await Timed("eztv", Limited(EztvFor(imdb), FastMs * 3, new List<Hit>()))).Where(Plays).ToList();
             if (eztv.Count > 0) return RankEpisode(eztv, show, season);
