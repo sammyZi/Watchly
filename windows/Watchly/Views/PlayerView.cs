@@ -51,6 +51,7 @@ static class VlcLibrary
 public sealed class PlayerView : UserControl, IDisposable
 {
     const int SkipSeconds = 10;
+    const double ControlsScale = 1.25;
     const int UpNextSeconds = 30;
     static readonly double[] Rates = { 0.75, 1, 1.25, 1.5, 2 };
     static readonly (string Label, string? Aspect, bool Crop, float Scale)[] Scales =
@@ -63,7 +64,6 @@ public sealed class PlayerView : UserControl, IDisposable
         ("Original", null, false, 1),
     };
 
-    static LibVLC Vlc => VlcLibrary.Instance.Value;
     public static void Warm() => VlcLibrary.Warm();
 
     public event Action? Exited;
@@ -72,6 +72,7 @@ public sealed class PlayerView : UserControl, IDisposable
     readonly MainWindow shell = MainWindow.Shell;
     readonly VideoView video = new();
     readonly MediaPlayer player;
+    readonly LibVLC vlc = VlcLibrary.Instance.Value;
     readonly Grid overlay = new() { Background = Brushes.Black };
     readonly DispatcherTimer tick = new() { Interval = TimeSpan.FromMilliseconds(300) };
     readonly DispatcherTimer hideTimer = new() { Interval = TimeSpan.FromSeconds(3.5) };
@@ -182,12 +183,17 @@ public sealed class PlayerView : UserControl, IDisposable
         Background = Brushes.Black;
         Focusable = true;
 
-        player = new MediaPlayer(Vlc) { EnableHardwareDecoding = true, EnableKeyInput = false, EnableMouseInput = false };
-        player.Volume = shell.Settings.Volume;
+        player = NewPlayer();
         video.MediaPlayer = player;
+        // Picture mode and speed carry over from the last video (volume already does).
+        scaleIdx = Math.Max(0, Array.FindIndex(Scales, s => s.Label == shell.Settings.PlayerScale));
+        if (Rates.Contains(shell.Settings.PlaybackRate)) rate = shell.Settings.PlaybackRate;
         video.Content = overlay;
         Content = video;
 
+        // Sized for a phone; on a desktop screen watched from further away everything reads
+        // small. One scale keeps text, icons and buttons in proportion.
+        chrome.LayoutTransform = new ScaleTransform(ControlsScale, ControlsScale);
         overlay.Children.Add(chrome);
         overlay.MouseMove += OnOverlayMouseMove;
         overlay.MouseLeave += OnOverlayMouseLeave;
@@ -198,48 +204,6 @@ public sealed class PlayerView : UserControl, IDisposable
 
         seek.Scrub += ratio => { seekAt = DateTime.UtcNow; current = (long)(ratio * duration); UpdateClock(); Bump(); };
         seek.Commit += ratio => SeekTo((long)(ratio * duration));
-
-        player.Playing += (_, _) => Ui(() =>
-        {
-            buffering = false;
-            // The audio output exists now, and it picks up whatever mute Windows remembered
-            // for this app (a pause in an older build muted it); only the viewer's M mutes.
-            // Likewise the saved volume: set before playback there is no output to take it.
-            if (player.Mute != userMuted) player.Mute = userMuted;
-            if (player.Volume != shell.Settings.Volume) player.Volume = shell.Settings.Volume;
-            OnPlaying();
-            Bump();
-            Render();
-        });
-        player.Paused += (_, _) => Ui(Render);
-        player.Buffering += (_, e) => Ui(() =>
-        {
-            bufferPct = e.Cache;
-            var now = e.Cache < 100;
-            if (now != buffering) { buffering = now; Render(); }
-        });
-        player.LengthChanged += (_, e) => Ui(() =>
-        {
-            if (e.Length <= 0) return;
-            duration = e.Length;
-            if (request.HistoryUri is not null) shell.SaveDuration(request.HistoryUri, request.FileIndex, duration / 1000.0);
-            UpdateClock();
-        });
-        player.TimeChanged += (_, e) => Ui(() =>
-        {
-            // Between asking for a seek and it landing this still reports the old spot.
-            if ((DateTime.UtcNow - seekAt).TotalMilliseconds < 1200) return;
-            current = e.Time;
-            if (current > 5000) reloads = 0;
-            UpdateClock();
-        });
-        player.EndReached += (_, _) => Ui(OnEnded);
-        player.EncounteredError += (_, _) => Ui(() =>
-        {
-            if (duration > 0) Warn("Playback stalled — waiting for data");
-            else Fail("This file could not be played", true);
-        });
-        player.ESAdded += (_, _) => Ui(OnTracksChanged);
 
         tick.Tick += (_, _) => OnTick();
         hideTimer.Tick += (_, _) =>
@@ -266,6 +230,56 @@ public sealed class PlayerView : UserControl, IDisposable
         tick.Start();
         Render();
         _ = Start();
+    }
+
+    /// <summary>The libVLC player, its events wired.</summary>
+    MediaPlayer NewPlayer()
+    {
+        var p = new MediaPlayer(vlc) { EnableHardwareDecoding = true, EnableKeyInput = false, EnableMouseInput = false };
+        void On(Action action) => Ui(action);
+
+        p.Playing += (_, _) => On(() =>
+        {
+            buffering = false;
+            // The audio output exists now, and it picks up whatever mute Windows remembered
+            // for this app (a pause in an older build muted it); only the viewer's M mutes.
+            // Likewise the saved volume: set before playback there is no output to take it.
+            if (player.Mute != userMuted) player.Mute = userMuted;
+            if (player.Volume != shell.Settings.Volume) player.Volume = shell.Settings.Volume;
+            OnPlaying();
+            Bump();
+            Render();
+        });
+        p.Paused += (_, _) => On(Render);
+        p.Buffering += (_, e) => On(() =>
+        {
+            bufferPct = e.Cache;
+            var now = e.Cache < 100;
+            if (now != buffering) { buffering = now; Render(); }
+        });
+        p.LengthChanged += (_, e) => On(() =>
+        {
+            if (e.Length <= 0) return;
+            duration = e.Length;
+            if (request.HistoryUri is not null) shell.SaveDuration(request.HistoryUri, request.FileIndex, duration / 1000.0);
+            UpdateClock();
+        });
+        p.TimeChanged += (_, e) => On(() =>
+        {
+            // Between asking for a seek and it landing this still reports the old spot.
+            if ((DateTime.UtcNow - seekAt).TotalMilliseconds < 1200) return;
+            current = e.Time;
+            if (current > 5000) reloads = 0;
+            UpdateClock();
+        });
+        p.EndReached += (_, _) => On(OnEnded);
+        p.EncounteredError += (_, _) => On(() =>
+        {
+            if (duration > 0) Warn("Playback stalled — waiting for data");
+            else Fail("This file could not be played", true);
+        });
+        p.ESAdded += (_, _) => On(OnTracksChanged);
+        return p;
     }
 
     void OnOverlayMouseMove(object sender, MouseEventArgs e)
@@ -361,7 +375,7 @@ public sealed class PlayerView : UserControl, IDisposable
     void Load(string url, double startSeconds)
     {
         var old = media;
-        media = new Media(Vlc, new Uri(url),
+        media = new Media(vlc, new Uri(url),
             ":network-caching=600",
             ":file-caching=300",
             ":live-caching=300",
@@ -523,7 +537,7 @@ public sealed class PlayerView : UserControl, IDisposable
         started, Preparing, showUi, locked, buffering || stalled, started && IsPlayingSafe,
         picking, pickingAudio, searchingSubs, hud, UpNextVisible,
         failure, failureFatal, scaleIdx, rate, fullscreen,
-        started && !disposed && player.NativeReference != IntPtr.Zero && player.Mute,
+        userMuted,
         started && !disposed && player.NativeReference != IntPtr.Zero && player.Spu >= 0,
         !disposed && player.NativeReference != IntPtr.Zero ? player.AudioTrack : -1,
         !disposed && player.NativeReference != IntPtr.Zero ? player.AudioTrackCount : 0,
@@ -685,7 +699,9 @@ public sealed class PlayerView : UserControl, IDisposable
             case Key.M:
                 userMuted = !userMuted;
                 player.Mute = userMuted;
-                ShowHud(player.Mute ? "Muted" : $"Volume {player.Volume}%");
+                // Not player.Mute: libVLC applies it to the audio output a moment later, so
+                // reading it back straight away still gives the old state ("Muted" on unmute).
+                ShowHud(userMuted ? "Muted" : $"Volume {player.Volume}%");
                 e.Handled = true;
                 return;
             case Key.A:
@@ -850,6 +866,7 @@ public sealed class PlayerView : UserControl, IDisposable
         var nextIdx = Math.Clamp(currentIdx + direction, 0, Rates.Length - 1);
         rate = Rates[nextIdx];
         player.SetRate((float)rate);
+        shell.ChangeSettings(shell.Settings with { PlaybackRate = rate });
         ShowHud($"Speed {rate}x");
         Render();
     }
@@ -946,6 +963,7 @@ public sealed class PlayerView : UserControl, IDisposable
     {
         scaleIdx = (scaleIdx + 1) % Scales.Length;
         ApplyScale();
+        shell.ChangeSettings(shell.Settings with { PlayerScale = Scales[scaleIdx].Label });
         ShowHud(Scales[scaleIdx].Label);
     }
 
@@ -1261,7 +1279,7 @@ public sealed class PlayerView : UserControl, IDisposable
                     Children =
                     {
                         RailButton("plus", () => StepVolume(5), "Louder (↑)"),
-                        new StackPanel { Margin = new Thickness(0, 2, 0, 2), Children = { WIcon(player.Mute ? "volume-x" : "volume", 13, White(0xb0)), Centered(liveVolume) } },
+                        new StackPanel { Margin = new Thickness(0, 2, 0, 2), Children = { WIcon(userMuted ? "volume-x" : "volume", 13, White(0xb0)), Centered(liveVolume) } },
                         RailButton("minus", () => StepVolume(-5), "Quieter (↓)"),
                     },
                 },
@@ -1318,6 +1336,7 @@ public sealed class PlayerView : UserControl, IDisposable
             {
                 rate = Rates[(Array.IndexOf(Rates, rate) + 1) % Rates.Length];
                 player.SetRate((float)rate);
+                shell.ChangeSettings(shell.Settings with { PlaybackRate = rate });
                 Render();
             }));
             if (session is not null && !session.Borrowed)
