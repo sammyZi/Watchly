@@ -136,15 +136,23 @@ public static class Meta
     {
         var key = $"shelf-{kind}-{genre}";
         var type = kind == "tv" ? "series" : "movie";
-        var url = genre == AnimeGenre
-            ? Anime
-            : $"{Catalog}/{type}/top{(genre is null ? "" : "/genre=" + Uri.EscapeDataString(genre))}.json";
+        // Cinemeta pages by 50: top/genre=Action&skip=50.json, or top/skip=50.json without a genre.
+        string Page(int skip)
+        {
+            var extras = new[] { genre is null ? null : "genre=" + Uri.EscapeDataString(genre), skip > 0 ? $"skip={skip}" : null }.Where(e => e is not null);
+            var extra = string.Join("&", extras);
+            return $"{Catalog}/{type}/top{(extra.Length > 0 ? "/" + extra : "")}.json";
+        }
         return Once(key, async () =>
         {
-            var all = await Remember(key, async () =>
+            // Three pages (150 titles) so the day's picks have something to rotate through.
+            var all = await Remember("pool-" + key, async () =>
             {
-                var body = await Net.Json(url);
-                return body?["metas"] is JsonArray metas ? ToTitles(metas, kind) : new List<Title>();
+                var pages = genre == AnimeGenre ? new[] { Anime } : new[] { Page(0), Page(50), Page(100) };
+                var bodies = await Task.WhenAll(pages.Select(async page => { try { return await Net.Json(page); } catch { return null; } }));
+                var titles = bodies.SelectMany(b => b?["metas"] is JsonArray metas ? ToTitles(metas, kind) : new List<Title>()).ToList();
+                if (titles.Count == 0) throw new InvalidOperationException("empty shelf");
+                return titles;
             });
             var titles = UniqueById(all);
             if (titles.Count == 0) throw new InvalidOperationException("empty shelf");
@@ -178,6 +186,15 @@ public static class Meta
         }
         return tally.OrderByDescending(x => x.Seen).Take(limit)
             .Select(x => (x.Genre, x.Films * 2 >= x.Seen ? "movie" : "tv")).ToList();
+    }
+
+    /// <summary>Genre → 0..1: how much of what you watch is that genre, the most-watched at 1.</summary>
+    public static async Task<Dictionary<string, double>> Taste(IEnumerable<(string Imdb, string Kind)> seen)
+    {
+        var titles = await Task.WhenAll(seen.Select(s => LoadTitle(s.Imdb, s.Kind)));
+        var counts = titles.Where(t => t is not null).SelectMany(t => t!.Genres).GroupBy(g => g).ToDictionary(g => g.Key, g => (double)g.Count());
+        var most = counts.Count > 0 ? counts.Values.Max() : 1;
+        return counts.ToDictionary(kv => kv.Key, kv => kv.Value / most);
     }
 
     public static async Task<List<(string Genre, string Kind)>> WatchedGenres(IEnumerable<(string Imdb, string Kind)> seen, int limit = 3)

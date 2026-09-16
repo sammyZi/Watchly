@@ -187,6 +187,26 @@ static class Smoke
         Eq(string.Join(",", Pick.SeasonFiles(pack, 1)), "0,1,2", "seasonFiles pack");
         Eq(string.Join(",", Pick.SeasonFiles(season, 1)), "2,1,0", "seasonFiles order");
         Eq(string.Join(",", Pick.SeasonFiles(season, 2)), "3", "seasonFiles season 2");
+        // Recommend: daily shelves.
+        var genresCycle = new[] { "Action", "Adventure", "Sci-Fi", "Drama", "Comedy" };
+        var pool = Enumerable.Range(0, 150).Select(i => new Title
+        {
+            Imdb = $"tt{1000000 + i}", Name = $"Film {i}", Rating = (5 + i % 5).ToString(), Year = (1995 + i % 30).ToString(),
+            Genres = new() { genresCycle[i % 5], genresCycle[(i + 1) % 5], genresCycle[(i + 3) % 5] },
+        }).ToList();
+        var noTaste = new Dictionary<string, double>();
+        var noneWatched = new HashSet<string?>();
+        var day1 = new DateTime(2026, 9, 16, 9, 0, 0);
+        var morning = Recommend.ForToday(pool, "Action", noTaste, noneWatched, true, day1).Select(t => t.Imdb).ToList();
+        var evening = Recommend.ForToday(pool, "Action", noTaste, noneWatched, true, day1.AddHours(12)).Select(t => t.Imdb).ToList();
+        var tomorrow = Recommend.ForToday(pool, "Action", noTaste, noneWatched, true, day1.AddDays(1)).Select(t => t.Imdb).ToList();
+        Ok(morning.SequenceEqual(evening), "recommend stable within a day");
+        Ok(!morning.SequenceEqual(tomorrow) && morning.Intersect(tomorrow).Count() < morning.Count, "recommend changes next day");
+        Ok(morning.Count > 0 && morning.Count <= Recommend.ShelfSize, "recommend shelf size");
+        Ok(Recommend.ForToday(pool, null, noTaste, new HashSet<string?> { pool[0].Imdb }, false, day1).All(t => t.Imdb != pool[0].Imdb), "recommend skips watched");
+        var perShelf = genresCycle.Select(g => Recommend.ForToday(pool, g, noTaste, noneWatched, true, day1).Select(t => t.Imdb)).ToList();
+        Ok(perShelf.SelectMany(x => x).GroupBy(x => x).All(g => g.Count() == 1), "recommend one genre shelf per title a day");
+
         Ok(Pick.IsUnsafe("Movie.2020.1080p/Codec Installer.exe"), "isUnsafe exe");
         Ok(Pick.IsUnsafe("Movie.mp4.exe"), "isUnsafe double extension");
         Ok(Pick.IsUnsafe("Movie.mp4.lnk"), "isUnsafe shortcut");

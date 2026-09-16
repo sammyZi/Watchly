@@ -128,9 +128,19 @@ public sealed class TorrentEngine
         }
         else if (uri.StartsWith("http", StringComparison.OrdinalIgnoreCase))
         {
-            var bytes = await Net.Http.GetByteArrayAsync(uri, ct);
-            torrent = Torrent.Load(bytes);
-            await File.WriteAllBytesAsync(Path.Combine(MetaDir, Hex(torrent.InfoHashes) + ".torrent"), bytes, CancellationToken.None);
+            // Cached by address too: the hash is only known once the file is fetched.
+            var byUrl = Path.Combine(MetaDir, "url-" + Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(uri))) + ".torrent");
+            if (File.Exists(byUrl) && Torrent.TryLoad(byUrl, out var fromDisk))
+            {
+                torrent = fromDisk;
+            }
+            else
+            {
+                var bytes = await Net.Http.GetByteArrayAsync(uri, ct);
+                torrent = Torrent.Load(bytes);
+                await File.WriteAllBytesAsync(Path.Combine(MetaDir, Hex(torrent.InfoHashes) + ".torrent"), bytes, CancellationToken.None);
+                await File.WriteAllBytesAsync(byUrl, bytes, CancellationToken.None);
+            }
         }
         else
         {
@@ -268,6 +278,31 @@ public sealed class TorrentEngine
 
     /// <summary>One registration at a time: two callers could otherwise both find no manager and both add one.</summary>
     readonly SemaphoreSlim registering = new(1, 1);
+
+    /// <summary>
+    /// File lists saved from every torrent opened (streamed, downloaded or just looked at),
+    /// so opening one again skips asking the swarm. Kept until cleared in Settings.
+    /// </summary>
+    static IEnumerable<FileInfo> SavedFileLists() => new[] { MetaDir, Path.Combine(Paths.EngineCache, "metadata") }
+        .Where(Directory.Exists)
+        .SelectMany(dir => new DirectoryInfo(dir).EnumerateFiles("*.torrent"));
+
+    public static (int Torrents, long Bytes) SavedFileListsSize()
+    {
+        var files = SavedFileLists().ToList();
+        return (files.Count(f => !f.Name.StartsWith("url-") && f.DirectoryName == MetaDir), files.Sum(f => f.Length));
+    }
+
+    /// <summary>Forget saved file lists. Torrents open now keep working; the next open asks the swarm again.</summary>
+    public static int ClearSavedFileLists()
+    {
+        var cleared = 0;
+        foreach (var file in SavedFileLists())
+        {
+            try { file.Delete(); cleared++; } catch { }
+        }
+        return cleared;
+    }
 
     public static TorrentMeta MetaOf(Torrent torrent) => new(
         torrent.Name,

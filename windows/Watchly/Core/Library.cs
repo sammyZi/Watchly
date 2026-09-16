@@ -215,7 +215,9 @@ public sealed record AppSettings
     public int Volume { get; init; } = 100;
     /// <summary>While streaming, fetch the whole file instead of only the next five minutes.</summary>
     public bool StreamWholeFile { get; init; }
-
+    /// <summary>The player's picture mode ("Best fit", "Stretch", "Crop", …) and speed, kept for the next video.</summary>
+    public string PlayerScale { get; init; } = "Best fit";
+    public double PlaybackRate { get; init; } = 1;
     const string Key = "settings";
 
     public static AppSettings Load()

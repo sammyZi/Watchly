@@ -31,32 +31,27 @@ public sealed class HomeView : UserControl
     readonly StackPanel page = new() { Margin = new Thickness(0, 0, 0, 120) };
     readonly Grid hero = new() { Height = 480 };
     readonly StackPanel personal = new();
-    readonly ScrollViewer genreScroll = new()
-    {
-        HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden,
-        VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
-        Padding = new Thickness(24, 0, 24, 0),
-        Margin = new Thickness(0, 20, 0, 4),
-    };
-    readonly StackPanel genreChips = new() { Orientation = Orientation.Horizontal };
     readonly StackPanel shelves = new();
     readonly Dictionary<string, List<Title>> loaded = new();
+
+    const string TasteKey = "home-taste";
+    /// <summary>The genres you watch (see Meta.Taste), from last time until this session's is worked out.</summary>
+    Dictionary<string, double> taste = Store.Load(TasteKey, new Dictionary<string, double>());
+
+    /// <summary>A shelf's titles for today — see Recommend. Genre shelves share titles out between them.</summary>
+    List<Title> Today(Shelf shelf, List<Title> pool, HashSet<string?> watched) =>
+        Recommend.ForToday(pool, shelf.Genre, taste, watched, onePerGenre: shelf.Genre is not null && shelf.Genre != Meta.AnimeGenre);
     readonly Dictionary<string, (FrameworkElement Container, ContentControl Body)> shelfControls = new();
     List<Shelf> picks = new();
-    string? selectedGenre;
     int version;
 
     public HomeView()
     {
         scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = page };
         Ui.SmoothWheel(scroll);
-        genreScroll.Content = genreChips;
-        Ui.PassWheel(genreScroll);
-        Ui.DragScroll(genreScroll);
 
         page.Children.Add(hero);
         page.Children.Add(personal);
-        page.Children.Add(genreScroll);
         page.Children.Add(shelves);
         Content = scroll;
 
@@ -120,47 +115,6 @@ public sealed class HomeView : UserControl
         return chosen.Concat(rest).Concat(fixedList).Concat(genreShelves).ToList();
     }
 
-    void BuildGenreChips()
-    {
-        genreChips.Children.Clear();
-
-        var allChip = Ui.Chip("All", selectedGenre is null, () => SelectGenre(null), "grid");
-        allChip.Margin = new Thickness(0, 0, 8, 0);
-        genreChips.Children.Add(allChip);
-
-        foreach (var g in Meta.Genres)
-        {
-            var name = g == Meta.AnimeGenre ? "Anime" : g;
-            var on = selectedGenre == g;
-            var chip = Ui.Chip(name, on, () => SelectGenre(g));
-            chip.Margin = new Thickness(0, 0, 8, 0);
-            genreChips.Children.Add(chip);
-        }
-    }
-
-    void SelectGenre(string? g)
-    {
-        selectedGenre = g;
-        BuildGenreChips();
-        if (g is null)
-        {
-            scroll.ScrollToTop();
-            return;
-        }
-
-        var target = shelves.Children.OfType<FrameworkElement>()
-            .FirstOrDefault(c => (c.Tag as string)?.Equals(g, StringComparison.OrdinalIgnoreCase) == true);
-        if (target is not null)
-        {
-            target.BringIntoView();
-        }
-        else
-        {
-            var shelf = new Shelf(g == Meta.AnimeGenre ? "Anime" : g, Meta.KindOfGenre(g), g);
-            MainWindow.Shell.OpenShelfPage(shelf);
-        }
-    }
-
     async void Refresh()
     {
         if (!IsVisible && heroKey.Length > 0)
@@ -171,7 +125,6 @@ public sealed class HomeView : UserControl
         dirty = false;
         var mine = ++version;
         BuildPersonal();
-        BuildGenreChips();
         BuildShelves();
 
         // What is mid-way leads the taste signal, then the rest, then saved titles.
@@ -183,6 +136,10 @@ public sealed class HomeView : UserControl
         if (identified.Count > 0)
         {
             var genres = await Meta.WatchedGenres(identified, 4);
+            if (mine != version) return;
+            // Kept for the next build of the shelves; changing rails already on screen would make them jump.
+            taste = await Meta.Taste(identified);
+            try { Store.Save(TasteKey, taste); } catch { }
             if (mine != version) return;
             var next = genres.Select((g, i) => new Shelf(i == 0 ? "Recommended for you" : $"Because you like {g.Genre}", g.Kind, g.Genre)).ToList();
             if (!next.SequenceEqual(picks))
@@ -202,8 +159,7 @@ public sealed class HomeView : UserControl
                 var watched = shell.HistoryList.Select(h => h.Imdb).Where(i => i is not null).ToHashSet();
                 if (shelfControls.TryGetValue(shelf.Key, out var pair) && pair.Body.Content is Grid)
                 {
-                    var data = shelf.Genre is not null ? t.Result.Where(x => !watched.Contains(x.Imdb)).ToList() : t.Result;
-                    pair.Body.Content = Ui.Rail(data, "PosterCard", 290);
+                    pair.Body.Content = Ui.Rail(Today(shelf, t.Result, watched), "PosterCard", 290);
                 }
                 BuildHero(AllShelves(), watched);
             }));
@@ -263,8 +219,7 @@ public sealed class HomeView : UserControl
 
                 if (loaded.TryGetValue(shelf.Key, out var raw))
                 {
-                    var data = shelf.Genre is not null ? raw.Where(t => !watched.Contains(t.Imdb)).ToList() : raw;
-                    body.Content = Ui.Rail(data, "PosterCard", 290);
+                    body.Content = Ui.Rail(Today(shelf, raw, watched), "PosterCard", 290);
                 }
                 else
                 {
@@ -283,8 +238,7 @@ public sealed class HomeView : UserControl
                 {
                     if (pair.Body.Content is Grid)
                     {
-                        var data = shelf.Genre is not null ? raw.Where(t => !watched.Contains(t.Imdb)).ToList() : raw;
-                        pair.Body.Content = Ui.Rail(data, "PosterCard", 290);
+                        pair.Body.Content = Ui.Rail(Today(shelf, raw, watched), "PosterCard", 290);
                     }
                 }
             }
@@ -304,8 +258,10 @@ public sealed class HomeView : UserControl
     {
         var chosen = Chosen();
         var heroShelf = chosen.FirstOrDefault() ?? picks.FirstOrDefault() ?? Fixed[0];
-        var source = loaded.GetValueOrDefault(heroShelf.Key) ?? loaded.GetValueOrDefault(Fixed[0].Key) ?? new();
-        var titles = source.Where(t => !watched.Contains(t.Imdb)).Take(5).ToList();
+        var heroFrom = loaded.ContainsKey(heroShelf.Key) ? heroShelf : Fixed[0];
+        var source = loaded.GetValueOrDefault(heroFrom.Key) ?? new();
+        // Today's picks too, but from the whole pool (not one genre's share), so the banner changes daily.
+        var titles = Recommend.ForToday(source, heroFrom.Genre, taste, watched, onePerGenre: false).Take(5).ToList();
         var eyebrow = loaded.ContainsKey(heroShelf.Key)
             ? chosen.Count > 0 ? $"in {chosen[0].Genre}" : picks.Count > 0 ? "for you" : "today"
             : "today";

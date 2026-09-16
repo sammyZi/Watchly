@@ -101,12 +101,31 @@ public sealed class SettingsView : UserControl
             Meta.ClearCache();
             shell.Toast("Title cache cleared");
         });
+        var (savedTorrents, savedBytes) = Engine.TorrentEngine.SavedFileListsSize();
+        var clearTorrents = Ui.Button(Row("file", "Clear saved torrent info",
+            savedTorrents > 0
+                ? $"{savedTorrents} torrent file list{(savedTorrents == 1 ? "" : "s")} saved ({Format.Bytes(savedBytes)}) — they open without waiting on the swarm"
+                : "Nothing saved — torrents you open are remembered here so they open faster next time",
+            Ui.Glyph("chevron-right", 18, "Faint")), () => shell.Confirm(
+                "Clear saved torrent info?",
+                "Torrents will need to fetch their file lists from the swarm again the next time you open them. Watch history and downloads stay.",
+                "Clear",
+                () =>
+                {
+                    var cleared = Engine.TorrentEngine.ClearSavedFileLists();
+                    shell.Toast(cleared > 0 ? "Saved torrent info cleared" : "Nothing to clear");
+                    Render();
+                },
+                "trash-2"));
+        clearTorrents.IsEnabled = savedTorrents > 0;
         page.Children.Add(Group("Storage", new StackPanel
         {
             Children =
             {
                 Row("trash", "Delete files after stopping", "Keep the cache small; turn off to re-watch without re-downloading",
                     Toggle(S.RemoveFilesAfterStop, v => Set(S with { RemoveFilesAfterStop = v }))),
+                Divider(),
+                clearTorrents,
                 Divider(),
                 clearMeta,
                 Divider(),
