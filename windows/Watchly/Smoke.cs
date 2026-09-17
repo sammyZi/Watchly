@@ -161,6 +161,12 @@ static class Smoke
         Ok(Search.SameTitle("House.M.D.S01.COMPLETE.720p.BluRay", "House"), "sameTitle initials");
         Ok(Search.SameTitle("The.Office.US.S02E01.1080p", "The Office"), "sameTitle country tag");
         Ok(!Search.SameTitle("The.Matrix.Reloaded.2003.1080p", "The Matrix"), "sameTitle sequel");
+        Ok(!Search.FitsYear("Mad Max 1979 720p BluRay x264", "Mad Max: Fury Road", "2015"), "fitsYear rejects other film");
+        Ok(!Search.FitsYear("Mad Max 2 1981 1080p BluRay", "Mad Max: Fury Road", "2015"), "fitsYear rejects sequel year");
+        Ok(Search.FitsYear("Mad.Max.Fury.Road.2015.1080p.BluRay", "Mad Max: Fury Road", "2015"), "fitsYear same year");
+        Ok(Search.FitsYear("Blade.Runner.2049.2017.2160p", "Blade Runner 2049", "2017"), "fitsYear year in title");
+        Ok(Search.FitsYear("Mad Max Fury Road 1080p", "Mad Max: Fury Road", "2015"), "fitsYear no year");
+        Ok(Search.SameTitle("Mad.Max.Fury.Road.2015.1080p.BluRay", "Mad Max: Fury Road"), "sameTitle full title with colon");
         Eq(Search.ReleaseTitle("S01E01.1080p.WEB").Count, 0, "releaseTitle only metadata");
 
         var pb = Search.RankEpisode(new[]

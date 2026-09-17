@@ -1,4 +1,8 @@
-import { requireNativeView } from 'expo';
+import { requireNativeModule, requireNativeView } from 'expo';
+
+/** Whether the app is in the picture-in-picture window right now. */
+export const isInPip = (): boolean =>
+  requireNativeModule<{ isInPip(): boolean }>('VlcPlayer').isInPip();
 import type { ViewStyle } from 'react-native';
 import type { ComponentType, Ref } from 'react';
 
@@ -25,6 +29,8 @@ export type VlcPlayerRef = {
    * nothing on the network.
    */
   snapshot(): Promise<string | null>;
+  /** Shrink into a floating window. False where the device has no picture-in-picture. */
+  enterPip(): Promise<boolean>;
 };
 
 /** libVLC's own fit modes, by their enum names. */
@@ -51,6 +57,10 @@ export type VlcPlayerProps = {
   subtitleFiles?: string[] | null;
   /** How the picture is fitted to the surface. Defaults to best fit. */
   scaleType?: VlcScaleType;
+  /** Go to picture-in-picture on Home while playing (Android 12+). */
+  autoPip?: boolean;
+  /** Entered or left picture-in-picture. */
+  onPip?: (e: { nativeEvent: { active: boolean } }) => void;
 
   onLoaded?: (e: { nativeEvent: { duration: number } }) => void;
   onProgress?: (e: { nativeEvent: { currentTime: number } }) => void;

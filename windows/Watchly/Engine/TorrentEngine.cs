@@ -28,6 +28,14 @@ public sealed class TorrentEngine
 
     readonly ClientEngine engine;
 
+    /// <summary>The DHT cache is read when the first torrent starts; adding one waits for it (briefly).</summary>
+    readonly Task dhtSeeded;
+
+    async Task DhtReady()
+    {
+        try { await dhtSeeded.WaitAsync(TimeSpan.FromSeconds(3)); } catch { }
+    }
+
     TorrentEngine()
     {
         Directory.CreateDirectory(Paths.EngineCache);
@@ -51,11 +59,97 @@ public sealed class TorrentEngine
             MaximumHalfOpenConnections = 120,
             ConnectionTimeout = TimeSpan.FromSeconds(6),
         };
+        // One known port, so a router rule can forward it (random each launch otherwise).
+        var port = PeerPort();
+        settings.ListenEndPoints = new Dictionary<string, IPEndPoint>
+        {
+            ["ipv4"] = new(IPAddress.Any, port),
+            ["ipv6"] = new(IPAddress.IPv6Any, port),
+        };
+        settings.DhtEndPoint = new IPEndPoint(IPAddress.Any, port);
         var app = AppSettings.Load();
         if (app.MaxDownloadKbps > 0) settings.MaximumDownloadRate = app.MaxDownloadKbps * 1024;
         if (app.MaxUploadKbps > 0) settings.MaximumUploadRate = app.MaxUploadKbps * 1024;
+        dhtSeeded = Task.Run(SeedDhtNodes);
         engine = new ClientEngine(settings.ToSettings());
+        // A torrent asks DHT for peers as it starts, before DHT has joined the network, and then
+        // not again for a long while. Ask again for every torrent the moment DHT is ready.
+        engine.Dht.StateChanged += (_, _) =>
+        {
+            if (engine.Dht.State != MonoTorrent.Dht.DhtState.Ready) return;
+            Log.Torrent($"DHT ready with {engine.Dht.NodeCount} nodes");
+            foreach (var manager in engine.Torrents.ToList())
+                _ = manager.DhtAnnounceAsync();
+        };
         Log.Info("engine", $"ClientEngine initialized on {settings.HttpStreamingPrefix} (DiskCache: 128MB, MaxConn: 600, HalfOpen: 120)");
+    }
+
+    /// <summary>
+    /// DHT finds peers without trackers — often most of a torrent's swarm. MonoTorrent joins it
+    /// only through router.bittorrent.com, which doesn't answer on some networks (measured here:
+    /// no reply; DHT stayed at 0 nodes, so every torrent got tracker peers only). It also starts
+    /// from the nodes it saved last time, so when that cache is empty this writes bootstrap
+    /// servers into it — compact node entries: a 20-byte id (any), IPv4 address, port. Once DHT
+    /// is up the engine saves real nodes over these.
+    /// </summary>
+    static async Task SeedDhtNodes()
+    {
+        const int Compact = 26;
+        var cache = Path.Combine(Paths.EngineCache, "dht_nodes.cache");
+        try
+        {
+            if (File.Exists(cache) && new FileInfo(cache).Length >= Compact * 8) return;
+            (string Host, int Port)[] routers =
+            {
+                ("dht.transmissionbt.com", 6881), ("dht.libtorrent.org", 25401), ("router.bittorrent.com", 6881),
+                ("router.utorrent.com", 6881), ("dht.aelitis.com", 6881), ("router.bitcomet.com", 6881),
+            };
+            var entries = new List<byte>();
+            foreach (var (host, port) in routers)
+            {
+                IPAddress[] addresses;
+                try { addresses = await Dns.GetHostAddressesAsync(host); } catch { continue; }
+                foreach (var address in addresses.Where(a => a.AddressFamily == AddressFamily.InterNetwork).Take(4))
+                {
+                    entries.AddRange(System.Security.Cryptography.RandomNumberGenerator.GetBytes(20));
+                    entries.AddRange(address.GetAddressBytes());
+                    entries.Add((byte)(port >> 8));
+                    entries.Add((byte)port);
+                }
+            }
+            if (entries.Count == 0) return;
+            await File.WriteAllBytesAsync(cache, entries.ToArray());
+            Log.Torrent($"DHT: seeded {entries.Count / Compact} bootstrap nodes");
+        }
+        catch (Exception e)
+        {
+            Log.Warn("engine", $"DHT bootstrap seed failed: {e.Message}");
+        }
+    }
+
+    /// <summary>The port forwarded on the router for incoming peers (TCP and UDP).</summary>
+    // ponytail: fixed constant; add a Settings field if someone needs a different port.
+    const int ForwardedPort = 51413;
+
+    /// <summary>
+    /// <see cref="ForwardedPort"/>, unless something else holds it (another torrent client, or
+    /// a second Watchly) — then any free port, so the engine still starts, just unforwarded.
+    /// </summary>
+    static int PeerPort()
+    {
+        try
+        {
+            var tcp = new TcpListener(IPAddress.Any, ForwardedPort);
+            tcp.Start();
+            tcp.Stop();
+            using var udp = new UdpClient(ForwardedPort);
+            return ForwardedPort;
+        }
+        catch (SocketException)
+        {
+            Log.Warn("engine", $"port {ForwardedPort} is in use; incoming peers can't reach this session");
+            return 0;
+        }
     }
 
     static int FreePort()
@@ -216,6 +310,7 @@ public sealed class TorrentEngine
         async Task<Torrent> Fetch()
         {
             TorrentManager manager;
+            await DhtReady();
             await registering.WaitAsync();
             try
             {
@@ -332,6 +427,7 @@ public sealed class TorrentEngine
             await Remove(probe, false);
 
         TorrentManager manager;
+        await DhtReady();
         await registering.WaitAsync();
         try
         {
@@ -558,12 +654,74 @@ public sealed class StreamSession : IAsyncDisposable
         var window = borrowed ? null : engine.WindowOf(manager);
         window?.Watch(fileIndex);
         if (manager.State is TorrentState.Stopped or TorrentState.Paused or TorrentState.Error) await manager.StartAsync();
+        if (!borrowed) _ = CreateSparseWhenDownloading(manager, file);
         var http = await manager.StreamProvider!.CreateHttpStreamAsync(file, false, ct);
         Log.Stream($"Streaming HTTP ready at {http.FullUri} for '{file.Path}'");
         return Current = new StreamSession(manager, meta, fileIndex, http, borrowed, deleteFilesAfter, window);
     }
 
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool DeviceIoControl(Microsoft.Win32.SafeHandles.SafeFileHandle handle, uint code, IntPtr inBuffer, int inSize, IntPtr outBuffer, int outSize, out int returned, IntPtr overlapped);
+
+    /// <summary>
+    /// MonoTorrent creates a file on its first write by preallocating the whole length (38 GB for
+    /// a remux, just to watch it) and, when two cache flushes race there, fails with "access
+    /// denied" and loses those blocks. Made here first, sparse, it only ever opens an existing file.
+    /// </summary>
+    /// <summary>
+    /// Not before the start: a file already on disk makes MonoTorrent hash every piece of it
+    /// before connecting to anyone (a new stream sat at "Hashing", 0 peers). Once it is
+    /// downloading that check is past, and no piece has had time to arrive yet.
+    /// </summary>
+    static async Task CreateSparseWhenDownloading(TorrentManager manager, ITorrentManagerFile file)
+    {
+        var clock = Stopwatch.StartNew();
+        while (manager.State is TorrentState.Starting or TorrentState.Hashing or TorrentState.Metadata or TorrentState.Stopped)
+        {
+            if (clock.Elapsed > TimeSpan.FromMinutes(2)) return;
+            await Task.Delay(50);
+        }
+        if (manager.State is TorrentState.Downloading) CreateSparse(file);
+    }
+
+    static void CreateSparse(ITorrentManagerFile file)
+    {
+        if (File.Exists(file.FullPath)) return;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(file.FullPath)!);
+            using var stream = new FileStream(file.FullPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
+            DeviceIoControl(stream.SafeFileHandle, 0x900C4 /* FSCTL_SET_SPARSE */, IntPtr.Zero, 0, IntPtr.Zero, 0, out _, IntPtr.Zero);
+            stream.SetLength(file.Length);
+        }
+        catch (Exception e)
+        {
+            Log.Warn("stream", $"couldn't pre-create '{file.Path}': {e.Message}");
+        }
+    }
+
     public Progress Progress => TorrentEngine.ProgressOf(Manager, FileIndex);
+
+    /// <summary>The watched file's finished pieces, merged into spans of 0–1 along the file.</summary>
+    public List<(double From, double To)> Downloaded()
+    {
+        var file = Manager.Files[FileIndex];
+        var spans = new List<(double, double)>();
+        if (Manager.Bitfield is not { } have) return spans;
+        double count = file.EndPieceIndex - file.StartPieceIndex + 1;
+        int? start = null;
+        for (var i = file.StartPieceIndex; i <= file.EndPieceIndex + 1; i++)
+        {
+            var done = i <= file.EndPieceIndex && have[i];
+            if (done && start is null) start = i;
+            else if (!done && start is int s)
+            {
+                spans.Add(((s - file.StartPieceIndex) / count, (i - file.StartPieceIndex) / count));
+                start = null;
+            }
+        }
+        return spans;
+    }
 
     const double WindowSeconds = 5 * 60, BehindSeconds = 5;
 

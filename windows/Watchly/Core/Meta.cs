@@ -127,6 +127,37 @@ public static class Meta
             return ToTitles(new JsonArray(meta.DeepClone()), kind, true).FirstOrDefault();
         }), null);
 
+    /// <summary>
+    /// Cast photos by name, from Wikipedia (Cinemeta has names only). One request for the
+    /// whole cast. A name that isn't clearly a performer's page (a disambiguation, or another
+    /// person with that name) gets no photo, and keeps its initials.
+    /// </summary>
+    public static Task<Dictionary<string, string>> CastPhotos(string imdb, IReadOnlyList<string> names) =>
+        Once($"cast-{imdb}", () => Remember($"cast-{imdb}", async () =>
+        {
+            var photos = new Dictionary<string, string>();
+            if (names.Count == 0) return photos;
+            var titles = Uri.EscapeDataString(string.Join("|", names.Take(50)));
+            var body = await Net.Json($"https://en.wikipedia.org/w/api.php?action=query&format=json&redirects=1&prop=pageimages|description&pithumbsize=200&titles={titles}", quiet: true);
+            var query = body?["query"];
+            Dictionary<string, string> Map(string key) => (query?[key] as JsonArray)?
+                .Where(n => S(n?["from"]) is not null && S(n?["to"]) is not null)
+                .GroupBy(n => S(n!["from"])!).ToDictionary(g => g.Key, g => S(g.First()!["to"])!) ?? new();
+            var normalized = Map("normalized");
+            var redirects = Map("redirects");
+            var pages = (query?["pages"] as JsonObject)?.Select(p => p.Value).Where(p => S(p?["title"]) is not null)
+                .GroupBy(p => S(p!["title"])!).ToDictionary(g => g.Key, g => g.First()!) ?? new();
+            foreach (var name in names)
+            {
+                var title = normalized.GetValueOrDefault(name, name);
+                title = redirects.GetValueOrDefault(title, title);
+                if (pages.GetValueOrDefault(title) is not { } page) continue;
+                if (!Regex.IsMatch(S(page["description"]) ?? "", @"\b(actor|actress|comedian|performer|voice|entertainer|singer|rapper|model|filmmaker|director|presenter|personality|wrestler)\b", RegexOptions.IgnoreCase)) continue;
+                if (S(page["thumbnail"]?["source"]) is { } url) photos[name] = url;
+            }
+            return photos;
+        }), new Dictionary<string, string>());
+
     static readonly ConcurrentDictionary<string, List<Title>> Settled = new();
 
     public static List<Title>? PeekCatalog(string kind, string? genre) =>
