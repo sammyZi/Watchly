@@ -8,6 +8,13 @@ class VlcPlayerModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("VlcPlayer")
 
+    // Synchronous, for the AppState handler: going into PiP pauses the activity,
+    // and that must not read as leaving the app.
+    Function("isInPip") {
+      android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N &&
+        appContext.currentActivity?.isInPictureInPictureMode == true
+    }
+
     View(VlcPlayerView::class) {
       // `onRemote` carries a headset or car-stereo button press up to React, so
       // the overlay's own paused state follows the same truth the media session
@@ -19,8 +26,13 @@ class VlcPlayerModule : Module() {
         "onEnded",
         "onFailed",
         "onTracks",
-        "onRemote"
+        "onRemote",
+        "onPip"
       )
+
+      Prop("autoPip") { view: VlcPlayerView, value: Boolean -> view.setAutoPip(value) }
+
+      AsyncFunction("enterPip") { view: VlcPlayerView -> view.enterPip() }
 
       Prop("source") { view: VlcPlayerView, value: String? -> view.setSource(value) }
       Prop("paused") { view: VlcPlayerView, value: Boolean -> view.setPaused(value) }

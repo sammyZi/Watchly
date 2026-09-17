@@ -339,6 +339,7 @@ public sealed class DetailView : UserControl, IDisposable
             heading.Margin = new Thickness(40, 28, 40, 12);
             content.Children.Add(heading);
             var rail = new WrapPanel { Margin = new Thickness(40, 0, 40, 0) };
+            var photos = new Dictionary<string, System.Windows.Shapes.Ellipse>();
             foreach (var who in title.Cast.Take(12))
             {
                 var face = new Border
@@ -355,9 +356,19 @@ public sealed class DetailView : UserControl, IDisposable
                 label.TextAlignment = TextAlignment.Center;
                 label.MaxHeight = 30;
                 label.Margin = new Thickness(0, 8, 0, 0);
-                rail.Children.Add(new StackPanel { Width = 82, Margin = new Thickness(0, 0, 12, 12), Children = { face, label } });
+                // The photo covers the initials once it arrives; until then (or without one) they show.
+                var photo = new System.Windows.Shapes.Ellipse { Width = 68, Height = 68 };
+                photos[who] = photo;
+                var avatar = new Grid { HorizontalAlignment = HorizontalAlignment.Center, Children = { face, photo } };
+                rail.Children.Add(new StackPanel { Width = 82, Margin = new Thickness(0, 0, 12, 12), Children = { avatar, label } });
             }
             content.Children.Add(rail);
+            Meta.CastPhotos(title.Imdb, title.Cast.Take(12).ToList()).ContinueWith(t => Dispatcher.BeginInvoke(() =>
+            {
+                foreach (var (who, url) in t.Result)
+                    if (photos.TryGetValue(who, out var photo) && ImageUrl.Load(url, 136) is { } image)
+                        photo.Fill = new ImageBrush(image) { Stretch = Stretch.UniformToFill, AlignmentY = AlignmentY.Top };
+            }), TaskScheduler.Default);
         }
 
         if (title.Kind == "tv") RenderEpisodes(progress);

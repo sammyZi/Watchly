@@ -24,7 +24,7 @@ import {
   useMediaStatus,
   useRemoteMediaClient,
 } from 'react-native-google-cast';
-import { VlcPlayer, type VlcPlayerRef, type VlcTrack } from '../../modules/vlc-player';
+import { VlcPlayer, isInPip, type VlcPlayerRef, type VlcTrack } from '../../modules/vlc-player';
 import TorrentStream, { type Progress } from '../../modules/torrent-stream';
 import { Icon, type IconName } from '../components/Icon';
 import { Marquee } from '../components/Marquee';
@@ -159,6 +159,8 @@ export function PlayerScreen({
   const [scaleIdx, setScaleIdx] = useState(0);
   /** Controls locked out, so a hand on the screen cannot pause or seek. */
   const [locked, setLocked] = useState(false);
+  /** Playing in the floating picture-in-picture window. */
+  const [pip, setPip] = useState(false);
   /** Transient readout for the fit mode, which has no control of its own. */
   const [hud, setHud] = useState<{ icon: IconName; label: string } | null>(null);
   /** SubDL search state. */
@@ -715,6 +717,8 @@ export function PlayerScreen({
         }
         return;
       }
+      // Shrinking into PiP pauses the activity too, but the film is still on screen.
+      if (isInPip()) return;
       left.current = true;
       save.current(position.current);
       // libVLC keeps decoding in the background on its own. react-native-video
@@ -771,6 +775,20 @@ export function PlayerScreen({
               ...externalSubs.map((s) => s.path),
             ]}
             scaleType={SCALES[scaleIdx].type}
+            autoPip
+            onPip={({ nativeEvent: { active } }) => {
+              setPip(active);
+              if (active) return;
+              // Leaving PiP is either back to full screen (the app turns active)
+              // or closing the little window (it doesn't) — which is leaving the app.
+              setTimeout(() => {
+                if (AppState.currentState === 'active') return;
+                left.current = true;
+                save.current(position.current);
+                videoRef.current?.pause().catch(() => {});
+                setPaused(true);
+              }, 800);
+            }}
             onTracks={({ nativeEvent }) => {
               const externals = externalSubsRef.current;
               const next = nativeEvent.subtitles.map((t, i) => ({
@@ -886,6 +904,8 @@ export function PlayerScreen({
             }}
           />
 
+          {/* In PiP the window is the picture and nothing else. */}
+          {!pip && (<>
           {/* Tap target for the picture. Always mounted — it sits above the
               video because Android Video eats touches aimed at a parent, and
               swapping it in and out loses the tap that caused the swap.
@@ -948,6 +968,15 @@ export function PlayerScreen({
                       {title}
                     </Text>
                   )}
+
+                  <Pressable
+                    onPress={() => videoRef.current?.enterPip().catch(() => false)}
+                    hitSlop={12}
+                    style={styles.iconBtn}
+                    accessibilityLabel="Picture in picture"
+                  >
+                    <Icon name="minimize-2" size={18} color="#fff" />
+                  </Pressable>
 
                   <View style={styles.topRight}>
                     {/* Fixed-width, tabular figures — the numbers change every
@@ -1347,12 +1376,13 @@ export function PlayerScreen({
               )}
             </View>
           )}
+          </>)}
         </View>
       )}
 
       {/* Outside the overlay: the card is the one thing that has to be there
           whether or not the controls are up, same as every streaming app. */}
-      {upNext && (
+      {upNext && !pip && (
         <View style={[styles.upNext, { bottom: insets.bottom + 90 }]}>
           <View style={styles.upNextText}>
             <Text style={styles.upNextLabel}>Up next in {countdown}s</Text>
@@ -1377,7 +1407,7 @@ export function PlayerScreen({
         </View>
       )}
 
-      {!!failure && (
+      {!!failure && !pip && (
         <View style={[styles.failure, !failure.fatal && styles.notice]}>
           <Text style={styles.failureText}>{failure.text}</Text>
         </View>

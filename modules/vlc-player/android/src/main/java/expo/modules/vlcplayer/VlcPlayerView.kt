@@ -222,6 +222,7 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
   /** Headsets and car stereos read the state, not the player — a session that
    *  never reports one is treated as idle and its buttons are ignored. */
   private fun pushState() {
+    updatePip()
     val ms = session ?: return
     val position = runCatching { player?.time ?: 0L }.getOrDefault(0L)
     runCatching {
@@ -244,6 +245,62 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
           .build()
       )
     }
+  }
+
+  /* ------------------------------------------------------ picture-in-picture */
+
+  private val onPip by EventDispatcher()
+  /** Go to PiP on Home while playing (Android 12+ does this itself from the params). */
+  private var autoPip = false
+  private var inPip = false
+
+  fun setAutoPip(value: Boolean) {
+    autoPip = value
+    updatePip()
+  }
+
+  private fun canPip(): Boolean =
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+      context.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)
+
+  @android.annotation.TargetApi(Build.VERSION_CODES.O)
+  private fun pipParams(): android.app.PictureInPictureParams {
+    val builder = android.app.PictureInPictureParams.Builder()
+    // The film's shape, inside the range Android accepts (it throws outside 1:2.39–2.39:1).
+    val track = runCatching { player?.currentVideoTrack }.getOrNull()
+    if (track != null && track.width > 0 && track.height > 0) {
+      val sar = if (track.sarNum > 0 && track.sarDen > 0) track.sarNum.toDouble() / track.sarDen else 1.0
+      val ratio = (track.width * sar / track.height).coerceIn(1 / 2.39, 2.39)
+      builder.setAspectRatio(android.util.Rational((ratio * 1000).toInt(), 1000))
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      builder.setAutoEnterEnabled(autoPip && !paused && player != null)
+      builder.setSeamlessResizeEnabled(false) // video, not UI: let the system crossfade
+    }
+    return builder.build()
+  }
+
+  private fun updatePip() {
+    if (!canPip()) return
+    val activity = appContext.currentActivity ?: return
+    runCatching { activity.setPictureInPictureParams(pipParams()) }
+  }
+
+  /** Shrink to a floating window. False where the device has no PiP. */
+  fun enterPip(): Boolean {
+    if (!canPip()) return false
+    val activity = appContext.currentActivity ?: return false
+    return runCatching { activity.enterPictureInPictureMode(pipParams()) }.getOrDefault(false)
+  }
+
+  /** Entering and leaving PiP resizes the window, which arrives here as a configuration change. */
+  override fun onConfigurationChanged(newConfig: android.content.res.Configuration?) {
+    super.onConfigurationChanged(newConfig)
+    val now = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N &&
+      appContext.currentActivity?.isInPictureInPictureMode == true
+    if (now == inPip) return
+    inPip = now
+    onPip(mapOf("active" to now))
   }
 
   /* ----------------------------------------------------------------- props */
@@ -547,6 +604,9 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
 
       MediaPlayer.Event.LengthChanged -> if (!announced) announceLoaded(p)
 
+      // The picture's size is known: PiP takes its shape.
+      MediaPlayer.Event.Vout -> updatePip()
+
       MediaPlayer.Event.TimeChanged ->
         onProgress(mapOf("currentTime" to event.timeChanged / 1000.0))
 
@@ -681,6 +741,9 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     runCatching { vlc?.release() }
     player = null
     vlc = null
+    // Leaving the player: Home must not shrink an empty screen into a window.
+    autoPip = false
+    updatePip()
     announced = false
     buffering = false
     defaultAudioId = null

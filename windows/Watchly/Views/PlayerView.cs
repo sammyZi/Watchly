@@ -103,6 +103,7 @@ public sealed class PlayerView : UserControl, IDisposable
     bool searchingSubs;
     bool dismissedNext;
     bool fullscreen;
+    bool pip;
     string? failure;
     bool failureFatal;
     string? hud;
@@ -246,8 +247,8 @@ public sealed class PlayerView : UserControl, IDisposable
             // The audio output exists now, and it picks up whatever mute Windows remembered
             // for this app (a pause in an older build muted it); only the viewer's M mutes.
             // Likewise the saved volume: set before playback there is no output to take it.
-            if (player.Mute != userMuted) player.Mute = userMuted;
-            if (player.Volume != shell.Settings.Volume) player.Volume = shell.Settings.Volume;
+            player.Mute = userMuted;
+            player.Volume = shell.Settings.Volume;
             OnPlaying();
             Bump();
             Render();
@@ -481,6 +482,7 @@ public sealed class PlayerView : UserControl, IDisposable
         {
             stats = session.Progress;
             _ = session.KeepBuffer(current / 1000.0, duration / 1000.0);
+            seek.Downloaded = session.Downloaded();
         }
 
         // The stall libVLC never reports: the socket blocks on a piece that has
@@ -538,7 +540,7 @@ public sealed class PlayerView : UserControl, IDisposable
     string Signature() => string.Join('|',
         started, Preparing, showUi, locked, buffering || stalled, started && IsPlayingSafe,
         picking, pickingAudio, searchingSubs, hud, UpNextVisible,
-        failure, failureFatal, scaleIdx, rate, fullscreen,
+        failure, failureFatal, scaleIdx, rate, fullscreen, pip,
         userMuted,
         started && !disposed && player.NativeReference != IntPtr.Zero && player.Spu >= 0,
         !disposed && player.NativeReference != IntPtr.Zero ? player.AudioTrack : -1,
@@ -561,6 +563,7 @@ public sealed class PlayerView : UserControl, IDisposable
 
     void UpdateLive()
     {
+        if (disposed) return;
         UpdateClock();
         if (stats is { } s)
         {
@@ -571,7 +574,7 @@ public sealed class PlayerView : UserControl, IDisposable
         }
         liveStage.Text = request.LocalPath is not null ? "Opening" : !started ? StageLabel(stats) : $"Buffering {Math.Round(bufferPct)}%";
         liveUpNext.Text = $"Up next in {Math.Max(0, (int)Math.Ceiling((duration - current) / 1000.0))}s";
-        if (started) liveVolume.Text = player.Volume.ToString();
+        liveVolume.Text = shell.Settings.Volume.ToString();
     }
 
     static TextBlock Live(double size, byte alpha, FontWeight? weight = null) => new()
@@ -660,6 +663,13 @@ public sealed class PlayerView : UserControl, IDisposable
     {
         if (e.OriginalSource != overlay && e.OriginalSource is not Border { Tag: "dim" }) return;
         if (picking || pickingAudio || searchingSubs) { picking = pickingAudio = searchingSubs = false; Render(); return; }
+        if (pip)
+        {
+            // The mini window has no title bar: the picture is the handle. Double-click goes back.
+            if (e.ClickCount == 2) TogglePip();
+            else try { Window.GetWindow(this)?.DragMove(); } catch { }
+            return;
+        }
         if (e.ClickCount == 2)
         {
             clickTimer.Stop();
@@ -703,7 +713,7 @@ public sealed class PlayerView : UserControl, IDisposable
                 player.Mute = userMuted;
                 // Not player.Mute: libVLC applies it to the audio output a moment later, so
                 // reading it back straight away still gives the old state ("Muted" on unmute).
-                ShowHud(userMuted ? "Muted" : $"Volume {player.Volume}%");
+                ShowHud(userMuted ? "Muted" : $"Volume {shell.Settings.Volume}%");
                 e.Handled = true;
                 return;
             case Key.A:
@@ -768,6 +778,9 @@ public sealed class PlayerView : UserControl, IDisposable
             case Key.F or Key.F11:
                 ToggleFullscreen();
                 break;
+            case Key.P:
+                TogglePip();
+                break;
             case Key.N when request.Next is not null:
                 PlayNext();
                 break;
@@ -775,6 +788,7 @@ public sealed class PlayerView : UserControl, IDisposable
                 if (locked) { Lock(false); break; }
                 if (picking || pickingAudio || searchingSubs) { picking = pickingAudio = searchingSubs = false; Render(); break; }
                 if (fullscreen) { ToggleFullscreen(); break; }
+                if (pip) { TogglePip(); break; }
                 RequestExit();
                 break;
             case Key.BrowserBack or Key.Back:
@@ -883,7 +897,7 @@ public sealed class PlayerView : UserControl, IDisposable
 
     void ShowShortcutsHelp()
     {
-        ShowHud("F: Fullscreen · Space: Play/Pause · ←/→: 10s · ↑/↓: Vol · A: Audio · S: Subs · [: Slower · ]: Faster", 3000);
+        ShowHud("F: Fullscreen · P: Mini player · Space: Play/Pause · ←/→: 10s · ↑/↓: Vol · A: Audio · S: Subs · [: Slower · ]: Faster", 3000);
     }
 
     bool userMuted;
@@ -919,7 +933,7 @@ public sealed class PlayerView : UserControl, IDisposable
 
     void StepVolume(int by)
     {
-        var next = Math.Clamp(player.Volume + by, 0, 150);
+        var next = Math.Clamp(shell.Settings.Volume + by, 0, 150);
         player.Volume = next;
         player.Mute = false;
         userMuted = false;
@@ -1008,9 +1022,68 @@ public sealed class PlayerView : UserControl, IDisposable
         Render();
     }
 
+    /// <summary>Where the window sat before picture-in-picture, and its minimum size (the mini window is smaller).</summary>
+    RECT pipRect;
+    Size pipMin;
+
+    void TogglePip()
+    {
+        var window = Window.GetWindow(this) ?? Application.Current?.MainWindow;
+        if (window is null) return;
+        if (fullscreen) SetFullscreen(window, false);
+        SetPip(window, !pip);
+        showUi = false;
+        Dispatcher.BeginInvoke(ApplyScale, DispatcherPriority.Background);
+        Render();
+    }
+
+    /// <summary>A small always-on-top window in the corner of the screen, just the picture; drag it anywhere.</summary>
+    void SetPip(Window window, bool on)
+    {
+        var hwnd = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+        pip = on;
+        if (on)
+        {
+            GetWindowRect(hwnd, out pipRect);
+            pipMin = new Size(window.MinWidth, window.MinHeight);
+            var info = new MONITORINFO { Size = System.Runtime.InteropServices.Marshal.SizeOf<MONITORINFO>() };
+            GetMonitorInfo(MonitorFromWindow(hwnd, 2 /* nearest */), ref info);
+            window.MinWidth = window.MinHeight = 0;
+            window.Topmost = true;
+            window.WindowStyle = WindowStyle.None;
+            window.ResizeMode = ResizeMode.NoResize;
+            // A quarter of the screen's width, in the film's shape, 16 px (scaled) off the corner.
+            var w = info.Work;
+            var ratio = VideoRatio();
+            var width = (w.Right - w.Left) / 4;
+            var height = (int)(width / ratio);
+            var margin = (int)(16 * VisualTreeHelper.GetDpi(window).DpiScaleX);
+            SetWindowPos(hwnd, IntPtr.Zero, w.Right - width - margin, w.Bottom - height - margin, width, height, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        }
+        else
+        {
+            window.Topmost = false;
+            window.WindowStyle = WindowStyle.SingleBorderWindow;
+            window.ResizeMode = ResizeMode.CanResize;
+            window.MinWidth = pipMin.Width;
+            window.MinHeight = pipMin.Height;
+            var r = pipRect;
+            if (r.Right > r.Left)
+                SetWindowPos(hwnd, IntPtr.Zero, r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        }
+    }
+
+    double VideoRatio()
+    {
+        uint w = 0, h = 0;
+        try { player.Size(0, ref w, ref h); } catch { }
+        return w > 0 && h > 0 ? Math.Clamp((double)w / h, 1, 2.4) : 16.0 / 9;
+    }
+
     void SetFullscreen(Window window, bool on)
     {
         var hwnd = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+        if (on && pip) SetPip(window, false);
         fullscreen = on;
         if (on)
         {
@@ -1208,6 +1281,32 @@ public sealed class PlayerView : UserControl, IDisposable
         overlay.Background = new SolidColorBrush(Color.FromArgb(1, 0, 0, 0));
         var waiting = buffering || stalled;
 
+        if (pip)
+        {
+            // Only what a mini window needs, on hover: close, back to full, play/pause.
+            if (waiting && !showUi)
+            {
+                chrome.Children.Add(new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false, Children = { Spin() } });
+            }
+            if (!showUi) return;
+            chrome.Children.Add(new Border { Background = Black(0x60), Tag = "dim" });
+            var close = Circle(WIcon("x", 16), 32, RequestExit, 0x88, "Close");
+            close.HorizontalAlignment = HorizontalAlignment.Right;
+            close.VerticalAlignment = VerticalAlignment.Top;
+            close.Margin = new Thickness(8);
+            chrome.Children.Add(close);
+            var expand = Circle(WIcon("maximize", 16), 32, TogglePip, 0x88, "Back to the full player (P)");
+            expand.HorizontalAlignment = HorizontalAlignment.Left;
+            expand.VerticalAlignment = VerticalAlignment.Top;
+            expand.Margin = new Thickness(8);
+            chrome.Children.Add(expand);
+            var toggle = Circle(waiting ? Spin() : WIcon(player.IsPlaying ? "pause" : "play", 22), 48, TogglePlay, 0xaa, "Play / pause (Space)");
+            toggle.HorizontalAlignment = HorizontalAlignment.Center;
+            toggle.VerticalAlignment = VerticalAlignment.Center;
+            chrome.Children.Add(toggle);
+            return;
+        }
+
         if (showUi && locked)
         {
             var unlock = Circle(WIcon("lock", 20), 46, () => Lock(false), 0xaa, "Unlock controls");
@@ -1344,6 +1443,7 @@ public sealed class PlayerView : UserControl, IDisposable
             if (session is not null && !session.Borrowed)
                 actions.Children.Add(Action(session.WholeFile ? "hard-drive" : "clock", null, session.WholeFile ? "Whole file" : "Next 5 min", session.WholeFile, ToggleWholeFile));
             if (session is not null) actions.Children.Add(Action("download", null, "Save", false, SaveCopy));
+            actions.Children.Add(Action("pip", null, "Mini player", false, TogglePip));
             actions.Children.Add(Action(fullscreen ? "minimize" : "maximize", null, fullscreen ? "Exit full" : "Fullscreen", fullscreen, ToggleFullscreen));
             bottom.Children.Add(actions);
             chrome.Children.Add(bottom);
@@ -1739,6 +1839,7 @@ public sealed class PlayerView : UserControl, IDisposable
         {
             var window = Window.GetWindow(this) ?? Application.Current?.MainWindow;
             if (window != null && fullscreen) SetFullscreen(window, false);
+            if (window != null && pip) SetPip(window, false);
         }
         catch { }
         overlay.MouseMove -= OnOverlayMouseMove;
@@ -1778,6 +1879,18 @@ public sealed class SeekBar : FrameworkElement
         }
     }
 
+    /// <summary>Spans of the file already on disk, as 0–1 ratios; drawn behind the played part.</summary>
+    public IReadOnlyList<(double From, double To)> Downloaded
+    {
+        get => downloaded;
+        set
+        {
+            downloaded = value;
+            InvalidateVisual();
+        }
+    }
+    IReadOnlyList<(double From, double To)> downloaded = Array.Empty<(double, double)>();
+
     public SeekBar()
     {
         Height = 36;
@@ -1791,6 +1904,9 @@ public sealed class SeekBar : FrameworkElement
         var pct = Math.Clamp(dragging ?? value, 0, 1);
         dc.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, ActualHeight));
         dc.DrawRoundedRectangle(new SolidColorBrush(Color.FromArgb(0x40, 255, 255, 255)), null, new Rect(0, y - 1.5, w, 3), 1.5, 1.5);
+        var white = new SolidColorBrush(Color.FromArgb(0xB0, 255, 255, 255));
+        foreach (var (from, to) in downloaded)
+            dc.DrawRectangle(white, null, new Rect(w * from, y - 1.5, Math.Max(1, w * (to - from)), 3));
         var blue = new SolidColorBrush(Color.FromRgb(0x3b, 0x6f, 0xe0));
         dc.DrawRoundedRectangle(blue, null, new Rect(0, y - 1.5, w * pct, 3), 1.5, 1.5);
         dc.DrawEllipse(blue, null, new Point(w * pct, y), IsMouseOver || dragging is not null ? 7 : 6, IsMouseOver || dragging is not null ? 7 : 6);

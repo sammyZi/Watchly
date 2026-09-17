@@ -608,6 +608,19 @@ public static class Search
     }
 
     /// <summary>
+    /// A release naming a year names the film's (give or take one, for festival vs. release
+    /// dates): "Mad Max 1979" is not Fury Road (2015). Years that are part of the title
+    /// ("Blade Runner 2049") don't count, and a release with no year is given the benefit.
+    /// </summary>
+    public static bool FitsYear(string release, string title, string year)
+    {
+        if (!int.TryParse(year, out var want)) return true;
+        var inTitle = Tokens(title).ToHashSet();
+        var years = Tokens(release).Where(t => Regex.IsMatch(t, @"^(?:19|20)\d{2}$") && !inTitle.Contains(t)).Select(int.Parse).ToList();
+        return years.Count == 0 || years.Any(y => Math.Abs(y - want) <= 1);
+    }
+
+    /// <summary>
     /// Search public indexes for video torrents. <paramref name="progress"/>, if given, gets the
     /// merged list so far each time another index answers — so results can show as they arrive.
     /// </summary>
@@ -658,9 +671,9 @@ public static class Search
                 ? Merge(bags).Where(h => h.Imdb is null || h.Imdb == imdb).ToList()
                 : Merge(bags);
             var found = Rank(merged, full);
-            var name = alias ?? title;
-            var exact = found.Where(h => SameTitle(h.Name, name)).ToList();
-            var named = found.Where(h => NamesTitle(h.Name, name)).ToList();
+            if (year is not null) found = found.Where(h => FitsYear(h.Name, title, year)).ToList();
+            var exact = found.Where(h => SameTitle(h.Name, title) || (alias is not null && SameTitle(h.Name, alias))).ToList();
+            var named = found.Where(h => NamesTitle(h.Name, title) || (alias is not null && NamesTitle(h.Name, alias))).ToList();
             return exact.Count > 0 ? exact : named.Count > 0 ? named : found;
         }
 
