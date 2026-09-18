@@ -28,7 +28,12 @@ dotnet publish windows/Watchly -c Release -r win-x64 --self-contained -o windows
 libVLC with its codecs are all inside. VLC can only load codecs from disk, so the
 first launch of each build unpacks everything (~250 MB, a few seconds) to
 `%TEMP%\.net\Watchly\` and runs from there; later launches start straight away.
-Publish doesn't clear old files, so delete `windows/dist` before re-publishing.
+Each build unpacks to a folder of its own, so the first launch after every
+publish is the slow one — unpacking, Defender scanning the new files, and libVLC
+building its plugin cache. At startup the app deletes earlier builds' folders
+(≈240 MB each), skipping any whose build is still running.
+Publish doesn't clear old files, so delete `windows/dist` before re-publishing,
+and close the app first — a running `Watchly.exe` can't be overwritten.
 Wrap it with Inno Setup or similar for a single installer.
 
 The SubDL key is read from the repo's `.env` (`EXPO_PUBLIC_SUBDL_KEY`) at build
@@ -76,10 +81,39 @@ and lays out every screen offscreen. Exit code 0 = pass; details in
   unfinished files carry a `.!mt` suffix until complete.
 - Settings: download/upload speed limits, keep seeding when done.
 
+## Player
+
+- Streams fetch only the next five minutes past the playhead (*Next 5 min*), or
+  switch to *Whole file* to fetch everything; the choice is remembered. The
+  seek bar shows what is already on disk as a white strip, gaps included.
+- *Mini player* (P): a borderless, always-on-top window in a corner of the
+  screen, shaped like the video. Drag the picture to move it; hover for
+  play/pause, back to the full player, and close.
+- Stats panel (ⓘ next to the swarm pill, or I): a graph of download speed
+  against the video's own bitrate, then the swarm (seeders, leechers,
+  connections, up/down, pieces), codecs, resolution, frame rate, lost frames and
+  audio buffers, and libVLC's bitrates. It stays up with the controls hidden and
+  shrinks to fit between the top bar and the seek bar.
+- Picture modes (best fit, stretch, crop, 16:9, 4:3, original) are applied once
+  libVLC's video output exists and only when they change, and Stretch/Crop are
+  re-applied after a resize. Setting them while the output was still being
+  created crashed libVLC natively on some files.
+
+## Incoming connections
+
+Peers can only connect to you through an open port. The engine listens on a
+fixed port, **51413** (peers over TCP on IPv4 and IPv6, DHT over UDP on IPv4), and asks the router to
+forward it over UPnP/NAT-PMP. With UPnP on in the router nothing needs setting
+up; otherwise forward 51413 (TCP/UDP) to this PC by hand. If another program
+already holds 51413 the app falls back to a random port and says so in the log.
+The phone (6882) and TV (6881) builds use ports of their own, so all three can
+take incoming peers on one network.
+
 ## Desktop differences from the phone
 
 - Keyboard: Space/K play-pause, ←/→ skip 10 s, ↑/↓ volume, M mute, F / double-click
-  fullscreen, N next episode, Esc back. Mouse back button and Esc close pages.
+  fullscreen, P mini player, I stats, N next episode, Esc back. Mouse back button
+  and Esc close pages.
 - The brightness rail is a volume rail; the wheel over the video changes volume.
 - Shelves page with arrow buttons on hover (Shift+wheel scrolls them).
 - Drop a `.torrent` file or a magnet link anywhere on the window, or pass one on
@@ -87,3 +121,5 @@ and lays out every screen offscreen. Exit code 0 = pass; details in
 - Casting and "Open in" another app are phone-only.
 - The first run shows a Windows Firewall prompt: allow it, or peers cannot
   connect in and torrents are slower.
+- Cast photos on title pages come from Wikipedia (Cinemeta has names only), used
+  only when the page describes the person as a performer; otherwise initials.
