@@ -324,11 +324,13 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
         if (t.id == audioId) break
       }
       return mapOf(
-        "videoCodec" to (video?.let { it.description?.takeIf(String::isNotBlank) ?: it.codec }),
+        // The codec's fourcc, named — not `description`, which is the track's title and
+        // in these releases usually the group's name.
+        "videoCodec" to video?.codec?.let(::codecName),
         "width" to (video?.width ?: 0),
         "height" to (video?.height ?: 0),
         "fps" to (video?.takeIf { it.frameRateDen > 0 }?.let { it.frameRateNum.toDouble() / it.frameRateDen } ?: 0.0),
-        "audioCodec" to (audio?.let { it.description?.takeIf(String::isNotBlank) ?: it.codec }),
+        "audioCodec" to audio?.codec?.let(::codecName),
         "channels" to (audio?.channels ?: 0),
         "sampleRate" to (audio?.rate ?: 0),
         "language" to audio?.language,
@@ -346,6 +348,27 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     } finally {
       runCatching { m.release() }
     }
+  }
+
+  private fun codecName(fourcc: String): String = when (fourcc.trim().lowercase()) {
+    "h264", "avc1", "x264" -> "H.264"
+    "hevc", "h265", "hev1", "hvc1" -> "HEVC (H.265)"
+    "av01" -> "AV1"
+    "vp90", "vp09" -> "VP9"
+    "vp80" -> "VP8"
+    "mp4v", "xvid", "divx", "dx50" -> "MPEG-4 Part 2"
+    "mpgv", "mp2v" -> "MPEG-2"
+    "mp4a", "aac" -> "AAC"
+    "a52", "ac-3", "ac3" -> "Dolby Digital (AC-3)"
+    "eac3", "ec-3" -> "Dolby Digital Plus (E-AC-3)"
+    "mlp", "trhd" -> "Dolby TrueHD"
+    "dts", "dtsh", "dtsl" -> "DTS"
+    "opus" -> "Opus"
+    "vorb" -> "Vorbis"
+    "flac" -> "FLAC"
+    "mpga", "mp3" -> "MP3"
+    "araw", "s16l", "s24l", "lpcm" -> "PCM"
+    else -> fourcc.trim().uppercase()
   }
 
   /* ----------------------------------------------------------------- props */
@@ -407,8 +430,22 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     player?.setSpuTrack(id ?: -1)
   }
 
+  /**
+   * Kept, like [wantedSpu]: coming back to the app reloads the stream into a new player,
+   * which starts on the file's default audio (an Italian dub, say) while the picker —
+   * whose prop never changed — still showed the viewer's choice.
+   */
+  private var wantedAudio: Int? = null
+
   fun setAudioTrack(id: Int?) {
+    wantedAudio = id
     if (id != null) player?.setAudioTrack(id)
+  }
+
+  /** Audio tracks appear as the demuxer finds them; take the wanted one when it does. */
+  private fun applyWantedAudio(p: MediaPlayer) {
+    val id = wantedAudio ?: return
+    if (runCatching { p.audioTrack }.getOrDefault(id) != id) runCatching { p.setAudioTrack(id) }
   }
 
   /**
@@ -664,7 +701,12 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
         onFailed(mapOf("message" to "This file could not be played"))
 
       // Tracks appear as the demuxer finds them, not all at once.
-      MediaPlayer.Event.ESAdded, MediaPlayer.Event.ESDeleted -> sendTracks(p)
+      MediaPlayer.Event.ESAdded, MediaPlayer.Event.ESDeleted -> {
+        if (event.type == MediaPlayer.Event.ESAdded && announced &&
+          event.esChangedType == IMedia.Track.Type.Audio && event.esChangedID == wantedAudio
+        ) applyWantedAudio(p)
+        sendTracks(p)
+      }
 
       else -> Unit
     }
@@ -689,6 +731,8 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
       val id = p.audioTrack
       if (id >= 0) defaultAudioId = id
     }
+    // After the default is noted, so the picker still marks the file's own default.
+    applyWantedAudio(p)
     onLoaded(mapOf("duration" to length / 1000.0))
     sendTracks(p)
   }

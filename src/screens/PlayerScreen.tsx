@@ -1422,18 +1422,24 @@ export function PlayerScreen({
             <View
               style={[
                 styles.info,
-                { top: 64, right: insets.right + 12, maxHeight: Math.max(160, height - 64 - 110) },
+                {
+                  top: 64,
+                  right: insets.right + 12,
+                  // Never wider than the screen: the columns shrink instead.
+                  maxWidth: width - insets.left - insets.right - 24,
+                  maxHeight: Math.max(160, height - 64 - 110),
+                },
               ]}
             >
               <ScrollView contentContainerStyle={styles.infoBody}>
                 <View style={styles.infoColumn}>
-                  <Text style={[styles.infoHeading, styles.infoHeadingFirst]}>
-                    DOWNLOAD VS VIDEO BITRATE · LAST 2 MIN
+                  <Text style={[styles.infoHeading, styles.infoHeadingFirst]} maxFontSizeMultiplier={1.15}>
+                    SPEED · LAST 2 MIN
                   </Text>
                   <SpeedGraph points={history} />
                   {fileIndex >= 0 && (
                     <>
-                      <Text style={styles.infoHeading}>TORRENT</Text>
+                      <Text style={styles.infoHeading} maxFontSizeMultiplier={1.15}>TORRENT</Text>
                       <InfoRow label="Seeders" value={stats ? `${stats.seeds}` : '—'} />
                       <InfoRow label="Peers" value={stats ? `${stats.peers}` : '—'} />
                       <InfoRow label="Download" value={stats ? speed(stats.speed) : '—'} />
@@ -1442,7 +1448,7 @@ export function PlayerScreen({
                       <InfoRow label="State" value={stats ? stats.state.toLowerCase().replace(/_/g, ' ') : '—'} />
                     </>
                   )}
-                  <Text style={styles.infoHeading}>AUDIO</Text>
+                  <Text style={styles.infoHeading} maxFontSizeMultiplier={1.15}>AUDIO</Text>
                   <InfoRow
                     label="Track"
                     value={
@@ -1455,7 +1461,7 @@ export function PlayerScreen({
                   <InfoRow label="Lost buffers" value={count(vlcStats?.lostBuffers)} />
                 </View>
                 <View style={styles.infoColumn}>
-                  <Text style={[styles.infoHeading, styles.infoHeadingFirst]}>VIDEO</Text>
+                  <Text style={[styles.infoHeading, styles.infoHeadingFirst]} maxFontSizeMultiplier={1.15}>VIDEO</Text>
                   <InfoRow label="Codec" value={vlcStats?.videoCodec ?? '—'} />
                   <InfoRow
                     label="Resolution"
@@ -1467,7 +1473,7 @@ export function PlayerScreen({
                   />
                   <InfoRow label="Displayed" value={count(vlcStats?.displayed)} />
                   <InfoRow label="Lost frames" value={count(vlcStats?.lostFrames)} />
-                  <Text style={styles.infoHeading}>STREAM</Text>
+                  <Text style={styles.infoHeading} maxFontSizeMultiplier={1.15}>STREAM</Text>
                   <InfoRow label="Input bitrate" value={kbps(vlcStats?.inputKbps)} />
                   <InfoRow label="Content bitrate" value={kbps(vlcStats?.contentKbps)} />
                   <InfoRow label="Read" value={vlcStats ? bytes(vlcStats.readBytes) : '—'} />
@@ -1524,8 +1530,8 @@ const kbps = (n: number | undefined) =>
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.infoRow}>
-      <Text style={styles.infoLabel}>{label}</Text>
-      <Text style={styles.infoValue} numberOfLines={1}>
+      <Text style={styles.infoLabel} maxFontSizeMultiplier={1.15}>{label}</Text>
+      <Text style={styles.infoValue} numberOfLines={1} maxFontSizeMultiplier={1.15}>
         {value}
       </Text>
     </View>
@@ -1544,7 +1550,7 @@ function SpeedGraph({ points }: { points: { down: number; rate: number }[] }) {
   return (
     <View>
       <View style={styles.graph}>
-        <Text style={styles.graphScale}>{top.toFixed(1)} Mb/s</Text>
+        <Text style={styles.graphScale} maxFontSizeMultiplier={1.15}>{top.toFixed(1)} Mb/s</Text>
         {/* Newest on the right; empty slots on the left until two minutes have passed. */}
         {Array.from({ length: GRAPH_SAMPLES }, (_, i) => points[i - (GRAPH_SAMPLES - points.length)]).map(
           (p, i) => (
@@ -1561,9 +1567,9 @@ function SpeedGraph({ points }: { points: { down: number; rate: number }[] }) {
       </View>
       <View style={styles.graphLegend}>
         <View style={[styles.legendSwatch, { backgroundColor: '#3b6fe0' }]} />
-        <Text style={styles.legendText}>Download {(last?.down ?? 0).toFixed(1)} Mb/s</Text>
+        <Text style={styles.legendText} maxFontSizeMultiplier={1.15}>Download {(last?.down ?? 0).toFixed(1)} Mb/s</Text>
         <View style={[styles.legendSwatch, { backgroundColor: '#fff', marginLeft: 12 }]} />
-        <Text style={styles.legendText}>Video {(last?.rate ?? 0).toFixed(1)} Mb/s</Text>
+        <Text style={styles.legendText} maxFontSizeMultiplier={1.15}>Video {(last?.rate ?? 0).toFixed(1)} Mb/s</Text>
       </View>
     </View>
   );
@@ -1919,7 +1925,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#000c',
   },
   infoBody: { flexDirection: 'row', padding: 12, gap: 20 },
-  infoColumn: { width: 230 },
+  // A fixed basis that shrinks: two columns side by side on any width that fits them.
+  infoColumn: { flexBasis: 230, flexShrink: 1, minWidth: 140 },
   infoHeading: {
     color: '#ffffff80',
     fontSize: 10,
@@ -1943,7 +1950,7 @@ const styles = StyleSheet.create({
   graphScale: { position: 'absolute', top: 2, left: 2, color: '#ffffff80', fontSize: 9 },
   graphSlot: { flex: 1, height: '100%', justifyContent: 'flex-end' },
   graphBar: { backgroundColor: '#3b6fe0b0' },
-  graphMark: { position: 'absolute', left: 0, right: 0, height: 1.5, backgroundColor: '#ffffffd0' },
+  graphMark: { position: 'absolute', left: 0, right: 0, height: 2, backgroundColor: '#fff' },
   graphLegend: { flexDirection: 'row', alignItems: 'center', marginTop: 5 },
   legendSwatch: { width: 10, height: 3, marginRight: 5 },
   legendText: { color: '#fff', fontSize: 10.5, fontFamily: font.regular },
