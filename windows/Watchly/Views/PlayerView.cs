@@ -188,6 +188,7 @@ public sealed class PlayerView : UserControl, IDisposable
 
         player = NewPlayer();
         video.MediaPlayer = player;
+        infoPanel = new(BuildInfoPanel);
         // Picture mode and speed carry over from the last video (volume already does).
         scaleIdx = Math.Max(0, Array.FindIndex(Scales, s => s.Label == shell.Settings.PlayerScale));
         if (Rates.Contains(shell.Settings.PlaybackRate)) rate = shell.Settings.PlaybackRate;
@@ -207,6 +208,10 @@ public sealed class PlayerView : UserControl, IDisposable
 
         seek.Scrub += ratio => { seekAt = DateTime.UtcNow; current = (long)(ratio * duration); UpdateClock(); Bump(); };
         seek.Commit += ratio => SeekTo((long)(ratio * duration));
+
+        // Stretch and Crop follow the window's shape, so a resize re-applies them (once it settles).
+        scaleAfterResize.Tick += (_, _) => { scaleAfterResize.Stop(); ApplyScale(); };
+        SizeChanged += (_, _) => { scaleAfterResize.Stop(); scaleAfterResize.Start(); };
 
         tick.Tick += (_, _) => OnTick();
         hideTimer.Tick += (_, _) =>
@@ -281,7 +286,15 @@ public sealed class PlayerView : UserControl, IDisposable
             if (duration > 0) Warn("Playback stalled — waiting for data");
             else Fail("This file could not be played", true);
         });
-        p.ESAdded += (_, _) => On(OnTracksChanged);
+        // The picture mode goes in once the video output exists, not while libVLC is creating it.
+        p.Vout += (_, e) => On(() =>
+        {
+            hasVout = e.Count > 0;
+            if (hasVout) ApplyScale();
+        });
+        p.ESAdded += (_, _) => On(() => { tracksVersion++; OnTracksChanged(); });
+        p.ESDeleted += (_, _) => On(() => tracksVersion++);
+        p.ESSelected += (_, _) => On(() => tracksVersion++);
         return p;
     }
 
@@ -408,7 +421,6 @@ public sealed class PlayerView : UserControl, IDisposable
         if (!firstPlay) return;
         firstPlay = false;
         foreach (var sub in externalSubs) AddSlave(sub.Path, false);
-        ApplyScale();
     }
 
     void AddSlave(string path, bool select)
@@ -484,6 +496,7 @@ public sealed class PlayerView : UserControl, IDisposable
             _ = session.KeepBuffer(current / 1000.0, duration / 1000.0);
             seek.Downloaded = session.Downloaded();
         }
+        if (showInfo) UpdateInfo();
 
         // The stall libVLC never reports: the socket blocks on a piece that has
         // not landed, the picture freezes, and no event fires. A clock that stops
@@ -540,12 +553,16 @@ public sealed class PlayerView : UserControl, IDisposable
     string Signature() => string.Join('|',
         started, Preparing, showUi, locked, buffering || stalled, started && IsPlayingSafe,
         picking, pickingAudio, searchingSubs, hud, UpNextVisible,
-        failure, failureFatal, scaleIdx, rate, fullscreen, pip,
-        userMuted,
-        started && !disposed && player.NativeReference != IntPtr.Zero && player.Spu >= 0,
-        !disposed && player.NativeReference != IntPtr.Zero ? player.AudioTrack : -1,
-        !disposed && player.NativeReference != IntPtr.Zero ? player.AudioTrackCount : 0,
+        failure, failureFatal, scaleIdx, rate, fullscreen, pip, showInfo,
+        userMuted, tracksVersion,
         stats != null, subLoading, subResults.Count);
+
+    /// <summary>
+    /// Bumped by libVLC's own track events (added, removed, selected), so a track change still
+    /// redraws the controls. Asking libVLC for the current tracks on every tick instead crashed
+    /// natively while a remux was still setting up its many tracks, like the volume read did.
+    /// </summary>
+    int tracksVersion;
 
     /// <summary>
     /// Until libVLC has actually started playing, the video window under the controls is
@@ -781,6 +798,9 @@ public sealed class PlayerView : UserControl, IDisposable
             case Key.P:
                 TogglePip();
                 break;
+            case Key.I:
+                ToggleInfo();
+                break;
             case Key.N when request.Next is not null:
                 PlayNext();
                 break;
@@ -897,7 +917,7 @@ public sealed class PlayerView : UserControl, IDisposable
 
     void ShowShortcutsHelp()
     {
-        ShowHud("F: Fullscreen · P: Mini player · Space: Play/Pause · ←/→: 10s · ↑/↓: Vol · A: Audio · S: Subs · [: Slower · ]: Faster", 3000);
+        ShowHud("F: Fullscreen · P: Mini player · I: Stats · Space: Play/Pause · ←/→: 10s · ↑/↓: Vol · A: Audio · S: Subs · [: Slower · ]: Faster", 3000);
     }
 
     bool userMuted;
@@ -983,13 +1003,243 @@ public sealed class PlayerView : UserControl, IDisposable
         ShowHud(Scales[scaleIdx].Label);
     }
 
+    // ── Stats panel ─────────────────────────────────────────────────────────
+
+    bool showInfo;
+    readonly SpeedGraph graph = new();
+    readonly Dictionary<string, TextBlock> infoValues = new();
+    DateTime infoAt;
+    int infoTracksVersion = -1;
+    string videoInfo = "—", audioInfo = "—";
+
+    void ToggleInfo()
+    {
+        showInfo = !showInfo;
+        infoAt = default;
+        if (showInfo) UpdateInfo();
+        Render();
+    }
+
+    static readonly (string Section, string[] Rows)[] InfoLayout =
+    {
+        ("TORRENT", new[] { "Seeders", "Leechers", "Connections", "Download", "Upload", "File", "Pieces", "Fetching" }),
+        ("VIDEO", new[] { "Codec", "Resolution", "Frame rate", "Displayed", "Lost frames" }),
+        ("AUDIO", new[] { "Track", "Played buffers", "Lost buffers" }),
+        ("STREAM", new[] { "Input bitrate", "Content bitrate", "Average bitrate", "Read", "Corrupted", "Discontinuities" }),
+    };
+
+    readonly Lazy<FrameworkElement> infoPanel;
+
+    /// <summary>
+    /// Two columns (graph, torrent and audio | video and stream), in a Viewbox that only ever
+    /// shrinks: it sits between the top bar and the bottom controls, and in a small window it
+    /// scales down to fit there rather than running over the seek bar.
+    /// </summary>
+    FrameworkElement BuildInfoPanel()
+    {
+        Grid Column(bool withGraph, params int[] sections)
+        {
+            var grid = new Grid { Width = 272 };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            void Row(UIElement left, UIElement? right = null)
+            {
+                grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                var r = grid.RowDefinitions.Count - 1;
+                Grid.SetRow(left, r);
+                if (right is null) Grid.SetColumnSpan(left, 2);
+                grid.Children.Add(left);
+                if (right is null) return;
+                Grid.SetRow(right, r);
+                Grid.SetColumn(right, 1);
+                grid.Children.Add(right);
+            }
+            if (withGraph)
+            {
+                var graphHeading = WText("DOWNLOAD VS VIDEO BITRATE · LAST 2 MIN", 10, White(0x80), FontWeights.SemiBold);
+                graphHeading.Margin = new Thickness(0, 0, 0, 4);
+                Row(graphHeading);
+                graph.Margin = new Thickness(0, 0, 0, 2);
+                Row(graph);
+            }
+            foreach (var index in sections)
+            {
+                var (section, rows) = InfoLayout[index];
+                var heading = WText(section, 10, White(0x80), FontWeights.SemiBold);
+                heading.Margin = new Thickness(0, grid.RowDefinitions.Count == 0 ? 0 : 10, 0, 4);
+                Row(heading);
+                foreach (var name in rows)
+                {
+                    var label = WText(name, 11, White(0x90));
+                    label.Margin = new Thickness(0, 1, 16, 1);
+                    var value = WText("—", 11, null, FontWeights.Medium);
+                    value.Margin = new Thickness(0, 1, 0, 1);
+                    value.TextAlignment = TextAlignment.Right;
+                    infoValues[name] = value;
+                    Row(label, value);
+                }
+            }
+            return grid;
+        }
+
+        var right = Column(false, 1, 3);
+        right.Margin = new Thickness(24, 0, 0, 0);
+        return new Viewbox
+        {
+            Stretch = Stretch.Uniform,
+            StretchDirection = StretchDirection.DownOnly,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Top,
+            // Below the top bar, above the seek bar and actions.
+            Margin = new Thickness(16, 64, 16, 150),
+            IsHitTestVisible = false,
+            Child = new Border
+            {
+                CornerRadius = new CornerRadius(12),
+                Background = Black(0xcc),
+                Padding = new Thickness(14, 12, 14, 12),
+                Child = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Children = { Column(true, 0, 2), right },
+                },
+            },
+        };
+    }
+
+    void SetInfo(string name, string value)
+    {
+        if (infoValues.TryGetValue(name, out var t)) t.Text = value;
+    }
+
+    static string Kbps(double kbps) => kbps >= 1000 ? $"{kbps / 1000:0.0} Mb/s" : $"{kbps:0} kb/s";
+
+    /// <summary>
+    /// Once a second while the panel is up. Swarm numbers are MonoTorrent's own; the picture and
+    /// sound figures are libVLC's input statistics. Tracks are read only when libVLC reports a
+    /// track change, never on the tick (see <see cref="tracksVersion"/>).
+    /// </summary>
+    void UpdateInfo()
+    {
+        if (disposed) return;
+        _ = infoPanel.Value; // builds the rows SetInfo fills
+        if (DateTime.UtcNow - infoAt < TimeSpan.FromSeconds(1)) return;
+        infoAt = DateTime.UtcNow;
+
+        if (session is { } s)
+        {
+            var m = s.Manager;
+            var p = s.Progress;
+            var file = m.Files[s.FileIndex];
+            var (have, total) = s.Pieces();
+            SetInfo("Seeders", p.Seeds.ToString());
+            SetInfo("Leechers", p.Peers.ToString());
+            SetInfo("Connections", m.OpenConnections.ToString());
+            SetInfo("Download", Format.Speed(p.Speed));
+            SetInfo("Upload", Format.Speed(p.UploadSpeed));
+            SetInfo("File", $"{p.Percent:0.0}% of {Format.Bytes(file.Length)}");
+            SetInfo("Pieces", $"{have} / {total} · {Format.Bytes(m.Torrent?.PieceLength ?? 0)}");
+            SetInfo("Fetching", s.Borrowed ? "Whole file (download)" : s.WholeFile ? "Whole file" : "Next 5 minutes");
+        }
+        else
+        {
+            foreach (var name in InfoLayout[0].Rows) SetInfo(name, "—");
+            SetInfo("File", "Local file");
+        }
+
+        var downMbps = session is { } s3 ? s3.Progress.Speed * 8 / 1e6 : 0;
+        var m2 = media;
+        if (m2 is null || !started)
+        {
+            graph.Push(downMbps, 0);
+            return;
+        }
+        if (infoTracksVersion != tracksVersion)
+        {
+            infoTracksVersion = tracksVersion;
+            ReadTracks(m2);
+        }
+        SetInfo("Codec", videoInfo.Split('|')[0]);
+        SetInfo("Resolution", videoInfo.Split('|').ElementAtOrDefault(1) ?? "—");
+        SetInfo("Frame rate", videoInfo.Split('|').ElementAtOrDefault(2) ?? "—");
+        SetInfo("Track", audioInfo);
+
+        var st = m2.Statistics;
+        SetInfo("Displayed", st.DisplayedPictures.ToString("N0"));
+        SetInfo("Lost frames", st.LostPictures.ToString("N0"));
+        SetInfo("Played buffers", st.PlayedAudioBuffers.ToString("N0"));
+        SetInfo("Lost buffers", st.LostAudioBuffers.ToString("N0"));
+        // × 8000 = kb/s, the same scaling VLC's own statistics window uses.
+        SetInfo("Input bitrate", Kbps(st.InputBitrate * 8000));
+        SetInfo("Content bitrate", Kbps(st.DemuxBitrate * 8000));
+        var length = session is { } s2 ? s2.Manager.Files[s2.FileIndex].Length
+            : request.LocalPath is { } lp && File.Exists(lp) ? new FileInfo(lp).Length : 0;
+        SetInfo("Average bitrate", length > 0 && duration > 0 ? Kbps(length * 8.0 / duration) : "—");
+        SetInfo("Read", Format.Bytes(st.ReadBytes));
+        SetInfo("Corrupted", st.DemuxCorrupted.ToString("N0"));
+        SetInfo("Discontinuities", st.DemuxDiscontinuity.ToString("N0"));
+        graph.Push(downMbps, st.DemuxBitrate * 8); // × 8000 kb/s ÷ 1000 = Mb/s
+    }
+
+    void ReadTracks(Media m)
+    {
+        try
+        {
+            // MediaTrack is a struct, and a default one reads as an audio track: go by index.
+            var tracks = m.Tracks;
+            var vi = Array.FindIndex(tracks, t => t.TrackType == TrackType.Video);
+            if (vi >= 0)
+            {
+                var video = tracks[vi];
+                var v = video.Data.Video;
+                var fps = v.FrameRateDen > 0 ? $"{(double)v.FrameRateNum / v.FrameRateDen:0.###} fps" : "—";
+                videoInfo = $"{Codec(m, TrackType.Video, video.Codec)}|{v.Width} × {v.Height}|{fps}";
+            }
+            var audioId = player.AudioTrack;
+            var ai = Array.FindIndex(tracks, t => t.TrackType == TrackType.Audio && t.Id == audioId);
+            if (ai < 0) ai = Array.FindIndex(tracks, t => t.TrackType == TrackType.Audio);
+            if (ai >= 0)
+            {
+                var a = tracks[ai];
+                var d = a.Data.Audio;
+                var lang = string.IsNullOrEmpty(a.Language) ? "" : $" · {a.Language}";
+                audioInfo = $"{Codec(m, TrackType.Audio, a.Codec)} · {d.Channels} ch · {d.Rate / 1000.0:0.#} kHz{lang}";
+            }
+        }
+        catch (Exception e)
+        {
+            Log.Warn("player", $"track info: {e.Message}");
+        }
+    }
+
+    static string Codec(Media m, TrackType type, uint fourcc)
+    {
+        var name = m.CodecDescription(type, fourcc);
+        if (!string.IsNullOrWhiteSpace(name)) return name;
+        var b = BitConverter.GetBytes(fourcc);
+        return System.Text.Encoding.ASCII.GetString(b).Trim();
+    }
+
+    /// <summary>What libVLC was last given; it starts with none of it (best fit).</summary>
+    (string? Crop, string? Aspect, float Scale) appliedScale = (null, null, 0);
+    bool hasVout;
+    readonly DispatcherTimer scaleAfterResize = new() { Interval = TimeSpan.FromMilliseconds(200) };
+
+    /// <summary>
+    /// Only once the video output exists, and only what changed: libVLC crashed (in the crop
+    /// setter, and natively in strlen) when these strings were set while it was still creating
+    /// the output — on every start in Stretch mode. Best fit sets nothing at all.
+    /// </summary>
     void ApplyScale()
     {
+        if (disposed || !hasVout) return;
         var mode = Scales[scaleIdx];
         var ratio = ActualWidth > 0 && ActualHeight > 0 ? $"{(int)ActualWidth}:{(int)ActualHeight}" : null;
-        player.CropGeometry = mode.Crop ? ratio : null;
-        player.AspectRatio = mode.Aspect == "fill" ? (mode.Crop ? null : ratio) : mode.Aspect;
-        player.Scale = mode.Scale;
+        var want = (Crop: mode.Crop ? ratio : null, Aspect: mode.Aspect == "fill" ? (mode.Crop ? null : ratio) : mode.Aspect, mode.Scale);
+        if (want.Crop != appliedScale.Crop) player.CropGeometry = want.Crop;
+        if (want.Aspect != appliedScale.Aspect) player.AspectRatio = want.Aspect;
+        if (want.Scale != appliedScale.Scale) player.Scale = want.Scale;
+        appliedScale = want;
     }
 
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
@@ -1244,6 +1494,7 @@ public sealed class PlayerView : UserControl, IDisposable
         lastSignature = Signature();
         chrome.Children.Clear();
         foreach (var live in new[] { liveSwarm, liveSpeed, livePct, liveMeta, liveStage, liveUpNext, liveVolume }) Detach(live);
+        if (infoPanel.IsValueCreated) Detach(infoPanel.Value);
         overlay.Cursor = !showUi && started && player.IsPlaying ? Cursors.None : null;
         Dispatcher.BeginInvoke(UpdateLive, DispatcherPriority.Render);
 
@@ -1350,6 +1601,10 @@ public sealed class PlayerView : UserControl, IDisposable
                 DockPanel.SetDock(pill, Dock.Right);
                 top.Children.Add(pill);
             }
+            var info = Circle(WIcon("info", 16), 32, ToggleInfo, (byte)(showInfo ? 0xdd : 0x88), "Stats (I)");
+            info.Margin = new Thickness(0, 0, 8, 0);
+            DockPanel.SetDock(info, Dock.Right);
+            top.Children.Add(info);
             var title = WText(request.Title, 13, null, FontWeights.Medium);
             title.VerticalAlignment = VerticalAlignment.Center;
             title.Margin = new Thickness(12, 0, 12, 0);
@@ -1448,6 +1703,9 @@ public sealed class PlayerView : UserControl, IDisposable
             bottom.Children.Add(actions);
             chrome.Children.Add(bottom);
         }
+
+        // Stays up with the controls hidden, like VLC's statistics window; clicks go through it.
+        if (showInfo) chrome.Children.Add(infoPanel.Value);
 
         if (picking) chrome.Children.Add(TrackSheet());
         if (pickingAudio) chrome.Children.Add(AudioSheet());
@@ -1861,6 +2119,84 @@ public sealed class PlayerView : UserControl, IDisposable
 }
 
 /// <summary>The thin scrubber: click anywhere on the track, or drag the head.</summary>
+/// <summary>
+/// Two lines over the last two minutes, one sample a second, in Mb/s: download speed (blue, filled)
+/// and the video's own bitrate (white). Blue above white = the buffer is growing.
+/// </summary>
+public sealed class SpeedGraph : FrameworkElement
+{
+    const int Samples = 120;
+    readonly List<(double Down, double Rate)> points = new();
+    static readonly Brush Blue = Frozen(new SolidColorBrush(Color.FromRgb(0x3b, 0x6f, 0xe0)));
+    static readonly Brush Fill = Frozen(new SolidColorBrush(Color.FromArgb(0x40, 0x3b, 0x6f, 0xe0)));
+    static readonly Pen BluePen = Frozen(new Pen(Blue, 1.5));
+    static readonly Pen WhitePen = Frozen(new Pen(new SolidColorBrush(Color.FromArgb(0xd0, 255, 255, 255)), 1.2));
+    static readonly Pen GridPen = Frozen(new Pen(new SolidColorBrush(Color.FromArgb(0x26, 255, 255, 255)), 1));
+    static readonly Typeface Face = new("Segoe UI");
+
+    static T Frozen<T>(T f) where T : Freezable { f.Freeze(); return f; }
+
+    public SpeedGraph()
+    {
+        Height = 92;
+        IsHitTestVisible = false;
+    }
+
+    public void Push(double downMbps, double rateMbps)
+    {
+        points.Add((Math.Max(0, downMbps), Math.Max(0, rateMbps)));
+        if (points.Count > Samples) points.RemoveAt(0);
+        InvalidateVisual();
+    }
+
+    protected override void OnRender(DrawingContext dc)
+    {
+        double w = ActualWidth, h = ActualHeight - 22; // bottom strip for the legend
+        if (w <= 0 || h <= 0) return;
+        var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        var top = Math.Max(1, points.Count == 0 ? 1 : points.Max(p => Math.Max(p.Down, p.Rate)) * 1.15);
+
+        dc.DrawLine(GridPen, new Point(0, 0.5), new Point(w, 0.5));
+        dc.DrawLine(GridPen, new Point(0, h / 2), new Point(w, h / 2));
+        dc.DrawLine(GridPen, new Point(0, h - 0.5), new Point(w, h - 0.5));
+        dc.DrawText(new FormattedText($"{top:0.#} Mb/s", System.Globalization.CultureInfo.CurrentCulture, FlowDirection.LeftToRight, Face, 9, Brushes.Gray, dpi), new Point(2, 2));
+
+        if (points.Count >= 2)
+        {
+            double X(int i) => w - (points.Count - 1 - i) * (w / (Samples - 1));
+            double Y(double v) => h - v / top * h;
+            Geometry Line(Func<(double Down, double Rate), double> pick, bool closed)
+            {
+                var g = new StreamGeometry();
+                using (var c = g.Open())
+                {
+                    c.BeginFigure(new Point(X(0), closed ? h : Y(pick(points[0]))), closed, closed);
+                    if (closed) c.LineTo(new Point(X(0), Y(pick(points[0]))), true, true);
+                    for (var i = 1; i < points.Count; i++) c.LineTo(new Point(X(i), Y(pick(points[i]))), true, true);
+                    if (closed) c.LineTo(new Point(X(points.Count - 1), h), true, true);
+                }
+                g.Freeze();
+                return g;
+            }
+            dc.DrawGeometry(Fill, null, Line(p => p.Down, true));
+            dc.DrawGeometry(null, BluePen, Line(p => p.Down, false));
+            dc.DrawGeometry(null, WhitePen, Line(p => p.Rate, false));
+        }
+
+        // The legend carries the latest value of each line: the white one sits near the bottom
+        // whenever the download is much faster, and is hard to read off the scale there.
+        var (down, rate) = points.Count > 0 ? points[^1] : (0, 0);
+        var legend = h + 6;
+        FormattedText Label(string text) => new(text, System.Globalization.CultureInfo.CurrentCulture, FlowDirection.LeftToRight, Face, 10.5, Brushes.White, dpi);
+        dc.DrawRectangle(Blue, null, new Rect(0, legend + 5, 10, 3));
+        var first = Label($"Download {down:0.0} Mb/s");
+        dc.DrawText(first, new Point(14, legend));
+        var x = 14 + first.Width + 16;
+        dc.DrawRectangle(WhitePen.Brush, null, new Rect(x, legend + 5, 10, 3));
+        dc.DrawText(Label($"Video {rate:0.0} Mb/s"), new Point(x + 14, legend));
+    }
+}
+
 public sealed class SeekBar : FrameworkElement
 {
     public event Action<double>? Scrub;

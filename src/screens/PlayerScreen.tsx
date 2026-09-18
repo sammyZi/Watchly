@@ -24,11 +24,17 @@ import {
   useMediaStatus,
   useRemoteMediaClient,
 } from 'react-native-google-cast';
-import { VlcPlayer, isInPip, type VlcPlayerRef, type VlcTrack } from '../../modules/vlc-player';
+import {
+  VlcPlayer,
+  isInPip,
+  type VlcPlayerRef,
+  type VlcStats,
+  type VlcTrack,
+} from '../../modules/vlc-player';
 import TorrentStream, { type Progress } from '../../modules/torrent-stream';
 import { Icon, type IconName } from '../components/Icon';
 import { Marquee } from '../components/Marquee';
-import { clock, speed } from '../lib/format';
+import { bytes, clock, speed } from '../lib/format';
 import { searchSubtitles, type Sub } from '../lib/subdl';
 import { parseEpisode } from '../lib/search';
 import { searchableName } from '../lib/title';
@@ -39,6 +45,8 @@ import { font, radius, space, type } from '../theme';
 const SUBDL_KEY = process.env.EXPO_PUBLIC_SUBDL_KEY;
 
 const SKIP_SECONDS = 10;
+/** Two minutes of the stats graph, one sample a second. */
+const GRAPH_SAMPLES = 120;
 /** How long before the end the "up next" card appears. Long enough to cancel
  *  before the credits, short enough not to sit over the last scene. */
 const UP_NEXT_SECONDS = 30;
@@ -161,6 +169,11 @@ export function PlayerScreen({
   const [locked, setLocked] = useState(false);
   /** Playing in the floating picture-in-picture window. */
   const [pip, setPip] = useState(false);
+  /** The stats panel, and what it shows: libVLC's figures, and two minutes of
+   *  download speed against the video's own bitrate (Mb/s, one a second). */
+  const [showInfo, setShowInfo] = useState(false);
+  const [vlcStats, setVlcStats] = useState<VlcStats | null>(null);
+  const [history, setHistory] = useState<{ down: number; rate: number }[]>([]);
   /** Transient readout for the fit mode, which has no control of its own. */
   const [hud, setHud] = useState<{ icon: IconName; label: string } | null>(null);
   /** SubDL search state. */
@@ -686,10 +699,30 @@ export function PlayerScreen({
    * something displays the stats keeps a hidden overlay free of re-renders.
    */
   useEffect(() => {
-    if (!showUi && !buffering && !stalled) return;
+    if (!showUi && !buffering && !stalled && !showInfo) return;
     const sub = TorrentStream.addListener('progress', setStats);
     return () => sub.remove();
-  }, [showUi, buffering, stalled]);
+  }, [showUi, buffering, stalled, showInfo]);
+
+  // The panel's once-a-second read of libVLC, only while it is open.
+  const statsRef = useRef<Progress | null>(null);
+  statsRef.current = stats;
+  useEffect(() => {
+    if (!showInfo) return;
+    const tick = () =>
+      videoRef.current
+        ?.stats()
+        .then((s) => {
+          setVlcStats(s);
+          const down = ((statsRef.current?.speed ?? 0) * 8) / 1e6;
+          const rate = (s?.contentKbps ?? 0) / 1000;
+          setHistory((h) => [...h.slice(-(GRAPH_SAMPLES - 1)), { down, rate }]);
+        })
+        .catch(() => {});
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [showInfo]);
 
   useEffect(() => {
     const back = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -970,12 +1003,15 @@ export function PlayerScreen({
                   )}
 
                   <Pressable
-                    onPress={() => videoRef.current?.enterPip().catch(() => false)}
+                    onPress={() => {
+                      setShowInfo((v) => !v);
+                      bumpUi();
+                    }}
                     hitSlop={12}
-                    style={styles.iconBtn}
-                    accessibilityLabel="Picture in picture"
+                    style={[styles.iconBtn, showInfo && styles.iconBtnOn]}
+                    accessibilityLabel="Stats"
                   >
-                    <Icon name="minimize-2" size={18} color="#fff" />
+                    <Icon name="info" size={18} color="#fff" />
                   </Pressable>
 
                   <View style={styles.topRight}>
@@ -1127,6 +1163,11 @@ export function PlayerScreen({
                     {fileIndex >= 0 && (
                       <Action icon="download" label="Save" onPress={saveCopy} />
                     )}
+                    <Action
+                      material="picture-in-picture-alt"
+                      label="Mini player"
+                      onPress={() => videoRef.current?.enterPip().catch(() => false)}
+                    />
                     <Action
                       icon="external-link"
                       label="Open in"
@@ -1376,6 +1417,66 @@ export function PlayerScreen({
               )}
             </View>
           )}
+          {/* Stays up with the controls hidden, like VLC's statistics window. */}
+          {showInfo && (
+            <View
+              style={[
+                styles.info,
+                { top: 64, right: insets.right + 12, maxHeight: Math.max(160, height - 64 - 110) },
+              ]}
+            >
+              <ScrollView contentContainerStyle={styles.infoBody}>
+                <View style={styles.infoColumn}>
+                  <Text style={[styles.infoHeading, styles.infoHeadingFirst]}>
+                    DOWNLOAD VS VIDEO BITRATE · LAST 2 MIN
+                  </Text>
+                  <SpeedGraph points={history} />
+                  {fileIndex >= 0 && (
+                    <>
+                      <Text style={styles.infoHeading}>TORRENT</Text>
+                      <InfoRow label="Seeders" value={stats ? `${stats.seeds}` : '—'} />
+                      <InfoRow label="Peers" value={stats ? `${stats.peers}` : '—'} />
+                      <InfoRow label="Download" value={stats ? speed(stats.speed) : '—'} />
+                      <InfoRow label="File" value={stats ? `${stats.progress.toFixed(1)}%` : '—'} />
+                      <InfoRow label="DHT nodes" value={stats ? `${stats.dhtNodes}` : '—'} />
+                      <InfoRow label="State" value={stats ? stats.state.toLowerCase().replace(/_/g, ' ') : '—'} />
+                    </>
+                  )}
+                  <Text style={styles.infoHeading}>AUDIO</Text>
+                  <InfoRow
+                    label="Track"
+                    value={
+                      vlcStats?.audioCodec
+                        ? `${vlcStats.audioCodec} · ${vlcStats.channels} ch · ${(vlcStats.sampleRate / 1000).toFixed(1)} kHz${vlcStats.language ? ` · ${vlcStats.language}` : ''}`
+                        : '—'
+                    }
+                  />
+                  <InfoRow label="Played buffers" value={count(vlcStats?.playedBuffers)} />
+                  <InfoRow label="Lost buffers" value={count(vlcStats?.lostBuffers)} />
+                </View>
+                <View style={styles.infoColumn}>
+                  <Text style={[styles.infoHeading, styles.infoHeadingFirst]}>VIDEO</Text>
+                  <InfoRow label="Codec" value={vlcStats?.videoCodec ?? '—'} />
+                  <InfoRow
+                    label="Resolution"
+                    value={vlcStats?.width ? `${vlcStats.width} × ${vlcStats.height}` : '—'}
+                  />
+                  <InfoRow
+                    label="Frame rate"
+                    value={vlcStats?.fps ? `${Number(vlcStats.fps.toFixed(3))} fps` : '—'}
+                  />
+                  <InfoRow label="Displayed" value={count(vlcStats?.displayed)} />
+                  <InfoRow label="Lost frames" value={count(vlcStats?.lostFrames)} />
+                  <Text style={styles.infoHeading}>STREAM</Text>
+                  <InfoRow label="Input bitrate" value={kbps(vlcStats?.inputKbps)} />
+                  <InfoRow label="Content bitrate" value={kbps(vlcStats?.contentKbps)} />
+                  <InfoRow label="Read" value={vlcStats ? bytes(vlcStats.readBytes) : '—'} />
+                  <InfoRow label="Corrupted" value={count(vlcStats?.corrupted)} />
+                  <InfoRow label="Discontinuities" value={count(vlcStats?.discontinuities)} />
+                </View>
+              </ScrollView>
+            </View>
+          )}
           </>)}
         </View>
       )}
@@ -1416,6 +1517,58 @@ export function PlayerScreen({
   );
 }
 
+const count = (n: number | undefined) => (n == null ? '—' : n.toLocaleString());
+const kbps = (n: number | undefined) =>
+  n == null ? '—' : n >= 1000 ? `${(n / 1000).toFixed(1)} Mb/s` : `${Math.round(n)} kb/s`;
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.infoRow}>
+      <Text style={styles.infoLabel}>{label}</Text>
+      <Text style={styles.infoValue} numberOfLines={1}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * Download speed (blue bars) against the video's own bitrate (white marks), in
+ * Mb/s. Blue above white means the buffer is growing. The legend carries the
+ * latest of each: when the download is far faster, the white marks sit on the
+ * floor of the graph and cannot be read off it.
+ */
+function SpeedGraph({ points }: { points: { down: number; rate: number }[] }) {
+  const top = Math.max(1, ...points.map((p) => Math.max(p.down, p.rate))) * 1.15;
+  const last = points[points.length - 1];
+  return (
+    <View>
+      <View style={styles.graph}>
+        <Text style={styles.graphScale}>{top.toFixed(1)} Mb/s</Text>
+        {/* Newest on the right; empty slots on the left until two minutes have passed. */}
+        {Array.from({ length: GRAPH_SAMPLES }, (_, i) => points[i - (GRAPH_SAMPLES - points.length)]).map(
+          (p, i) => (
+            <View key={i} style={styles.graphSlot}>
+              {!!p && (
+                <>
+                  <View style={[styles.graphBar, { height: `${(p.down / top) * 100}%` }]} />
+                  <View style={[styles.graphMark, { bottom: `${(p.rate / top) * 100}%` }]} />
+                </>
+              )}
+            </View>
+          )
+        )}
+      </View>
+      <View style={styles.graphLegend}>
+        <View style={[styles.legendSwatch, { backgroundColor: '#3b6fe0' }]} />
+        <Text style={styles.legendText}>Download {(last?.down ?? 0).toFixed(1)} Mb/s</Text>
+        <View style={[styles.legendSwatch, { backgroundColor: '#fff', marginLeft: 12 }]} />
+        <Text style={styles.legendText}>Video {(last?.rate ?? 0).toFixed(1)} Mb/s</Text>
+      </View>
+    </View>
+  );
+}
+
 /** One control in the bottom row: glyph over a label, tinted when active. */
 function Action({
   icon,
@@ -1427,7 +1580,7 @@ function Action({
 }: {
   icon?: IconName;
   /** Feather has no closed-caption glyph — see the MaterialIcons note above. */
-  material?: 'subtitles' | 'subtitles-off';
+  material?: 'subtitles' | 'subtitles-off' | 'picture-in-picture-alt';
   /** For the speed control, which is a number rather than a symbol. */
   text?: string;
   label: string;
@@ -1759,6 +1912,41 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  iconBtnOn: { backgroundColor: '#3b6fe0' },
+  info: {
+    position: 'absolute',
+    borderRadius: 12,
+    backgroundColor: '#000c',
+  },
+  infoBody: { flexDirection: 'row', padding: 12, gap: 20 },
+  infoColumn: { width: 230 },
+  infoHeading: {
+    color: '#ffffff80',
+    fontSize: 10,
+    fontFamily: font.semibold,
+    letterSpacing: 0.5,
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  infoHeadingFirst: { marginTop: 0 },
+  infoRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 1.5, gap: 12 },
+  infoLabel: { color: '#ffffff90', fontSize: 11, fontFamily: font.regular },
+  infoValue: { color: '#fff', fontSize: 11, fontFamily: font.medium, flexShrink: 1, textAlign: 'right' },
+  graph: {
+    height: 64,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ffffff26',
+  },
+  graphScale: { position: 'absolute', top: 2, left: 2, color: '#ffffff80', fontSize: 9 },
+  graphSlot: { flex: 1, height: '100%', justifyContent: 'flex-end' },
+  graphBar: { backgroundColor: '#3b6fe0b0' },
+  graphMark: { position: 'absolute', left: 0, right: 0, height: 1.5, backgroundColor: '#ffffffd0' },
+  graphLegend: { flexDirection: 'row', alignItems: 'center', marginTop: 5 },
+  legendSwatch: { width: 10, height: 3, marginRight: 5 },
+  legendText: { color: '#fff', fontSize: 10.5, fontFamily: font.regular },
   skipBtn: {
     width: 52,
     height: 52,

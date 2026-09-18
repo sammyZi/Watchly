@@ -702,6 +702,17 @@ public sealed class StreamSession : IAsyncDisposable
 
     public Progress Progress => TorrentEngine.ProgressOf(Manager, FileIndex);
 
+    /// <summary>The watched file's pieces: finished, and all.</summary>
+    public (int Have, int Total) Pieces()
+    {
+        var file = Manager.Files[FileIndex];
+        var total = file.EndPieceIndex - file.StartPieceIndex + 1;
+        if (Manager.Bitfield is not { } have) return (0, total);
+        var count = 0;
+        for (var i = file.StartPieceIndex; i <= file.EndPieceIndex; i++) if (have[i]) count++;
+        return (count, total);
+    }
+
     /// <summary>The watched file's finished pieces, merged into spans of 0–1 along the file.</summary>
     public List<(double From, double To)> Downloaded()
     {

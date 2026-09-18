@@ -873,7 +873,10 @@ class TorrentStreamModule : Module() {
       // already tiny because everything outside the zones is IGNORE, so allowing
       // early duplicate requests means many peers sending the same blocks and
       // almost no unique bytes arriving.
-      .setString(settings_pack.string_types.listen_interfaces.swigValue(), "0.0.0.0:6881")
+      // One fixed port, IPv4 and IPv6, which UPnP/NAT-PMP (below) forward on the router. Each
+      // app its own: a router forwards a port to one device, and the phone, the TV (6881) and
+      // the Windows app (51413) can all be running on the same network at once.
+      .setString(settings_pack.string_types.listen_interfaces.swigValue(), "0.0.0.0:6882,[::]:6882")
       .setString(settings_pack.string_types.dht_bootstrap_nodes.swigValue(), BOOTSTRAP)
       .setBoolean(settings_pack.bool_types.enable_dht.swigValue(), true)
       .setBoolean(settings_pack.bool_types.enable_lsd.swigValue(), true)

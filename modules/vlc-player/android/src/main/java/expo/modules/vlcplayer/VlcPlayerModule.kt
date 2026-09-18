@@ -34,6 +34,8 @@ class VlcPlayerModule : Module() {
 
       AsyncFunction("enterPip") { view: VlcPlayerView -> view.enterPip() }
 
+      AsyncFunction("stats") { view: VlcPlayerView -> view.stats() }
+
       Prop("source") { view: VlcPlayerView, value: String? -> view.setSource(value) }
       Prop("paused") { view: VlcPlayerView, value: Boolean -> view.setPaused(value) }
       Prop("rate") { view: VlcPlayerView, value: Float -> view.setRate(value) }

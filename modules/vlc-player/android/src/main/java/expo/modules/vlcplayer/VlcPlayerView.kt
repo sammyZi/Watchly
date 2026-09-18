@@ -303,6 +303,51 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     onPip(mapOf("active" to now))
   }
 
+  /* ------------------------------------------------------------------ stats */
+
+  /**
+   * libVLC's input statistics and the playing tracks, for the stats panel. Called about once a
+   * second, only while that panel is open. `media` is a new reference each call and must be
+   * released; null before anything is loaded.
+   */
+  fun stats(): Map<String, Any?>? {
+    val p = player ?: return null
+    val m = runCatching { p.media }.getOrNull() ?: return null
+    try {
+      val s = runCatching { m.stats }.getOrNull()
+      val video = runCatching { p.currentVideoTrack }.getOrNull()
+      val audioId = runCatching { p.audioTrack }.getOrDefault(-1)
+      var audio: IMedia.AudioTrack? = null
+      for (i in 0 until runCatching { m.trackCount }.getOrDefault(0)) {
+        val t = runCatching { m.getTrack(i) }.getOrNull() as? IMedia.AudioTrack ?: continue
+        if (audio == null || t.id == audioId) audio = t
+        if (t.id == audioId) break
+      }
+      return mapOf(
+        "videoCodec" to (video?.let { it.description?.takeIf(String::isNotBlank) ?: it.codec }),
+        "width" to (video?.width ?: 0),
+        "height" to (video?.height ?: 0),
+        "fps" to (video?.takeIf { it.frameRateDen > 0 }?.let { it.frameRateNum.toDouble() / it.frameRateDen } ?: 0.0),
+        "audioCodec" to (audio?.let { it.description?.takeIf(String::isNotBlank) ?: it.codec }),
+        "channels" to (audio?.channels ?: 0),
+        "sampleRate" to (audio?.rate ?: 0),
+        "language" to audio?.language,
+        // × 8000 = kb/s — the scaling VLC's own statistics use.
+        "inputKbps" to ((s?.inputBitrate ?: 0f) * 8000.0),
+        "contentKbps" to ((s?.demuxBitrate ?: 0f) * 8000.0),
+        "readBytes" to (s?.readBytes ?: 0),
+        "displayed" to (s?.displayedPictures ?: 0),
+        "lostFrames" to (s?.lostPictures ?: 0),
+        "playedBuffers" to (s?.playedAbuffers ?: 0),
+        "lostBuffers" to (s?.lostAbuffers ?: 0),
+        "corrupted" to (s?.demuxCorrupted ?: 0),
+        "discontinuities" to (s?.demuxDiscontinuity ?: 0)
+      )
+    } finally {
+      runCatching { m.release() }
+    }
+  }
+
   /* ----------------------------------------------------------------- props */
 
   fun setSource(uri: String?) {

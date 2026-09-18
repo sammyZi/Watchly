@@ -31,6 +31,29 @@ export type VlcPlayerRef = {
   snapshot(): Promise<string | null>;
   /** Shrink into a floating window. False where the device has no picture-in-picture. */
   enterPip(): Promise<boolean>;
+  /** libVLC's playback statistics and the playing tracks; null before anything is loaded. */
+  stats(): Promise<VlcStats | null>;
+};
+
+export type VlcStats = {
+  videoCodec: string | null;
+  width: number;
+  height: number;
+  fps: number;
+  audioCodec: string | null;
+  channels: number;
+  sampleRate: number;
+  language: string | null;
+  inputKbps: number;
+  /** The video's own data rate, as the demuxer reads it. */
+  contentKbps: number;
+  readBytes: number;
+  displayed: number;
+  lostFrames: number;
+  playedBuffers: number;
+  lostBuffers: number;
+  corrupted: number;
+  discontinuities: number;
 };
 
 /** libVLC's own fit modes, by their enum names. */
