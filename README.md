@@ -4,7 +4,15 @@ Movies and series for Android, streamed from torrents while they download (Expo)
 
 Browse a catalogue, open a title, pick a release, watch it. Magnet links and
 `.torrent` files shared in from other apps still work and land in the same
-player. Android only.
+player.
+
+This README is the phone app. The repo holds two more, each with its own README:
+
+| App | Where | Engine |
+|---|---|---|
+| Phone (Android) | `src/`, `android/`, `modules/` | libtorrent4j + libVLC |
+| Television (Android TV) | [`tv/`](tv/README.md) | libtorrent4j + libVLC, own copy of the modules |
+| Windows desktop | [`windows/`](windows/README.md) | MonoTorrent + LibVLCSharp (.NET 8, WPF) |
 
 ## Run
 
@@ -61,7 +69,8 @@ modules/torrent-stream/
   android/…/LocalFileServer.kt       localhost HTTP server over the partial file
 modules/vlc-player/
   index.ts                     JS surface
-  android/…/VlcPlayerView.kt         libVLC video surface
+  android/…/VlcPlayerView.kt         libVLC video surface, picture-in-picture,
+                                     playback stats
 ```
 
 ## Features
@@ -101,6 +110,17 @@ modules/vlc-player/
 - Custom player overlay: scrub bar, ±10s buttons, double-tap sides to skip,
   playback speed, audio and subtitle track pickers, fit modes, lock, live
   swarm stats
+- Picture-in-picture: *Mini player* in the bottom row, and on Android 12+
+  pressing Home while a video plays does the same. The controls hide in the
+  window; closing it pauses and saves the position like leaving the app
+- Stats panel (ⓘ in the top bar), like VLC's statistics window: two minutes of
+  download speed against the video's own bitrate — blue above white means the
+  buffer is growing — then the swarm, the video and audio codecs, resolution,
+  frame rate, lost frames and audio buffers, and libVLC's bitrates. It stays up
+  with the controls hidden and only reads libVLC while it is open
+- The chosen audio track survives coming back to the app. Returning reloads the
+  stream into a fresh player, which used to start on the file's default dub
+  while the picker still showed the viewer's choice
 - Subtitles from inside the torrent, or searched online via SubDL. SubDL only
   serves zips, so the download, unpack and write happen natively: only `.srt`
   entries are extracted, into app-private cache, under a name the app chooses,
@@ -187,12 +207,36 @@ survives app close and reboot — it lives in `filesDir`, not `cacheDir`, and th
 stream-cache wipe does not touch it. Piece data lives elsewhere and is wiped
 when the stream stops.
 
+## Incoming connections
+
+A peer can only connect if one side accepts connections, and most home users
+sit behind a router. Without an open port you reach only the peers that have
+one, which is a small part of most swarms.
+
+The engine listens on one fixed port, **6882**, on IPv4 and IPv6, and asks the
+router to forward it with UPnP and NAT-PMP. With UPnP on in the router nothing
+needs setting up; without it, forward 6882 (TCP and UDP) to the phone by hand.
+The phone, the TV and the Windows app each use their own port, because a router
+forwards a port to one device only and all three can be on one network at once:
+
+| App | Port |
+|---|---|
+| Windows | 51413 |
+| TV | 6881 |
+| Phone | 6882 |
+
+On mobile data no port can be opened: carriers share one IPv4 address between
+many subscribers. IPv6 still gets through where the carrier provides it.
+
 ## Notes
 
 - Release builds split by ABI — install `app-arm64-v8a-release.apk`. libtorrent4j
   and libVLC both ship large native libraries per architecture, so a universal
   APK would make every device carry code it cannot run.
 - iOS is unsupported — no comparable torrent library exists for it.
+- Picture-in-picture needs `android:supportsPictureInPicture="true"` on
+  `MainActivity`, which is set by hand in `android/app/src/main/AndroidManifest.xml`.
+  `expo prebuild --clean` regenerates that file and drops it.
 - Nothing prunes the metadata cache. It is a few hundred KB per distinct torrent
   ever opened, so hundreds of them come to tens of MB.
 - A shared `content://` URI is copied into app storage on arrival. The grant

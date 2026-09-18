@@ -71,6 +71,34 @@ Evicting continuously instead of rolling would need `FALLOC_FL_PUNCH_HOLE`
 through JNI, and libtorrent would then seed the zeros it still believes are
 pieces — worth doing only if the stall becomes the thing people notice.
 
+## Incoming connections
+
+The engine listens on a fixed port, **6881**, on IPv4 and IPv6, and asks the
+router to forward it with UPnP and NAT-PMP — with UPnP on in the router, peers
+can connect in with nothing set up. It is not the phone's 6882 or the Windows
+app's 51413 because a router forwards a port to one device only, and all three
+can be on one network at once.
+
+## Installing a release on a TV
+
+Most Android TVs are 32-bit ARM (`getprop ro.product.cpu.abilist` says), so
+build only that and install over network debugging:
+
+```bash
+cd tv/android && ./gradlew assembleRelease -PreactNativeArchitectures=armeabi-v7a
+```
+
+```bash
+adb connect <tv-ip>:5555
+```
+
+```bash
+adb install -r tv/android/app/build/outputs/apk/release/app-armeabi-v7a-release.apk
+```
+
+Release builds are signed with the debug keystore, so this updates in place and
+keeps the app's data.
+
 ## Checks
 
 ```bash
