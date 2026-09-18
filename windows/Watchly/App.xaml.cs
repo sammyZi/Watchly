@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Threading;
 using Watchly.Core;
@@ -34,6 +35,7 @@ public partial class App : Application
 
         Log.Info("app", "Watchly starting up...");
         Views.PlayerView.Warm();
+        _ = Task.Run(RemoveOldBuilds);
         Theme.Apply(AppSettings.Load().ThemeMode);
 
         DispatcherUnhandledException += (_, args) =>
@@ -52,6 +54,57 @@ public partial class App : Application
         var window = new MainWindow(e.Args.FirstOrDefault(TitleText.IsTorrentSource));
         MainWindow = window;
         window.Show();
+    }
+
+    /// <summary>
+    /// The single-file exe unpacks itself (≈240 MB, libVLC and all) to %TEMP%\.net\Watchly\&lt;build id&gt;\
+    /// and nothing ever removes the folders of earlier builds. A folder whose build is still running
+    /// is left whole: deleting it would strip the files that build hasn't loaded yet (a libVLC plugin
+    /// it opens later). Renaming doesn't tell — Windows renames a folder with a running exe in it —
+    /// but a loaded DLL can't be opened for writing, so that is the test. Nothing is written.
+    /// </summary>
+    static void RemoveOldBuilds()
+    {
+        try
+        {
+            var current = new DirectoryInfo(AppContext.BaseDirectory.TrimEnd('\\'));
+            var root = current.Parent;
+            if (root is null || !root.FullName.EndsWith(@"\.net\Watchly", StringComparison.OrdinalIgnoreCase)) return;
+            foreach (var dir in root.EnumerateDirectories())
+            {
+                if (dir.FullName.Equals(current.FullName, StringComparison.OrdinalIgnoreCase)) continue;
+                try
+                {
+                    if (InUse(dir)) continue;
+                    dir.Delete(true);
+                    Log.Info("app", $"removed an old build's files: {dir.Name}");
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+        }
+        catch (Exception e)
+        {
+            Log.Warn("app", $"old build cleanup: {e.Message}");
+        }
+    }
+
+    static bool InUse(DirectoryInfo dir)
+    {
+        // WPF's renderer first: a running build always has it loaded, so a live folder is found
+        // before this briefly holds (and so blocks) any file that build might open next.
+        var files = dir.EnumerateFiles("*", SearchOption.AllDirectories)
+            .OrderBy(f => f.Name.Equals("wpfgfx_cor3.dll", StringComparison.OrdinalIgnoreCase) ? 0 : 1);
+        foreach (var file in files)
+        {
+            try
+            {
+                using var _ = file.Open(FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) { return true; }
+            catch (UnauthorizedAccessException) { return true; }
+        }
+        return false;
     }
 
 }
