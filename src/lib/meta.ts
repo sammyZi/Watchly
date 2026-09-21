@@ -239,6 +239,40 @@ export function loadCatalog(kind: 'movie' | 'tv', genre?: string): Promise<Title
   return pending;
 }
 
+/** How a shelf can be ordered. `popular` is the order the catalogue came in. */
+export type Sort = 'popular' | 'rating' | 'year' | 'title';
+
+export const SORTS: { key: Sort; label: string }[] = [
+  { key: 'popular', label: 'Popular' },
+  { key: 'rating', label: 'Top rated' },
+  { key: 'year', label: 'Newest' },
+  { key: 'title', label: 'A–Z' },
+];
+
+/**
+ * Order a shelf. Titles missing the field being sorted on go last rather than
+ * counting as zero — an unrated title is unknown, not bad — and keep the
+ * catalogue's own order among themselves.
+ */
+export function sortTitles<T extends { title: string; rating: string | null; year: string | null }>(
+  titles: T[],
+  sort: Sort
+): T[] {
+  if (sort === 'popular') return titles;
+  const number = (value: string | null) => {
+    const n = parseFloat(value ?? '');
+    return Number.isFinite(n) ? n : null;
+  };
+  const by = (t: T) => (sort === 'rating' ? number(t.rating) : number(t.year));
+  return [...titles].sort((a, b) => {
+    if (sort === 'title') return a.title.localeCompare(b.title);
+    const x = by(a);
+    const y = by(b);
+    if (x === null || y === null) return x === y ? 0 : x === null ? 1 : -1;
+    return y - x;
+  });
+}
+
 /**
  * Title search — the poster-first front door. Not persisted: queries are
  * one-off, and filling storage with them would crowd out the shelves.
