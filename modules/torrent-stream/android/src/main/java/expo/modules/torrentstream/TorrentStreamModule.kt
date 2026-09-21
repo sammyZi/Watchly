@@ -254,6 +254,14 @@ class TorrentStreamModule : Module() {
    *  whole torrent: the file priorities set in play() exclude every other file
    *  in it, download or not. */
   private var fullFile = false
+  /**
+   * Streaming, but fetch the rest of the file too (the player's *Whole file*).
+   * The zone around the reader keeps its priority — this only lifts everything
+   * outside it from IGNORE to LOW, so spare bandwidth goes into the film
+   * instead of nowhere. Off is the default: a window is lighter on data, disk
+   * and battery.
+   */
+  private var wholeStream = false
   /** Movies/Watchly/<saveFolder>/ — set by play() for download mode. */
   private var saveFolder = ""
   private var firstPiece = 0
@@ -674,6 +682,15 @@ class TorrentStreamModule : Module() {
     }
 
     /** Drop one file from a season download. Remaining files keep going. */
+    /** The player's *Whole file* / *Next 5 min* switch; takes effect on the next tick. */
+    AsyncFunction("setWholeFile") { on: Boolean ->
+      wholeStream = on
+      val h = handle
+      if (h != null && h.isValid) applyFocus(h)
+      log("stream mode: ${if (on) "whole file" else "window around the reader"}")
+      null
+    }
+
     AsyncFunction("skipFile") { index: Int ->
       wantedFiles = wantedFiles.filter { it != index }.toIntArray()
       val h = handle
@@ -2154,6 +2171,8 @@ class TorrentStreamModule : Module() {
       prios[p] = when {
         p in tailPiece..tailEnd || zones.any { p in it } -> Priority.DEFAULT
         spare.any { p in it } || behind.any { p in it } -> Priority.LOW
+        // Whole file: everything else still wanted, but only once the zone is fed.
+        wholeStream -> Priority.LOW
         else -> Priority.IGNORE
       }
     }
@@ -2341,6 +2360,7 @@ class TorrentStreamModule : Module() {
     announcedReady = false
     peerSaveTick = 0
     fullFile = false
+    wholeStream = false
     if (downloads.isNotEmpty() && poller == null) startPolling()
   }
 
