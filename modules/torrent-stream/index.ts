@@ -106,6 +106,12 @@ type TorrentStream = {
   skipDownload(id: string, index: number): Promise<void>;
   includeDownload(id: string, index: number): Promise<void>;
   /** Stop fetching one file; the rest of a season download continues. */
+  /**
+   * Streaming: fetch the whole file (`true`) or only a window around the
+   * playhead (`false`, the default). Off is lighter on data, disk and battery;
+   * on plays the rest without waiting. Resets when the stream stops.
+   */
+  setWholeFile(on: boolean): Promise<void>;
   skipFile(index: number): Promise<void>;
   /** Put a skipped file back into a season download. */
   includeFile(index: number): Promise<void>;

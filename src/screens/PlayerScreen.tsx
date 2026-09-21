@@ -14,6 +14,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Line, Path } from 'react-native-svg';
 import * as Brightness from 'expo-brightness';
 import * as ScreenOrientation from 'expo-screen-orientation';
 // Feather has no closed-caption glyph, and "type" reads as a bare T. The badge
@@ -35,6 +36,7 @@ import TorrentStream, { type Progress } from '../../modules/torrent-stream';
 import { Icon, type IconName } from '../components/Icon';
 import { Marquee } from '../components/Marquee';
 import { bytes, clock, speed } from '../lib/format';
+import { loadSettings, saveSettings } from '../lib/settings';
 import { searchSubtitles, type Sub } from '../lib/subdl';
 import { parseEpisode } from '../lib/search';
 import { searchableName } from '../lib/title';
@@ -47,8 +49,6 @@ const SUBDL_KEY = process.env.EXPO_PUBLIC_SUBDL_KEY;
 const SKIP_SECONDS = 10;
 /** Two minutes of the stats graph, one sample a second. */
 const GRAPH_SAMPLES = 120;
-/** Bars drawn for those samples — one per two seconds, so each is wide enough to read. */
-const GRAPH_BARS = 60;
 /** How long before the end the "up next" card appears. Long enough to cancel
  *  before the credits, short enough not to sit over the last scene. */
 const UP_NEXT_SECONDS = 30;
@@ -171,6 +171,30 @@ export function PlayerScreen({
   const [locked, setLocked] = useState(false);
   /** Playing in the floating picture-in-picture window. */
   const [pip, setPip] = useState(false);
+  /**
+   * What the engine fetches: the whole file, or only the next few minutes past
+   * the playhead (the default — lighter on data, disk and battery). Remembered
+   * for the next stream, like the Windows player's own switch.
+   */
+  const [wholeFile, setWholeFile] = useState(false);
+  useEffect(() => {
+    loadSettings().then((s) => setWholeFile(s.streamWholeFile));
+  }, []);
+  const firstMode = useRef(true);
+  useEffect(() => {
+    if (fileIndex < 0) return;
+    TorrentStream.setWholeFile(wholeFile).catch(() => {});
+    // The stored value is what the first run applied; only a press changes it.
+    if (firstMode.current) {
+      firstMode.current = false;
+      return;
+    }
+    showHud({
+      icon: wholeFile ? 'hard-drive' : 'clock',
+      label: wholeFile ? 'Downloading the whole file' : 'Downloading the next 5 minutes',
+    });
+    loadSettings().then((s) => saveSettings({ ...s, streamWholeFile: wholeFile }));
+  }, [wholeFile, fileIndex]);
   /** The stats panel, and what it shows: libVLC's figures, and two minutes of
    *  download speed against the video's own bitrate (Mb/s, one a second). */
   const [showInfo, setShowInfo] = useState(false);
@@ -1170,6 +1194,14 @@ export function PlayerScreen({
                       label="Mini player"
                       onPress={() => videoRef.current?.enterPip().catch(() => false)}
                     />
+                    {fileIndex >= 0 && (
+                      <Action
+                        icon={wholeFile ? 'hard-drive' : 'clock'}
+                        label={wholeFile ? 'Whole file' : 'Next 5 min'}
+                        on={wholeFile}
+                        onPress={() => setWholeFile((on) => !on)}
+                      />
+                    )}
                     <Action
                       icon="external-link"
                       label="Open in"
@@ -1541,38 +1573,50 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * Download speed (blue bars) against the video's own bitrate (white marks), in
- * Mb/s. Blue above white means the buffer is growing. The legend carries the
- * latest of each: when the download is far faster, the white marks sit on the
- * floor of the graph and cannot be read off it.
+ * Download speed (blue, filled) against the video's own bitrate (white), in
+ * Mb/s — the Windows player's graph, drawn the same way. Blue above white means
+ * the buffer is growing. Both lines are drawn as real paths: stacking one view
+ * per sample gave a jagged, grainy chart.
  */
 function SpeedGraph({ points }: { points: { down: number; rate: number }[] }) {
   const top = Math.max(1, ...points.map((p) => Math.max(p.down, p.rate))) * 1.15;
   const last = points[points.length - 1];
-  // One bar per two seconds. A bar per sample came out a couple of pixels wide,
-  // which is what made the graph look like grit rather than a line.
-  const bars = Array.from({ length: GRAPH_BARS }, (_, i) => {
-    const from = points.length - (GRAPH_BARS - i) * 2;
-    const pair = [points[from], points[from + 1]].filter(Boolean);
-    return pair.length ? Math.max(...pair.map((p) => p.down)) : null;
-  });
+  const w = 100;
+  const h = 100;
+  // Newest on the right; the left stays empty until two minutes have passed.
+  const x = (i: number) => w - (points.length - 1 - i) * (w / (GRAPH_SAMPLES - 1));
+  const y = (v: number) => h - Math.min(1, v / top) * h;
+  const line = (pick: (p: { down: number; rate: number }) => number) =>
+    points.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(2)},${y(pick(p)).toFixed(2)}`).join(' ');
+  const area = points.length >= 2
+    ? `M${x(0).toFixed(2)},${h} ${line((p) => p.down).slice(1)} L${x(points.length - 1).toFixed(2)},${h} Z`
+    : '';
   return (
     <View>
       <View style={styles.graph}>
+        <Svg width="100%" height="100%" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+          <Line x1="0" y1={h / 2} x2={w} y2={h / 2} stroke="#ffffff26" strokeWidth="0.5" />
+          {points.length >= 2 && (
+            <>
+              <Path d={area} fill="#3b6fe040" />
+              <Path
+                d={line((p) => p.down)}
+                fill="none"
+                stroke="#3b6fe0"
+                strokeWidth="1.5"
+                vectorEffect="non-scaling-stroke"
+              />
+              <Path
+                d={line((p) => p.rate)}
+                fill="none"
+                stroke="#ffffffd0"
+                strokeWidth="1.2"
+                vectorEffect="non-scaling-stroke"
+              />
+            </>
+          )}
+        </Svg>
         <Text style={styles.graphScale} maxFontSizeMultiplier={1.15}>{top.toFixed(1)} Mb/s</Text>
-        {/* Newest on the right; empty slots on the left until two minutes have passed. */}
-        {bars.map((down, i) => (
-          <View key={i} style={styles.graphSlot}>
-            {down !== null && (
-              <View style={[styles.graphBar, { height: `${Math.min(100, (down / top) * 100)}%` }]} />
-            )}
-          </View>
-        ))}
-        {/* The video's bitrate as one line, not a mark per sample: it barely
-            moves, and the per-sample marks drew a dotted staircase. */}
-        {!!last && (
-          <View style={[styles.graphMark, { bottom: `${Math.min(100, (last.rate / top) * 100)}%` }]} />
-        )}
       </View>
       <View style={styles.graphLegend}>
         <View style={[styles.legendSwatch, { backgroundColor: '#3b6fe0' }]} />
@@ -1949,17 +1993,13 @@ const styles = StyleSheet.create({
   infoLabel: { color: '#ffffff90', fontSize: 11, fontFamily: font.regular },
   infoValue: { color: '#fff', fontSize: 11, fontFamily: font.medium, flexShrink: 1, textAlign: 'right' },
   graph: {
+    position: 'relative',
     height: 64,
-    flexDirection: 'row',
-    alignItems: 'flex-end',
     borderTopWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: '#ffffff26',
   },
   graphScale: { position: 'absolute', top: 2, left: 2, color: '#ffffff80', fontSize: 9 },
-  graphSlot: { flex: 1, height: '100%', justifyContent: 'flex-end', paddingHorizontal: 0.5 },
-  graphBar: { backgroundColor: '#3b6fe0d0', borderTopLeftRadius: 1.5, borderTopRightRadius: 1.5 },
-  graphMark: { position: 'absolute', left: 0, right: 0, height: 2, backgroundColor: '#fff' },
   graphLegend: { flexDirection: 'row', alignItems: 'center', marginTop: 5 },
   legendSwatch: { width: 10, height: 3, marginRight: 5 },
   legendText: { color: '#fff', fontSize: 10.5, fontFamily: font.regular },

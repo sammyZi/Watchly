@@ -10,6 +10,9 @@ export type Settings = {
   /** Genres to lead the home page with, in Cinemeta's spelling. Empty means
    *  the page is built from watch history alone. */
   genres: string[];
+  /** Player default: fetch the whole file while streaming, or only the next few
+   *  minutes past the playhead. */
+  streamWholeFile: boolean;
   /** App appearance. */
   themeMode: 'system' | 'light' | 'dark';
 };
@@ -22,6 +25,7 @@ export const DEFAULTS: Settings = {
   addTrackers: true,
   removeFilesAfterStop: true,
   genres: [],
+  streamWholeFile: false,
   themeMode: 'system',
 };
 
