@@ -110,6 +110,29 @@ public static class Meta
         Store.RemovePrefix("meta");
     }
 
+    /// <summary>src/lib/meta.ts — how a shelf can be ordered; "Popular" is the order it arrived in.</summary>
+    public static readonly (string Key, string Label)[] Sorts =
+    {
+        ("popular", "Popular"), ("rating", "Top rated"), ("year", "Newest"), ("title", "A–Z"),
+    };
+
+    /// <summary>
+    /// Order a shelf. A title missing the field being sorted on goes last rather than counting
+    /// as zero — unrated is unknown, not bad — and those keep the catalogue's own order.
+    /// </summary>
+    public static List<Title> SortTitles(IReadOnlyList<Title> titles, string sort)
+    {
+        static double? Number(string? value) =>
+            double.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var n) ? n : null;
+        Func<Title, double?> by = sort == "rating" ? t => Number(t.Rating) : t => Number(t.Year);
+        return sort switch
+        {
+            "title" => titles.OrderBy(t => t.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
+            "rating" or "year" => titles.OrderBy(t => by(t) is null).ThenByDescending(by).ToList(),
+            _ => titles.ToList(),
+        };
+    }
+
     public static List<Title> UniqueById(IEnumerable<Title> titles)
     {
         var seen = new HashSet<string>();

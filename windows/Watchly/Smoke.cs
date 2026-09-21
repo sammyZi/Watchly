@@ -125,6 +125,19 @@ static class Smoke
         for (var e = 1; e <= 24; e++) jjk.Add(new Episode { Id = $"tt:1:{e}", Season = 1, Number = e });
         for (var e = 1; e <= 23; e++) jjk.Add(new Episode { Id = $"tt:2:{e}", Season = 2, Number = e });
         jjk.Insert(0, new Episode { Id = "tt:0:1", Season = 0, Number = 1 });
+        // Shelf ordering. Unknown rating or year goes last — it is unknown, not zero.
+        var shelf = new List<Title>
+        {
+            new() { Imdb = "tt1", Name = "Bravo", Rating = "7.1", Year = "2019" },
+            new() { Imdb = "tt2", Name = "Alpha", Rating = null, Year = null },
+            new() { Imdb = "tt3", Name = "Charlie", Rating = "8.4", Year = "2024" },
+        };
+        Eq(string.Join(",", Meta.SortTitles(shelf, "popular").Select(t => t.Name)), "Bravo,Alpha,Charlie", "sortTitles popular keeps order");
+        Eq(string.Join(",", Meta.SortTitles(shelf, "rating").Select(t => t.Name)), "Charlie,Bravo,Alpha", "sortTitles by rating");
+        Eq(string.Join(",", Meta.SortTitles(shelf, "year").Select(t => t.Name)), "Charlie,Bravo,Alpha", "sortTitles by year");
+        Eq(string.Join(",", Meta.SortTitles(shelf, "title").Select(t => t.Name)), "Alpha,Bravo,Charlie", "sortTitles by title");
+        Eq(shelf[0].Name, "Bravo", "sortTitles leaves the shelf alone");
+
         Eq(Meta.AbsoluteNumber(jjk, 2, 5), 29, "absoluteNumber skips specials");
         Eq(Meta.AbsoluteNumber(new[] { new Episode { Season = 21, Number = 892 }, new Episode { Season = 21, Number = 893 } }, 21, 893), 893, "absoluteNumber keeps running numbering");
         Eq(jjk[Meta.IndexOfEpisode(jjk, "[SubsPlease] Jujutsu Kaisen - 29 (1080p).mkv", "JJK/[SubsPlease] Jujutsu Kaisen - 29 (1080p).mkv")].Id, "tt:2:5", "indexOfEpisode running number");

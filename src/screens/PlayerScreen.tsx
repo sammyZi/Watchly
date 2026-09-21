@@ -47,6 +47,8 @@ const SUBDL_KEY = process.env.EXPO_PUBLIC_SUBDL_KEY;
 const SKIP_SECONDS = 10;
 /** Two minutes of the stats graph, one sample a second. */
 const GRAPH_SAMPLES = 120;
+/** Bars drawn for those samples — one per two seconds, so each is wide enough to read. */
+const GRAPH_BARS = 60;
 /** How long before the end the "up next" card appears. Long enough to cancel
  *  before the credits, short enough not to sit over the last scene. */
 const UP_NEXT_SECONDS = 30;
@@ -1547,22 +1549,29 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 function SpeedGraph({ points }: { points: { down: number; rate: number }[] }) {
   const top = Math.max(1, ...points.map((p) => Math.max(p.down, p.rate))) * 1.15;
   const last = points[points.length - 1];
+  // One bar per two seconds. A bar per sample came out a couple of pixels wide,
+  // which is what made the graph look like grit rather than a line.
+  const bars = Array.from({ length: GRAPH_BARS }, (_, i) => {
+    const from = points.length - (GRAPH_BARS - i) * 2;
+    const pair = [points[from], points[from + 1]].filter(Boolean);
+    return pair.length ? Math.max(...pair.map((p) => p.down)) : null;
+  });
   return (
     <View>
       <View style={styles.graph}>
         <Text style={styles.graphScale} maxFontSizeMultiplier={1.15}>{top.toFixed(1)} Mb/s</Text>
         {/* Newest on the right; empty slots on the left until two minutes have passed. */}
-        {Array.from({ length: GRAPH_SAMPLES }, (_, i) => points[i - (GRAPH_SAMPLES - points.length)]).map(
-          (p, i) => (
-            <View key={i} style={styles.graphSlot}>
-              {!!p && (
-                <>
-                  <View style={[styles.graphBar, { height: `${(p.down / top) * 100}%` }]} />
-                  <View style={[styles.graphMark, { bottom: `${(p.rate / top) * 100}%` }]} />
-                </>
-              )}
-            </View>
-          )
+        {bars.map((down, i) => (
+          <View key={i} style={styles.graphSlot}>
+            {down !== null && (
+              <View style={[styles.graphBar, { height: `${Math.min(100, (down / top) * 100)}%` }]} />
+            )}
+          </View>
+        ))}
+        {/* The video's bitrate as one line, not a mark per sample: it barely
+            moves, and the per-sample marks drew a dotted staircase. */}
+        {!!last && (
+          <View style={[styles.graphMark, { bottom: `${Math.min(100, (last.rate / top) * 100)}%` }]} />
         )}
       </View>
       <View style={styles.graphLegend}>
@@ -1948,8 +1957,8 @@ const styles = StyleSheet.create({
     borderColor: '#ffffff26',
   },
   graphScale: { position: 'absolute', top: 2, left: 2, color: '#ffffff80', fontSize: 9 },
-  graphSlot: { flex: 1, height: '100%', justifyContent: 'flex-end' },
-  graphBar: { backgroundColor: '#3b6fe0b0' },
+  graphSlot: { flex: 1, height: '100%', justifyContent: 'flex-end', paddingHorizontal: 0.5 },
+  graphBar: { backgroundColor: '#3b6fe0d0', borderTopLeftRadius: 1.5, borderTopRightRadius: 1.5 },
   graphMark: { position: 'absolute', left: 0, right: 0, height: 2, backgroundColor: '#fff' },
   graphLegend: { flexDirection: 'row', alignItems: 'center', marginTop: 5 },
   legendSwatch: { width: 10, height: 3, marginRight: 5 },

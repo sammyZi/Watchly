@@ -1,6 +1,6 @@
 // node --experimental-strip-types src/lib/meta.test.ts
 import assert from 'node:assert';
-import { bestMatch, reviewLinks, toEpisodes, toMeta, toTitles, topGenres, uniqueById } from './meta.ts';
+import { bestMatch, reviewLinks, sortTitles, toEpisodes, toMeta, toTitles, topGenres, uniqueById } from './meta.ts';
 
 assert.deepEqual(
   toMeta({
@@ -191,5 +191,18 @@ assert.deepEqual(
 );
 // Anything without an id cannot be keyed on, so it cannot be rendered either.
 assert.deepEqual(uniqueById([{ title: 'no id' }] as any), []);
+
+// Shelf ordering. Unknown rating or year goes last — it is unknown, not zero.
+const shelf = [
+  { title: 'Bravo', rating: '7.1', year: '2019' },
+  { title: 'Alpha', rating: null, year: null },
+  { title: 'Charlie', rating: '8.4', year: '2024' },
+] as any;
+assert.deepEqual(sortTitles(shelf, 'popular').map((t: any) => t.title), ['Bravo', 'Alpha', 'Charlie']);
+assert.deepEqual(sortTitles(shelf, 'rating').map((t: any) => t.title), ['Charlie', 'Bravo', 'Alpha']);
+assert.deepEqual(sortTitles(shelf, 'year').map((t: any) => t.title), ['Charlie', 'Bravo', 'Alpha']);
+assert.deepEqual(sortTitles(shelf, 'title').map((t: any) => t.title), ['Alpha', 'Bravo', 'Charlie']);
+// The shelf itself is never reordered in place — the grid keeps rendering the old one otherwise.
+assert.equal(shelf[0].title, 'Bravo');
 
 console.log('ok');
