@@ -492,6 +492,8 @@ export function DetailScreen({
   const [sources, setSources] = useState<Hit[] | null>(null);
   /** Which episode/title `sources` belongs to — Play ignores a stale list. */
   const [sourceKey, setSourceKey] = useState<string | null>(null);
+  /** Rows are on screen but slower indexes are still answering. */
+  const [more, setMore] = useState(false);
   /** Plot expanded. Three lines is enough to decide; the rest is on request. */
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -659,19 +661,29 @@ export function DetailScreen({
     const delay = sourceKey == null ? 0 : 280;
     const timer = setTimeout(() => {
       setError(null);
+      setMore(true);
       const t0 = Date.now();
       console.log('[releases] detail start', title.title, key);
+      // Each index answers on its own clock; show what has landed so far
+      // rather than holding the list until the slowest one gives up.
+      const partial = (hits: Hit[]) => {
+        if (mine !== searchGen.current || !hits.length) return;
+        setSources(hits);
+        setSourceKey(key);
+      };
       const wanted = picked
         ? searchEpisode(
             title.title,
             picked.season,
             picked.episode,
             ctrl.signal,
-            title.imdb
+            title.imdb,
+            partial
           )
         : searchTorrents(title.title, ctrl.signal, {
             year: title.kind === 'movie' ? title.year : null,
             imdb: title.imdb,
+            onHits: partial,
           });
       wanted
         .then((hits) => {
@@ -682,12 +694,14 @@ export function DetailScreen({
           console.log('[releases] detail done', title.title, Date.now() - t0, 'ms n=', hits.length);
           setSources(hits);
           setSourceKey(key);
+          setMore(false);
         })
         .catch((e) => {
           if (mine !== searchGen.current) return;
           console.log('[releases] detail FAIL', title.title, Date.now() - t0, 'ms', e);
           setSources([]);
           setSourceKey(key);
+          setMore(false);
           setError(String(e?.message ?? e));
         });
     }, delay);
@@ -1097,7 +1111,7 @@ export function DetailScreen({
             {!fresh
               ? 'Finding releases…'
               : shown
-                ? `${shown.length} release${shown.length === 1 ? '' : 's'}`
+                ? `${shown.length} release${shown.length === 1 ? '' : 's'}${more ? ' · finding more…' : ''}`
                 : 'Finding releases…'}
           </Text>
 

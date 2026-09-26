@@ -585,7 +585,26 @@ public sealed class StreamSession : IAsyncDisposable
     /// <summary>The one stream open right now, if any.</summary>
     public static StreamSession? Current { get; private set; }
     readonly IHttpStream http;
-    readonly bool deleteFiles;
+    bool deleteFiles;
+    /// <summary>A stopped download's unfinished copy of the watched file, deleted once the player lets go of it.</summary>
+    string? leftover;
+
+    /// <summary>
+    /// The download sharing this torrent has gone (finished or stopped): the stream owns it
+    /// again and removes it when the player closes. Files are deleted then only if they are
+    /// in the stream cache — a download folder holds what the download already saved.
+    /// </summary>
+    public void TakeBack(bool dropWatchedFile)
+    {
+        var inCache = Path.GetFullPath(Manager.SavePath)
+            .StartsWith(Path.GetFullPath(Paths.StreamCache), StringComparison.OrdinalIgnoreCase);
+        if (!inCache)
+        {
+            deleteFiles = false;
+            if (dropWatchedFile) leftover = Manager.Files[FileIndex].DownloadIncompleteFullPath;
+        }
+        Borrowed = false;
+    }
 
     StreamSession(TorrentManager manager, TorrentMeta meta, int fileIndex, IHttpStream http, bool borrowed, bool deleteFiles, WindowedRequester? window)
     {
@@ -655,7 +674,18 @@ public sealed class StreamSession : IAsyncDisposable
         window?.Watch(fileIndex);
         if (manager.State is TorrentState.Stopped or TorrentState.Paused or TorrentState.Error) await manager.StartAsync();
         if (!borrowed) _ = CreateSparseWhenDownloading(manager, file);
-        var http = await manager.StreamProvider!.CreateHttpStreamAsync(file, false, ct);
+        IHttpStream http;
+        try
+        {
+            http = await manager.StreamProvider!.CreateHttpStreamAsync(file, false, ct);
+        }
+        catch when (!borrowed)
+        {
+            // Left (or failed) before a session existed to own the torrent: nothing
+            // else would ever remove it, and it would download its window until exit.
+            await engine.Remove(manager, deleteFilesAfter);
+            throw;
+        }
         Log.Stream($"Streaming HTTP ready at {http.FullUri} for '{file.Path}'");
         return Current = new StreamSession(manager, meta, fileIndex, http, borrowed, deleteFilesAfter, window);
     }
@@ -762,6 +792,7 @@ public sealed class StreamSession : IAsyncDisposable
         if (Current == this) Current = null;
         try { http.Dispose(); } catch { }
         if (!Borrowed) await TorrentEngine.Instance.Remove(Manager, deleteFiles);
+        if (leftover is not null) try { File.Delete(leftover); } catch { }
     }
 }
 

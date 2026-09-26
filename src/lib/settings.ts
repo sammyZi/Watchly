@@ -13,6 +13,11 @@ export type Settings = {
   /** Player default: fetch the whole file while streaming, or only the next few
    *  minutes past the playhead. */
   streamWholeFile: boolean;
+  /** The player's picture mode, by label ("Best fit", "Crop"…) — carried from
+   *  one video to the next, as the Windows player does. */
+  playerScale: string;
+  /** Playback speed, likewise remembered. */
+  playbackRate: number;
   /** App appearance. */
   themeMode: 'system' | 'light' | 'dark';
 };
@@ -26,6 +31,8 @@ export const DEFAULTS: Settings = {
   removeFilesAfterStop: true,
   genres: [],
   streamWholeFile: false,
+  playerScale: 'Best fit',
+  playbackRate: 1,
   themeMode: 'system',
 };
 
@@ -48,4 +55,9 @@ export async function loadSettings(): Promise<Settings> {
 export async function saveSettings(next: Settings) {
   await AsyncStorage.setItem(KEY, JSON.stringify(next));
   return next;
+}
+
+/** Change a few settings, keeping the rest as stored. */
+export async function updateSettings(patch: Partial<Settings>) {
+  return saveSettings({ ...(await loadSettings()), ...patch });
 }

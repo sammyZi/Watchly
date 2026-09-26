@@ -53,6 +53,9 @@ export function useTorrent(settings: Settings) {
 
   // Latest source, so play() uses the same (tracker-augmented) uri as inspect().
   const source = useRef<string | null>(null);
+  /** Bumped by every open and by reset, so a file list that arrives after the
+   *  viewer backed out (or picked something else) is dropped, not played. */
+  const inspectGen = useRef(0);
   const lastState = useRef<string | null>(null);
   const itemRef = useRef<Item | null>(null);
   itemRef.current = item;
@@ -116,6 +119,7 @@ export function useTorrent(settings: Settings) {
     setQueueIndices([]);
     setProgress(null);
     source.current = null;
+    inspectGen.current++;
     lastState.current = null;
     streaming.current = false;
     keepProgress.current = false;
@@ -126,6 +130,7 @@ export function useTorrent(settings: Settings) {
     async (next: Item): Promise<TorrentMeta | null> => {
       const uri = settings.addTrackers ? withTrackers(next.uri) : next.uri;
       source.current = uri;
+      const ticket = ++inspectGen.current;
 
       setError(null);
       setProgress(null);
@@ -138,10 +143,12 @@ export function useTorrent(settings: Settings) {
 
       try {
         const found = await TorrentStream.inspect(uri, 60);
+        if (ticket !== inspectGen.current) return null;
         setMeta(found);
         setPhase('choosing');
         return found;
       } catch (e: any) {
+        if (ticket !== inspectGen.current) return null;
         console.warn('[torrent] inspect failed', e?.message ?? e);
         setError(String(e?.message ?? e));
         setPhase('idle');
@@ -259,6 +266,7 @@ export function useTorrent(settings: Settings) {
     ) => {
       const uri = settings.addTrackers ? withTrackers(next.uri) : next.uri;
       source.current = uri;
+      inspectGen.current++;
       setError(null);
       setItem(next);
       if (next.torrentName && next.files) {

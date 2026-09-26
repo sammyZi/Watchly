@@ -8,9 +8,11 @@ import { onList, type List, type Saved } from '../lib/saved';
 import {
   episodeTag,
   health,
+  quickest,
   searchEpisode,
   searchTorrents,
   type Hit,
+  type OnHits,
 } from '../lib/search';
 import { bytes } from '../lib/format';
 import {
@@ -37,6 +39,10 @@ const QUALITY_ORDER = ['4K', '1080p', '720p', 'CAM'];
 
 /** Episodes revealed at a time. See `shownEpisodes`. */
 const EPISODE_PAGE = 10;
+
+/** Releases listed under a title. Every index is asked now, so a page can
+ *  hold a hundred; past forty it is D-pad scrolling nobody finishes. */
+const MAX_SOURCES = 40;
 
 const qualityRank = (q: string) => {
   const i = QUALITY_ORDER.indexOf(q);
@@ -67,7 +73,7 @@ const SCOPE_LABEL: Record<Hit['scope'], string> = {
   complete: 'Complete series',
 };
 
-function Source({
+export function Source({
   hit,
   onPress,
   first,
@@ -313,24 +319,30 @@ export function DetailScreen({
   const findSources = useCallback(
     async (ep?: Episode) => {
       const ticket = ++wanted.current;
+      const mine = () => ticket === wanted.current;
       setBusy(true);
       setHits(null);
       setQuality(null);
       setEpisode(ep ?? null);
-      try {
-        const found = ep
-          ? await searchEpisode(title.title, ep.season, ep.episode, undefined, title.imdb)
-          : await searchTorrents(title.title, undefined, {
+      // Rows are shown as each index answers. `busy` lasts until the last one
+      // has, while the value returned here — what a Play press acts on — comes
+      // as soon as there is something worth playing (see quickest).
+      const search = (onHits: OnHits) =>
+        (ep
+          ? searchEpisode(title.title, ep.season, ep.episode, undefined, title.imdb, onHits)
+          : searchTorrents(title.title, undefined, {
               imdb: title.imdb,
               year: title.year,
-            });
-        if (ticket === wanted.current) setHits(found);
-        return ticket === wanted.current ? found : null;
+              onHits,
+            })
+        ).finally(() => mine() && setBusy(false));
+      try {
+        const found = await quickest(search, (partial) => mine() && setHits(partial));
+        if (mine()) setHits(found);
+        return mine() ? found : null;
       } catch {
-        if (ticket === wanted.current) setHits([]);
+        if (mine()) setHits([]);
         return null;
-      } finally {
-        if (ticket === wanted.current) setBusy(false);
       }
     },
     [title]
@@ -348,7 +360,9 @@ export function DetailScreen({
   const playEpisode = useCallback(
     async (ep: Episode) => {
       // Already looked this one up — no reason to ask the indexes twice.
-      const ready = episode?.id === ep.id && !busy ? shown : null;
+      // Rows already on screen for this episode are enough, even while slower
+      // indexes are still adding to them.
+      const ready = episode?.id === ep.id && shown.length ? shown : null;
       const found = ready?.length ? ready : await findSources(ep);
       const best = found?.[0];
       if (best) onStream(best, title, episodeTag(ep.season, ep.episode), ep);
@@ -419,7 +433,7 @@ export function DetailScreen({
               first
               icon="play"
               variant="solid"
-              label={busy ? 'Finding sources' : shown.length ? 'Play' : 'No sources'}
+              label={shown.length ? 'Play' : busy ? 'Finding sources' : 'No sources'}
               onPress={() => {
                 if (shown.length) onStream(shown[0], title);
               }}
@@ -434,7 +448,7 @@ export function DetailScreen({
               icon="play"
               variant="solid"
               label={
-                busy && episode?.id === upNext.id
+                busy && episode?.id === upNext.id && !shown.length
                   ? 'Finding sources'
                   : `Play ${episodeTag(upNext.season, upNext.episode)}`
               }
@@ -566,7 +580,7 @@ export function DetailScreen({
         >
           {episode ? `Sources for ${episodeTag(episode.season, episode.episode)}` : 'Sources'}
         </Text>
-        {!busy && qualities.length > 1 && (
+        {qualities.length > 1 && (
           <View style={[styles.chips, { marginBottom: space.md }]}>
             {[null, ...qualities].map((q) => {
               const on = q === quality;
@@ -594,7 +608,12 @@ export function DetailScreen({
             })}
           </View>
         )}
-        {busy && <ActivityIndicator color={colors.accent} size="large" />}
+        {busy && !shown.length && <ActivityIndicator color={colors.accent} size="large" />}
+        {busy && !!shown.length && (
+          <Text style={styles.note}>
+            {shown.length} so far · finding more…
+          </Text>
+        )}
         {!busy && hits?.length === 0 && (
           <Text style={styles.note}>
             Nothing found. Try another episode, or search for the release by name.
@@ -603,7 +622,7 @@ export function DetailScreen({
         {!busy && !hits && title.kind === 'tv' && (
           <Text style={styles.note}>Choose an episode to see what is available.</Text>
         )}
-        {shown.slice(0, 12).map((hit, i) => (
+        {shown.slice(0, MAX_SOURCES).map((hit, i) => (
           <Source
             key={hit.id}
             hit={hit}

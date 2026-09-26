@@ -1,6 +1,6 @@
 // node --experimental-strip-types src/lib/search.test.ts
 import assert from 'node:assert';
-import { aliasOf, episodeTag, merge, namesTitle, parseEpisode, parseAbsolute, releaseTitle, sameTitle, seasonsIn, health, kindOf, quality, rank, rankEpisode, scopeOf, toCsvHits, toEztvHits, toHits, toTorrentioHits, toYtsHits, type Hit } from './search.ts';
+import { aliasOf, episodeTag, merge, namesTitle, parseEpisode, parseAbsolute, releaseTitle, sameTitle, seasonsIn, health, kindOf, quality, rank, rankEpisode, scopeOf, toCsvHits, toEztvHits, toHits, toKnabenHits, toNyaaHits, toTorrentioHits, toYtsHits, type Hit } from './search.ts';
 
 const row = (over: Record<string, string | number> = {}) => ({
   id: '1',
@@ -315,3 +315,44 @@ assert.equal(parseAbsolute('[yibis]_One_Piece_588_[720p].mkv'), 588);
 assert.equal(parseAbsolute('Ted.Lasso.S01E02.1080p.mkv'), null);
 assert.equal(parseAbsolute('Some Film 2024 [1080p].mkv'), null);
 assert.equal(parseAbsolute('Stranger Things Season 12 [1080p].mkv'), null);
+
+// Knaben: video rows only, our own magnet, its byte and peer fields.
+const knaben = toKnabenHits([
+  {
+    title: 'The Matrix (1999) 1080p BrRip x264 - 1.85GB - YIFY',
+    hash: 'D7A46713EAEE18C746B3254B7D1492A50FD9D6CE',
+    category: 'Movies / HD',
+    bytes: 1997159792,
+    seeders: 756,
+    peers: 143,
+  },
+  { title: 'Breaking Bad S01E01 720p', hash: 'a'.repeat(40), category: 'TV / HD', seeders: 5 },
+  { title: 'Interstellar OST FLAC', hash: 'b'.repeat(40), category: 'Audio / Lossless', seeders: 90 },
+  { title: 'No hash', hash: null, category: 'Movies / HD', seeders: 90 },
+]);
+assert.equal(knaben.length, 2);
+assert.equal(knaben[0].id, 'd7a46713eaee18c746b3254b7d1492a50fd9d6ce');
+assert.equal(knaben[0].seeders, 756);
+assert.equal(knaben[0].leechers, 143);
+assert.equal(knaben[0].size, 1997159792);
+assert.equal(knaben[0].kind, 'movie');
+assert.equal(knaben[1].kind, 'tv');
+assert.ok(knaben[0].magnet.startsWith('magnet:?xt=urn:btih:d7a46713'));
+
+// Nyaa's RSS, entities and all.
+const nyaa = toNyaaHits(`<rss><channel>
+  <item>
+    <title>[Judas] One Piece - 1179 [1080p][HEVC x265 10bit][Multi-Subs] &amp; more</title>
+    <nyaa:seeders>198</nyaa:seeders>
+    <nyaa:leechers>2</nyaa:leechers>
+    <nyaa:infoHash>27e22f8b7acf8804c3c6909dc5cb321b8d2700a3</nyaa:infoHash>
+    <nyaa:size>389.7 MiB</nyaa:size>
+  </item>
+  <item><title>broken</title><nyaa:infoHash>nothex</nyaa:infoHash></item>
+</channel></rss>`);
+assert.equal(nyaa.length, 1);
+assert.equal(nyaa[0].name, '[Judas] One Piece - 1179 [1080p][HEVC x265 10bit][Multi-Subs] & more');
+assert.equal(nyaa[0].seeders, 198);
+assert.equal(nyaa[0].leechers, 2);
+assert.equal(nyaa[0].size, Math.round(389.7 * 1024 ** 2));
+assert.equal(nyaa[0].quality, '1080p');

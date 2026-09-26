@@ -96,6 +96,8 @@ public sealed class PlayerView : UserControl, IDisposable
     DateTime lastMovedAt = DateTime.UtcNow;
     DateTime seekAt = DateTime.MinValue;
     int reloads;
+    /// <summary>Where the last recovery restarted, in ms — five seconds past it counts as going again.</summary>
+    long reloadFrom;
     int scaleIdx;
     double rate = 1;
     bool picking;
@@ -277,7 +279,7 @@ public sealed class PlayerView : UserControl, IDisposable
             // Between asking for a seek and it landing this still reports the old spot.
             if ((DateTime.UtcNow - seekAt).TotalMilliseconds < 1200) return;
             current = e.Time;
-            if (current > 5000) reloads = 0;
+            if (current > reloadFrom + 5000) reloads = 0;
             UpdateClock();
         });
         p.EndReached += (_, _) => On(OnEnded);
@@ -636,6 +638,7 @@ public sealed class PlayerView : UserControl, IDisposable
                 return;
             }
             reloads++;
+            reloadFrom = current;
             Warn("Stream dropped — picking it back up");
             var at = current / 1000.0;
             var url = media.Mrl;

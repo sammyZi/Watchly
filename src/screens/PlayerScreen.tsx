@@ -36,7 +36,7 @@ import TorrentStream, { type Progress } from '../../modules/torrent-stream';
 import { Icon, type IconName } from '../components/Icon';
 import { Marquee } from '../components/Marquee';
 import { bytes, clock, speed } from '../lib/format';
-import { loadSettings, saveSettings } from '../lib/settings';
+import { loadSettings, updateSettings } from '../lib/settings';
 import { searchSubtitles, type Sub } from '../lib/subdl';
 import { parseEpisode } from '../lib/search';
 import { searchableName } from '../lib/title';
@@ -178,7 +178,13 @@ export function PlayerScreen({
    */
   const [wholeFile, setWholeFile] = useState(false);
   useEffect(() => {
-    loadSettings().then((s) => setWholeFile(s.streamWholeFile));
+    // Picture mode and speed carry over from the last video too, as on Windows.
+    loadSettings().then((s) => {
+      setWholeFile(s.streamWholeFile);
+      const scale = SCALES.findIndex((m) => m.label === s.playerScale);
+      if (scale >= 0) setScaleIdx(scale);
+      if (RATES.includes(s.playbackRate)) setRate(s.playbackRate);
+    });
   }, []);
   const firstMode = useRef(true);
   useEffect(() => {
@@ -193,7 +199,7 @@ export function PlayerScreen({
       icon: wholeFile ? 'hard-drive' : 'clock',
       label: wholeFile ? 'Downloading the whole file' : 'Downloading the next 5 minutes',
     });
-    loadSettings().then((s) => saveSettings({ ...s, streamWholeFile: wholeFile }));
+    updateSettings({ streamWholeFile: wholeFile });
   }, [wholeFile, fileIndex]);
   /** The stats panel, and what it shows: libVLC's figures, and two minutes of
    *  download speed against the video's own bitrate (Mb/s, one a second). */
@@ -252,6 +258,9 @@ export function PlayerScreen({
   /** Consecutive recoveries from a dropped stream, so a genuinely dead source
    *  cannot put the player in a reload loop. Reset once playback gets going. */
   const reloads = useRef(0);
+  /** Where the last recovery restarted — playing on from there is what counts
+   *  as "going", not an absolute clock that is past five seconds all film. */
+  const reloadFrom = useRef(0);
   /** Whether the app has been away since playback last ran. */
   const left = useRef(false);
   const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -663,6 +672,7 @@ export function PlayerScreen({
     const next = (scaleIdx + 1) % SCALES.length;
     setScaleIdx(next);
     showHud({ icon: 'maximize', label: SCALES[next].label });
+    updateSettings({ playerScale: SCALES[next].label });
     bumpUi();
   }, [scaleIdx, showHud, bumpUi]);
 
@@ -729,6 +739,27 @@ export function PlayerScreen({
     const sub = TorrentStream.addListener('progress', setStats);
     return () => sub.remove();
   }, [showUi, buffering, stalled, showInfo]);
+
+  /**
+   * What is already on disk, shaded on the seek bar as the Windows player does
+   * — so a seek into a filled stretch is known to be instant. Read only while
+   * the bar is on screen, and never for a file that is already local.
+   */
+  const [spans, setSpans] = useState<[number, number][]>([]);
+  useEffect(() => {
+    if (!showUi || fileIndex < 0 || !url) return;
+    let live = true;
+    const read = () =>
+      TorrentStream.downloadedSpans()
+        .then((s) => live && setSpans(s))
+        .catch(() => {});
+    read();
+    const id = setInterval(read, 1000);
+    return () => {
+      live = false;
+      clearInterval(id);
+    };
+  }, [showUi, fileIndex, url]);
 
   // The panel's once-a-second read of libVLC, only while it is open.
   const statsRef = useRef<Progress | null>(null);
@@ -897,7 +928,7 @@ export function PlayerScreen({
               if (showUi || ending) setCurrent(currentTime);
 
               // Playing steadily again — allow the drop recovery to arm afresh.
-              if (currentTime > 5) reloads.current = 0;
+              if (currentTime > reloadFrom.current + 5) reloads.current = 0;
 
             }}
             onLoaded={({ nativeEvent: { duration: d } }) => {
@@ -933,6 +964,7 @@ export function PlayerScreen({
                   return;
                 }
                 reloads.current += 1;
+                reloadFrom.current = at;
                 warn('Stream dropped — picking it back up');
                 videoRef.current?.reload(at);
                 return;
@@ -1124,6 +1156,7 @@ export function PlayerScreen({
                     <Text style={styles.time}>{clock(current)}</Text>
                     <SeekBar
                       value={duration ? current / duration : 0}
+                      spans={spans}
                       onScrub={scrubTo}
                       onSeek={(ratio) => {
                         seekTo(ratio * duration);
@@ -1182,7 +1215,9 @@ export function PlayerScreen({
                       label="Speed"
                       on={rate !== 1}
                       onPress={() => {
-                        setRate((r) => RATES[(RATES.indexOf(r) + 1) % RATES.length]);
+                        const next = RATES[(RATES.indexOf(rate) + 1) % RATES.length];
+                        setRate(next);
+                        updateSettings({ playbackRate: next });
                         bumpUi();
                       }}
                     />
@@ -1743,10 +1778,13 @@ function friendlySubName(
  */
 function SeekBar({
   value,
+  spans,
   onScrub,
   onSeek,
 }: {
   value: number;
+  /** Downloaded stretches, [from, to] as fractions of the file. */
+  spans: [number, number][];
   onScrub: (ratio: number) => void;
   onSeek: (ratio: number) => void;
 }) {
@@ -1782,6 +1820,12 @@ function SeekBar({
     >
       {/* Padded hit area: a 3px bar is impossible to grab on a phone. */}
       <View style={styles.track}>
+        {spans.map(([from, to]) => (
+          <View
+            key={from}
+            style={[styles.have, { left: `${from * 100}%`, width: `${(to - from) * 100}%` }]}
+          />
+        ))}
         <View style={[styles.fill, { width: `${pct * 100}%` }]} />
       </View>
       <View style={[styles.knob, { left: `${pct * 100}%` }]} />
@@ -2042,6 +2086,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   fill: { height: 3, borderRadius: 2, backgroundColor: '#3b6fe0' },
+  /** Downloaded, not yet played: brighter than the empty track, under the fill. */
+  have: { position: 'absolute', top: 0, height: 3, backgroundColor: '#ffffff90' },
   knob: {
     position: 'absolute',
     width: 12,

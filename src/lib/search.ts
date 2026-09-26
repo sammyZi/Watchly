@@ -21,8 +21,22 @@ const TORRENTIO = 'https://torrentio.strem.fun/stream';
 const YTS = 'https://yts.mx/api/v2/list_movies.json';
 /** Fast series index, keyed by IMDb id. */
 const EZTV = 'https://eztv.tf/api/get-torrents';
-/** YTS / EZTV / Torrentio should answer quickly or we move on. */
-const FAST_MS = 2000;
+/**
+ * An aggregator that answers for The Pirate Bay, 1337x, RuTracker, YTS, Nyaa
+ * and more through its own mirrors — which is what makes it the way round an
+ * ISP that blocks apibay or yts.mx by name. Most of a page's rows come from here.
+ */
+const KNABEN = 'https://api.knaben.org/v1';
+/** Anime, which the general indexes carry little of. */
+const NYAA = 'https://nyaa.si/';
+/**
+ * How long any one index gets. Every source runs at once and its rows are
+ * shown the moment they land, so a slow one only delays itself, not the page.
+ */
+const SOURCE_MS = 8000;
+/** Knaben takes anywhere from 4s to 20s depending on its load, and carries the
+ *  most rows, so it gets the longest wait `net` allows. Its rows just land late. */
+const KNABEN_MS = 15000;
 
 export type Kind = 'movie' | 'tv' | 'other';
 
@@ -370,6 +384,72 @@ export function toCsvHits(rows: Record<string, any>[]): Hit[] {
     .filter((h) => !!h.name);
 }
 
+/** Knaben mixes in music, books and games; only these are something to watch. */
+const WATCHABLE = /^(tv|movies|anime)\b/i;
+
+export function toKnabenHits(rows: Record<string, any>[]): Hit[] {
+  return (rows ?? [])
+    .filter(
+      (r) =>
+        /^[0-9a-f]{40}$/i.test(String(r?.hash ?? '')) &&
+        WATCHABLE.test(String(r.category ?? ''))
+    )
+    .map((r) => {
+      const name = String(r.title ?? '');
+      const hash = String(r.hash).toLowerCase();
+      return {
+        id: hash,
+        name,
+        // Our own magnet, not theirs: it carries the working tracker list, and
+        // Knaben's still points at RARBG trackers that died years ago.
+        magnet: withTrackers(`magnet:?xt=urn:btih:${hash}&dn=${encodeURIComponent(name)}`),
+        seeders: Number(r.seeders ?? 0),
+        leechers: Number(r.peers ?? 0),
+        size: Number(r.bytes ?? 0),
+        quality: quality(name),
+        scope: scopeOf(name),
+        kind: (/^movies/i.test(String(r.category)) ? 'movie' : 'tv') as Kind,
+        imdb: null,
+      };
+    })
+    .filter((h) => !!h.name);
+}
+
+const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+const unescapeXml = (s: string) =>
+  s.replace(/&(#\d+|[a-z]+);/gi, (whole, code: string) =>
+    code[0] === '#' ? String.fromCharCode(Number(code.slice(1))) : ENTITIES[code] ?? whole
+  );
+
+/** Nyaa writes sizes as "389.7 MiB". */
+const NYAA_SIZE = /([\d.]+)\s*([KMGT])i?B/i;
+
+/** Nyaa's RSS feed — plain enough to read with a pattern, no XML parser needed. */
+export function toNyaaHits(xml: string): Hit[] {
+  const out: Hit[] = [];
+  for (const [, item] of String(xml ?? '').matchAll(/<item>([\s\S]*?)<\/item>/g)) {
+    const field = (tag: string) =>
+      new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`).exec(item)?.[1]?.trim() ?? '';
+    const hash = field('nyaa:infoHash').toLowerCase();
+    const name = unescapeXml(field('title'));
+    if (!/^[0-9a-f]{40}$/.test(hash) || !name) continue;
+    const size = NYAA_SIZE.exec(field('nyaa:size'));
+    out.push({
+      id: hash,
+      name,
+      magnet: withTrackers(`magnet:?xt=urn:btih:${hash}&dn=${encodeURIComponent(name)}`),
+      seeders: Number(field('nyaa:seeders') || 0),
+      leechers: Number(field('nyaa:leechers') || 0),
+      size: size ? Math.round(Number(size[1]) * (UNIT[`${size[2].toLowerCase()}b`] ?? 0)) : 0,
+      quality: quality(name),
+      scope: scopeOf(name),
+      kind: 'tv',
+      imdb: null,
+    });
+  }
+  return out;
+}
+
 /** Same torrent from two indexes is one row — keep whichever knew more. */
 export function merge(lists: Hit[][]): Hit[] {
   const best = new Map<string, Hit>();
@@ -423,15 +503,43 @@ async function fromCsv(query: string, signal?: AbortSignal): Promise<Hit[]> {
   return toCsvHits(body?.torrents ?? body ?? []);
 }
 
-/** apibay first; torrents-csv when the host is blocked. */
-async function fromBay(query: string, signal?: AbortSignal): Promise<Hit[]> {
-  const hits = await limited(
-    get(`${API}?q=${encodeURIComponent(query)}&cat=200`, signal).then(toHits),
-    1200,
-    [] as Hit[]
+async function fromApibay(query: string, signal?: AbortSignal): Promise<Hit[]> {
+  return toHits(await get(`${API}?q=${encodeURIComponent(query)}&cat=200`, signal));
+}
+
+async function fromKnaben(query: string, signal?: AbortSignal): Promise<Hit[]> {
+  const res = await net(
+    KNABEN,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        search_type: '100%',
+        search_field: 'title',
+        query,
+        order_by: 'seeders',
+        order_direction: 'desc',
+        size: 100,
+        hide_unsafe: true,
+        hide_xxx: true,
+      }),
+      signal,
+    },
+    true
   );
-  if (hits.length || signal?.aborted) return hits;
-  return limited(fromCsv(query, signal), 2000, [] as Hit[]);
+  if (!res.ok) throw new Error(`Knaben returned ${res.status}`);
+  return toKnabenHits((await res.json())?.hits ?? []);
+}
+
+async function fromNyaa(query: string, signal?: AbortSignal): Promise<Hit[]> {
+  // c=1_0 is all of Anime; the rest of Nyaa is music and manga.
+  const res = await net(
+    `${NYAA}?page=rss&c=1_0&f=0&q=${encodeURIComponent(query)}`,
+    { signal },
+    true
+  );
+  if (!res.ok) throw new Error(`Nyaa returned ${res.status}`);
+  return toNyaaHits(await res.text());
 }
 
 function limited<T>(job: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -461,20 +569,6 @@ async function timed<T>(name: string, job: Promise<T>): Promise<T> {
     console.log(`[releases] ${name} ${Date.now() - t}ms FAIL ${String(e)}`);
     throw e;
   }
-}
-
-/** First source that actually has rows — the rest can still log when they finish. */
-function firstHits(jobs: Promise<Hit[]>[]): Promise<Hit[]> {
-  return new Promise((resolve) => {
-    let left = jobs.length;
-    if (!left) return resolve([]);
-    for (const job of jobs) {
-      job.then(
-        (hits) => (hits.length ? resolve(hits) : --left === 0 && resolve([])),
-        () => --left === 0 && resolve([])
-      );
-    }
-  });
 }
 
 async function fromYts(query: string, signal?: AbortSignal): Promise<Hit[]> {
@@ -591,58 +685,130 @@ export function sameTitle(release: string, title: string): boolean {
   return got.slice(want.length).every((w) => w.length <= 2);
 }
 
+/** Called with the whole list so far, every time another index answers. */
+export type OnHits = (hits: Hit[]) => void;
+
+/** After the first rows land, how long a Play press waits for better ones. */
+const PLAY_GRACE_MS = 2000;
+
+/**
+ * A search's answer as soon as it is good enough to act on.
+ *
+ * A Play button wants the best release, not the complete list, and waiting out
+ * the slowest index (Knaben can take fifteen seconds) for rows nobody reads is
+ * dead time. This settles `PLAY_GRACE_MS` after the first rows arrive, or when
+ * the search finishes if that is sooner. `onHits` keeps hearing every update
+ * either way, so a list on screen goes on filling.
+ */
+export function quickest(
+  run: (onHits: OnHits) => Promise<Hit[]>,
+  onHits?: OnHits
+): Promise<Hit[]> {
+  return new Promise((resolve, reject) => {
+    let latest: Hit[] = [];
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    run((hits) => {
+      latest = hits;
+      onHits?.(hits);
+      if (hits.length) timer ??= setTimeout(() => resolve(latest), PLAY_GRACE_MS);
+    }).then(
+      (hits) => {
+        clearTimeout(timer);
+        resolve(hits);
+      },
+      (e) => {
+        clearTimeout(timer);
+        if (latest.length) resolve(latest);
+        else reject(e);
+      }
+    );
+  });
+}
+
 /**
  * Search public indexes for video torrents.
  *
  * `suffix` is appended to every name variant — an episode tag, or "complete".
- * The title is asked for under both its own name and its alias. apibay is
- * tried first — it indexes the widest spread of releases, and its rows carry
- * real seeder counts rather than a scraped display string. YTS and Torrentio
- * only run when it comes up empty, which covers the ISPs that block it.
- * One source being unreachable is the normal case rather than the exception,
- * and half a list beats an error message.
+ * The title is asked for under both its own name and its alias.
+ *
+ * Every index is asked at once, and `onHits` hears the merged, ranked list
+ * each time one of them answers — so the page fills as results land rather
+ * than waiting on the slowest. Asking them one after another, and only moving
+ * on when the first came back empty, is what left a page with five releases:
+ * apibay answering with a handful meant nobody else was ever asked. One source
+ * being unreachable is the normal case rather than the exception, and half a
+ * list beats an error message.
  */
 export async function searchTorrents(
   title: string,
   signal?: AbortSignal,
-  opts?: { imdb?: string | null; year?: string | null; suffix?: string }
+  opts?: {
+    imdb?: string | null;
+    year?: string | null;
+    suffix?: string;
+    /** A series: skip the film-only indexes. */
+    series?: boolean;
+    onHits?: OnHits;
+  }
 ): Promise<Hit[]> {
   const year = opts?.year ?? null;
   const tail = [opts?.suffix, year].filter(Boolean).join(' ');
   const full = [title, tail].filter(Boolean).join(' ');
   const alias = aliasOf(title);
-
-  const bay = (q: string) => fromBay(q, signal);
+  const aliasQuery = alias ? [alias, tail].filter(Boolean).join(' ') : null;
 
   const t0 = Date.now();
   console.log(`[releases] torrents start "${full}" imdb=${opts?.imdb ?? '-'}`);
 
   const bags: Hit[][] = [];
-  const [primary, aliased] = await Promise.all([
-    timed('apibay', bay(full)),
-    alias
-      ? timed('apibay-alias', bay([alias, tail].filter(Boolean).join(' ')))
-      : Promise.resolve([] as Hit[]),
-  ]);
+  const add = (hits: Hit[]) => {
+    if (!hits.length || signal?.aborted) return;
+    bags.push(hits);
+    opts?.onHits?.(settle(bags, full, title, alias, opts?.imdb));
+  };
   // The alias is a looser question — "Dune 2021" also matches Dune Prophecy's
   // 2021 rips — so its answers have to carry the year to count. The primary
   // query named the film outright and needs no such proof.
-  bags.push(primary, year ? aliased.filter((h) => h.name.includes(year)) : aliased);
+  const addAliased = (hits: Hit[]) =>
+    add(year ? hits.filter((h) => h.name.includes(year)) : hits);
+  const source = (name: string, job: Promise<Hit[]>, ms = SOURCE_MS) =>
+    timed(name, limited(job, ms, [] as Hit[]));
 
-  if (!bags.some((h) => h.length) && !opts?.suffix) {
-    console.log('[releases] torrents fallback yts/torrentio');
-    const fast = await firstHits([
-      timed('yts', limited(fromYts(opts?.imdb ?? full, signal), FAST_MS, [] as Hit[])),
-      opts?.imdb
-        ? timed(
-            'torrentio',
-            fromTorrentio(`movie/${opts.imdb}`, 'movie', signal).catch(() => [] as Hit[])
-          )
-        : Promise.resolve([] as Hit[]),
-    ]);
-    if (fast.length) bags.push(fast);
+  const jobs: Promise<void>[] = [
+    source('apibay', fromApibay(full, signal)).then(add),
+    source('csv', fromCsv(full, signal)).then(add),
+    source('knaben', fromKnaben(full, signal), KNABEN_MS).then(add),
+    source('nyaa', fromNyaa(full, signal)).then(add),
+  ];
+  if (aliasQuery) {
+    jobs.push(
+      source('apibay-alias', fromApibay(aliasQuery, signal)).then(addAliased),
+      source('knaben-alias', fromKnaben(aliasQuery, signal), KNABEN_MS).then(addAliased)
+    );
   }
+  if (!opts?.suffix && !opts?.series) {
+    jobs.push(source('yts', fromYts(opts?.imdb ?? full, signal)).then(add));
+    if (opts?.imdb) {
+      jobs.push(
+        source('torrentio', fromTorrentio(`movie/${opts.imdb}`, 'movie', signal)).then(add)
+      );
+    }
+  }
+  await Promise.all(jobs);
 
+  const out = settle(bags, full, title, alias, opts?.imdb);
+  console.log(`[releases] torrents done ${Date.now() - t0}ms n=${out.length}`);
+  return out;
+}
+
+/** Everything the indexes said so far, as one ranked, on-topic list. */
+function settle(
+  bags: Hit[][],
+  full: string,
+  title: string,
+  alias: string | null,
+  imdb?: string | null
+): Hit[] {
   /**
    * A row that names a different title is a different show, not a near miss.
    *
@@ -653,8 +819,8 @@ export async function searchTorrents(
    * simply wrong. Rows carrying no id are left to the name test below — most
    * releases have none, and dropping them would empty the page.
    */
-  const merged = opts?.imdb
-    ? merge(bags).filter((h) => !h.imdb || h.imdb === opts.imdb)
+  const merged = imdb
+    ? merge(bags).filter((h) => !h.imdb || h.imdb === imdb)
     : merge(bags);
 
   const found = rank(merged, full);
@@ -670,9 +836,7 @@ export async function searchTorrents(
    */
   const exact = found.filter((h) => sameTitle(h.name, alias ?? title));
   const named = found.filter((h) => namesTitle(h.name, alias ?? title));
-  const out = exact.length ? exact : named.length ? named : found;
-  console.log(`[releases] torrents done ${Date.now() - t0}ms n=${out.length}`);
-  return out;
+  return exact.length ? exact : named.length ? named : found;
 }
 
 /**
@@ -688,13 +852,16 @@ export async function searchEpisode(
   season: number,
   episode: number,
   signal?: AbortSignal,
-  imdb?: string | null
+  imdb?: string | null,
+  /** Only the call that starts a search hears its partial lists — a repeat
+   *  gets the memoised final answer. */
+  onHits?: OnHits
 ): Promise<Hit[]> {
   const key = `${imdb ?? show}:${season}:${episode}`;
   const cached = episodeMemo.get(key);
   if (cached) return cached;
 
-  const pending = findEpisode(show, season, episode, signal, imdb).then(
+  const pending = findEpisode(show, season, episode, signal, imdb, onHits).then(
     (hits) => {
       if (!hits.length) episodeMemo.delete(key);
       return hits;
@@ -713,7 +880,8 @@ async function findEpisode(
   season: number,
   episode: number,
   signal?: AbortSignal,
-  imdb?: string | null
+  imdb?: string | null,
+  onHits?: OnHits
 ): Promise<Hit[]> {
   const plays = (h: Hit) => {
     const ep = parseEpisode(h.name);
@@ -735,46 +903,57 @@ async function findEpisode(
   // `imdb` matters most on the unsuffixed pack query: "House" on its own is a
   // substring of half the catalogue, and the id is what tells the show apart
   // from the ones merely containing its name.
-  const [loose, packs] = await Promise.all([
-    searchTorrents(show, signal, { suffix: tag, imdb }).catch(() => [] as Hit[]),
-    searchTorrents(show, signal, { imdb }).catch(() => [] as Hit[]),
-  ]);
-  const bayHits = rankEpisode(merge([loose, packs]).filter(plays), show, season);
-  if (bayHits.length) {
-    console.log(`[releases] episode done ${Date.now() - t0}ms n=${bayHits.length} bay`);
-    return bayHits;
+  //
+  // Torrentio and EZTV are keyed by IMDb id and run alongside rather than as a
+  // fallback: they reach releases the name search never finds.
+  let loose: Hit[] = [];
+  let packs: Hit[] = [];
+  let byId: Hit[] = [];
+  const current = () => rankEpisode(merge([loose, packs, byId]).filter(plays), show, season);
+  const emit = () => {
+    if (!signal?.aborted) onHits?.(current());
+  };
+  const addById = (hits: Hit[]) => {
+    if (!hits.length) return;
+    byId = merge([byId, hits]);
+    emit();
+  };
+
+  const jobs: Promise<unknown>[] = [
+    searchTorrents(show, signal, {
+      suffix: tag,
+      imdb,
+      onHits: (hits) => {
+        loose = hits;
+        emit();
+      },
+    }).then((hits) => (loose = hits), () => {}),
+    searchTorrents(show, signal, {
+      imdb,
+      series: true,
+      onHits: (hits) => {
+        packs = hits;
+        emit();
+      },
+    }).then((hits) => (packs = hits), () => {}),
+  ];
+  if (imdb) {
+    jobs.push(
+      timed(
+        'torrentio',
+        limited(
+          fromTorrentio(`series/${imdb}:${season}:${episode}`, 'tv', signal),
+          SOURCE_MS,
+          [] as Hit[]
+        )
+      ).then(addById),
+      timed('eztv', limited(eztvFor(imdb), SOURCE_MS, [] as Hit[])).then(addById)
+    );
   }
+  await Promise.all(jobs);
   if (signal?.aborted) return [];
 
-  console.log('[releases] episode fallback torrentio/eztv');
-  if (imdb) {
-    // Capped like every other index here. These two are the last thing between
-    // a press and an answer, so a slow one has to be given up on rather than
-    // waited out.
-    const tio = await timed(
-      'torrentio',
-      limited(
-        fromTorrentio(`series/${imdb}:${season}:${episode}`, 'tv', signal),
-        FAST_MS * 3,
-        [] as Hit[]
-      )
-    );
-    if (tio.length) {
-      const out = rankEpisode(merge([tio]), show, season);
-      console.log(`[releases] episode done ${Date.now() - t0}ms n=${out.length} torrentio`);
-      return out;
-    }
-    if (signal?.aborted) return [];
-    const eztv = (
-      await timed('eztv', limited(eztvFor(imdb), FAST_MS * 3, [] as Hit[]))
-    ).filter(plays);
-    if (eztv.length) {
-      const out = rankEpisode(eztv, show, season);
-      console.log(`[releases] episode done ${Date.now() - t0}ms n=${out.length} eztv`);
-      return out;
-    }
-  }
-
-  console.log(`[releases] episode done ${Date.now() - t0}ms n=0`);
-  return [];
+  const out = current();
+  console.log(`[releases] episode done ${Date.now() - t0}ms n=${out.length}`);
+  return out;
 }

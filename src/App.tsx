@@ -42,7 +42,7 @@ import { DEFAULTS, loadSettings, saveSettings, type Settings } from './lib/setti
 import { linkEpisode, loadEpisodeLinks, type EpisodeLinks } from './lib/watched';
 import { isTorrentSource } from './lib/magnet';
 import { nextEpisode, pickFile, seasonFiles } from './lib/pick';
-import { episodeTag, parseEpisode, searchEpisode } from './lib/search';
+import { episodeTag, parseEpisode, quickest, searchEpisode } from './lib/search';
 import { titleOf } from './lib/title';
 import { loadTitle, resolveTitle, type Title } from './lib/meta';
 import { isOnline, useOnline } from './lib/net';
@@ -907,12 +907,16 @@ function ShellApp({
         ? {
             name: `${episodeTag(nextEp.season, nextEp.episode)} · ${nextEp.name}`,
             go: async () => {
-              const hits = await searchEpisode(
-                detail.title,
-                nextEp.season,
-                nextEp.episode,
-                undefined,
-                detail.imdb
+              // The best release so far, not the complete list — see quickest.
+              const hits = await quickest((onHits) =>
+                searchEpisode(
+                  detail.title,
+                  nextEp.season,
+                  nextEp.episode,
+                  undefined,
+                  detail.imdb,
+                  onHits
+                )
               ).catch(() => []);
               if (!hits.length) {
                 fail(`No releases found for ${episodeTag(nextEp.season, nextEp.episode)}`);
