@@ -184,7 +184,10 @@ function SearchScreenView({
       return;
     }
     setBusy(true);
-    const found = await searchTorrents(q).catch(() => [] as Hit[]);
+    // Rows land as each index answers; the spinner stays until the last one has.
+    const found = await searchTorrents(q, undefined, {
+      onHits: (partial) => mine === latest.current && setHits(partial),
+    }).catch(() => [] as Hit[]);
     if (mine !== latest.current) return;
     setHits(found);
     setBusy(false);
@@ -341,7 +344,9 @@ function SearchScreenView({
           keyboardShouldPersistTaps="handled"
         >
           {!!hits?.length && (
-            <Text style={styles.heading}>{hits.length} releases</Text>
+            <Text style={styles.heading}>
+              {hits.length} releases{busy ? ' · finding more…' : ''}
+            </Text>
           )}
           {hits?.map((h) => (
             <Pressable

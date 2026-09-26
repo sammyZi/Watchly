@@ -429,11 +429,25 @@ public sealed class Downloads
         Persist();
         var m = row.Manager;
         if (m is null) return;
+        var watching = StreamSession.Current is { } s && s.Manager == m ? s : null;
+        // The file being watched is still open in the player; the stream deletes it when done.
         var partials = deleteIncomplete
-            ? m.Files.Where((f, i) => !row.SavedSet.Contains(i)).Select(f => f.DownloadIncompleteFullPath).ToList()
+            ? m.Files.Where((f, i) => !row.SavedSet.Contains(i) && i != watching?.FileIndex).Select(f => f.DownloadIncompleteFullPath).ToList()
             : new List<string>();
-        var watching = StreamSession.Current?.Manager == m;
-        if (!watching) await TorrentEngine.Instance.Remove(m, false);
+        if (watching is null)
+        {
+            await TorrentEngine.Instance.Remove(m, false);
+        }
+        else
+        {
+            // Nobody else would ever remove this torrent: the download skips it because it is
+            // being watched, and the stream skips it because it was borrowed. Hand it back, with
+            // only the watched file (and subtitles) still wanted.
+            for (var i = 0; i < m.Files.Count; i++)
+                if (i != watching.FileIndex && !watching.Meta.Files[i].IsSubtitle)
+                    try { await m.SetFilePriorityAsync(m.Files[i], Priority.DoNotDownload); } catch { }
+            watching.TakeBack(deleteIncomplete && !row.SavedSet.Contains(watching.FileIndex));
+        }
         foreach (var path in partials)
         {
             try { File.Delete(path); } catch { }

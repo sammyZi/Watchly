@@ -438,62 +438,6 @@ class TorrentStreamModule : Module() {
     }
 
     /**
-     * Move the finished file into app Downloads and stop the torrent.
-     * The local HTTP server must be stopped first or the file stays locked and
-     * rename/copy hangs forever on "Saving to Downloads…".
-     */
-    AsyncFunction("copyTo") { fileIndex: Int, fileName: String ->
-      log("copyTo: begin index=$fileIndex name=$fileName")
-      val ti = info ?: throw CodedException("No torrent is running")
-
-      // Drop every reader that might hold the file open.
-      server?.stop()
-      server = null
-      val h = handle
-      if (h != null && h.isValid) {
-        runCatching { h.pause() }
-        userPaused = true
-      }
-      log("copyTo: server stopped, torrent paused")
-
-      val name = fileName.ifBlank { ti.files().fileName(fileIndex) }
-      val videos = wantedFiles.filter { i ->
-        i in 0 until ti.files().numFiles() &&
-          ti.files().filePath(i).substringAfterLast('.', "").lowercase() in VIDEO
-      }.ifEmpty { listOf(fileIndex) }
-      val uris = videos.mapNotNull { i ->
-        val rel = ti.files().filePath(i)
-        val src = File(saveDir, rel)
-        val expected = ti.files().fileSize(i)
-        var waits = 0
-        while (src.length() < expected && waits < 20) {
-          Thread.sleep(200)
-          waits++
-        }
-        if (src.length() < expected * 99 / 100) {
-          log(
-            "copyTo: skip index=$i — only " +
-              "${(src.length() * 100 / expected.coerceAtLeast(1))}% on disk"
-          )
-          return@mapNotNull null
-        }
-        saveToDownloads(src, rel)
-      }
-      if (uris.isEmpty()) {
-        throw CodedException("No finished files on disk yet")
-      }
-      log("copyTo: saved ${uris.size} file(s) → ${uris.joinToString()}")
-      notifyComplete(if (uris.size == 1) name else "${uris.size} files")
-      showNotify = false
-      clearDownloadNotification()
-      forgetWanted(infoHashHex)
-      teardown()
-      wipeStreamCache()
-      log("copyTo: torn down")
-      uris
-    }
-
-    /**
      * Copy every wanted video that is complete on disk into Downloads.
      * Leaves the torrent running so later episodes can keep fetching.
      */
@@ -558,19 +502,60 @@ class TorrentStreamModule : Module() {
       null
     }
 
-    /** `file://` for a finished episode still in the torrent cache. */
+    /** `file://` for a finished episode: its Movies/Watchly copy, else the torrent cache. */
     AsyncFunction("fileUri") { index: Int, id: String ->
-      val ti = (if (id.isNotEmpty()) findDl(id)?.info else info)
+      val dl = if (id.isNotEmpty()) findDl(id) else null
+      val ti = (if (id.isNotEmpty()) dl?.info else info)
         ?: throw CodedException("No torrent is running")
+      val h = if (id.isNotEmpty()) dl?.handle else handle
       if (index !in 0 until ti.files().numFiles()) {
         throw CodedException("No file at index $index")
       }
-      val src = File(saveDir, ti.files().filePath(index))
+      val rel = ti.files().filePath(index)
       val expected = ti.files().fileSize(index)
-      if (!src.exists() || (expected > 0 && src.length() < expected * 95 / 100)) {
+      // Saved in an earlier session means the cache copy is long gone.
+      val folder = dl?.saveFolder ?: saveFolder
+      if (destComplete(rel, expected, folder, ti.name())) {
+        return@AsyncFunction "file://${downloadDest(rel, folder, ti.name()).absolutePath}"
+      }
+      // Hashed pieces, not File.length() — a sparse file is full-size from the first write.
+      val src = File(saveDir, rel)
+      if (!src.exists() || h == null || !h.isValid || !fileComplete(h, ti, index)) {
         throw CodedException("This episode is not ready to play yet")
       }
       "file://${src.absolutePath}"
+    }
+
+    /**
+     * The playing file's finished pieces, as [from, to] spans of 0–1 along it —
+     * the shaded stretches on the seek bar, as the Windows player draws them.
+     * Empty when nothing is streaming (a file already on disk has no gaps).
+     */
+    AsyncFunction("downloadedSpans") {
+      val none = emptyList<List<Double>>()
+      val ti = info ?: return@AsyncFunction none
+      val h = handle?.takeIf { it.isValid } ?: return@AsyncFunction none
+      val index = fileIndex
+      if (index < 0 || index >= ti.files().numFiles()) return@AsyncFunction none
+      val size = ti.files().fileSize(index)
+      if (size <= 0) return@AsyncFunction none
+      runCatching {
+        val first = ti.mapFile(index, 0, 1).piece()
+        val last = ti.mapFile(index, size - 1, 1).piece()
+        val count = (last - first + 1).toDouble()
+        val spans = mutableListOf<List<Double>>()
+        var start = -1
+        for (p in first..last + 1) {
+          val done = p <= last && h.havePiece(p)
+          if (done && start < 0) {
+            start = p
+          } else if (!done && start >= 0) {
+            spans.add(listOf((start - first) / count, (p - first) / count))
+            start = -1
+          }
+        }
+        spans
+      }.getOrDefault(none)
     }
 
     /** Resolve a finished download for local playback. */
@@ -596,13 +581,26 @@ class TorrentStreamModule : Module() {
     AsyncFunction("saveSubtitle") { url: String, name: String ->
       val safe = name.replace(Regex("[^A-Za-z0-9._-]"), "_").take(60).ifBlank { "sub" }
       val dir = File(cacheRoot, "subs").apply { mkdirs() }
-      val bytes = URL(url).openStream().use { it.readCapped(MAX_SUBTITLE_DOWNLOAD) }
+      // A host that accepts the connection and then goes quiet would otherwise
+      // hold the subtitle spinner forever.
+      val connection = URL(url).openConnection().apply {
+        connectTimeout = 15_000
+        readTimeout = 30_000
+      }
+      val bytes = connection.getInputStream().use { it.readCapped(MAX_SUBTITLE_DOWNLOAD) }
         ?: throw CodedException("That subtitle download is far too large to be one")
       if (bytes.size < 4) throw CodedException("Subtitle download was empty")
 
-      // "PK": a zip. Anything else is the subtitle itself.
+      // "PK": a zip. Anything else is the subtitle itself — named for what it
+      // is, since libVLC picks the parser by extension.
       if (bytes[0] != 0x50.toByte() || bytes[1] != 0x4B.toByte()) {
-        val dest = File(dir, "$safe.srt")
+        val head = String(bytes, 0, minOf(bytes.size, 512), Charsets.UTF_8).trimStart('﻿')
+        val ext = when {
+          head.startsWith("WEBVTT") -> "vtt"
+          head.contains("[Script Info]", ignoreCase = true) -> "ass"
+          else -> "srt"
+        }
+        val dest = File(dir, "$safe.$ext")
         dest.writeBytes(bytes)
         return@AsyncFunction dest.absolutePath
       }
@@ -2528,24 +2526,6 @@ class TorrentStreamModule : Module() {
     return "${secs / 3600}h ${(secs % 3600) / 60}m left"
   }
 
-  private fun notifyComplete(name: String) {
-    val ctx = appContext.reactContext ?: return
-    rememberCtx(ctx)
-    ensureNotifyChannel()
-    watchTask(false)
-    clearDownloadNotification()
-    showNotify = false
-    val notif = NotificationCompat.Builder(ctx, NOTIF_CHANNEL)
-      .setSmallIcon(android.R.drawable.stat_sys_download_done)
-      .setContentTitle("Download complete")
-      .setContentText(name)
-      .setAutoCancel(true)
-      .setTimeoutAfter(5_000)
-      .build()
-    val nm = notifyManager() ?: return
-    nm.notify(NOTIF_ID + 1, notif)
-  }
-
   private fun clearDownloadNotification() {
     val nm = notifyManager() ?: return
     nm.cancel(NOTIF_ID)
@@ -2666,46 +2646,6 @@ class TorrentStreamModule : Module() {
       applyFocus(dl)
     }
     return out
-  }
-
-  /**
-   * App Downloads folder. Rename when the torrent cache lives on the same
-   * volume (the normal case) so a 500MB+ finish is instant; copy otherwise.
-   */
-  private fun saveToDownloads(src: File, name: String): String {
-    val dest = downloadDest(name)
-    log("copyTo: dest=${dest.absolutePath}")
-    if (dest.exists()) {
-      val removed = dest.delete()
-      log("copyTo: removed existing dest=$removed")
-    }
-    dest.parentFile?.mkdirs()
-    if (src.renameTo(dest)) {
-      log("copyTo: renamed in place")
-      return "file://${dest.absolutePath}"
-    }
-    log("copyTo: rename failed — streaming copy ${src.length()}B")
-    src.inputStream().use { input ->
-      dest.outputStream().use { output ->
-        val buf = ByteArray(1024 * 256)
-        var total = 0L
-        var n: Int
-        var lastLog = 0L
-        while (input.read(buf).also { n = it } >= 0) {
-          if (n == 0) continue
-          output.write(buf, 0, n)
-          total += n
-          if (total - lastLog > 50L * 1024 * 1024) {
-            log("copyTo: copied ${total / (1024 * 1024)}MB…")
-            lastLog = total
-          }
-        }
-        output.flush()
-      }
-    }
-    val deleted = src.delete()
-    log("copyTo: copy done, srcDeleted=$deleted destLen=${dest.length()}")
-    return "file://${dest.absolutePath}"
   }
 
   private fun locateDownload(fileName: String): File? {
@@ -2871,6 +2811,13 @@ class DownloadTaskWatch : Service() {
 
   override fun onTaskRemoved(rootIntent: Intent?) {
     // Leave the download running.
+  }
+
+  /** Android 15 caps a dataSync service at six hours a day, and crashes the app
+   *  if it is still in the foreground a few seconds after this call. */
+  override fun onTimeout(startId: Int, fgsType: Int) {
+    stopForeground(STOP_FOREGROUND_REMOVE)
+    stopSelf()
   }
 
   override fun onDestroy() {

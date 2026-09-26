@@ -413,17 +413,17 @@ function Shell({
    * video — which for a film is the film.
    */
   const stream = useCallback(
-    async (hit: Hit, title: Title, tag?: string, episode?: Episode) => {
+    async (hit: Hit, title?: Title, tag?: string, episode?: Episode) => {
       const next: Item = {
         uri: hit.magnet,
         title: hit.name,
         at: Date.now(),
-        imdb: title.imdb,
-        kind: title.kind,
-        poster: title.poster ?? undefined,
-        titleName: episode
+        imdb: title?.imdb,
+        kind: title?.kind,
+        poster: title?.poster ?? undefined,
+        titleName: episode && title
           ? `${title.title} · ${episodeTag(episode.season, episode.episode)}`
-          : title.title,
+          : title?.title,
       };
       try {
         const items = await put(next);
@@ -454,7 +454,7 @@ function Shell({
         await rememberFiles(next.uri, found, index);
         const size = found.files.find((f) => f.index === index)?.size ?? 0;
         play(index, resumeRatio(fresh, index), {
-          bitrate: bitrateOf(size, fresh.durations?.[index] || runtimeSeconds(title.runtime)),
+          bitrate: bitrateOf(size, fresh.durations?.[index] || runtimeSeconds(title?.runtime)),
         });
       } catch (e: any) {
         // `stream` is fired from onPress and nobody awaits it, so a throw
@@ -676,7 +676,7 @@ function Shell({
             hidden={!!detail}
           />
         ) : tab === 'search' ? (
-          <SearchScreen onPickTitle={openTitle} />
+          <SearchScreen onPickTitle={openTitle} onPickHit={stream} />
         ) : tab === 'library' ? (
           <LibraryScreen
             history={history}

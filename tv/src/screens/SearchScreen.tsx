@@ -2,9 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, Text, TextInput, View } from 'react-native';
 import { Focusable } from '../components/Focusable';
 import { Icon } from '../components/Icon';
-import { Poster } from '../components/Ui';
+import { Poster, TvButton } from '../components/Ui';
 import { searchTitles, uniqueById, type Title } from '../lib/meta';
+import { searchTorrents, type Hit } from '../lib/search';
 import { clearSearches, loadSearches, rememberSearch } from '../lib/searches';
+import { Source } from './DetailScreen';
 import { GUTTER, SAFE, font, radius, space, type, useColors, useThemedStyles } from '../theme';
 
 /** Long enough that "th" does not fetch the whole catalogue. */
@@ -39,7 +41,14 @@ const relevance = (title: string, query: string) => {
  * get as much room as the results, and both films and series are fetched at
  * once rather than making anyone choose a category first.
  */
-export function SearchScreen({ onPickTitle }: { onPickTitle: (title: Title) => void }) {
+export function SearchScreen({
+  onPickTitle,
+  onPickHit,
+}: {
+  onPickTitle: (title: Title) => void;
+  /** A release found by name, streamed the way a title page's release is. */
+  onPickHit: (hit: Hit) => void;
+}) {
   const colors = useColors();
   const styles = useThemedStyles((c) => ({
     screen: { flex: 1, backgroundColor: c.bg },
@@ -57,6 +66,7 @@ export function SearchScreen({ onPickTitle }: { onPickTitle: (title: Title) => v
       borderColor: 'transparent',
     },
     fieldOn: { borderColor: c.focus },
+    modes: { flexDirection: 'row' as const, marginTop: space.md },
     input: { flex: 1, ...type.title, color: c.text, padding: 0 },
     section: {
       ...type.title,
@@ -80,6 +90,13 @@ export function SearchScreen({ onPickTitle }: { onPickTitle: (title: Title) => v
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Title[] | null>(null);
+  /**
+   * Searching the indexes by release name instead of the catalogue by title —
+   * for anything Cinemeta has no entry for: a concert, a niche rip, a pack
+   * named its own way.
+   */
+  const [torrents, setTorrents] = useState(false);
+  const [hits, setHits] = useState<Hit[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [recents, setRecents] = useState<string[]>([]);
   /** Whether the field holds focus — it draws its own ring, having no wrapper. */
@@ -105,6 +122,16 @@ export function SearchScreen({ onPickTitle }: { onPickTitle: (title: Title) => v
       latest.current = q;
       setBusy(true);
       try {
+        if (torrents) {
+          // Rows land as each index answers; the spinner stays until the last has.
+          const found = await searchTorrents(q, undefined, {
+            onHits: (partial) => latest.current === q && setHits(partial),
+          }).catch(() => [] as Hit[]);
+          if (latest.current !== q) return;
+          setHits(found);
+          if (opts?.remember) setRecents(await rememberSearch(q));
+          return;
+        }
         // Both catalogues at once. Asking someone with a remote to pick "film
         // or series" before they have typed anything is a screen for nothing.
         const [films, series] = await Promise.all([
@@ -126,7 +153,7 @@ export function SearchScreen({ onPickTitle }: { onPickTitle: (title: Title) => v
         if (latest.current === q) setBusy(false);
       }
     },
-    []
+    [torrents]
   );
 
   // Search as the letters arrive. The remote's keyboard is slow enough that
@@ -137,6 +164,7 @@ export function SearchScreen({ onPickTitle }: { onPickTitle: (title: Title) => v
     if (q.length < MIN_QUERY) {
       latest.current = '';
       setResults(null);
+      setHits(null);
       setBusy(false);
       return;
     }
@@ -156,6 +184,7 @@ export function SearchScreen({ onPickTitle }: { onPickTitle: (title: Title) => v
     if (was && !q.startsWith(was) && !was.startsWith(q)) {
       latest.current = '';
       setResults(null);
+      setHits(null);
     }
     const timer = setTimeout(() => run(q), DEBOUNCE_MS);
     return () => clearTimeout(timer);
@@ -181,7 +210,7 @@ export function SearchScreen({ onPickTitle }: { onPickTitle: (title: Title) => v
             onFocus={() => setTyping(true)}
             onBlur={() => setTyping(false)}
             onSubmitEditing={() => run(query, { remember: true })}
-            placeholder="Film or series"
+            placeholder={torrents ? 'Release or torrent name' : 'Film or series'}
             placeholderTextColor={colors.faint}
             returnKeyType="search"
             autoCorrect={false}
@@ -189,7 +218,23 @@ export function SearchScreen({ onPickTitle }: { onPickTitle: (title: Title) => v
           {busy && <ActivityIndicator color={colors.accent} />}
         </View>
 
-        {!!recents.length && !results && (
+        {/* One press down from the field. Flipping it re-runs whatever is in
+            the box against the other source. */}
+        <View style={styles.modes}>
+          <TvButton
+            label="Torrents"
+            icon="search"
+            variant={torrents ? 'solid' : 'ghost'}
+            onPress={() => {
+              latest.current = '';
+              setResults(null);
+              setHits(null);
+              setTorrents((on) => !on);
+            }}
+          />
+        </View>
+
+        {!!recents.length && !results && !hits && (
           <>
             <Text style={styles.section}>Recent</Text>
             <View style={styles.recents}>
@@ -229,7 +274,29 @@ export function SearchScreen({ onPickTitle }: { onPickTitle: (title: Title) => v
           </>
         )}
 
-        {!!results && (
+        {torrents && !!hits && (
+          <>
+            <Text style={styles.section}>
+              {hits.length
+                ? `${hits.length} releases for “${query.trim()}”${busy ? ' · finding more…' : ''}`
+                : busy
+                  ? 'Searching…'
+                  : `No releases for “${query.trim()}”`}
+            </Text>
+            {hits.map((hit) => (
+              <Source
+                key={hit.id}
+                hit={hit}
+                onPress={() => {
+                  rememberSearch(query).then(setRecents);
+                  onPickHit(hit);
+                }}
+              />
+            ))}
+          </>
+        )}
+
+        {!torrents && !!results && (
           <>
             <Text style={styles.section}>
               {results.length

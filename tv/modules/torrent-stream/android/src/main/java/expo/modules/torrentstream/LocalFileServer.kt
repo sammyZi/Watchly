@@ -237,6 +237,13 @@ class LocalFileServer(
     val spec = header?.substringAfter("bytes=", "")?.trim().orEmpty()
     if (spec.isEmpty()) return 0L to last
 
+    // `bytes=-N` is the last N bytes, not bytes 0..N.
+    if (spec.startsWith('-')) {
+      val n = spec.drop(1).toLongOrNull() ?: return 0L to last
+      if (n <= 0 || fileSize <= 0) return null
+      return maxOf(0L, fileSize - n) to last
+    }
+
     val requested = spec.substringBefore('-').toLongOrNull() ?: 0L
     if (requested > last) return null
 
@@ -249,7 +256,9 @@ class LocalFileServer(
   }
 }
 
-private fun String.urlEncoded() = replace(" ", "%20")
+/** Every reserved character, not just spaces — a `#` or `%` in a release name
+ *  otherwise makes a URL a Cast receiver refuses or truncates. */
+private fun String.urlEncoded() = android.net.Uri.encode(this)
 
 /** Also used to tell an external player what it is being handed. */
 internal fun contentType(name: String) = when (name.substringAfterLast('.', "").lowercase()) {

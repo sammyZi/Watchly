@@ -77,12 +77,11 @@ type TorrentStream = {
    * elsewhere.
    */
   openExternally(url: string, positionSeconds: number): Promise<void>;
-  /** Copy the currently-downloaded file to the public Downloads folder.
-   *  Returns a `file://` URI for the saved file. */
-  copyTo(fileIndex: number, fileName: string): Promise<string | string[]>;
   /** Copy finished wanted videos into Downloads without stopping the torrent. */
   saveReady(): Promise<{ index: number; name: string; uri: string; size: number; id?: string }[]>;
-  /** `file://` URI for a finished episode still in the torrent cache. */
+  /** The streaming file's finished stretches, as [from, to] fractions of it. */
+  downloadedSpans(): Promise<[number, number][]>;
+  /** `file://` URI for a finished episode — its Movies/Watchly copy, else the torrent cache. */
   fileUri(index: number, id?: string): Promise<string>;
   /** `file://` URI for a finished file in public Downloads/. */
   downloadUri(fileName: string): Promise<string>;
