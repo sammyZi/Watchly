@@ -255,11 +255,17 @@ class TorrentStreamModule : Module() {
    *  in it, download or not. */
   private var fullFile = false
   /**
-   * Streaming, but fetch the rest of the file too (the player's *Whole file*).
-   * The zone around the reader keeps its priority — this only lifts everything
-   * outside it from IGNORE to LOW, so spare bandwidth goes into the film
-   * instead of nowhere. Off is the default: a window is lighter on data, disk
-   * and battery.
+   * Streaming, but fetch the rest of the file too (the player's *Whole file*),
+   * front to back: everything outside the zone goes from IGNORE to LOW and the
+   * torrent turns sequential, so the downloaded part grows as one stretch from
+   * the start rather than in scattered pieces. Playback does not wait on that
+   * order — the pieces under the playhead carry deadlines, and libtorrent's
+   * time-critical path serves those ahead of any picker order.
+   *
+   * The viewer's preference, not a property of one stream: teardown leaves it
+   * alone, because the player sends it as it opens, which can be before play()
+   * has finished setting up — resetting it there silently dropped the choice.
+   * Off is the default: a window is lighter on data, disk and battery.
    */
   private var wholeStream = false
   /** Movies/Watchly/<saveFolder>/ — set by play() for download mode. */
@@ -679,13 +685,20 @@ class TorrentStreamModule : Module() {
       null
     }
 
-    /** Drop one file from a season download. Remaining files keep going. */
     /** The player's *Whole file* / *Next 5 min* switch; takes effect on the next tick. */
     AsyncFunction("setWholeFile") { on: Boolean ->
       wholeStream = on
       val h = handle
-      if (h != null && h.isValid) applyFocus(h)
-      log("stream mode: ${if (on) "whole file" else "window around the reader"}")
+      if (h != null && h.isValid && !fullFile) {
+        if (on) h.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
+        else h.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
+      }
+      // The mode lives in the piece priorities applyZone writes, so the next
+      // tick has to rewrite them — re-prioritising the files instead, as this
+      // used to, marked the whole file wanted and left it that way after the
+      // switch went back to the window.
+      zoneWidth = -1
+      log("stream mode: ${if (on) "whole file, front to back" else "window around the reader"}")
       null
     }
 
@@ -1507,8 +1520,9 @@ class TorrentStreamModule : Module() {
     // of the file outranks the one the viewer is waiting on.
     // Sequential is right for a download, though: nobody is waiting on a
     // particular piece, and writing the file front to back keeps it playable
-    // before it finishes.
-    if (fullFile) h.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
+    // before it finishes. Likewise *Whole file* while streaming — the viewer
+    // asked for the file, and the deadlines still carry the playhead.
+    if (fullFile || wholeStream) h.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
     else h.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
     handle = h
     warm = null
@@ -2358,7 +2372,8 @@ class TorrentStreamModule : Module() {
     announcedReady = false
     peerSaveTick = 0
     fullFile = false
-    wholeStream = false
+    // Not wholeStream: it is the viewer's setting, and the player may already
+    // have sent it for the stream this teardown is making way for.
     if (downloads.isNotEmpty() && poller == null) startPolling()
   }
 
