@@ -235,6 +235,25 @@ private const val REWIND_BYTES = 32L * 1024 * 1024
 private const val SEEK_READER = -1L
 
 /**
+ * How long a reader still counts after its connection closes. See `lately` —
+ * long enough to span a player hopping between two parts of one file, short
+ * enough that a real seek lets go of the old spot quickly.
+ */
+private const val READER_LINGER_MS = 10_000L
+
+/** After start, rush only as many pieces as the swarm finishes in this long. */
+private const val REACH_SECONDS = 16L
+
+/**
+ * The player blocked on one piece this long, with the swarm connected, is a
+ * piece whose requests are stuck with a peer that is not delivering. libVLC
+ * gives up on its connection at about forty seconds and restarts reading
+ * further on, which is how a stall turned into skipping, so this has to act
+ * well before then.
+ */
+private const val STUCK_PIECE_MS = 20_000L
+
+/**
  * How long to wait for libtorrent to let go of a torrent before giving up.
  *
  * This runs on the polling thread, so it is a stall in progress reporting for
@@ -393,6 +412,14 @@ class TorrentStreamModule : Module() {
    *  they fought over it every 150ms, resetting the scheduler faster than
    *  libtorrent could complete a piece for either. */
   private val readers = ConcurrentHashMap<Long, Long>()
+
+  /** Readers that closed recently: connection id → (offset, closed at). */
+  private val lately = ConcurrentHashMap<Long, Pair<Long, Long>>()
+
+  /** The piece the player is waiting on, and since when. See STUCK_PIECE_MS. */
+  private var blockingPiece = -1
+  private var blockingSince = 0L
+  private var lastKickAt = 0L
 
   /**
    * Metadata is expensive to fetch; keep the last one so play() need not
@@ -834,6 +861,10 @@ class TorrentStreamModule : Module() {
             }
           }
           runCatching { session.remove(h, SessionHandle.DELETE_FILES) }
+          // The cached metadata may be a view onto this torrent's memory; kept,
+          // the next open of the same title read it back as garbage — a file
+          // list with no files and a name of random bytes, then a native crash.
+          forgetMeta()
         }
       }
       teardown()
@@ -885,7 +916,12 @@ class TorrentStreamModule : Module() {
         AlertType.TRACKER_WARNING,
         AlertType.METADATA_RECEIVED,
         AlertType.TORRENT_ERROR,
-        AlertType.PORTMAP_ERROR -> log("libtorrent: ${alert.message()}")
+        AlertType.PORTMAP_ERROR,
+        // Invisible until now, and each can freeze a stream on its own: a piece
+        // that never lands on disk, or one that keeps arriving corrupt.
+        AlertType.FILE_ERROR,
+        AlertType.HASH_FAILED,
+        AlertType.PERFORMANCE -> log("libtorrent: ${alert.message()}")
 
         else -> Unit
       }
@@ -942,19 +978,23 @@ class TorrentStreamModule : Module() {
       // below that though: a mobile handshake to a distant peer genuinely takes
       // a few seconds, and 5 was cutting off peers that would have connected.
       .setInteger(settings_pack.int_types.peer_connect_timeout.swigValue(), 10)
-      // Streaming cares about *completing* a piece, not raw throughput: 32MB
-      // arrived in the time it took to finish one 2.9MB piece, because blocks
-      // were scattered across peers. This is the threshold at which a peer is
-      // considered fast enough to be asked for a whole piece at a time — with
-      // pieces this large, the 20s default excludes almost every peer.
-      .setInteger(settings_pack.int_types.whole_pieces_threshold.swigValue(), 60)
-      // request_timeout, piece_timeout and strict_end_game_mode are left at their
-      // defaults on purpose. Shortening the first two churns peers off a mobile
-      // link — libtorrent counts timeouts against a peer and disconnects it — and
-      // relaxing end-game mode is actively harmful here: the wanted set is
-      // already tiny because everything outside the zones is IGNORE, so allowing
-      // early duplicate requests means many peers sending the same blocks and
-      // almost no unique bytes arriving.
+      // The threshold at which a peer is fast enough to be handed a whole piece
+      // at a time. It was 60s, for fewer scattered blocks — but on 4-8MB pieces
+      // that let a 70kB/s peer book an entire piece, and when that piece became
+      // the one the player was blocked on, every block was already requested
+      // from it: libtorrent will not ask anyone else for a fully-requested piece,
+      // so a swarm of fifty seeds sat idle at 11kB/s while the film froze. Ten
+      // seconds keeps whole pieces for peers that can actually deliver them.
+      .setInteger(settings_pack.int_types.whole_pieces_threshold.swigValue(), 10)
+      // A request unanswered this long is re-requested from someone else. The
+      // 60s default is a minute of frozen picture per stuck block. The phone
+      // keeps the default, because a mobile link genuinely goes quiet for that
+      // long; a television on the home network does not.
+      .setInteger(settings_pack.int_types.request_timeout.swigValue(), 20)
+      // strict_end_game_mode stays at its default: relaxing it is harmful here,
+      // since the wanted set is already tiny (everything outside the zones is
+      // IGNORE), so early duplicate requests mean many peers sending the same
+      // blocks and almost no unique bytes arriving.
       // One fixed port, IPv4 and IPv6, so a router rule can forward it (UPnP/NAT-PMP below
       // map it themselves where the router allows). 6881, not the Windows app's 51413: a
       // router forwards a port to one device only, and both can be on the same network.
@@ -1540,6 +1580,9 @@ class TorrentStreamModule : Module() {
     zoneStarts = emptyList()
     zoneWidth = -1
     zoneRushedTail = false
+    lately.clear()
+    blockingPiece = -1
+    lastKickAt = 0L
 
     // Everything except the chosen file(s) is skipped entirely.
     val priorities = Array(files.numFiles()) { Priority.IGNORE }
@@ -1695,6 +1738,8 @@ class TorrentStreamModule : Module() {
     forgetWanted(dl.hash)
     if (dl.handle.isValid) {
       runCatching { session.remove(dl.handle, SessionHandle.DELETE_FILES) }
+      // Same as stop(): cached metadata may belong to the torrent just removed.
+      forgetMeta()
     }
     log("stop download ${dl.hash}")
     if (downloads.isEmpty()) {
@@ -2110,10 +2155,14 @@ class TorrentStreamModule : Module() {
     // want the instant it does: the container header at byte 0, and the point it
     // resumes from. Buffering only the resume point leaves it stalling on the
     // header the moment it opens the file.
-    // One region when the resume point is close enough to the header to share a
-    // window — two overlapping zones a piece apart help nobody.
+    // One region only when the resume point falls inside the header's own
+    // pre-roll deadlines. Merging on the wider zone instead (it used to be
+    // `windowPieces`) left the resume point in the zone but with no deadline,
+    // and the first frame waited on a piece nobody was hurrying.
+    val pieceLen = ti.pieceLength().toLong().coerceAtLeast(1L)
+    val prerollPieces = maxOf(1, Math.ceil(prepareBytes.toDouble() / pieceLen).toInt())
     val preroll =
-      if (startPiece - firstPiece <= windowPieces) listOf(firstPiece)
+      if (startPiece - firstPiece <= prerollPieces) listOf(firstPiece)
       else listOf(firstPiece, startPiece)
 
     // A reader parked in the tail is the player reading the container index
@@ -2124,12 +2173,62 @@ class TorrentStreamModule : Module() {
     // The tail is already fetched and kept below, so nothing is lost by
     // ignoring it — unless the tail is genuinely all anyone is reading, which
     // is what watching the last minutes looks like.
+    //
+    // A reader that closed within READER_LINGER_MS still counts. Some files are
+    // read in two places at once, and the player gets there by closing one
+    // connection and opening another, over and over. Counting only open sockets
+    // re-aimed every zone on each hop and cleared every deadline, so neither
+    // place ever finished a piece.
+    //
+    // Open connections always come first, and a lingering one only adds a zone:
+    // letting it take part in the tail rule above hid an MKV's index read (the
+    // header connection had just closed, so the tail reader looked like a
+    // bystander) and the film sat at 0:00 until the linger ran out. And rank 0
+    // gets the tightest deadlines, which belong to the connection playing now,
+    // not to the spot a seek just left.
+    val clock = System.currentTimeMillis()
+    lately.entries.removeIf { clock - it.value.second > READER_LINGER_MS }
     val live = readers.values.map { pieceAt(it) }.distinct().sorted()
-    val targets = live.filter { it < tailPiece }.ifEmpty { live }.ifEmpty { preroll }
+    val open = live.filter { it < tailPiece }.ifEmpty { live }
+    val closed = lately.values.map { pieceAt(it.first) }
+      .filter { it < tailPiece && it !in open }.distinct().sorted()
+    val targets = (open + closed).ifEmpty { preroll }
     headPiece = targets.first()
 
     val status = h.status()
-    val pieceLen = ti.pieceLength().toLong().coerceAtLeast(1L)
+
+    // Stuck-piece watchdog: the player is sitting on a piece that has not landed
+    // in STUCK_PIECE_MS while peers are connected. Pausing and resuming drops
+    // every outstanding request and re-dials the swarm from the peer cache, so
+    // the piece is asked for afresh from whoever answers first. The deadlines
+    // are set again next tick — the pause clears libtorrent's list of them.
+    val blocked = if (announcedReady && !userPaused) {
+      targets.first().takeIf { it in firstPiece..lastPiece && !h.havePiece(it) } ?: -1
+    } else {
+      -1
+    }
+    if (blocked != blockingPiece) {
+      blockingPiece = blocked
+      blockingSince = clock
+    } else if (
+      blocked >= 0 &&
+      status.numPeers() > 0 &&
+      clock - blockingSince > STUCK_PIECE_MS &&
+      clock - lastKickAt > STUCK_PIECE_MS
+    ) {
+      lastKickAt = clock
+      log(
+        "stuck: piece $blocked for ${(clock - blockingSince) / 1000}s " +
+          "(${pieceState(h, blocked)}, ${status.downloadRate() / 1024}kB/s, " +
+          "${status.numPeers()} peers) — re-asking the swarm"
+      )
+      persistPeers()
+      runCatching { h.pause() }
+      runCatching { h.resume() }
+      runCatching { h.clearPieceDeadlines() }
+      deadlined.clear()
+      blockingSince = clock
+    }
 
     // Pre-roll watchdog. Metadata served from the disk cache never passes
     // inspect()'s own timeout, so a dead swarm or a network that blocks
@@ -2166,12 +2265,15 @@ class TorrentStreamModule : Module() {
     // the first frame instead of spreading over tens of MB of readahead.
     // After start, a slow swarm stays tight (finish the next piece) and a
     // fast one opens to the full WINDOW_BYTES so playback never catches up.
+    // After start, as many pieces as the swarm finishes in REACH_SECONDS: rushing
+    // more than that splits the peers across pieces that all land late, so the
+    // one the player is blocked on arrives at a single peer's speed. The old
+    // cut-over at 400kB/s jumped straight to the full window.
     val reach = if (!announcedReady) {
-      maxOf(1, Math.ceil(prepareBytes.toDouble() / pieceLen).toInt())
+      prerollPieces
     } else {
-      val rate = status.downloadRate()
-      if (rate < 400_000) maxOf(2, (8L * 1024 * 1024 / pieceLen).toInt())
-      else windowPieces
+      val affordable = (status.downloadRate().toLong() * REACH_SECONDS / pieceLen).toInt()
+      affordable.coerceIn(2, maxOf(2, windowPieces))
     }
 
     // `width` is the zone: everything the torrent is *allowed* to fetch. It
@@ -2269,7 +2371,13 @@ class TorrentStreamModule : Module() {
         "rate ${status.downloadRate() / 1024}kB/s, ${status.numPeers()} peers " +
           "(${status.numSeeds()} seeds), readers ${targets.joinToString("/")}, " +
           "reach $reach, ${deadlined.size} deadlined, " +
-          "head ${headHave / 1024 / 1024}MB start ${startHave / 1024 / 1024}MB"
+          "head ${headHave / 1024 / 1024}MB start ${startHave / 1024 / 1024}MB" +
+          if (blockingPiece >= 0) {
+            ", waiting on $blockingPiece for ${(clock - blockingSince) / 1000}s " +
+              "(${pieceState(h, blockingPiece)})"
+          } else {
+            ""
+          }
       )
     }
 
@@ -2288,7 +2396,9 @@ class TorrentStreamModule : Module() {
           readers[id] = offset
           lastReaderAt = offset
         },
-        release = { id -> readers.remove(id) }
+        release = { id ->
+          readers.remove(id)?.let { at -> lately[id] = at to System.currentTimeMillis() }
+        }
       )
       srv.start()
       server = srv
@@ -2629,6 +2739,15 @@ class TorrentStreamModule : Module() {
   }
 
   /** Piece holding the given byte offset *within the selected file*. */
+  /** A partial piece's blocks, for the stall log: who is holding it up. */
+  private fun pieceState(h: TorrentHandle, piece: Int): String {
+    val q = runCatching { h.downloadQueue }.getOrNull()
+      ?.firstOrNull { it.pieceIndex() == piece }
+      ?: return "nothing requested yet"
+    return "${q.finished()} done, ${q.writing()} writing, ${q.requested()} requested " +
+      "of ${q.blocksInPiece()} blocks"
+  }
+
   private fun pieceAt(offset: Long): Int {
     val ti = info ?: return firstPiece
     return ti.mapFile(fileIndex, offset.coerceAtLeast(0), 1).piece()
@@ -2720,6 +2839,8 @@ class TorrentStreamModule : Module() {
 
     deadlined.clear()
     readers.clear()
+    lately.clear()
+    blockingPiece = -1
     zoneStarts = emptyList()
     zoneWidth = -1
     zoneRushedTail = false

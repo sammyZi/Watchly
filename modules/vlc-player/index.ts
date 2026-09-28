@@ -82,6 +82,8 @@ export type VlcPlayerProps = {
   scaleType?: VlcScaleType;
   /** Go to picture-in-picture on Home while playing (Android 12+). */
   autoPip?: boolean;
+  /** Shown on the playback notification and the lock screen. */
+  title?: string;
   /** Entered or left picture-in-picture. */
   onPip?: (e: { nativeEvent: { active: boolean } }) => void;
 
