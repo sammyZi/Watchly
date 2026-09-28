@@ -32,6 +32,9 @@ class VlcPlayerModule : Module() {
 
       Prop("autoPip") { view: VlcPlayerView, value: Boolean -> view.setAutoPip(value) }
 
+      /** Shown on the playback notification and the lock screen. */
+      Prop("title") { view: VlcPlayerView, value: String? -> view.setTitle(value) }
+
       AsyncFunction("enterPip") { view: VlcPlayerView -> view.enterPip() }
 
       AsyncFunction("stats") { view: VlcPlayerView -> view.stats() }

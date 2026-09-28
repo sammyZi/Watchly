@@ -865,6 +865,7 @@ export function PlayerScreen({
               ...externalSubs.map((s) => s.path),
             ]}
             scaleType={SCALES[scaleIdx].type}
+            title={title || metaTitle}
             autoPip
             onPip={({ nativeEvent: { active } }) => {
               setPip(active);

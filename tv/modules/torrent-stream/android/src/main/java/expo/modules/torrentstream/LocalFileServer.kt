@@ -155,6 +155,13 @@ class LocalFileServer(
 
       val (start, end) = range
       val generationAtStart = generation.incrementAndGet()
+      // Where the player reads from is the whole story when a stream stalls
+      // with data on either side of the playhead; one line per connection.
+      Log.i(
+        "TorrentStream",
+        "http #$generationAtStart: $method bytes $start-$end " +
+          "(${start * 100 / fileSize.coerceAtLeast(1)}% of ${fileSize / 1024 / 1024}MB)"
+      )
 
       val length = end - start + 1
       val header = buildString {

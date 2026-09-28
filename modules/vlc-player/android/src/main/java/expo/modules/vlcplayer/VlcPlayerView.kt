@@ -1,6 +1,10 @@
 package expo.modules.vlcplayer
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
+import android.graphics.drawable.Icon
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -34,6 +38,10 @@ import java.io.File
 import java.io.FileOutputStream
 
 private const val TAG = "VlcPlayer"
+
+/** The playback card in the shade — its own id and channel, apart from downloads'. */
+private const val PLAYBACK_NOTIFICATION = 42101
+private const val PLAYBACK_CHANNEL = "watchly_playback"
 
 /** Poster tiles are small; a full-resolution frame is pure waste. */
 private const val POSTER_WIDTH = 320
@@ -143,14 +151,8 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
         )
       }
       // Some ROMs treat a session with no metadata as not worth routing to.
-      runCatching {
-        ms.setMetadata(
-          MediaMetadata.Builder()
-            .putString(MediaMetadata.METADATA_KEY_TITLE, "Watchly")
-            .putLong(MediaMetadata.METADATA_KEY_DURATION, player?.length ?: 0L)
-            .build()
-        )
-      }
+      session = ms
+      updateMetadata()
       ms.setCallback(object : MediaSession.Callback() {
         override fun onPlay() = remotePlay(false)
 
@@ -219,10 +221,104 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     onRemote(mapOf("action" to if (pause) "pause" else "play"))
   }
 
+  /** What the notification and the lock screen call this video. */
+  private var title: String? = null
+
+  fun setTitle(value: String?) {
+    title = value
+    updateMetadata()
+    pushState()
+  }
+
+  /** Title and length — the shade's progress bar needs the length to draw. */
+  private fun updateMetadata() {
+    val ms = session ?: return
+    runCatching {
+      ms.setMetadata(
+        MediaMetadata.Builder()
+          .putString(MediaMetadata.METADATA_KEY_TITLE, title ?: "Watchly")
+          .putLong(MediaMetadata.METADATA_KEY_DURATION, player?.length ?: 0L)
+          .build()
+      )
+    }
+  }
+
+  private val notifications =
+    context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+  /**
+   * The playback card in the notification shade and on the lock screen.
+   *
+   * Bound to the session, so Android 13+ draws its own media controls from the
+   * session's actions — and many ROMs, this phone's among them, send a
+   * headset's button to whichever app shows one. Media-session notifications
+   * are exempt from the notification permission, so this needs no prompt.
+   * The Play/Pause action is for older Android, which draws the buttons we give it.
+   */
+  private fun postNotification() {
+    val ms = session ?: return
+    if (player == null) return
+    runCatching {
+      if (Build.VERSION.SDK_INT >= 26 &&
+        notifications.getNotificationChannel(PLAYBACK_CHANNEL) == null
+      ) {
+        notifications.createNotificationChannel(
+          NotificationChannel(PLAYBACK_CHANNEL, "Playback", NotificationManager.IMPORTANCE_LOW)
+            .apply { setShowBadge(false) }
+        )
+      }
+      val toggle = PendingIntent.getBroadcast(
+        context,
+        1,
+        Intent(Intent.ACTION_MEDIA_BUTTON)
+          .setClass(context, MediaButtons::class.java)
+          .putExtra(
+            Intent.EXTRA_KEY_EVENT,
+            KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+          ),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+      )
+      val open = context.packageManager.getLaunchIntentForPackage(context.packageName)?.let {
+        PendingIntent.getActivity(
+          context,
+          0,
+          it.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+          PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+      }
+      val builder =
+        if (Build.VERSION.SDK_INT >= 26) Notification.Builder(context, PLAYBACK_CHANNEL)
+        else @Suppress("DEPRECATION") Notification.Builder(context)
+      val icon = if (paused) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause
+      val notification = builder
+        .setSmallIcon(android.R.drawable.ic_media_play)
+        .setContentTitle(title ?: "Watchly")
+        .setContentIntent(open)
+        .setOngoing(!paused)
+        .setShowWhen(false)
+        .setVisibility(Notification.VISIBILITY_PUBLIC)
+        .addAction(
+          Notification.Action.Builder(
+            Icon.createWithResource(context, icon),
+            if (paused) "Play" else "Pause",
+            toggle
+          ).build()
+        )
+        .setStyle(
+          Notification.MediaStyle()
+            .setMediaSession(ms.sessionToken)
+            .setShowActionsInCompactView(0)
+        )
+        .build()
+      notifications.notify(PLAYBACK_NOTIFICATION, notification)
+    }.onFailure { Log.w(TAG, "playback notification failed", it) }
+  }
+
   /** Headsets and car stereos read the state, not the player — a session that
    *  never reports one is treated as idle and its buttons are ignored. */
   private fun pushState() {
     updatePip()
+    postNotification()
     val ms = session ?: return
     val position = runCatching { player?.time ?: 0L }.getOrDefault(0L)
     runCatching {
@@ -521,6 +617,8 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     // Two-arg form is the fast seek; the default does a precise one, which over
     // a torrent means waiting on data we may not have yet.
     p.setTime(ms, true)
+    // The shade's progress bar extrapolates from the last reported position.
+    pushState()
   }
 
   /* ---------------------------------------------------------------- poster */
@@ -614,8 +712,10 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
   /* --------------------------------------------------------------- lifecycle */
 
   private fun restart() {
-    release()
+    releasePlayer()
     val uri = source?.takeIf { it.isNotBlank() } ?: return
+    // Gone if the view was detached and has come back (release() ran then).
+    if (session == null) startSession()
 
     try {
       // --file-caching / --network-caching are milliseconds of demux buffer.
@@ -682,9 +782,13 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
       MediaPlayer.Event.Playing -> {
         report(false)
         if (!announced) announceLoaded(p)
+        pushState()
       }
 
-      MediaPlayer.Event.LengthChanged -> if (!announced) announceLoaded(p)
+      MediaPlayer.Event.LengthChanged -> {
+        if (!announced) announceLoaded(p)
+        updateMetadata()
+      }
 
       // The picture's size is known: PiP takes its shape.
       MediaPlayer.Event.Vout -> updatePip()
@@ -803,8 +907,13 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     holdingFocus = false
   }
 
+  /** Leaving the player for good: the libVLC side and the media session. */
   fun release() {
-    dropAudioFocus()
+    // Leaving the player: Home must not shrink an empty screen into a window.
+    // Here and not in releasePlayer, which runs on every load — straight after
+    // the autoPip prop is set, so it was quietly switching auto-PiP off.
+    autoPip = false
+    releasePlayer()
     // Left active, it keeps claiming the headset's buttons after the player is
     // gone — pressing play would resume nothing at all.
     runCatching {
@@ -812,6 +921,7 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
       session?.release()
     }
     session = null
+    runCatching { notifications.cancel(PLAYBACK_NOTIFICATION) }
     runCatching {
       @Suppress("DEPRECATION")
       audioManager.unregisterMediaButtonEventReceiver(
@@ -819,6 +929,18 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
       )
     }
     if (live === this) live = null
+  }
+
+  /**
+   * Only the libVLC side — what a reload tears down.
+   *
+   * restart() used to call release(), session and all, on every load. The
+   * session is made once, when the view is, so from the first frame of the
+   * first video there was nothing for a headset button to reach and no
+   * playback notification to hang controls on.
+   */
+  private fun releasePlayer() {
+    dropAudioFocus()
     removeCallbacks(attachSubs)
     subRetries = 0
     player?.let { p ->
@@ -830,8 +952,6 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     runCatching { vlc?.release() }
     player = null
     vlc = null
-    // Leaving the player: Home must not shrink an empty screen into a window.
-    autoPip = false
     updatePip()
     announced = false
     buffering = false
