@@ -783,10 +783,42 @@ class TorrentStreamModule : Module() {
      */
     AsyncFunction("openExternally") { url: String, positionSeconds: Double ->
       val context = appContext.reactContext!!
-      val name = Uri.decode(Uri.parse(url).lastPathSegment ?: "")
+      val parsed = Uri.parse(url)
+      // A stream is an http address any app can fetch. A downloaded file is a
+      // path, and Android throws (FileUriExposedException) on a file:// handed
+      // to another app — it has to go as a content:// address, with a grant to
+      // read that one file.
+      val local = parsed.scheme == null || parsed.scheme == "file"
+      // The path taken literally first: this module builds its file:// strings
+      // from raw paths, and a release name with a `#` or `%` in it would be cut
+      // short or mangled by a URI parser.
+      val localFile = if (local) {
+        File(url.removePrefix("file://")).takeIf { it.exists() } ?: File(parsed.path ?: url)
+      } else {
+        null
+      }
+      val name = localFile?.name ?: Uri.decode(parsed.lastPathSegment ?: "")
+      val data = if (localFile != null) {
+        val file = localFile
+        if (!file.exists()) throw CodedException("That file is no longer on this device.")
+        try {
+          androidx.core.content.FileProvider.getUriForFile(
+            context, "${context.packageName}.watchly.files", file
+          )
+        } catch (e: IllegalArgumentException) {
+          throw CodedException("This file is stored somewhere other apps cannot be given.", e)
+        }
+      } else {
+        parsed
+      }
       val view = Intent(Intent.ACTION_VIEW).apply {
-        setDataAndType(Uri.parse(url), contentType(name))
+        setDataAndType(data, contentType(name))
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (local) {
+          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+          // The chooser is a second intent; the grant travels with the clip.
+          clipData = android.content.ClipData.newRawUri(name, data)
+        }
         putExtra("title", name)
         // VideoLAN's documented contract for third-party launches: milliseconds,
         // as a Long. Without it the other player has no idea where we were and
@@ -799,6 +831,7 @@ class TorrentStreamModule : Module() {
       }
       val chooser = Intent.createChooser(view, "Play with").apply {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (local) addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
       }
       try {
         context.startActivity(chooser)

@@ -35,6 +35,9 @@ class VlcPlayerModule : Module() {
       /** Shown on the playback notification and the lock screen. */
       Prop("title") { view: VlcPlayerView, value: String? -> view.setTitle(value) }
 
+      /** The poster for that notification: a web address or a file on disk. */
+      Prop("artwork") { view: VlcPlayerView, value: String? -> view.setArtwork(value) }
+
       AsyncFunction("enterPip") { view: VlcPlayerView -> view.enterPip() }
 
       AsyncFunction("stats") { view: VlcPlayerView -> view.stats() }

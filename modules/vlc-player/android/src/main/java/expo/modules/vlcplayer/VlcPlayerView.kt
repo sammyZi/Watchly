@@ -9,6 +9,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.MediaMetadata
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
@@ -42,6 +43,9 @@ private const val TAG = "VlcPlayer"
 /** The playback card in the shade — its own id and channel, apart from downloads'. */
 private const val PLAYBACK_NOTIFICATION = 42101
 private const val PLAYBACK_CHANNEL = "watchly_playback"
+
+/** Poster width on the playback card, in pixels. */
+private const val ARTWORK_WIDTH = 360
 
 /** Poster tiles are small; a full-resolution frame is pure waste. */
 private const val POSTER_WIDTH = 320
@@ -230,7 +234,56 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     pushState()
   }
 
-  /** Title and length — the shade's progress bar needs the length to draw. */
+  /** The poster shown beside the title, and where it came from. */
+  private var artworkUrl: String? = null
+  private var art: Bitmap? = null
+
+  /**
+   * The film's or show's poster for the playback card, as other players show
+   * theirs. Fetched off the main thread — a web address, or a still already on
+   * disk — and dropped in when it lands; a slow or failed fetch just leaves the
+   * card without a picture.
+   */
+  fun setArtwork(value: String?) {
+    if (value == artworkUrl) return
+    artworkUrl = value
+    art = null
+    if (value.isNullOrBlank()) {
+      updateMetadata()
+      pushState()
+      return
+    }
+    Thread({
+      val bitmap = runCatching {
+        if (value.startsWith("http", true)) {
+          val connection = java.net.URL(value).openConnection().apply {
+            connectTimeout = 10_000
+            readTimeout = 15_000
+          }
+          connection.getInputStream().use { BitmapFactory.decodeStream(it) }
+        } else {
+          BitmapFactory.decodeFile(value.removePrefix("file://"))
+        }
+      }.getOrNull() ?: return@Thread
+      // A notification icon, not a wallpaper: a full-size poster would be
+      // megabytes pushed across to the system on every state change.
+      val small = if (bitmap.width > ARTWORK_WIDTH) {
+        Bitmap.createScaledBitmap(
+          bitmap, ARTWORK_WIDTH, bitmap.height * ARTWORK_WIDTH / bitmap.width, true
+        )
+      } else {
+        bitmap
+      }
+      post {
+        if (artworkUrl != value) return@post
+        art = small
+        updateMetadata()
+        pushState()
+      }
+    }, "watchly-artwork").start()
+  }
+
+  /** Title, length and poster — the shade's progress bar needs the length to draw. */
   private fun updateMetadata() {
     val ms = session ?: return
     runCatching {
@@ -238,6 +291,13 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
         MediaMetadata.Builder()
           .putString(MediaMetadata.METADATA_KEY_TITLE, title ?: "Watchly")
           .putLong(MediaMetadata.METADATA_KEY_DURATION, player?.length ?: 0L)
+          .apply {
+            // Android 13+ paints the media card's background from this.
+            art?.let {
+              putBitmap(MediaMetadata.METADATA_KEY_ART, it)
+              putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, it)
+            }
+          }
           .build()
       )
     }
@@ -292,6 +352,7 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
       val icon = if (paused) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause
       val notification = builder
         .setSmallIcon(android.R.drawable.ic_media_play)
+        .setLargeIcon(art)
         .setContentTitle(title ?: "Watchly")
         .setContentIntent(open)
         .setOngoing(!paused)
