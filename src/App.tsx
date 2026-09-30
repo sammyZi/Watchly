@@ -948,6 +948,7 @@ function ShellApp({
         }
         metaTitle={detail?.title ?? stored.titleName}
         imdb={detail?.imdb ?? stored.imdb}
+        poster={detail?.poster ?? stored.poster ?? undefined}
         kind={detail?.kind ?? stored.kind}
         resumeAt={stored.positions?.[playingIndex]}
         url={url}

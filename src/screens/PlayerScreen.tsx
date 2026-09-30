@@ -11,6 +11,7 @@ import {
   Text,
   TextInput,
   useWindowDimensions,
+  Vibration,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -53,6 +54,10 @@ const GRAPH_SAMPLES = 120;
  *  before the credits, short enough not to sit over the last scene. */
 const UP_NEXT_SECONDS = 30;
 const RATES = [0.75, 1, 1.25, 1.5, 2];
+/** Press and hold the picture: this speed until the finger lifts, as YouTube does. */
+const HOLD_RATE = 2;
+/** Long enough that a slow tap is still a tap. */
+const HOLD_MS = 450;
 
 /** No frame for this long means the stream is stalled. Well clear of libVLC's
  *  ~250ms TimeChanged interval, so jitter and seeks do not flash the spinner. */
@@ -85,6 +90,7 @@ export function PlayerScreen({
   title,
   metaTitle,
   imdb,
+  poster,
   kind,
   resumeAt,
   url,
@@ -106,6 +112,8 @@ export function PlayerScreen({
   /** IMDb / Cinemeta title. SubDL search uses this, never the release filename. */
   metaTitle?: string;
   imdb?: string;
+  /** The title's poster, for the playback notification. */
+  poster?: string;
   kind?: 'movie' | 'tv';
   resumeAt?: number;
   /** null until the first piece lands — the player mounts before that. */
@@ -249,6 +257,18 @@ export function PlayerScreen({
    */
   const [brightPct, setBrightPct] = useState(50);
   const brightDrag = useRef<{ y: number; start: number } | null>(null);
+  /** Held down on the picture: playing at HOLD_RATE until the finger lifts. */
+  const [boost, setBoost] = useState(false);
+  const boosting = useRef(false);
+  /** Where the press began, and the timer that turns it into a hold. */
+  const hold = useRef<{ x: number; y: number; timer: ReturnType<typeof setTimeout> } | null>(
+    null
+  );
+  const endHold = useCallback(() => {
+    if (hold.current) clearTimeout(hold.current.timer);
+    hold.current = null;
+  }, []);
+  useEffect(() => endHold, [endHold]);
   /** When a subtitle track was last chosen, so onError can blame the right thing. */
   const pickedAt = useRef(0);
   const pickedTrack = useRef<number | null>(null);
@@ -630,9 +650,31 @@ export function PlayerScreen({
       if (phase === 'start') {
         brightDrag.current =
           x < width * 0.4 ? { y, start: brightness.current } : null;
+        // A press that stays put becomes a hold: double speed, one short buzz
+        // to say so, until the finger lifts. Nothing to speed up while paused.
+        endHold();
+        if (!paused) {
+          const timer = setTimeout(() => {
+            hold.current = null;
+            boosting.current = true;
+            setBoost(true);
+            Vibration.vibrate(35);
+            // This press is a hold now — not a tap, and not a brightness drag.
+            brightDrag.current = null;
+            if (tapTimer.current) {
+              clearTimeout(tapTimer.current);
+              tapTimer.current = null;
+            }
+          }, HOLD_MS);
+          hold.current = { x, y, timer };
+        }
         return;
       }
       if (phase === 'move') {
+        // Moving is a drag, not a hold.
+        const began = hold.current;
+        if (began && Math.hypot(x - began.x, y - began.y) >= 14) endHold();
+        if (boosting.current) return;
         const drag = brightDrag.current;
         if (!drag) return;
         const dy = y - drag.y;
@@ -645,6 +687,13 @@ export function PlayerScreen({
         showHud({ icon: 'sun', label: `${Math.round(next * 100)}%` });
         return;
       }
+      endHold();
+      // Lifting out of a hold goes back to the chosen speed and is not a tap.
+      if (boosting.current) {
+        boosting.current = false;
+        setBoost(false);
+        return;
+      }
       if (brightDrag.current) {
         const moved = Math.abs(y - brightDrag.current.y) >= 14;
         brightDrag.current = null;
@@ -652,7 +701,7 @@ export function PlayerScreen({
       }
       tapPicture(x);
     },
-    [locked, bumpUi, width, height, showHud, tapPicture, setBright]
+    [locked, bumpUi, width, height, showHud, tapPicture, setBright, paused, endHold]
   );
 
   const lock = useCallback(
@@ -857,7 +906,7 @@ export function PlayerScreen({
             source={url}
             startPosition={startAt.current}
             paused={paused}
-            rate={rate}
+            rate={boost ? HOLD_RATE : rate}
             subtitleTrack={subTrack}
             audioTrack={audioTrack}
             subtitleFiles={[
@@ -865,7 +914,14 @@ export function PlayerScreen({
               ...externalSubs.map((s) => s.path),
             ]}
             scaleType={SCALES[scaleIdx].type}
-            title={title || metaTitle}
+            // The film's or show's own name on the playback card, with its
+            // poster — the release's file name only when nothing better is known.
+            title={metaTitle || title}
+            artwork={
+              poster ||
+              // Cinemeta's poster for the title; medium is the size that is a JPEG.
+              (imdb ? `https://images.metahub.space/poster/medium/${imdb}/img` : undefined)
+            }
             autoPip
             onPip={({ nativeEvent: { active } }) => {
               setPip(active);
@@ -1437,11 +1493,20 @@ export function PlayerScreen({
             </View>
           )}
 
-          {hud !== null && (
+          {/* Up for as long as the finger is: the transient readout below would
+              vanish while the film is still running fast. */}
+          {boost ? (
             <View pointerEvents="none" style={styles.hud}>
-              <Icon name={hud.icon} size={16} color="#fff" />
-              <Text style={styles.hudLabel}>{hud.label}</Text>
+              <Icon name="fast-forward" size={16} color="#fff" />
+              <Text style={styles.hudLabel}>2x</Text>
             </View>
+          ) : (
+            hud !== null && (
+              <View pointerEvents="none" style={styles.hud}>
+                <Icon name={hud.icon} size={16} color="#fff" />
+                <Text style={styles.hudLabel}>{hud.label}</Text>
+              </View>
+            )
           )}
 
           {nudge !== null && (
@@ -1795,6 +1860,9 @@ function SeekBar({
   const [dragging, setDragging] = useState<number | null>(null);
   const pct = Math.max(0, Math.min(1, dragging ?? value));
 
+  /** The bar's left edge on screen, fixed by the touch that starts a drag. */
+  const origin = useRef(0);
+
   const track = (x: number) => {
     last.current = width.current ? Math.max(0, Math.min(1, x / width.current)) : 0;
     setDragging(last.current);
@@ -1809,8 +1877,17 @@ function SeekBar({
       }}
       onStartShouldSetResponderCapture={() => true}
       onMoveShouldSetResponderCapture={() => true}
-      onResponderGrant={(e) => track(e.nativeEvent.locationX)}
-      onResponderMove={(e) => track(e.nativeEvent.locationX)}
+      // `locationX` is measured from whichever view is under the finger *now*,
+      // and a thumb never stays on a 40px strip: drift down onto the buttons
+      // below and it became a few pixels from that button's edge, which sent
+      // the playhead to the start. Only the first touch is known to be on the
+      // bar, so it fixes where the bar is; every move after that is the
+      // finger's place on screen against that edge.
+      onResponderGrant={(e) => {
+        origin.current = e.nativeEvent.pageX - e.nativeEvent.locationX;
+        track(e.nativeEvent.locationX);
+      }}
+      onResponderMove={(e) => track(e.nativeEvent.pageX - origin.current)}
       onResponderRelease={() => {
         // Not the release event's own locationX: lifting a finger that has
         // drifted off the bar reports a position the user never saw.

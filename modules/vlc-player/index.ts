@@ -84,6 +84,8 @@ export type VlcPlayerProps = {
   autoPip?: boolean;
   /** Shown on the playback notification and the lock screen. */
   title?: string;
+  /** The poster beside it: a web address, or a file on disk. */
+  artwork?: string;
   /** Entered or left picture-in-picture. */
   onPip?: (e: { nativeEvent: { active: boolean } }) => void;
 
