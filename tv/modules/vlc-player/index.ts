@@ -25,6 +25,28 @@ export type VlcPlayerRef = {
    * nothing on the network.
    */
   snapshot(): Promise<string | null>;
+  /** What is playing and how it is going, for the info panel. Null before load. */
+  stats(): Promise<VlcStats | null>;
+};
+
+export type VlcStats = {
+  videoCodec: string | null;
+  width: number;
+  height: number;
+  fps: number;
+  audioCodec: string | null;
+  channels: number;
+  sampleRate: number;
+  language: string | null;
+  /** What is arriving from the stream, kb/s. */
+  inputKbps: number;
+  /** The video's own data rate, as the demuxer reads it, kb/s. */
+  contentKbps: number;
+  displayed: number;
+  lostFrames: number;
+  lostBuffers: number;
+  /** libVLC's buffer for this file, in milliseconds. */
+  cacheMs: number;
 };
 
 /** libVLC's own fit modes, by their enum names. */

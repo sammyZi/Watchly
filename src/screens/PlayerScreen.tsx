@@ -1819,8 +1819,12 @@ function SeekBar({
       }}
       onResponderTerminate={() => setDragging(null)}
     >
-      {/* Padded hit area: a 3px bar is impossible to grab on a phone. */}
-      <View style={styles.track}>
+      {/* Padded hit area: a 3px bar is impossible to grab on a phone.
+          Nothing inside takes touches: `locationX` is measured from whichever
+          view the finger is over, so a drag crossing the knob or a downloaded
+          band (which starts partway along) read as a position near zero and
+          the thumb jumped. With these out of the way it is always this bar's. */}
+      <View style={styles.track} pointerEvents="none">
         {spans.map(([from, to]) => (
           <View
             key={from}
@@ -1829,7 +1833,7 @@ function SeekBar({
         ))}
         <View style={[styles.fill, { width: `${pct * 100}%` }]} />
       </View>
-      <View style={[styles.knob, { left: `${pct * 100}%` }]} />
+      <View style={[styles.knob, { left: `${pct * 100}%` }]} pointerEvents="none" />
     </View>
   );
 }

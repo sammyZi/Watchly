@@ -259,13 +259,30 @@ public sealed class SearchView : UserControl
             if (Query.Length > 0) recent = Searches.Remember(Query);
             shell.BeginDownload(new DownloadJob { Uri = hit.Magnet, Auto = "best", Title = hit.Name, TitleName = TitleText.SearchableName(hit.Name) });
         }, "Accent", "SurfaceAlt", 32, 15, "Download");
+        var copy = Ui.Round("copy", () =>
+        {
+            // The clipboard can be held open by another app for a moment; say so
+            // rather than let the exception reach the whole window.
+            try
+            {
+                Clipboard.SetText(hit.Magnet);
+                shell.Toast("Magnet link copied");
+            }
+            catch (System.Runtime.InteropServices.ExternalException)
+            {
+                shell.Toast("Couldn't reach the clipboard — try again", true);
+            }
+        }, "Accent", "SurfaceAlt", 32, 15, "Copy magnet link");
+        copy.Margin = new Thickness(0, 0, 8, 0);
         var dot = Ui.Brushed(new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 4, 0) }, tone.Fg);
 
         var dock = new DockPanel { Margin = new Thickness(0, 12, 0, 12) };
         DockPanel.SetDock(dot, Dock.Right);
         DockPanel.SetDock(download, Dock.Right);
+        DockPanel.SetDock(copy, Dock.Right);
         dock.Children.Add(dot);
         dock.Children.Add(download);
+        dock.Children.Add(copy);
         dock.Children.Add(body);
 
         var row = Ui.Button(new Border { Child = dock, BorderThickness = new Thickness(0, 0, 0, 1) }, () =>
