@@ -114,6 +114,126 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     keepScreenOn = true
   }
 
+  /* ------------------------------------------------------------------ stats */
+
+  /**
+   * libVLC's input statistics and the playing tracks, for the info panel. Called
+   * about once a second, only while that panel is open. `media` is a new
+   * reference each call and must be released; null before anything is loaded.
+   */
+  fun stats(): Map<String, Any?>? {
+    val p = player ?: return null
+    val m = runCatching { p.media }.getOrNull() ?: return null
+    try {
+      val s = runCatching { m.stats }.getOrNull()
+      val video = runCatching { p.currentVideoTrack }.getOrNull()
+      val audioId = runCatching { p.audioTrack }.getOrDefault(-1)
+      var audio: IMedia.AudioTrack? = null
+      for (i in 0 until runCatching { m.trackCount }.getOrDefault(0)) {
+        val t = runCatching { m.getTrack(i) }.getOrNull() as? IMedia.AudioTrack ?: continue
+        if (audio == null || t.id == audioId) audio = t
+        if (t.id == audioId) break
+      }
+      return mapOf(
+        // The codec's fourcc, named — not `description`, which is the track's
+        // title and in these releases usually the group's name.
+        "videoCodec" to video?.codec?.let(::codecName),
+        "width" to (video?.width ?: 0),
+        "height" to (video?.height ?: 0),
+        "fps" to (video?.takeIf { it.frameRateDen > 0 }
+          ?.let { it.frameRateNum.toDouble() / it.frameRateDen } ?: 0.0),
+        "audioCodec" to audio?.codec?.let(::codecName),
+        "channels" to (audio?.channels ?: 0),
+        "sampleRate" to (audio?.rate ?: 0),
+        "language" to audio?.language,
+        // × 8000 = kb/s — the scaling VLC's own statistics use.
+        "inputKbps" to ((s?.inputBitrate ?: 0f) * 8000.0),
+        "contentKbps" to ((s?.demuxBitrate ?: 0f) * 8000.0),
+        "displayed" to (s?.displayedPictures ?: 0),
+        "lostFrames" to (s?.lostPictures ?: 0),
+        "lostBuffers" to (s?.lostAbuffers ?: 0),
+        "cacheMs" to cacheMs
+      )
+    } finally {
+      runCatching { m.release() }
+    }
+  }
+
+  private fun codecName(fourcc: String): String = when (fourcc.trim().lowercase()) {
+    "h264", "avc1", "x264" -> "H.264"
+    "hevc", "h265", "hev1", "hvc1" -> "HEVC (H.265)"
+    "av01" -> "AV1"
+    "vp90", "vp09" -> "VP9"
+    "mp4v", "xvid", "divx", "dx50" -> "MPEG-4 Part 2"
+    "mpgv", "mp2v" -> "MPEG-2"
+    "mp4a", "aac" -> "AAC"
+    "a52", "ac-3", "ac3" -> "Dolby Digital (AC-3)"
+    "eac3", "ec-3" -> "Dolby Digital Plus (E-AC-3)"
+    "mlp", "trhd" -> "Dolby TrueHD"
+    "dts", "dtsh", "dtsl" -> "DTS"
+    "opus" -> "Opus"
+    "vorb" -> "Vorbis"
+    "flac" -> "FLAC"
+    "mpga", "mp3" -> "MP3"
+    else -> fourcc.trim().uppercase()
+  }
+
+  /**
+   * Tell libVLC the size of the screen it is drawing on.
+   *
+   * libVLC's own helper is meant to, but it finds the window through the
+   * view's Activity, and a React Native view's context does not lead to one —
+   * it returns without a word and the size is never set. Not knowing it,
+   * libVLC makes the subtitle surface as big as the *video*: for a 4K film a
+   * 3840×2076 translucent layer, cleared and redrawn (32MB) on the thread that
+   * presents video at every subtitle change, and blended by the GPU on every
+   * frame. On this television that cost one frame in twelve — 13 drops in three
+   * minutes with subtitles off, 12–21 every ten seconds with them on. Sized to
+   * the 1080p screen it is a quarter of the work, and the text is drawn at the
+   * resolution it is shown at.
+   *
+   * Said twice: the first can land before the output has registered to hear it.
+   */
+  private fun tellWindowSize() {
+    val tell = Runnable {
+      val w = videoLayout.width
+      val h = videoLayout.height
+      if (w > 0 && h > 0) runCatching { player?.vlcVout?.setWindowSize(w, h) }
+    }
+    tell.run()
+    postDelayed(tell, 500)
+  }
+
+  private var dropsLoggedAt = 0L
+  private var dropsLogged = 0
+
+  /**
+   * One line whenever libVLC has dropped more frames, at most every ten
+   * seconds. A judder nobody can describe is either frames being dropped or the
+   * panel's own 24-into-60 cadence, and this is what tells them apart after the
+   * fact.
+   */
+  private fun logDrops(p: MediaPlayer) {
+    val now = System.currentTimeMillis()
+    if (now - dropsLoggedAt < 10_000) return
+    dropsLoggedAt = now
+    val m = runCatching { p.media }.getOrNull() ?: return
+    try {
+      val s = runCatching { m.stats }.getOrNull() ?: return
+      if (s.lostPictures != dropsLogged) {
+        Log.i(
+          TAG,
+          "frames: ${s.lostPictures - dropsLogged} dropped in the last stretch " +
+            "(${s.lostPictures} of ${s.displayedPictures + s.lostPictures} so far), " +
+            "${s.lostAbuffers} audio buffers lost, cache ${cacheMs}ms"
+        )
+        dropsLogged = s.lostPictures
+      }
+    } finally {
+      runCatching { m.release() }
+    }
+  }
+
   /* ----------------------------------------------------------------- props */
 
   fun setCacheMs(value: Int) {
@@ -355,15 +475,11 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     val uri = source?.takeIf { it.isNotBlank() } ?: return
 
     try {
-      // --file-caching / --network-caching are milliseconds of demux buffer.
-      // The torrent window already holds tens of MB ahead; 1s covers a piece
-      // stall without adding another 3s of black screen after ready.
+      // --file-caching / --network-caching are milliseconds of demux buffer,
+      // sized by the screen from the file's bitrate (see cacheMsFor).
       val instance = LibVLC(
         context,
         arrayListOf(
-          // Native torrent window already holds tens of MB ahead of the
-          // playhead. 1s is enough to ride a piece stall; 3s was extra black
-          // screen after the URL was already handed over.
           "--network-caching=$cacheMs",
           "--file-caching=$cacheMs",
           "--no-video-title-show",
@@ -400,6 +516,7 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
       vlc = instance
       player = mediaPlayer
       announced = false
+      dropsLogged = 0
       mediaPlayer.rate = rate
       if (!paused) {
         takeAudioFocus()
@@ -423,8 +540,13 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
 
       MediaPlayer.Event.LengthChanged -> if (!announced) announceLoaded(p)
 
-      MediaPlayer.Event.TimeChanged ->
+      // The video output exists now, so it can be told how big the screen is.
+      MediaPlayer.Event.Vout -> if (event.voutCount > 0) tellWindowSize()
+
+      MediaPlayer.Event.TimeChanged -> {
         onProgress(mapOf("currentTime" to event.timeChanged / 1000.0))
+        logDrops(p)
+      }
 
       // Buffering fires continuously; 100 means it is done.
       MediaPlayer.Event.Buffering -> report(event.buffering < 100f)

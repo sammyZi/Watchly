@@ -36,6 +36,8 @@ class VlcPlayerModule : Module() {
 
       AsyncFunction("pause") { view: VlcPlayerView -> view.pause() }
 
+      AsyncFunction("stats") { view: VlcPlayerView -> view.stats() }
+
       AsyncFunction("snapshot") { view: VlcPlayerView, promise: Promise ->
         view.snapshot(promise)
       }

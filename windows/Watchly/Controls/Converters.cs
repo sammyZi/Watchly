@@ -57,6 +57,7 @@ public sealed class ImageUrl : IValueConverter
     public static ImageSource? Load(string? url, object? width = null)
     {
         if (!History.IsRemote(url)) return null;
+        url = Decodable(url!);
         var w = int.TryParse(width?.ToString(), out var parsed) && parsed > 0 ? parsed : 0;
         var key = $"{w}|{url}";
         if (Recent.TryGetValue(key, out var hit)) return hit;
@@ -70,7 +71,18 @@ public sealed class ImageUrl : IValueConverter
         while (order.Count > (order == Small ? SmallMax : LargeMax)) Recent.Remove(order.Dequeue());
 
         var ui = System.Windows.Threading.Dispatcher.CurrentDispatcher;
-        _ = Task.Run(() => Decode(url!, w)).ContinueWith(t => ui.BeginInvoke(() =>
+        _ = Task.Run(async () =>
+        {
+            // A second go before giving up: the card showing this keeps the image
+            // it was handed, so a failure with no retry was a blank tile for good.
+            var bitmap = await Decode(url, w);
+            if (bitmap is null)
+            {
+                await Task.Delay(5000);
+                bitmap = await Decode(url, w);
+            }
+            return bitmap;
+        }).ContinueWith(t => ui.BeginInvoke(() =>
         {
             if (t.Result is { } bitmap)
             {
@@ -84,6 +96,17 @@ public sealed class ImageUrl : IValueConverter
         }), TaskScheduler.Default);
         return image;
     }
+
+    /// <summary>
+    /// An address WPF can decode. metahub serves its *small* posters as WebP, which
+    /// WPF's imaging cannot read — every one failed to decode and stayed a coloured
+    /// tile, which is what whole shelves of the home page looked like. Its medium
+    /// size is JPEG, and posters are drawn at 300px, which medium covers.
+    /// </summary>
+    static string Decodable(string url) =>
+        url.Contains("metahub.space/poster/small/", StringComparison.OrdinalIgnoreCase)
+            ? url.Replace("/poster/small/", "/poster/medium/", StringComparison.OrdinalIgnoreCase)
+            : url;
 
     static async Task<BitmapSource?> Decode(string url, int width)
     {

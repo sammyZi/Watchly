@@ -49,6 +49,10 @@ public sealed class HomeView : UserControl
     {
         scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = page };
         Ui.SmoothWheel(scroll);
+        // Rows are built as they come near the screen — see Fill.
+        scroll.ScrollChanged += (_, _) => FillVisible();
+        scroll.SizeChanged += (_, _) => FillVisible();
+        Loaded += (_, _) => Dispatcher.BeginInvoke(FillVisible, DispatcherPriority.Loaded);
 
         page.Children.Add(hero);
         page.Children.Add(personal);
@@ -126,6 +130,9 @@ public sealed class HomeView : UserControl
         var mine = ++version;
         BuildPersonal();
         BuildShelves();
+        // Before the taste lookup, not after it: that walks up to thirty titles'
+        // records, and every shelf used to sit on a spinner until it finished.
+        LoadMissing();
 
         // What is mid-way leads the taste signal, then the rest, then saved titles.
         var recent = shell.HistoryList;
@@ -149,21 +156,88 @@ public sealed class HomeView : UserControl
             }
         }
 
+        // The recommended shelves only exist now; fetch theirs too.
+        LoadMissing();
+    }
+
+    readonly HashSet<string> requested = new();
+
+    /// <summary>Fetch every shelf's catalog not already in hand, once each.</summary>
+    void LoadMissing()
+    {
         foreach (var shelf in AllShelves())
         {
-            if (loaded.ContainsKey(shelf.Key)) continue;
+            if (loaded.ContainsKey(shelf.Key) || !requested.Add(shelf.Key)) continue;
             _ = Meta.LoadCatalog(shelf.Kind, shelf.Genre).ContinueWith(t => Dispatcher.BeginInvoke(() =>
             {
+                requested.Remove(shelf.Key);
                 if (t.Result.Count == 0) return;
                 loaded[shelf.Key] = t.Result;
                 var watched = shell.HistoryList.Select(h => h.Imdb).Where(i => i is not null).ToHashSet();
-                if (shelfControls.TryGetValue(shelf.Key, out var pair) && pair.Body.Content is Grid)
-                {
-                    pair.Body.Content = Ui.Rail(Today(shelf, t.Result, watched), "PosterCard", 290);
-                }
+                if (shelfControls.TryGetValue(shelf.Key, out var pair) && pair.Body.Content is Grid { Tag: Loading })
+                    Fill(shelf, pair.Container, pair.Body, watched);
                 BuildHero(AllShelves(), watched);
-            }));
+            }), TaskScheduler.Default);
         }
+    }
+
+    /// <summary>A row not yet built: what to build once it comes near the screen.</summary>
+    readonly Dictionary<ContentControl, Action> waiting = new();
+
+    /// <summary>Marks a shelf still waiting for its catalog, as against one waiting to be seen.</summary>
+    const string Loading = "loading";
+
+    /// <summary>
+    /// Put a shelf's row in — now if it is on or near the screen, otherwise when it
+    /// scrolls close. The page holds twenty-odd shelves, and building them all at
+    /// once asked for every one of their posters at startup: some four hundred
+    /// images through six download slots, first come first served. The rows the
+    /// viewer was looking at — the recommended ones, added last because they wait
+    /// on the taste lookup — sat on coloured tiles until everything below them had
+    /// landed. A placeholder of the row's own height keeps the page from jumping.
+    /// </summary>
+    void Fill(Shelf shelf, FrameworkElement container, ContentControl body, HashSet<string?> watched)
+    {
+        if (!loaded.TryGetValue(shelf.Key, out var raw)) return;
+        void Build()
+        {
+            waiting.Remove(body);
+            body.Content = Ui.Rail(Today(shelf, raw, watched), "PosterCard", 290);
+        }
+        if (NearScreen(container))
+        {
+            Build();
+            return;
+        }
+        // Not a Loading grid: this shelf has its titles and only waits to be seen.
+        body.Content = new Grid { Height = 290 };
+        waiting[body] = Build;
+    }
+
+    /// <summary>
+    /// Within a screen's height of the visible part of the page. Before the first
+    /// layout nothing is near — FillVisible runs as soon as there is one, and
+    /// building everything up front was the whole problem.
+    /// </summary>
+    bool NearScreen(FrameworkElement element)
+    {
+        if (!element.IsLoaded || scroll.ViewportHeight <= 0 || element.ActualHeight <= 0) return false;
+        try
+        {
+            var top = element.TransformToAncestor(scroll).Transform(new Point(0, 0)).Y;
+            var margin = scroll.ViewportHeight;
+            return top < scroll.ViewportHeight + margin && top + element.ActualHeight > -margin;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    void FillVisible()
+    {
+        foreach (var (body, build) in waiting.ToList())
+            if (body.Parent is FrameworkElement container && NearScreen(container)) build();
     }
 
     void BuildPersonal()
@@ -203,6 +277,7 @@ public sealed class HomeView : UserControl
         {
             shelves.Children.Clear();
             shelfControls.Clear();
+            waiting.Clear();
             for (var i = 0; i < all.Count; i++)
             {
                 var shelf = all[i];
@@ -217,30 +292,20 @@ public sealed class HomeView : UserControl
                     Children = { head, body },
                 };
 
-                if (loaded.TryGetValue(shelf.Key, out var raw))
-                {
-                    body.Content = Ui.Rail(Today(shelf, raw, watched), "PosterCard", 290);
-                }
-                else
-                {
-                    body.Content = new Grid { Height = 225, Children = { Ui.Spinner(20, "Faint") } };
-                }
-
+                body.Content = new Grid { Height = 225, Tag = Loading, Children = { Ui.Spinner(20, "Faint") } };
                 shelves.Children.Add(container);
                 shelfControls[shelf.Key] = (container, body);
+                Fill(shelf, container, body, watched);
             }
         }
         else
         {
             foreach (var shelf in all)
             {
-                if (shelfControls.TryGetValue(shelf.Key, out var pair) && loaded.TryGetValue(shelf.Key, out var raw))
-                {
-                    if (pair.Body.Content is Grid)
-                    {
-                        pair.Body.Content = Ui.Rail(Today(shelf, raw, watched), "PosterCard", 290);
-                    }
-                }
+                // Only a shelf still on its spinner — a built row is a Grid too, and
+                // testing for that alone rebuilt every row on each refresh.
+                if (shelfControls.TryGetValue(shelf.Key, out var pair) && pair.Body.Content is Grid { Tag: Loading })
+                    Fill(shelf, pair.Container, pair.Body, watched);
             }
         }
 

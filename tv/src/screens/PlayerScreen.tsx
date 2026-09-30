@@ -10,6 +10,7 @@ import {
   VlcPlayer,
   type VlcPlayerRef,
   type VlcScaleType,
+  type VlcStats,
   type VlcTracks,
 } from '../../modules/vlc-player';
 import TorrentStream, { type Progress } from '../../modules/torrent-stream';
@@ -43,12 +44,17 @@ const AUTO_NEXT_SECONDS = 0;
  * libVLC's buffer, sized by bitrate.
  *
  * Its default second is nothing at remux rates, so playback stalls whenever a
- * piece is late even though the engine holds a minute of readahead. Small files
- * keep the short cache, because there the second costs start-up time and buys
- * nothing.
+ * piece is late even though the engine holds a minute of readahead.
+ *
+ * Three seconds is the floor, not one. A torrent delivers in bursts — nothing,
+ * then a whole 4MB piece — and with a one-second buffer any gap longer than
+ * that reached libVLC as data arriving "too late": it resets its clock and
+ * drops a frame or two, which on screen is a small regular hitch rather than a
+ * stall. An ordinary 1080p episode is under 1.5MB/s, so nearly everything
+ * played on the one-second setting. The cost is a moment more before the first
+ * frame.
  */
-const cacheMsFor = (bytesPerSecond: number) =>
-  bytesPerSecond > 4_000_000 ? 5000 : bytesPerSecond > 1_500_000 ? 3000 : 1000;
+const cacheMsFor = (bytesPerSecond: number) => (bytesPerSecond > 4_000_000 ? 6000 : 3000);
 
 /** Committed this long after the last press, the way a TV remote expects. */
 const SCRUB_COMMIT_MS = 700;
@@ -152,6 +158,56 @@ function Round({
 }
 
 /** A labelled control on the second row — opens a sheet rather than acting. */
+const mbps = (kbps: number) => `${(kbps / 1000).toFixed(1)} Mb/s`;
+
+/** The info panel's lines, label and value — only the ones there is something to say for. */
+function infoRows(s: VlcStats | null, progress: Progress | null): [string, string][] {
+  const rows: [string, string][] = [];
+  if (!s) return [['Player', 'Reading…']];
+  rows.push([
+    'Video',
+    [
+      s.videoCodec,
+      s.width && s.height ? `${s.width}×${s.height}` : null,
+      s.fps ? `${s.fps.toFixed(s.fps % 1 ? 3 : 0)} fps` : null,
+    ]
+      .filter(Boolean)
+      .join('  ·  ') || '—',
+  ]);
+  rows.push([
+    'Audio',
+    [
+      s.audioCodec,
+      s.channels ? `${s.channels} ch` : null,
+      s.sampleRate ? `${s.sampleRate / 1000} kHz` : null,
+      s.language,
+    ]
+      .filter(Boolean)
+      .join('  ·  ') || '—',
+  ]);
+  rows.push(['Bitrate', `${mbps(s.contentKbps)} video  ·  ${mbps(s.inputKbps)} arriving`]);
+  // The line to watch when playback hitches: dropped frames climbing means the
+  // player is discarding them; a steady count means the hitch is elsewhere.
+  rows.push(['Frames', `${s.displayed} shown  ·  ${s.lostFrames} dropped`]);
+  rows.push([
+    'Buffer',
+    `${(s.cacheMs / 1000).toFixed(0)} s${s.lostBuffers ? `  ·  ${s.lostBuffers} audio gaps` : ''}`,
+  ]);
+  if (progress) {
+    rows.push([
+      'Swarm',
+      [
+        speedOf(progress.speed ?? 0),
+        `${progress.peers} peers`,
+        progress.seeds ? `${progress.seeds} seeds` : null,
+      ]
+        .filter(Boolean)
+        .join('  ·  '),
+    ]);
+  }
+  return rows;
+}
+
 function Chip({
   icon,
   label,
@@ -376,6 +432,20 @@ export function PlayerScreen({
       backgroundColor: c.surface,
     },
     toastText: { ...type.meta, color: c.text },
+    // Top left, clear of the toast's corner and of the bar along the bottom.
+    info: {
+      position: 'absolute' as const,
+      top: SAFE.y,
+      left: SAFE.x,
+      paddingHorizontal: space.md,
+      paddingVertical: space.sm,
+      borderRadius: radius.md,
+      backgroundColor: 'rgba(0,0,0,0.72)',
+      gap: 4,
+    },
+    infoRow: { flexDirection: 'row' as const, gap: space.md },
+    infoLabel: { ...type.meta, color: '#9aa4b8', width: 84 },
+    infoValue: { ...type.meta, color: '#ffffff', fontVariant: ['tabular-nums' as const] },
   }));
 
   const player = useRef<VlcPlayerRef>(null);
@@ -385,6 +455,25 @@ export function PlayerScreen({
   const [buffering, setBuffering] = useState(true);
   const [controls, setControls] = useState(true);
   const [panel, setPanel] = useState<Panel>(null);
+  /**
+   * The info panel: what is playing and how it is going. Not a sheet — it sits
+   * in a corner and stays up with the controls down, because the numbers worth
+   * watching (dropped frames, what is arriving) only mean something while the
+   * film is running.
+   */
+  const [info, setInfo] = useState(false);
+  const [vlcStats, setVlcStats] = useState<VlcStats | null>(null);
+  useEffect(() => {
+    if (!info) return;
+    const read = () =>
+      player.current
+        ?.stats()
+        .then(setVlcStats)
+        .catch(() => {});
+    read();
+    const id = setInterval(read, 1000);
+    return () => clearInterval(id);
+  }, [info]);
   const [tracks, setTracks] = useState<VlcTracks | null>(null);
   const [subtitle, setSubtitle] = useState<number | null>(null);
   /**
@@ -474,11 +563,16 @@ export function PlayerScreen({
         setControls(false);
         return true;
       }
+      // Left up with the controls down, the panel is the next thing BACK means.
+      if (info) {
+        setInfo(false);
+        return true;
+      }
       onExit();
       return true;
     });
     return () => sub.remove();
-  }, [panel, controls, onExit, show]);
+  }, [panel, controls, info, onExit, show]);
 
   const seekBy = useCallback(
     (by: number) => {
@@ -817,6 +911,17 @@ export function PlayerScreen({
         </View>
       )}
 
+      {info && (
+        <View style={styles.info} pointerEvents="none">
+          {infoRows(vlcStats, progress).map(([label, value]) => (
+            <View key={label} style={styles.infoRow}>
+              <Text style={styles.infoLabel}>{label}</Text>
+              <Text style={styles.infoValue}>{value}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
       {offerNext && (
         <View style={styles.upNext}>
           <View style={{ flex: 1 }}>
@@ -996,6 +1101,13 @@ export function PlayerScreen({
                 setPanel('find');
                 findSubs();
               }}
+            />
+            <Chip
+              icon="info"
+              label="Info"
+              value={info ? 'On' : undefined}
+              onFocus={() => setRow('chips')}
+              onPress={() => setInfo((on) => !on)}
             />
           </View>
             </>
