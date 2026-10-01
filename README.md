@@ -92,7 +92,9 @@ modules/vlc-player/
 - New episodes: a shelf of watched or saved series with episodes out since
   their page was last opened. Checked when Home builds, off the day-long
   metadata cache, so an episode shows up within a day of airing
-- Trailer button on a title page, opening YouTube
+- Trailers play in the app, over the title page, in YouTube's embedded player;
+  turn the phone for full screen. *YouTube* in its top bar opens the app
+  instead, for the odd upload that disallows embedding
 
 **Releases**
 
