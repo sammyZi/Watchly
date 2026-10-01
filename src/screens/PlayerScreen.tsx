@@ -551,7 +551,7 @@ export function PlayerScreen({
     try {
       const at = parseEpisode(title ?? '');
       const useImdb = !!imdb && (!typed || typed === metaTitle);
-      const results = await searchSubtitles(useImdb ? '' : q, key, {
+      const results = await searchSubtitles(q, key, {
         ...at,
         language: prefs?.subLang || 'EN',
         imdb: useImdb ? imdb : undefined,
@@ -565,7 +565,8 @@ export function PlayerScreen({
       } else {
         warn(msg);
       }
-      setSearching(false);
+      // Panel stays open: "nothing found" is fixed by editing the query, and
+      // closing it threw away the box to do that in.
     } finally {
       setSubLoading(false);
     }
@@ -1748,7 +1749,8 @@ export function PlayerScreen({
                           <Text style={styles.subResultTitle}>{name}</Text>
                           <Text style={styles.subResultMeta}>
                             {[r.language || 'EN', 'SRT',
-                              r.season != null ? `S${r.season}` : null,
+                              // SubDL sends season 0 on films.
+                              r.season ? `S${r.season}` : null,
                               r.episode != null ? `E${r.episode}` : null,
                             ]
                               .filter(Boolean)

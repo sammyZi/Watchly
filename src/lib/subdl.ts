@@ -62,19 +62,23 @@ export async function searchSubtitles(
     languages: opts?.language ?? 'EN',
     subs_per_page: '30',
   });
-  // IMDb id is the reliable key; film_name is the fallback when we only have
-  // a title. Sending a release filename here matches nothing.
-  if (opts?.imdb) params.set('imdb_id', opts.imdb);
-  else if (query) params.set('film_name', query);
-  else return [];
   if (opts?.type) params.set('type', opts.type);
   if (opts?.season != null) params.set('season_number', String(opts.season));
   if (opts?.episode != null) params.set('episode_number', String(opts.episode));
 
-  const res = await net(`${API}?${params}`);
-  if (!res.ok) throw new Error(`SubDL search returned ${res.status}`);
-  const body = await res.json();
+  const ask = async (key: 'imdb_id' | 'film_name', value: string) => {
+    const res = await net(`${API}?${params}&${key}=${encodeURIComponent(value)}`);
+    if (!res.ok) throw new Error(`SubDL search returned ${res.status}`);
+    return res.json();
+  };
+  // IMDb id is the reliable key; film_name is the fallback when we only have
+  // a title. Sending a release filename here matches nothing.
+  let body = opts?.imdb ? await ask('imdb_id', opts.imdb) : null;
+  // Some SubDL entries have no IMDb id at all (Toy Story 4 does not) — the
+  // name still finds them.
+  if ((!body || body.status === false) && query) body = await ask('film_name', query);
+  if (!body) return [];
   // A rejected key comes back as 200 with `status: false` and an `error`.
-  if (body?.status === false) throw new Error(String(body.error ?? 'SubDL refused the request'));
-  return toSubs(body?.subtitles ?? []);
+  if (body.status === false) throw new Error(String(body.error ?? 'SubDL refused the request'));
+  return toSubs(body.subtitles ?? []);
 }
