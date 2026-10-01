@@ -3,6 +3,7 @@ import { memo, useEffect, useRef, useState } from 'react';
 import TorrentStream, { type DownloadPrefs } from '../../modules/torrent-stream';
 import { Icon, type IconName } from '../components/Icon';
 import { Screen } from '../components/Screen';
+import { SelectSheet, type SelectOption } from '../components/SelectSheet';
 import { bytes } from '../lib/format';
 import { LANGS } from '../lib/lang';
 import { GENRES } from '../lib/meta';
@@ -25,12 +26,23 @@ const APPEARANCE: { mode: ThemeMode; label: string }[] = [
   { mode: 'light', label: 'Light' },
   { mode: 'dark', label: 'Dark' },
 ];
-const SIZES: { size: SubSize; label: string }[] = [
-  { size: 'small', label: 'Small' },
-  { size: 'normal', label: 'Normal' },
-  { size: 'large', label: 'Large' },
-  { size: 'huge', label: 'Huge' },
+const SIZES: SelectOption<SubSize>[] = [
+  { key: 'small', label: 'Small' },
+  { key: 'normal', label: 'Normal' },
+  { key: 'large', label: 'Large' },
+  { key: 'huge', label: 'Huge' },
 ];
+const SUB_LANGS: SelectOption<string>[] = [
+  { key: '', label: 'Off' },
+  ...LANGS.map((l) => ({ key: l.code, label: l.name })),
+];
+const AUDIO_LANGS: SelectOption<string>[] = [
+  { key: '', label: 'File default' },
+  ...LANGS.map((l) => ({ key: l.code, label: l.name })),
+];
+
+/** The list a select row opens, or none. */
+type Picking = 'subLang' | 'audioLang' | 'subSize' | null;
 
 function SettingsScreenView({
   settings,
@@ -53,6 +65,7 @@ function SettingsScreenView({
   const styles = useSettingsStyles();
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) =>
     onChange({ ...settings, [key]: value });
+  const [picking, setPicking] = useState<Picking>(null);
 
   /** Kept natively — they have to hold for a download resumed with no JS. */
   const [dl, setDl] = useState<DownloadPrefs | null>(null);
@@ -194,49 +207,33 @@ function SettingsScreenView({
         </Group>
 
         <Group title="Subtitles & audio">
-          <View style={styles.choiceRow}>
-            <Row
-              icon="message-square"
-              title="Subtitle language"
-              subtitle="Turned on by itself when a video has it, and what online search looks for"
-            />
-            <Chips
-              scroll
-              options={[{ key: '', label: 'Off' }, ...LANGS.map((l) => ({ key: l.code, label: l.name }))]}
-              value={settings.subLang}
-              onPick={(v) => set('subLang', v)}
-            />
-          </View>
+          <SelectRow
+            icon="message-square"
+            title="Subtitle language"
+            subtitle="Turned on by itself when a video has it, and what online search looks for"
+            value={labelOf(SUB_LANGS, settings.subLang)}
+            onPress={() => setPicking('subLang')}
+          />
 
           <Divider />
 
-          <View style={styles.choiceRow}>
-            <Row
-              icon="volume-2"
-              title="Audio language"
-              subtitle="Picked first when a release carries several dubs"
-            />
-            <Chips
-              scroll
-              options={[
-                { key: '', label: 'File default' },
-                ...LANGS.map((l) => ({ key: l.code, label: l.name })),
-              ]}
-              value={settings.audioLang}
-              onPick={(v) => set('audioLang', v)}
-            />
-          </View>
+          <SelectRow
+            icon="volume-2"
+            title="Audio language"
+            subtitle="Picked first when a release carries several dubs"
+            value={labelOf(AUDIO_LANGS, settings.audioLang)}
+            onPress={() => setPicking('audioLang')}
+          />
 
           <Divider />
 
-          <View style={styles.choiceRow}>
-            <Row icon="type" title="Subtitle size" subtitle="Applies from the next video" />
-            <Chips
-              options={SIZES.map((s) => ({ key: s.size, label: s.label }))}
-              value={settings.subSize}
-              onPick={(v) => set('subSize', v)}
-            />
-          </View>
+          <SelectRow
+            icon="type"
+            title="Subtitle size"
+            subtitle="Also in the player's subtitle panel"
+            value={labelOf(SIZES, settings.subSize)}
+            onPress={() => setPicking('subSize')}
+          />
 
           <Divider />
 
@@ -358,9 +355,37 @@ function SettingsScreenView({
         </Text>
       </ScrollView>
     </Screen>
+
+    <SelectSheet
+      visible={picking === 'subLang'}
+      title="Subtitle language"
+      options={SUB_LANGS}
+      value={settings.subLang}
+      onPick={(v) => set('subLang', v)}
+      onClose={() => setPicking(null)}
+    />
+    <SelectSheet
+      visible={picking === 'audioLang'}
+      title="Audio language"
+      options={AUDIO_LANGS}
+      value={settings.audioLang}
+      onPick={(v) => set('audioLang', v)}
+      onClose={() => setPicking(null)}
+    />
+    <SelectSheet
+      visible={picking === 'subSize'}
+      title="Subtitle size"
+      options={SIZES}
+      value={settings.subSize}
+      onPick={(v) => set('subSize', v)}
+      onClose={() => setPicking(null)}
+    />
     </KeyboardAvoidingView>
   );
 }
+
+const labelOf = <T extends string>(options: SelectOption<T>[], key: T) =>
+  options.find((o) => o.key === key)?.label ?? options[0]?.label ?? '';
 
 function useSettingsStyles() {
   return useThemedStyles((c) => ({
@@ -431,6 +456,13 @@ function useSettingsStyles() {
       backgroundColor: c.surfaceAlt,
     },
     choiceOn: { backgroundColor: c.accent },
+    selectValue: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: 2,
+      maxWidth: 130,
+    },
+    selectValueText: { ...type.label, color: c.accent, fontFamily: font.medium, flexShrink: 1 },
     choiceText: { ...type.label, color: c.muted },
     choiceTextOn: { color: c.onAccent, fontFamily: font.semibold },
     footer: {
@@ -499,17 +531,16 @@ const Toggle = ({
   );
 };
 
-/** A row of choice chips; `scroll` for lists too long to wrap, like languages. */
+/** A row of choice chips, for two or three short options. Longer lists are a
+ *  SelectRow — a sideways-scrolling row hid both the options and the pick. */
 function Chips<T extends string>({
   options,
   value,
   onPick,
-  scroll,
 }: {
   options: { key: T; label: string }[];
   value: T;
   onPick: (key: T) => void;
-  scroll?: boolean;
 }) {
   const styles = useSettingsStyles();
   const chips = options.map(({ key, label }) => {
@@ -520,16 +551,41 @@ function Chips<T extends string>({
       </Pressable>
     );
   });
-  return scroll ? (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={[styles.choices, { paddingRight: space.lg }]}
+  return <View style={styles.choices}>{chips}</View>;
+}
+
+/** A setting with many choices: the current one on the right, the list on tap. */
+function SelectRow({
+  icon,
+  title,
+  subtitle,
+  value,
+  onPress,
+}: {
+  icon: IconName;
+  title: string;
+  subtitle?: string;
+  value: string;
+  onPress: () => void;
+}) {
+  const colors = useColors();
+  const styles = useSettingsStyles();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${title}: ${value}`}
+      style={({ pressed }) => pressed && { opacity: 0.6 }}
     >
-      {chips}
-    </ScrollView>
-  ) : (
-    <View style={styles.choices}>{chips}</View>
+      <Row icon={icon} title={title} subtitle={subtitle}>
+        <View style={styles.selectValue}>
+          <Text style={styles.selectValueText} numberOfLines={1}>
+            {value}
+          </Text>
+          <Icon name="chevron-right" size={16} color={colors.faint} />
+        </View>
+      </Row>
+    </Pressable>
   );
 }
 

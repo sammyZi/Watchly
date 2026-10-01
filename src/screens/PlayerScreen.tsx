@@ -47,6 +47,7 @@ import {
   SUB_SIZES,
   updateSettings,
   type Settings,
+  type SubSize,
 } from '../lib/settings';
 import { searchSubtitles, type Sub } from '../lib/subdl';
 import { parseEpisode } from '../lib/search';
@@ -118,6 +119,7 @@ export function PlayerScreen({
   onDuration,
   onDownload,
   onExit,
+  onSettings,
 }: {
   /** What is playing — the file inside the torrent, not the torrent. */
   title?: string;
@@ -148,6 +150,9 @@ export function PlayerScreen({
    *  copying whatever partial bytes streaming happens to have on disk. */
   onDownload?: () => void;
   onExit: () => void;
+  /** A setting changed from in here, so the app's own copy (the Settings tab)
+   *  follows. Without it, the change is only written to storage. */
+  onSettings?: (patch: Partial<Settings>) => void;
 }) {
   const [failure, setFailure] = useState<{ text: string; fatal: boolean } | null>(null);
   const [paused, setPaused] = useState(false);
@@ -246,6 +251,14 @@ export function PlayerScreen({
       if (RATES.includes(s.playbackRate)) setRate(s.playbackRate);
     });
   }, []);
+  /** Subtitle look, changed from the subtitle panel. The view restarts itself
+   *  in place to apply it — see VlcPlayerView.restyle. */
+  const setSubStyle = (patch: Partial<Settings>) => {
+    setPrefs((p) => (p ? { ...p, ...patch } : p));
+    if (onSettings) onSettings(patch);
+    else updateSettings(patch).catch(() => {});
+    bumpUi();
+  };
   const firstMode = useRef(true);
   useEffect(() => {
     if (fileIndex < 0) return;
@@ -1609,6 +1622,47 @@ export function PlayerScreen({
                   </Pressable>
                 </View>
               )}
+              {subTrack !== null && prefs && (
+                <>
+                  <View style={styles.delayRow}>
+                    <Text style={styles.delayLabel}>Size</Text>
+                    {SUB_SIZE_CHOICES.map((c) => (
+                      <StyleChip
+                        key={c.key}
+                        label={c.label}
+                        active={prefs.subSize === c.key}
+                        onPress={() => setSubStyle({ subSize: c.key })}
+                      />
+                    ))}
+                  </View>
+                  <View style={styles.delayRow}>
+                    <Text style={styles.delayLabel}>Colour</Text>
+                    <StyleChip
+                      label="White"
+                      active={prefs.subColor === 'white'}
+                      onPress={() => setSubStyle({ subColor: 'white' })}
+                    />
+                    <StyleChip
+                      label="Yellow"
+                      active={prefs.subColor === 'yellow'}
+                      onPress={() => setSubStyle({ subColor: 'yellow' })}
+                    />
+                  </View>
+                  <View style={styles.delayRow}>
+                    <Text style={styles.delayLabel}>Background</Text>
+                    <StyleChip
+                      label="Off"
+                      active={!prefs.subBackground}
+                      onPress={() => setSubStyle({ subBackground: false })}
+                    />
+                    <StyleChip
+                      label="Box"
+                      active={prefs.subBackground}
+                      onPress={() => setSubStyle({ subBackground: true })}
+                    />
+                  </View>
+                </>
+              )}
               <TrackOption
                 label="Off"
                 active={subTrack === null}
@@ -2077,6 +2131,35 @@ function TrackOption({
   );
 }
 
+/** Short, to fit four across the subtitle panel. Same order as Settings. */
+const SUB_SIZE_CHOICES: { key: SubSize; label: string }[] = [
+  { key: 'small', label: 'S' },
+  { key: 'normal', label: 'M' },
+  { key: 'large', label: 'L' },
+  { key: 'huge', label: 'XL' },
+];
+
+function StyleChip({
+  label,
+  active,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={4}
+      style={[styles.styleChip, active && styles.optionOn]}
+      accessibilityState={{ selected: active }}
+    >
+      <Text style={[styles.styleChipText, active && styles.styleChipTextOn]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 /** SubDL links are .zip; after save they are .srt — show that to the user. */
 function srtDisplayName(r: Sub): string {
   const raw = (r.release || r.name || 'subtitle').trim() || 'subtitle';
@@ -2315,6 +2398,17 @@ const styles = StyleSheet.create({
     paddingBottom: 6,
   },
   delayLabel: { ...type.meta, color: '#ffffffa0', flex: 1 },
+  styleChip: {
+    minWidth: 30,
+    height: 28,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    backgroundColor: '#ffffff1f',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  styleChipText: { ...type.meta, color: '#ffffffc0' },
+  styleChipTextOn: { color: '#fff', fontFamily: font.semibold },
   delayBtn: {
     width: 30,
     height: 30,

@@ -134,6 +134,15 @@ function Shell() {
     saveSettings(next);
   }, []);
 
+  /** A few settings changed elsewhere (the player), merged into the latest. */
+  const patchSettings = useCallback((patch: Partial<Settings>) => {
+    setSettings((prev) => {
+      const next = { ...prev, ...patch };
+      saveSettings(next);
+      return next;
+    });
+  }, []);
+
   const changeThemeMode = useCallback((themeMode: Settings['themeMode']) => {
     startTransition(() => {
       setSettings((prev) => {
@@ -162,6 +171,7 @@ function Shell() {
         <ShellApp
           settings={settings}
           onChangeSettings={changeSettings}
+          onPatchSettings={patchSettings}
           onReady={reveal}
         />
         <OfflineBanner />
@@ -173,10 +183,13 @@ function Shell() {
 function ShellApp({
   settings,
   onChangeSettings,
+  onPatchSettings,
   onReady,
 }: {
   settings: Settings;
   onChangeSettings: (next: Settings) => void;
+  /** Merges into the latest settings, for changes made outside Settings. */
+  onPatchSettings: (patch: Partial<Settings>) => void;
   onReady: () => void;
 }) {
   const colors = useColors();
@@ -913,6 +926,7 @@ function ShellApp({
   if (localPlay) {
     return (
       <PlayerScreen
+        onSettings={onPatchSettings}
         title={localPlay.title}
         url={localPlay.url}
         fileIndex={-1}
@@ -994,6 +1008,7 @@ function ShellApp({
 
     return (
       <PlayerScreen
+        onSettings={onPatchSettings}
         // fileName is what the engine actually opened; before it reports back,
         // the stored file list is the next best thing.
         title={
