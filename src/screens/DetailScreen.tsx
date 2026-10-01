@@ -16,6 +16,7 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Icon } from '../components/Icon';
 import { Marquee } from '../components/Marquee';
 import { ProgressBar } from '../components/ProgressBar';
+import { TrailerModal } from '../components/TrailerModal';
 import { bytes, clock, left } from '../lib/format';
 import { hueOf } from '../lib/title';
 import { loadTitle, reviewLinks, type Episode, type Title } from '../lib/meta';
@@ -495,6 +496,8 @@ export function DetailScreen({
   const [sourceKey, setSourceKey] = useState<string | null>(null);
   /** Rows are on screen but slower indexes are still answering. */
   const [more, setMore] = useState(false);
+  /** Trailer playing over the page. */
+  const [trailer, setTrailer] = useState(false);
   /** Plot expanded. Three lines is enough to decide; the rest is on request. */
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -880,15 +883,10 @@ export function DetailScreen({
             )}
           </Pressable>
 
-          {/* Hands off to YouTube (the app when installed, else the browser) —
-              nothing to stream through the torrent player here. */}
+          {/* Played over the page in YouTube's embed — see TrailerModal. */}
           {!!title.trailer && (
             <Pressable
-              onPress={() =>
-                Linking.openURL(
-                  `https://www.youtube.com/watch?v=${encodeURIComponent(title.trailer!)}`
-                ).catch(() => {})
-              }
+              onPress={() => setTrailer(true)}
               accessibilityLabel="Watch trailer"
               style={({ pressed }) => [styles.download, pressed && styles.pressed]}
             >
@@ -1199,6 +1197,12 @@ export function DetailScreen({
           })}
         </View>
       </ScrollView>
+
+      <TrailerModal
+        id={trailer ? title.trailer : null}
+        title={title.title}
+        onClose={() => setTrailer(false)}
+      />
     </View>
   );
 }
