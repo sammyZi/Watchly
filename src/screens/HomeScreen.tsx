@@ -27,6 +27,7 @@ import {
   type Title,
 } from '../lib/meta';
 import { useOnline } from '../lib/net';
+import { newEpisodes, type Fresh } from '../lib/newEpisodes';
 import { asTitle, inList, type Saved } from '../lib/saved';
 import {
   fadeToBg,
@@ -369,6 +370,31 @@ function HomeScreenView({
     .filter((t) => !watchedIds.has(t.imdb))
     .slice(0, 5);
   const resumable = recent.filter(isInProgress);
+
+  /**
+   * Series being followed — watched or saved — with episodes out since their
+   * page was last opened. Opening one marks it seen (DetailScreen does that);
+   * it is dropped here at once rather than on the next rebuild.
+   */
+  const [fresh, setFresh] = useState<Fresh[]>([]);
+  useEffect(() => {
+    const ids = [
+      ...recent.filter((h) => h.kind === 'tv' && h.imdb).map((h) => h.imdb!),
+      ...saved.filter((s) => s.kind === 'tv').map((s) => s.imdb),
+    ];
+    let live = true;
+    newEpisodes(ids)
+      .then((found) => live && setFresh(found))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [recent, saved, online]);
+  const openFresh = (title: Title) => {
+    setFresh((all) => all.filter((f) => f.title.imdb !== title.imdb));
+    onOpenTitle(title);
+  };
+
   const later = inList(saved, 'later');
   const favorites = inList(saved, 'favorite');
 
@@ -440,6 +466,23 @@ function HomeScreenView({
                       />
                     );
                   }}
+                />
+              </View>
+            )}
+
+            {fresh.length > 0 && (
+              <View style={styles.shelf}>
+                <Head title="New episodes" hue={hues[3]} />
+                <Rail
+                  data={fresh}
+                  keyOf={(f) => f.title.imdb}
+                  render={(f) => (
+                    <Poster
+                      title={f.title}
+                      stamp={f.count === 1 ? '1 new episode' : `${f.count} new episodes`}
+                      onPress={() => openFresh(f.title)}
+                    />
+                  )}
                 />
               </View>
             )}
