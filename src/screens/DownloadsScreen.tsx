@@ -217,7 +217,8 @@ function showTitle(name: string, titleName?: string | null) {
   return titleName || searchableName(name) || name;
 }
 
-function stageLabel(state?: string, paused?: boolean): string {
+function stageLabel(state?: string, paused?: boolean, wifi?: boolean): string {
+  if (wifi) return 'Waiting for Wi-Fi';
   if (paused) return 'Paused';
   if (!state) return 'Starting…';
   if (state === 'DOWNLOADING_METADATA') return 'Starting…';
@@ -449,6 +450,9 @@ function DownloadsScreenView({
   const renderActive = (active: ActiveDownload) => {
   const pct = Math.min(100, active.progress?.progress ?? 0);
   const paused = !!active.progress?.paused;
+  /** Held by the Wi-Fi-only setting, not by the viewer. Resume then means
+   *  "carry on over mobile data" — the native side treats it as that. */
+  const wifi = !!active.progress?.waitingWifi;
   const rate = paused ? 0 : active.progress?.speed ?? 0;
   const queue = active.queue && active.queue.length > 1 ? active.queue : null;
   const wantedSet = new Set(active?.wanted ?? queue?.map((f) => f.index) ?? []);
@@ -504,7 +508,7 @@ function DownloadsScreenView({
   const tags = [season != null ? seasonLabel(season) : '', episodeLabel(at)]
     .filter(Boolean)
     .join(' · ');
-  const stage = stageLabel(active.progress?.state, paused);
+  const stage = stageLabel(active.progress?.state, paused, wifi);
   const sub = paused ? stage : pct >= 100 ? 'Saving to device…' : stage;
   const starting = !paused && pct < 1;
   const qid = active.id ?? active.name;
@@ -556,7 +560,7 @@ function DownloadsScreenView({
                     {totalSize > 0
                       ? `${bytes(haveBytes)} of ${bytes(totalSize)}`
                       : 'Starting…'}
-                    {paused ? ' · Paused' : ` · ${speed(rate)}`}
+                    {wifi ? ' · On mobile data' : paused ? ' · Paused' : ` · ${speed(rate)}`}
                   </Text>
                   <View style={styles.pctRow}>
                     <Text style={styles.pct}>{Math.round(overallPct)}%</Text>
@@ -569,7 +573,7 @@ function DownloadsScreenView({
 
               <View style={styles.actions}>
                 <Button
-                  label={paused ? 'Resume' : 'Pause'}
+                  label={wifi ? 'Use mobile data' : paused ? 'Resume' : 'Pause'}
                   icon={paused ? 'play' : 'pause'}
                   onPress={paused ? active.onResume : active.onPause}
                   style={styles.action}

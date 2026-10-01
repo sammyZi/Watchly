@@ -20,6 +20,7 @@ import { bytes, clock, left } from '../lib/format';
 import { hueOf } from '../lib/title';
 import { loadTitle, reviewLinks, type Episode, type Title } from '../lib/meta';
 import { useOnline } from '../lib/net';
+import { markSeen } from '../lib/newEpisodes';
 import { onList, type List, type Saved } from '../lib/saved';
 import { WATCHED } from '../lib/watched';
 import { episodeTag, health, searchEpisode, searchTorrents, seasonsIn, type Hit } from '../lib/search';
@@ -608,15 +609,27 @@ export function DetailScreen({
   };
 
   // A catalog row carries no episode list, so a series always needs the full
-  // record even when the shelf already gave us a plot.
+  // record even when the shelf already gave us a plot — and catalog rows only
+  // sometimes carry the trailer, so a seed without one asks too (cached a day).
   useEffect(() => {
-    if (seed.plot && (seed.kind === 'movie' || (seed.episodes?.length ?? 0) > 0)) return;
+    if (
+      seed.plot &&
+      seed.trailer &&
+      (seed.kind === 'movie' || (seed.episodes?.length ?? 0) > 0)
+    )
+      return;
     let live = true;
     loadTitle(seed.imdb, seed.kind).then((full) => live && full && setTitle(full));
     return () => {
       live = false;
     };
   }, [seed, online]);
+
+  // Opening the page is seeing what is out: clears the show off Home's
+  // "New episodes" shelf. Needs the full episode list — see `markSeen`.
+  useEffect(() => {
+    markSeen(title);
+  }, [title]);
 
   /** First episode of a season that has not been finished, else its first. */
   const nextIn = (which: number | null) => {
@@ -866,6 +879,22 @@ export function DetailScreen({
               <Icon name="download" size={18} color={colors.text} />
             )}
           </Pressable>
+
+          {/* Hands off to YouTube (the app when installed, else the browser) —
+              nothing to stream through the torrent player here. */}
+          {!!title.trailer && (
+            <Pressable
+              onPress={() =>
+                Linking.openURL(
+                  `https://www.youtube.com/watch?v=${encodeURIComponent(title.trailer!)}`
+                ).catch(() => {})
+              }
+              accessibilityLabel="Watch trailer"
+              style={({ pressed }) => [styles.download, pressed && styles.pressed]}
+            >
+              <Icon name="youtube" size={18} color={colors.text} />
+            </Pressable>
+          )}
         </View>
 
         {title.kind === 'tv' && season != null && (
