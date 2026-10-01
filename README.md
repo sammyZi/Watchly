@@ -48,7 +48,8 @@ src/
   screens/DownloadsScreen.tsx  active transfer and finished files
   screens/FilesScreen.tsx      pick a file inside a multi-file torrent
   screens/PlayerScreen.tsx     video, overlay controls, up next, subtitles
-  screens/SettingsScreen.tsx   buffer size, trackers, cache, theme
+  screens/SettingsScreen.tsx   buffer size, trackers, cache, theme, languages,
+                               subtitle style, Wi-Fi only, SD card, backup
   components/                  TabBar, Screen, PosterGrid, Marquee, Offline,
                                Thumb, HistoryRow, Button, ProgressBar, …
   lib/meta.ts                  Cinemeta titles, shelves, genre recommendations
@@ -63,6 +64,10 @@ src/
   lib/title.ts                 release name -> searchable title, poster hue
   lib/magnet.ts                tracker injection, deep-link detection
   lib/format.ts                speed, clock, time remaining, byte sizes
+  lib/lang.ts                  preferred audio/subtitle language matching
+  lib/intros.ts                per-show intro window for Skip intro
+  lib/newEpisodes.ts           followed series with episodes out since last look
+  lib/backup.ts                library to and from one JSON file
 modules/torrent-stream/
   index.ts                     JS surface
   android/…/TorrentStreamModule.kt   libtorrent4j session + piece scheduler
@@ -84,6 +89,10 @@ modules/vlc-player/
 - Anime is its own catalogue (Stremio's Kitsu addon), because Cinemeta has no
   anime genre — its list stops at "Animation", which is half western cartoons
 - Title search with recent queries, plus favourites and watch later
+- New episodes: a shelf of watched or saved series with episodes out since
+  their page was last opened. Checked when Home builds, off the day-long
+  metadata cache, so an episode shows up within a day of airing
+- Trailer button on a title page, opening YouTube
 
 **Releases**
 
@@ -118,6 +127,17 @@ modules/vlc-player/
   buffer is growing — then the swarm, the video and audio codecs, resolution,
   frame rate, lost frames and audio buffers, and libVLC's bitrates. It stays up
   with the controls hidden and only reads libVLC while it is open
+- Subtitle delay: −/+ in the subtitle picker, 0.1 s a tap, held for 1 s; tap
+  the value to reset it
+- Preferred subtitle and audio languages (Settings) are picked automatically
+  when the file has a matching track, and online subtitle search uses the
+  subtitle language. Picking a track yourself wins
+- Subtitle size, colour (white or yellow) and background box, from Settings.
+  Applied from the next video
+- Swipe up or down on the right edge for volume, the left edge for brightness
+- Sleep timer: 15, 30 or 60 minutes, or the end of the episode
+- Skip intro: *Mark intro* at the start and again at the end of a show's
+  opening; every episode of that show then offers *Skip intro*
 - The chosen audio track survives coming back to the app. Returning reloads the
   stream into a fresh player, which used to start on the file's default dub
   while the picker still showed the viewer's choice
@@ -129,6 +149,13 @@ modules/vlc-player/
   else installed
 - Download mode: keep a file rather than stream it, with a progress
   notification, then play it back from Downloads
+- Wi-Fi only downloads, enforced natively so it holds in the background: on
+  mobile data a download waits ("Waiting for Wi-Fi" in the notification and the
+  Downloads tab) and carries on when Wi-Fi returns. *Use mobile data* on a
+  waiting download lets that one continue anyway
+- Save to SD card: torrents and finished downloads go to the card's app folder
+  instead of the phone. Only switchable while nothing is streaming or
+  downloading, and files there are removed if the app is uninstalled
 
 **Elsewhere**
 
@@ -137,6 +164,9 @@ modules/vlc-player/
   comes back
 - Settings: pre-roll buffer size, whether to inject public trackers, whether to
   wipe piece data when a stream stops, and the theme
+- Backup and restore: history, resume points, saved lists, settings, searches
+  and intro marks as one JSON file written to Downloads; restore picks the
+  file. Finished downloads are not included — they are files on this phone
 
 ## Why libVLC and not ExoPlayer
 
