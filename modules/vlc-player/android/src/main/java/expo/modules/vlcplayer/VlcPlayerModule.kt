@@ -81,8 +81,9 @@ class VlcPlayerModule : Module() {
       Prop("subtitleFiles") { view: VlcPlayerView, value: List<String>? -> view.setSubtitleFiles(value) }
       Prop("scaleType") { view: VlcPlayerView, value: String? -> view.setScaleType(value) }
       Prop("subtitleDelay") { view: VlcPlayerView, value: Int -> view.setSubtitleDelay(value) }
-      // Text-renderer options, read when the next media loads. setSource posts its
-      // load, so the first one already sees these from the same prop batch.
+      // Text-renderer options, read when a LibVLC instance is made. setSource posts
+      // its load, so the first one already sees these from the same prop batch;
+      // a later change restarts playback in place (see VlcPlayerView.restyle).
       Prop("subtitleSize") { view: VlcPlayerView, value: Int -> view.subtitleSize = value }
       Prop("subtitleColor") { view: VlcPlayerView, value: Int -> view.subtitleColor = value }
       Prop("subtitleBackground") { view: VlcPlayerView, value: Boolean -> view.subtitleBackground = value }

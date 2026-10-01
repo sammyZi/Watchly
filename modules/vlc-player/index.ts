@@ -93,7 +93,7 @@ export type VlcPlayerProps = {
   /** Subtitle offset in ms; positive shows them later. */
   subtitleDelay?: number;
   /** libVLC's relative font size — smaller is bigger: 16 normal, 12 large.
-   *  This and the two below apply from the next load. */
+   *  Changing this or the two below restarts playback in place to apply. */
   subtitleSize?: number;
   /** 0xRRGGBB. */
   subtitleColor?: number;
