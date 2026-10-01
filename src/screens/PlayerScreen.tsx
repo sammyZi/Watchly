@@ -163,6 +163,39 @@ export function PlayerScreen({
   const [defaultAudio, setDefaultAudio] = useState<number | null>(null);
   /** Index of the chosen track, null for off. */
   const [subTrack, setSubTrack] = useState<number | null>(null);
+  /**
+   * The chosen subtitle by name, which survives a reload where its id does not.
+   *
+   * Coming back to the app reopens the stream, and libVLC numbers its tracks
+   * afresh: a subtitle added mid-film (a SubDL download, a sidecar that turned
+   * up late) is attached up front this time, so it and the file's own tracks
+   * swap numbers — and the id the player was holding now names a different
+   * subtitle. After a reload the name is what picks it again.
+   */
+  const subName = useRef<string | null>(null);
+  /** Set by a reload until the new track list has the chosen subtitle back. */
+  const restoreSub = useRef(false);
+  // Follows the viewer's choice — except while a reload is re-finding it, when
+  // the id still held belongs to the old numbering and names the wrong track.
+  useEffect(() => {
+    if (restoreSub.current) return;
+    if (subTrack == null) {
+      subName.current = null;
+      return;
+    }
+    const chosen = tracks.find((t) => t.id === subTrack);
+    if (chosen) subName.current = chosen.name;
+  }, [subTrack, tracks]);
+  /** Before any reload: re-find the chosen subtitle by name once it is back. */
+  const markReload = () => {
+    if (subName.current == null) return;
+    restoreSub.current = true;
+    // A subtitle that never comes back (its file is gone) must not freeze the
+    // choice for good — after this the viewer's own picks count again.
+    setTimeout(() => {
+      restoreSub.current = false;
+    }, 10_000);
+  };
   const [picking, setPicking] = useState(false);
   /** Tracks that failed to select. libVLC renders essentially every subtitle
    *  format, so this should stay empty — it is a safety net, not a workaround. */
@@ -851,6 +884,7 @@ export function PlayerScreen({
         // there is a title, a scrubber and a play button rather than a void.
         if (left.current) {
           left.current = false;
+          markReload();
           videoRef.current?.reload(position.current);
           bump.current();
         }
@@ -943,6 +977,15 @@ export function PlayerScreen({
                 name: friendlySubName(t, i, externals),
               }));
               setTracks(next);
+              // Back from a reload: the same subtitle, by name, at whatever
+              // number libVLC has given it this time.
+              if (restoreSub.current && subName.current != null) {
+                const again = next.find((t) => t.name === subName.current);
+                if (again) {
+                  restoreSub.current = false;
+                  setSubTrack(again.id);
+                }
+              }
               setAudioTracks(nativeEvent.audio);
               if (nativeEvent.defaultAudio != null && nativeEvent.defaultAudio >= 0) {
                 setDefaultAudio(nativeEvent.defaultAudio);
@@ -1023,6 +1066,7 @@ export function PlayerScreen({
                 reloads.current += 1;
                 reloadFrom.current = at;
                 warn('Stream dropped — picking it back up');
+                markReload();
                 videoRef.current?.reload(at);
                 return;
               }
