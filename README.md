@@ -134,8 +134,9 @@ modules/vlc-player/
 - Preferred subtitle and audio languages (Settings) are picked automatically
   when the file has a matching track, and online subtitle search uses the
   subtitle language. Picking a track yourself wins
-- Subtitle size, colour (white or yellow) and background box, from Settings.
-  Applied from the next video
+- Subtitle size, colour (white or yellow) and background box, in Settings and
+  in the player's subtitle panel. libVLC only reads them when it starts, so a
+  change mid-film restarts the player in place — a blink, same position
 - Swipe up or down on the right edge for volume, the left edge for brightness
 - Sleep timer: 15, 30 or 60 minutes, or the end of the episode
 - Skip intro: *Mark intro* at the start and again at the end of a show's

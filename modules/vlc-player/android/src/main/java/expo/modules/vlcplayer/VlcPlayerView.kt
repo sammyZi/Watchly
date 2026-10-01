@@ -626,13 +626,45 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
   }
 
   /**
-   * Subtitle text, as libVLC's freetype options — instance-wide, so they apply
-   * from the next load. `subtitleSize` is VLC's relative size, where *smaller*
-   * is bigger text: 16 is normal, 12 large, 20 small.
+   * Subtitle text, as libVLC's freetype options — instance-wide, fixed when the
+   * LibVLC instance is made. A change while something plays restarts it in
+   * place, as `reload` does, so the new style shows straight away.
+   * `subtitleSize` is VLC's relative size, where *smaller* is bigger text: 16
+   * is normal, 12 large, 20 small.
    */
   var subtitleSize = 16
+    set(value) {
+      if (field == value) return
+      field = value
+      restyle()
+    }
   var subtitleColor = 0xFFFFFF
+    set(value) {
+      if (field == value) return
+      field = value
+      restyle()
+    }
   var subtitleBackground = false
+    set(value) {
+      if (field == value) return
+      field = value
+      restyle()
+    }
+
+  private var restylePending = false
+
+  /** Posted, so the three style props of one batch cost one restart. Before the
+   *  first load there is no player, and the load itself picks the options up. */
+  private fun restyle() {
+    if (player == null || restylePending) return
+    restylePending = true
+    post {
+      restylePending = false
+      val p = player ?: return@post
+      // Still opening: no time yet, so keep the resume point it was opening at.
+      reload(p.time.takeIf { it > 0L } ?: startMs)
+    }
+  }
 
   fun setSubtitleFiles(paths: List<String>?) {
     val normalized = paths?.map { localPath(it) }?.filter { it.isNotEmpty() }
