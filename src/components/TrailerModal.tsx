@@ -1,8 +1,17 @@
 import { useEffect } from 'react';
-import { Linking, Modal, Pressable, StatusBar, Text, useWindowDimensions, View } from 'react-native';
+import {
+  Linking,
+  Modal,
+  Pressable,
+  StatusBar,
+  Text,
+  TurboModuleRegistry,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ScreenOrientation from 'expo-screen-orientation';
-import { WebView } from 'react-native-webview';
+import type { WebView as WebViewType } from 'react-native-webview';
 import { Icon } from './Icon';
 import { font, radius, space, type } from '../theme';
 
@@ -28,7 +37,23 @@ const page = (id: string) => `<!doctype html>
   referrerpolicy="strict-origin-when-cross-origin"></iframe>
 </body></html>`;
 
-const watchUrl = (id: string) => `https://www.youtube.com/watch?v=${encodeURIComponent(id)}`;
+export const watchUrl = (id: string) =>
+  `https://www.youtube.com/watch?v=${encodeURIComponent(id)}`;
+
+/**
+ * The WebView, when the installed build carries its native half.
+ *
+ * Asked for rather than imported: react-native-webview looks its native module
+ * up the moment it loads and throws if it is missing, and this file loads with
+ * the title page — so a build made before the package was added would die on
+ * launch, not just on the trailer. Without it, trailers open in YouTube.
+ */
+const WebView: typeof WebViewType | null = TurboModuleRegistry.get('RNCWebViewModule')
+  ? require('react-native-webview').WebView
+  : null;
+
+/** Trailers play in here; otherwise the button hands off to YouTube. */
+export const canPlayTrailers = WebView != null;
 
 /**
  * A title's trailer, played over the page in YouTube's own embedded player.
@@ -136,7 +161,7 @@ export function TrailerModal({
           </Pressable>
         </View>
 
-        {!!id && (
+        {!!id && WebView && (
           <WebView
             source={{ html: page(id), baseUrl: ORIGIN }}
             style={{ flex: 1, backgroundColor: '#000' }}

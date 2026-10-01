@@ -16,7 +16,7 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Icon } from '../components/Icon';
 import { Marquee } from '../components/Marquee';
 import { ProgressBar } from '../components/ProgressBar';
-import { TrailerModal } from '../components/TrailerModal';
+import { canPlayTrailers, TrailerModal, watchUrl } from '../components/TrailerModal';
 import { bytes, clock, left } from '../lib/format';
 import { hueOf } from '../lib/title';
 import { loadTitle, reviewLinks, type Episode, type Title } from '../lib/meta';
@@ -886,7 +886,11 @@ export function DetailScreen({
           {/* Played over the page in YouTube's embed — see TrailerModal. */}
           {!!title.trailer && (
             <Pressable
-              onPress={() => setTrailer(true)}
+              onPress={() =>
+                canPlayTrailers
+                  ? setTrailer(true)
+                  : Linking.openURL(watchUrl(title.trailer!)).catch(() => {})
+              }
               accessibilityLabel="Watch trailer"
               style={({ pressed }) => [styles.download, pressed && styles.pressed]}
             >
