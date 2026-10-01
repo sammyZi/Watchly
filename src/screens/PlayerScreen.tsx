@@ -910,18 +910,16 @@ export function PlayerScreen({
 
   useEffect(() => {
     bumpUi();
-    return () => {
-      // Do not clear warnTimer here — bumpUi changes when the subtitle picker
-      // opens, and wiping the timer left "Subtitle ready" on screen forever.
-      [hideTimer, tapTimer, nudgeTimer].forEach((t) => {
-        if (t.current) clearTimeout(t.current);
-      });
-    };
   }, [bumpUi]);
 
+  // Unmount only. bumpUi changes whenever the picker opens or closes; clearing
+  // these on that left a dead handle in tapTimer, so every later tap read as
+  // the second half of a double-tap and the controls never came up.
   useEffect(() => {
     return () => {
-      if (warnTimer.current) clearTimeout(warnTimer.current);
+      [hideTimer, tapTimer, nudgeTimer, warnTimer].forEach((t) => {
+        if (t.current) clearTimeout(t.current);
+      });
     };
   }, []);
 

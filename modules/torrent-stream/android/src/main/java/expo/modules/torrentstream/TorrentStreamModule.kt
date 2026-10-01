@@ -778,11 +778,8 @@ class TorrentStreamModule : Module() {
     /** The player's *Whole file* / *Next 5 min* switch; takes effect on the next tick. */
     AsyncFunction("setWholeFile") { on: Boolean ->
       wholeStream = on
-      val h = handle
-      if (h != null && h.isValid && !fullFile) {
-        if (on) h.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
-        else h.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
-      }
+      // Not sequential mode — see play(). The order comes from the front band
+      // applyZone adds, which leaves the playhead's own pieces ahead of it.
       // The mode lives in the piece priorities applyZone writes, so the next
       // tick has to rewrite them — re-prioritising the files instead, as this
       // used to, marked the whole file wanted and left it that way after the
@@ -1748,9 +1745,14 @@ class TorrentStreamModule : Module() {
     // of the file outranks the one the viewer is waiting on.
     // Sequential is right for a download, though: nobody is waiting on a
     // particular piece, and writing the file front to back keeps it playable
-    // before it finishes. Likewise *Whole file* while streaming — the viewer
-    // asked for the file, and the deadlines still carry the playhead.
-    if (fullFile || wholeStream) h.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
+    // before it finishes.
+    //
+    // Not for *Whole file* while streaming, which it briefly was: with the
+    // resume point 37 pieces in, the picker took pieces 0–12 in order first —
+    // 208MB — and the film sat on a black screen for 71 seconds before the one
+    // piece it was waiting on arrived. The front band in applyZone gives the
+    // front-to-back fill without outranking the playhead.
+    if (fullFile) h.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
     else h.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
     handle = h
     warm = null
@@ -2316,8 +2318,10 @@ class TorrentStreamModule : Module() {
     //
     // *Whole file* adds a front band — see applyZone — which moves on once the
     // first missing piece is half a band past where it was last aimed, not on
-    // every piece that lands.
-    val front = if (wholeStream) {
+    // every piece that lands. Only once playing: before the first frame every
+    // byte belongs to the header and the resume point.
+    val banded = wholeStream && announcedReady
+    val front = if (banded) {
       var p = maxOf(firstPiece, zoneFront)
       while (p <= lastPiece && h.havePiece(p)) p++
       p
@@ -2326,8 +2330,8 @@ class TorrentStreamModule : Module() {
     }
     val stale = zoneWidth != width ||
       zoneRushedTail != announcedReady ||
-      wholeStream != (zoneFront >= 0) ||
-      (wholeStream && front > zoneFront + width / 2) ||
+      banded != (zoneFront >= 0) ||
+      (banded && front > zoneFront + width / 2) ||
       zoneStarts.size != targets.size ||
       targets.any { t -> zoneStarts.none { t >= it - back && t <= it + width / 2 } }
     if (stale) applyZone(h, targets, width, back, rushTail = announcedReady, front = front)
