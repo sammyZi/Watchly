@@ -77,6 +77,7 @@ export const asTitle = (s: Saved): Title => ({
   cast: [],
   directors: [],
   awards: null,
+  trailer: null,
   backdrop: null,
   runtime: null,
   episodes: [],

@@ -1,9 +1,12 @@
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Switch, Text, View } from 'react-native';
-import { memo, useRef } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
+import TorrentStream, { type DownloadPrefs } from '../../modules/torrent-stream';
 import { Icon, type IconName } from '../components/Icon';
 import { Screen } from '../components/Screen';
+import { bytes } from '../lib/format';
+import { LANGS } from '../lib/lang';
 import { GENRES } from '../lib/meta';
-import type { Settings } from '../lib/settings';
+import type { Settings, SubSize } from '../lib/settings';
 import {
   font,
   radius,
@@ -22,17 +25,27 @@ const APPEARANCE: { mode: ThemeMode; label: string }[] = [
   { mode: 'light', label: 'Light' },
   { mode: 'dark', label: 'Dark' },
 ];
+const SIZES: { size: SubSize; label: string }[] = [
+  { size: 'small', label: 'Small' },
+  { size: 'normal', label: 'Normal' },
+  { size: 'large', label: 'Large' },
+  { size: 'huge', label: 'Huge' },
+];
 
 function SettingsScreenView({
   settings,
   onChange,
   onClearHistory,
   historyCount,
+  onBackup,
+  onRestore,
 }: {
   settings: Settings;
   onChange: (next: Settings) => void;
   onClearHistory: () => void;
   historyCount: number;
+  onBackup: () => void;
+  onRestore: () => void;
 }) {
   const scrollRef = useRef<ScrollView>(null);
   const colors = useColors();
@@ -40,6 +53,19 @@ function SettingsScreenView({
   const styles = useSettingsStyles();
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) =>
     onChange({ ...settings, [key]: value });
+
+  /** Kept natively — they have to hold for a download resumed with no JS. */
+  const [dl, setDl] = useState<DownloadPrefs | null>(null);
+  const [storageHint, setStorageHint] = useState<string | null>(null);
+  const readDl = () => TorrentStream.downloadPrefs().then(setDl).catch(() => {});
+  useEffect(() => {
+    readDl();
+  }, []);
+  const chooseCard = async (on: boolean) => {
+    const ok = await TorrentStream.setSdCard(on).catch(() => false);
+    setStorageHint(ok ? null : 'Stop the stream and any downloads first, then switch.');
+    readDl();
+  };
 
   return (
     <KeyboardAvoidingView
@@ -165,6 +191,137 @@ function SettingsScreenView({
               })}
             </View>
           </View>
+        </Group>
+
+        <Group title="Subtitles & audio">
+          <View style={styles.choiceRow}>
+            <Row
+              icon="message-square"
+              title="Subtitle language"
+              subtitle="Turned on by itself when a video has it, and what online search looks for"
+            />
+            <Chips
+              scroll
+              options={[{ key: '', label: 'Off' }, ...LANGS.map((l) => ({ key: l.code, label: l.name }))]}
+              value={settings.subLang}
+              onPick={(v) => set('subLang', v)}
+            />
+          </View>
+
+          <Divider />
+
+          <View style={styles.choiceRow}>
+            <Row
+              icon="volume-2"
+              title="Audio language"
+              subtitle="Picked first when a release carries several dubs"
+            />
+            <Chips
+              scroll
+              options={[
+                { key: '', label: 'File default' },
+                ...LANGS.map((l) => ({ key: l.code, label: l.name })),
+              ]}
+              value={settings.audioLang}
+              onPick={(v) => set('audioLang', v)}
+            />
+          </View>
+
+          <Divider />
+
+          <View style={styles.choiceRow}>
+            <Row icon="type" title="Subtitle size" subtitle="Applies from the next video" />
+            <Chips
+              options={SIZES.map((s) => ({ key: s.size, label: s.label }))}
+              value={settings.subSize}
+              onPick={(v) => set('subSize', v)}
+            />
+          </View>
+
+          <Divider />
+
+          <View style={styles.choiceRow}>
+            <Row icon="droplet" title="Subtitle colour" />
+            <Chips
+              options={[
+                { key: 'white' as const, label: 'White' },
+                { key: 'yellow' as const, label: 'Yellow' },
+              ]}
+              value={settings.subColor}
+              onPick={(v) => set('subColor', v)}
+            />
+          </View>
+
+          <Divider />
+
+          <Row
+            icon="square"
+            title="Background box"
+            subtitle="A dark band behind the text, for bright scenes"
+          >
+            <Toggle value={settings.subBackground} onChange={(v) => set('subBackground', v)} />
+          </Row>
+        </Group>
+
+        <Group title="Downloads">
+          <Row
+            icon="wifi"
+            title="Download on Wi-Fi only"
+            subtitle="Waits on mobile data; Resume on a download overrides it"
+          >
+            <Toggle
+              value={!!dl?.wifiOnly}
+              onChange={(v) => {
+                setDl((cur) => (cur ? { ...cur, wifiOnly: v } : cur));
+                TorrentStream.setWifiOnly(v).catch(() => {});
+              }}
+            />
+          </Row>
+
+          {!!dl?.sdAvailable && (
+            <>
+              <Divider />
+              <View style={styles.choiceRow}>
+                <Row
+                  icon="hard-drive"
+                  title="Save to"
+                  subtitle={
+                    storageHint ??
+                    `${bytes(dl.internalFree)} free on the phone, ${bytes(dl.sdFree)} on the card. ` +
+                      'The card copy is removed if the app is uninstalled.'
+                  }
+                />
+                <Chips
+                  options={[
+                    { key: 'phone' as const, label: 'Phone' },
+                    { key: 'card' as const, label: 'SD card' },
+                  ]}
+                  value={dl.sdCard ? 'card' : 'phone'}
+                  onPick={(v) => chooseCard(v === 'card')}
+                />
+              </View>
+            </>
+          )}
+        </Group>
+
+        <Group title="Library">
+          <Pressable onPress={onBackup}>
+            <Row
+              icon="download"
+              title="Back up library"
+              subtitle="History, resume points, saved lists and settings, to Downloads"
+            >
+              <Icon name="chevron-right" size={18} color={colors.faint} />
+            </Row>
+          </Pressable>
+
+          <Divider />
+
+          <Pressable onPress={onRestore}>
+            <Row icon="upload" title="Restore from backup" subtitle="Pick a watchly-backup file">
+              <Icon name="chevron-right" size={18} color={colors.faint} />
+            </Row>
+          </Pressable>
         </Group>
 
         <Group title="Storage">
@@ -341,6 +498,40 @@ const Toggle = ({
     />
   );
 };
+
+/** A row of choice chips; `scroll` for lists too long to wrap, like languages. */
+function Chips<T extends string>({
+  options,
+  value,
+  onPick,
+  scroll,
+}: {
+  options: { key: T; label: string }[];
+  value: T;
+  onPick: (key: T) => void;
+  scroll?: boolean;
+}) {
+  const styles = useSettingsStyles();
+  const chips = options.map(({ key, label }) => {
+    const on = value === key;
+    return (
+      <Pressable key={key} onPress={() => onPick(key)} style={[styles.choice, on && styles.choiceOn]}>
+        <Text style={[styles.choiceText, on && styles.choiceTextOn]}>{label}</Text>
+      </Pressable>
+    );
+  });
+  return scroll ? (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={[styles.choices, { paddingRight: space.lg }]}
+    >
+      {chips}
+    </ScrollView>
+  ) : (
+    <View style={styles.choices}>{chips}</View>
+  );
+}
 
 const Divider = () => {
   const styles = useSettingsStyles();

@@ -100,6 +100,8 @@ export type Meta = {
   directors: string[];
   /** Cinemeta's own prose — "Won 4 Oscars. 42 wins & 52 nominations total". */
   awards: string | null;
+  /** YouTube video id of the trailer, when Cinemeta has one. */
+  trailer: string | null;
 };
 
 /** One request per key for the life of the process — ids repeat constantly
@@ -117,7 +119,7 @@ const TTL = 24 * 60 * 60 * 1000;
  * `undefined.map`. The version is part of the key, so old entries are simply
  * never found again.
  */
-const STORE = 'meta:3:';
+const STORE = 'meta:4:';
 
 /**
  * Memory cache over a disk cache over the network.
@@ -469,6 +471,15 @@ export function toMeta(m: Record<string, any>): Meta {
     cast: Array.isArray(m.cast) ? m.cast.map(String) : [],
     directors: Array.isArray(m.director) ? m.director.map(String) : [],
     awards: m.awards ? String(m.awards) : null,
+    // Two shapes in the wild: `trailerStreams` on newer records, `trailers`
+    // (with "Clip"s mixed in) on older ones.
+    trailer:
+      (Array.isArray(m.trailerStreams) && m.trailerStreams[0]?.ytId
+        ? String(m.trailerStreams[0].ytId)
+        : null) ??
+      (Array.isArray(m.trailers)
+        ? (m.trailers.find((t: any) => t?.type === 'Trailer' && t.source)?.source ?? null)
+        : null),
   };
 }
 

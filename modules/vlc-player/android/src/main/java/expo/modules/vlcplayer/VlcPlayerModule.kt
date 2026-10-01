@@ -1,5 +1,7 @@
 package expo.modules.vlcplayer
 
+import android.content.Context
+import android.media.AudioManager
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -13,6 +15,29 @@ class VlcPlayerModule : Module() {
     Function("isInPip") {
       android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N &&
         appContext.currentActivity?.isInPictureInPictureMode == true
+    }
+
+    // Media volume, 0–1 — the right-edge swipe. The system's own stream, as VLC
+    // does, so the hardware keys and the swipe move the same level. No flags: the
+    // overlay draws its own readout, and the system slider over it is clutter.
+    Function("getVolume") {
+      val am = audio() ?: return@Function 0.0
+      am.getStreamVolume(AudioManager.STREAM_MUSIC).toDouble() /
+        am.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+    }
+
+    Function("setVolume") { level: Double ->
+      val am = audio() ?: return@Function null
+      val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+      // Throws under Do Not Disturb on some ROMs; the swipe just does nothing then.
+      runCatching {
+        am.setStreamVolume(
+          AudioManager.STREAM_MUSIC,
+          Math.round(level.coerceIn(0.0, 1.0) * max).toInt(),
+          0
+        )
+      }
+      null
     }
 
     View(VlcPlayerView::class) {
@@ -55,6 +80,12 @@ class VlcPlayerModule : Module() {
       Prop("audioTrack") { view: VlcPlayerView, value: Int? -> view.setAudioTrack(value) }
       Prop("subtitleFiles") { view: VlcPlayerView, value: List<String>? -> view.setSubtitleFiles(value) }
       Prop("scaleType") { view: VlcPlayerView, value: String? -> view.setScaleType(value) }
+      Prop("subtitleDelay") { view: VlcPlayerView, value: Int -> view.setSubtitleDelay(value) }
+      // Text-renderer options, read when the next media loads. setSource posts its
+      // load, so the first one already sees these from the same prop batch.
+      Prop("subtitleSize") { view: VlcPlayerView, value: Int -> view.subtitleSize = value }
+      Prop("subtitleColor") { view: VlcPlayerView, value: Int -> view.subtitleColor = value }
+      Prop("subtitleBackground") { view: VlcPlayerView, value: Boolean -> view.subtitleBackground = value }
 
       AsyncFunction("seekTo") { view: VlcPlayerView, seconds: Double ->
         view.seekTo((seconds * 1000).toLong())
@@ -73,4 +104,7 @@ class VlcPlayerModule : Module() {
       OnViewDestroys { view: VlcPlayerView -> view.release() }
     }
   }
+
+  private fun audio(): AudioManager? =
+    appContext.reactContext?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
 }

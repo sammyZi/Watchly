@@ -28,7 +28,9 @@ import {
 } from 'react-native-google-cast';
 import {
   VlcPlayer,
+  getVolume,
   isInPip,
+  setVolume,
   type VlcPlayerRef,
   type VlcStats,
   type VlcTrack,
@@ -37,7 +39,15 @@ import TorrentStream, { type Progress } from '../../modules/torrent-stream';
 import { Icon, type IconName } from '../components/Icon';
 import { Marquee } from '../components/Marquee';
 import { bytes, clock, speed } from '../lib/format';
-import { loadSettings, updateSettings } from '../lib/settings';
+import { inIntro, loadIntro, saveIntro, type Intro } from '../lib/intros';
+import { trackForLang } from '../lib/lang';
+import {
+  loadSettings,
+  SUB_COLORS,
+  SUB_SIZES,
+  updateSettings,
+  type Settings,
+} from '../lib/settings';
 import { searchSubtitles, type Sub } from '../lib/subdl';
 import { parseEpisode } from '../lib/search';
 import { searchableName } from '../lib/title';
@@ -58,6 +68,8 @@ const RATES = [0.75, 1, 1.25, 1.5, 2];
 const HOLD_RATE = 2;
 /** Long enough that a slow tap is still a tap. */
 const HOLD_MS = 450;
+/** Sleep timer steps, in minutes; -1 is "at the end of this episode". */
+const SLEEP = [0, 15, 30, 60, -1];
 
 /** No frame for this long means the stream is stalled. Well clear of libVLC's
  *  ~250ms TimeChanged interval, so jitter and seeks do not flash the spinner. */
@@ -218,9 +230,16 @@ export function PlayerScreen({
    * for the next stream, like the Windows player's own switch.
    */
   const [wholeFile, setWholeFile] = useState(false);
+  /**
+   * The stored settings. The player waits for them before it mounts: subtitle
+   * styling is fixed when libVLC starts, so a first load without them would
+   * play the whole film in the default style.
+   */
+  const [prefs, setPrefs] = useState<Settings | null>(null);
   useEffect(() => {
     // Picture mode and speed carry over from the last video too, as on Windows.
     loadSettings().then((s) => {
+      setPrefs(s);
       setWholeFile(s.streamWholeFile);
       const scale = SCALES.findIndex((m) => m.label === s.playerScale);
       if (scale >= 0) setScaleIdx(scale);
@@ -260,12 +279,23 @@ export function PlayerScreen({
   const externalSubsRef = useRef(externalSubs);
   externalSubsRef.current = externalSubs;
 
+  /** Subtitle offset in ms, for a subtitle timed against a different cut. */
+  const [subDelay, setSubDelay] = useState(0);
+  /**
+   * Whether the viewer's languages have been applied to this file, or the
+   * viewer has picked for themselves — either way, hands off from then on.
+   * Tracks arrive one at a time, so this keeps trying until one matches.
+   */
+  const autoPicked = useRef({ sub: false, audio: false });
+
   // Same player instance can move to the next episode — reload that file's picks.
   useEffect(() => {
     setExternalSubs(savedSubs ?? []);
     setDefaultAudio(null);
     setAudioTrack(null);
     setSubTrack(null);
+    setSubDelay(0);
+    autoPicked.current = { sub: false, audio: false };
     // Only on file change; including savedSubs would reset mid-session on every history write.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileIndex]);
@@ -273,6 +303,26 @@ export function PlayerScreen({
   const pendingSub = useRef<string | null>(null);
   /** "Cancel" on the up-next card — only for the episode playing now. */
   const [dismissedNext, setDismissedNext] = useState(false);
+
+  /** Index into SLEEP, and when a timed one runs out. */
+  const [sleepIdx, setSleepIdx] = useState(0);
+  const [sleepEnds, setSleepEnds] = useState(0);
+  const sleepAtEnd = SLEEP[sleepIdx] < 0;
+
+  /**
+   * The show's intro, marked by the viewer on one episode and offered as
+   * "Skip intro" on the rest. Series only — a film has no recurring titles.
+   */
+  const showKey = kind === 'tv' || parseEpisode(title ?? '') ? imdb || metaTitle || null : null;
+  const [intro, setIntro] = useState<Intro | null>(null);
+  const introRef = useRef<Intro | null>(null);
+  introRef.current = intro;
+  /** Where the viewer said the intro starts, until they say where it ends. */
+  const [introMark, setIntroMark] = useState<number | null>(null);
+  useEffect(() => {
+    setIntro(null);
+    if (showKey) loadIntro(showKey).then(setIntro);
+  }, [showKey]);
 
   const position = useRef(resumeAt ?? 0);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -289,7 +339,8 @@ export function PlayerScreen({
    * re-rendering the player at that rate is what made it feel heavy.
    */
   const [brightPct, setBrightPct] = useState(50);
-  const brightDrag = useRef<{ y: number; start: number } | null>(null);
+  /** An edge drag in progress: brightness on the left, system volume on the right. */
+  const edgeDrag = useRef<{ y: number; start: number; volume: boolean } | null>(null);
   /** Held down on the picture: playing at HOLD_RATE until the finger lifts. */
   const [boost, setBoost] = useState(false);
   const boosting = useRef(false);
@@ -376,7 +427,8 @@ export function PlayerScreen({
    * the credits can be watched in peace.
    */
   const remaining = duration > 0 ? duration - current : Infinity;
-  const upNext = !!next && !!onNext && !dismissedNext && remaining <= UP_NEXT_SECONDS;
+  const upNext =
+    !!next && !!onNext && !dismissedNext && !sleepAtEnd && remaining <= UP_NEXT_SECONDS;
   const countdown = Math.max(0, Math.ceil(remaining));
 
   const playNext = useCallback(() => {
@@ -488,6 +540,7 @@ export function PlayerScreen({
       const useImdb = !!imdb && (!typed || typed === metaTitle);
       const results = await searchSubtitles(useImdb ? '' : q, key, {
         ...at,
+        language: prefs?.subLang || 'EN',
         imdb: useImdb ? imdb : undefined,
         type: (at || kind === 'tv') ? 'tv' : kind === 'movie' ? 'movie' : undefined,
       });
@@ -503,7 +556,7 @@ export function PlayerScreen({
     } finally {
       setSubLoading(false);
     }
-  }, [subQuery, title, metaTitle, imdb, kind, warn]);
+  }, [subQuery, title, metaTitle, imdb, kind, warn, prefs?.subLang]);
 
   const applySubtitle = useCallback(async (result: Sub) => {
     try {
@@ -515,6 +568,7 @@ export function PlayerScreen({
         label.replace(/\.srt$/i, '')
       );
       pendingSub.current = label;
+      autoPicked.current.sub = true;
       setExternalSubs((prev) => {
         const next = prev.some((s) => s.path === dest)
           ? prev
@@ -671,8 +725,9 @@ export function PlayerScreen({
   );
 
   /**
-   * Left half, vertical drag — same gesture VLC uses for brightness. A tap or
-   * double-tap still falls through when the finger barely moved.
+   * Vertical drags on the edges, the gestures VLC uses: brightness on the left,
+   * volume on the right. A tap or double-tap still falls through when the
+   * finger barely moved.
    */
   const onPictureTouch = useCallback(
     (phase: 'start' | 'move' | 'end', x: number, y: number) => {
@@ -681,8 +736,12 @@ export function PlayerScreen({
         return;
       }
       if (phase === 'start') {
-        brightDrag.current =
-          x < width * 0.4 ? { y, start: brightness.current } : null;
+        edgeDrag.current =
+          x < width * 0.4
+            ? { y, start: brightness.current, volume: false }
+            : x > width * 0.6
+              ? { y, start: getVolume(), volume: true }
+              : null;
         // A press that stays put becomes a hold: double speed, one short buzz
         // to say so, until the finger lifts. Nothing to speed up while paused.
         endHold();
@@ -692,8 +751,8 @@ export function PlayerScreen({
             boosting.current = true;
             setBoost(true);
             Vibration.vibrate(35);
-            // This press is a hold now — not a tap, and not a brightness drag.
-            brightDrag.current = null;
+            // This press is a hold now — not a tap, and not an edge drag.
+            edgeDrag.current = null;
             if (tapTimer.current) {
               clearTimeout(tapTimer.current);
               tapTimer.current = null;
@@ -708,7 +767,7 @@ export function PlayerScreen({
         const began = hold.current;
         if (began && Math.hypot(x - began.x, y - began.y) >= 14) endHold();
         if (boosting.current) return;
-        const drag = brightDrag.current;
+        const drag = edgeDrag.current;
         if (!drag) return;
         const dy = y - drag.y;
         if (Math.abs(dy) < 14) return;
@@ -716,8 +775,15 @@ export function PlayerScreen({
           clearTimeout(tapTimer.current);
           tapTimer.current = null;
         }
-        const next = setBright(drag.start - dy / (height * 0.7));
-        showHud({ icon: 'sun', label: `${Math.round(next * 100)}%` });
+        const level = drag.start - dy / (height * 0.7);
+        if (drag.volume) {
+          const v = Math.max(0, Math.min(1, level));
+          setVolume(v);
+          showHud({ icon: v === 0 ? 'volume-x' : 'volume-2', label: `${Math.round(v * 100)}%` });
+        } else {
+          const next = setBright(level);
+          showHud({ icon: 'sun', label: `${Math.round(next * 100)}%` });
+        }
         return;
       }
       endHold();
@@ -727,9 +793,9 @@ export function PlayerScreen({
         setBoost(false);
         return;
       }
-      if (brightDrag.current) {
-        const moved = Math.abs(y - brightDrag.current.y) >= 14;
-        brightDrag.current = null;
+      if (edgeDrag.current) {
+        const moved = Math.abs(y - edgeDrag.current.y) >= 14;
+        edgeDrag.current = null;
         if (moved) return;
       }
       tapPicture(x);
@@ -757,6 +823,61 @@ export function PlayerScreen({
     updateSettings({ playerScale: SCALES[next].label });
     bumpUi();
   }, [scaleIdx, showHud, bumpUi]);
+
+  const cycleSleep = useCallback(() => {
+    const next = (sleepIdx + 1) % SLEEP.length;
+    setSleepIdx(next);
+    setSleepEnds(Date.now() + SLEEP[next] * 60_000);
+    showHud({
+      icon: 'moon',
+      label: SLEEP[next] === 0 ? 'Sleep timer off' : SLEEP[next] < 0 ? 'Stop after this episode' : `Pause in ${SLEEP[next]} min`,
+    });
+    bumpUi();
+  }, [sleepIdx, showHud, bumpUi]);
+
+  // Read when the timer fires — a Cast session starting mid-timer must not
+  // restart the countdown.
+  const castRef = useRef(castClient);
+  castRef.current = castClient;
+
+  // A timed sleep: pause where we are and keep the place, as leaving the app does.
+  useEffect(() => {
+    const minutes = SLEEP[sleepIdx];
+    if (minutes <= 0) return;
+    const timer = setTimeout(() => {
+      castRef.current?.pause().catch(() => {});
+      videoRef.current?.pause().catch(() => {});
+      setPaused(true);
+      save.current(position.current);
+      setSleepIdx(0);
+      warn('Sleep timer — paused');
+    }, minutes * 60_000);
+    return () => clearTimeout(timer);
+  }, [sleepIdx, warn]);
+
+  /**
+   * Two presses mark the intro: where it starts, then where it ends. Saved for
+   * the show, so every other episode offers to skip the same stretch.
+   */
+  const markIntro = useCallback(() => {
+    if (!showKey) return;
+    const at = position.current;
+    bumpUi();
+    if (introMark == null) {
+      setIntroMark(at);
+      warn('Intro start marked — press again where it ends');
+      return;
+    }
+    setIntroMark(null);
+    if (at < introMark + 5) {
+      warn('Too short for an intro — marking cancelled');
+      return;
+    }
+    const marked = { start: Math.round(introMark), end: Math.round(at) };
+    setIntro(marked);
+    saveIntro(showKey, marked).catch(() => {});
+    warn('Intro saved — other episodes will offer to skip it');
+  }, [showKey, introMark, warn, bumpUi]);
 
   // Video is a landscape medium; go there on open and hand the phone back on exit.
   useEffect(() => {
@@ -914,7 +1035,7 @@ export function PlayerScreen({
     <View style={styles.screen}>
       <StatusBar hidden />
 
-      {!url ? (
+      {!url || !prefs ? (
         <View style={styles.preparing}>
           {!!title && (
             <Text numberOfLines={2} style={styles.preparingTitle}>
@@ -948,6 +1069,10 @@ export function PlayerScreen({
               ...externalSubs.map((s) => s.path),
             ]}
             scaleType={SCALES[scaleIdx].type}
+            subtitleDelay={subDelay}
+            subtitleSize={SUB_SIZES[prefs.subSize]}
+            subtitleColor={SUB_COLORS[prefs.subColor]}
+            subtitleBackground={prefs.subBackground}
             // The film's or show's own name on the playback card, with its
             // poster — the release's file name only when nothing better is known.
             title={metaTitle || title}
@@ -1007,6 +1132,27 @@ export function PlayerScreen({
                   setSubTrack(hit.id);
                 }
               }
+              // The viewer's languages, while nobody has chosen anything for
+              // this file — a pick of their own, Off included, ends it.
+              if (
+                prefs.subLang &&
+                !autoPicked.current.sub &&
+                !restoreSub.current &&
+                !pendingSub.current
+              ) {
+                const hit = trackForLang(next, prefs.subLang);
+                if (hit) {
+                  autoPicked.current.sub = true;
+                  setSubTrack(hit.id);
+                }
+              }
+              if (prefs.audioLang && !autoPicked.current.audio) {
+                const hit = trackForLang(nativeEvent.audio, prefs.audioLang);
+                if (hit) {
+                  autoPicked.current.audio = true;
+                  setAudioTrack(hit.id);
+                }
+              }
             }}
             onProgress={({ nativeEvent: { currentTime } }) => {
               // Between asking for a seek and it landing, this still reports
@@ -1025,7 +1171,12 @@ export function PlayerScreen({
               // the clock it watches — so it never appeared at all.
               const ending =
                 !!next && duration > 0 && duration - currentTime <= UP_NEXT_SECONDS;
-              if (showUi || ending) setCurrent(currentTime);
+              // Likewise the skip-intro button, a little past the intro's end
+              // too, so the clock it reads moves out and takes it down again.
+              const intro = introRef.current;
+              const nearIntro =
+                !!intro && currentTime >= intro.start - 3 && currentTime <= intro.end + 3;
+              if (showUi || ending || nearIntro) setCurrent(currentTime);
 
               // Playing steadily again — allow the drop recovery to arm afresh.
               if (currentTime > reloadFrom.current + 5) reloads.current = 0;
@@ -1054,7 +1205,15 @@ export function PlayerScreen({
               const at = position.current;
               // A real end with another episode behind it: carry on rather
               // than dropping back to the library.
-              if (duration > 0 && at >= duration - 10 && next && onNext && !dismissedNext) {
+              // The sleep timer said this episode was the last — leave on it.
+              if (
+                duration > 0 &&
+                at >= duration - 10 &&
+                next &&
+                onNext &&
+                !dismissedNext &&
+                !sleepAtEnd
+              ) {
                 playNext();
                 return;
               }
@@ -1107,7 +1266,7 @@ export function PlayerScreen({
           <View
             style={[StyleSheet.absoluteFill, showUi && !locked && styles.dim]}
             onStartShouldSetResponder={() => true}
-            onMoveShouldSetResponder={() => !!brightDrag.current}
+            onMoveShouldSetResponder={() => !!edgeDrag.current}
             onResponderGrant={(e) =>
               onPictureTouch('start', e.nativeEvent.locationX, e.nativeEvent.locationY)
             }
@@ -1270,7 +1429,13 @@ export function PlayerScreen({
                   {/* Everything that is not playback itself. It was a stack of
                       six buttons crowding the title; down here each one gets a
                       label and the top bar is just context again. */}
-                  <View style={styles.actions}>
+                  {/* Scrolls sideways once there are more than fit — a narrow
+                      phone does not have room for all of them in one row. */}
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.actions}
+                  >
                     <Action icon="lock" label="Lock" onPress={() => lock(true)} />
                     {/* The card at the end of an episode is easy to miss, and
                         impossible to reach on purpose. This is the same thing,
@@ -1339,11 +1504,31 @@ export function PlayerScreen({
                       />
                     )}
                     <Action
+                      icon="moon"
+                      label={
+                        SLEEP[sleepIdx] === 0
+                          ? 'Sleep'
+                          : sleepAtEnd
+                            ? 'Ep. end'
+                            : `${Math.max(1, Math.ceil((sleepEnds - Date.now()) / 60_000))} min`
+                      }
+                      on={SLEEP[sleepIdx] !== 0}
+                      onPress={cycleSleep}
+                    />
+                    {!!showKey && (
+                      <Action
+                        icon="scissors"
+                        label={introMark != null ? 'Intro ends' : intro ? 'Re-mark intro' : 'Mark intro'}
+                        on={introMark != null}
+                        onPress={markIntro}
+                      />
+                    )}
+                    <Action
                       icon="external-link"
                       label="Open in"
                       onPress={handOff}
                     />
-                  </View>
+                  </ScrollView>
                 </View>
             </View>
           )}
@@ -1374,6 +1559,7 @@ export function PlayerScreen({
                         (audioTrack == null && t.id === defaultAudio)
                       }
                       onPress={() => {
+                        autoPicked.current.audio = true;
                         setAudioTrack(t.id);
                         setPicking(false);
                         bumpUi();
@@ -1392,10 +1578,42 @@ export function PlayerScreen({
                 keyboardShouldPersistTaps="handled"
               >
               <Text style={styles.sheetTitle}>Subtitles</Text>
+              {/* A subtitle timed against a different cut runs early or late
+                  by a fixed amount; this is the fix. Hold for whole seconds. */}
+              {subTrack !== null && (
+                <View style={styles.delayRow}>
+                  <Text style={styles.delayLabel}>Delay</Text>
+                  <Pressable
+                    onPress={() => setSubDelay((d) => d - 100)}
+                    onLongPress={() => setSubDelay((d) => d - 1000)}
+                    hitSlop={6}
+                    style={styles.delayBtn}
+                    accessibilityLabel="Show subtitles earlier"
+                  >
+                    <Icon name="minus" size={14} color="#fff" />
+                  </Pressable>
+                  <Pressable onPress={() => setSubDelay(0)} accessibilityLabel="Reset delay">
+                    <Text style={styles.delayValue}>
+                      {subDelay > 0 ? '+' : ''}
+                      {(subDelay / 1000).toFixed(1)}s
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setSubDelay((d) => d + 100)}
+                    onLongPress={() => setSubDelay((d) => d + 1000)}
+                    hitSlop={6}
+                    style={styles.delayBtn}
+                    accessibilityLabel="Show subtitles later"
+                  >
+                    <Icon name="plus" size={14} color="#fff" />
+                  </Pressable>
+                </View>
+              )}
               <TrackOption
                 label="Off"
                 active={subTrack === null}
                 onPress={() => {
+                  autoPicked.current.sub = true;
                   setSubTrack(null);
                   setPicking(false);
                   bumpUi();
@@ -1418,6 +1636,7 @@ export function PlayerScreen({
                   active={subTrack === t.id}
                   unsupported={badTracks.includes(t.id)}
                   onPress={() => {
+                    autoPicked.current.sub = true;
                     pickedAt.current = Date.now();
                     pickedTrack.current = t.id;
                     setSubTrack(t.id);
@@ -1668,6 +1887,21 @@ export function PlayerScreen({
 
       {/* Outside the overlay: the card is the one thing that has to be there
           whether or not the controls are up, same as every streaming app. */}
+      {/* Same corner as up next, and for the same reason: it has to be there
+          with the controls down. Not while the viewer is re-marking it. */}
+      {!!url && inIntro(intro, current) && introMark == null && !locked && !pip && !upNext && (
+        <Pressable
+          onPress={() => {
+            if (intro) seekTo(intro.end);
+          }}
+          style={[styles.skipIntro, { bottom: insets.bottom + 90 }]}
+          accessibilityLabel="Skip intro"
+        >
+          <Text style={styles.upNextPlayText}>Skip intro</Text>
+          <Icon name="skip-forward" size={14} color="#0b0e14" />
+        </Pressable>
+      )}
+
       {upNext && !pip && (
         <View style={[styles.upNext, { bottom: insets.bottom + 90 }]}>
           <View style={styles.upNextText}>
@@ -2066,11 +2300,47 @@ const styles = StyleSheet.create({
   },
   bottomWrap: { paddingBottom: 8 },
   actions: {
+    flexGrow: 1,
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-around',
     paddingHorizontal: 12,
     paddingTop: 2,
+  },
+  delayRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingBottom: 6,
+  },
+  delayLabel: { ...type.meta, color: '#ffffffa0', flex: 1 },
+  delayBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#ffffff1f',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  delayValue: {
+    ...type.meta,
+    color: '#fff',
+    minWidth: 46,
+    textAlign: 'center',
+    fontFamily: font.medium,
+    fontVariant: ['tabular-nums'],
+  },
+  skipIntro: {
+    position: 'absolute',
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: '#fff',
   },
   action: { alignItems: 'center', gap: 3, minWidth: 62, paddingVertical: 4 },
   actionPressed: { opacity: 0.55 },

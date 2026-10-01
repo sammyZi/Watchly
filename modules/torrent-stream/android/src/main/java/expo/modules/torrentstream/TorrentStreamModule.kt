@@ -330,6 +330,10 @@ class TorrentStreamModule : Module() {
     val savedFiles: MutableSet<Int> = ConcurrentHashMap.newKeySet(),
     var userPaused: Boolean = false,
     var announcedReady: Boolean = false,
+    /** Paused by the Wi-Fi-only setting, not by the viewer. */
+    var wifiHeld: Boolean = false,
+    /** The viewer pressed Resume while held: carry on over mobile data. */
+    var wifiOverride: Boolean = false,
   )
 
   private val downloads = LinkedHashMap<String, Dl>()
@@ -394,9 +398,59 @@ class TorrentStreamModule : Module() {
   private val saveDir: File
     get() {
       val ctx = appContext.reactContext!!
-      return File(ctx.getExternalFilesDir(null) ?: ctx.filesDir, "torrents")
+      return File(storageRoot(ctx, null) ?: ctx.filesDir, "torrents")
         .apply { mkdirs() }
     }
+
+  /**
+   * Download settings that have to hold with no JS running — a download resumed
+   * by the service, or one crossing from Wi-Fi to mobile data in the background.
+   */
+  private fun prefs() =
+    (appContext.reactContext ?: appCtx)!!.getSharedPreferences("watchly", Context.MODE_PRIVATE)
+
+  /**
+   * The app's own folder on a removable card, when there is one mounted.
+   *
+   * App-specific, so it needs no permission and is a real path libtorrent can
+   * write to — a SAF tree is neither. The cost is that it goes on uninstall.
+   */
+  private fun sdRoot(ctx: Context, type: String?): File? =
+    ctx.getExternalFilesDirs(type).drop(1).firstOrNull {
+      it != null && Environment.getExternalStorageState(it) == Environment.MEDIA_MOUNTED
+    }
+
+  /** The card when it was chosen and is still there, else internal storage. */
+  private fun storageRoot(ctx: Context, type: String?): File? {
+    if (prefs().getBoolean("sdCard", false)) sdRoot(ctx, type)?.let { return it }
+    return ctx.getExternalFilesDir(type)
+  }
+
+  /** A metered network is mobile data, or a hotspot that says it costs. With no
+   *  network at all this is true too, which only holds what could not run anyway. */
+  private fun onMeteredNetwork(): Boolean {
+    val ctx = appContext.reactContext ?: appCtx ?: return false
+    val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+      ?: return false
+    return runCatching { cm.isActiveNetworkMetered }.getOrDefault(false)
+  }
+
+  /** Pause a download on mobile data, and pick it back up on Wi-Fi. */
+  private fun holdForWifi(dl: Dl) {
+    if (!dl.handle.isValid) return
+    val hold = !dl.wifiOverride && prefs().getBoolean("wifiOnly", false) && onMeteredNetwork()
+    if (hold && !dl.wifiHeld && !dl.userPaused) {
+      dl.handle.pause()
+      dl.wifiHeld = true
+      log("download ${dl.hash} held — on mobile data")
+      emitDlProgress(dl)
+    } else if (!hold && dl.wifiHeld) {
+      dl.wifiHeld = false
+      if (!dl.userPaused) dl.handle.resume()
+      log("download ${dl.hash} released — back on Wi-Fi")
+      emitDlProgress(dl)
+    }
+  }
 
   /** Where pieces lived before the move off cacheDir. Wiped, never written. */
   private val legacySaveDir: File
@@ -503,6 +557,9 @@ class TorrentStreamModule : Module() {
       if (dl.handle.isValid) {
         dl.handle.resume()
         dl.userPaused = false
+        // Resume on a held download is the viewer choosing mobile data for it.
+        if (dl.wifiHeld) dl.wifiOverride = true
+        dl.wifiHeld = false
         emitDlProgress(dl)
         if (showNotify) {
           watchTask(true)
@@ -533,7 +590,8 @@ class TorrentStreamModule : Module() {
       if (dl.handle.isValid) applyFocus(dl)
       persistWanted(dl.hash, dl.wantedFiles)
       if (dl.userPaused) {
-        dl.handle.resume()
+        // Still held for Wi-Fi: un-pausing is the viewer's part, the network's stays.
+        if (!dl.wifiHeld) dl.handle.resume()
         dl.userPaused = false
       }
       log("include download ${dl.hash} file $index")
@@ -875,6 +933,96 @@ class TorrentStreamModule : Module() {
       teardown()
       if (downloads.isEmpty()) wipeStreamCache()
       log("stop: stream removed")
+    }
+
+    /** Where downloads go and when they may run — the Settings screen's view of it. */
+    AsyncFunction("downloadPrefs") {
+      val ctx = appContext.reactContext!!
+      val sd = sdRoot(ctx, null)
+      mapOf(
+        "wifiOnly" to prefs().getBoolean("wifiOnly", false),
+        "sdCard" to (prefs().getBoolean("sdCard", false) && sd != null),
+        "sdAvailable" to (sd != null),
+        "internalFree" to (ctx.getExternalFilesDir(null)?.usableSpace ?: 0L).toDouble(),
+        "sdFree" to (sd?.usableSpace ?: 0L).toDouble(),
+      )
+    }
+
+    /** Takes effect on the next poll tick, for downloads already running too. */
+    AsyncFunction("setWifiOnly") { on: Boolean ->
+      prefs().edit().putBoolean("wifiOnly", on).apply()
+      // Turning it off is the viewer's answer to every held download.
+      if (!on) downloads.values.forEach { it.wifiOverride = false }
+      null
+    }
+
+    /**
+     * Move torrents and finished downloads to the card, or back.
+     *
+     * Refused while anything runs: libtorrent holds paths under the old root,
+     * and a download half on each side is a download in neither. Files already
+     * saved stay where they are and are still found there.
+     */
+    AsyncFunction("setSdCard") { on: Boolean ->
+      if (handle != null || downloads.isNotEmpty()) return@AsyncFunction false
+      if (on && sdRoot(appContext.reactContext!!, null) == null) return@AsyncFunction false
+      // Stream pieces under the old root would never be swept again.
+      wipeStreamCache()
+      prefs().edit().putBoolean("sdCard", on).apply()
+      true
+    }
+
+    /**
+     * Write a small text file into public Downloads and return its name there —
+     * the library backup. MediaStore on Android 10+, where the plain path is
+     * not ours to write; the path itself before that.
+     */
+    AsyncFunction("writeDownloadText") { name: String, text: String ->
+      val ctx = appContext.reactContext!!
+      val safe = safeName(name)
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val values = ContentValues().apply {
+          put(MediaStore.MediaColumns.DISPLAY_NAME, safe)
+          put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
+        }
+        val uri = ctx.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+          ?: throw CodedException("Could not create $safe in Downloads")
+        ctx.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) }
+          ?: throw CodedException("Could not write $safe")
+      } else {
+        val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val written = runCatching { File(dir.apply { mkdirs() }, safe).writeText(text) }
+        // No storage permission granted: the app's own Downloads folder instead.
+        if (written.isFailure) {
+          val own = File(ctx.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: ctx.filesDir, safe)
+          own.writeText(text)
+          return@AsyncFunction own.absolutePath
+        }
+      }
+      "Downloads/$safe"
+    }
+
+    /** Read a picked file back — a content:// grant or a cached file:// copy. */
+    AsyncFunction("readText") { uri: String ->
+      val ctx = appContext.reactContext!!
+      val input = if (uri.startsWith("content://")) {
+        ctx.contentResolver.openInputStream(Uri.parse(uri))
+      } else {
+        File(Uri.parse(uri).path ?: uri).inputStream()
+      } ?: throw CodedException("Could not open the file")
+      input.use { stream ->
+        // A backup is kilobytes; stop reading long before a wrongly picked film
+        // could fill memory.
+        val out = java.io.ByteArrayOutputStream()
+        val buf = ByteArray(8192)
+        while (true) {
+          val n = stream.read(buf)
+          if (n < 0) break
+          out.write(buf, 0, n)
+          if (out.size() > 8 * 1024 * 1024) throw CodedException("That file is too large to be a backup")
+        }
+        out.toString("UTF-8")
+      }
     }
 
     /** Wipe piece data under cache/torrents (not public Downloads or meta/peers). */
@@ -1973,7 +2121,9 @@ class TorrentStreamModule : Module() {
         )
       )
     }
-    if (ticks % 10 == 1 && !dl.userPaused) applyFocus(dl)
+    // Every two seconds: a Wi-Fi drop costs at most that much mobile data.
+    if (ticks % 4 == 0) holdForWifi(dl)
+    if (ticks % 10 == 1 && !dl.userPaused && !dl.wifiHeld) applyFocus(dl)
     if (ticks % 2 == 0) emitDlProgress(dl)
     if (ticks % 30 == 0) persistPeers(dl.handle, dl.hash)
   }
@@ -2430,12 +2580,13 @@ class TorrentStreamModule : Module() {
       mapOf(
         "buffer" to 100,
         "progress" to downloadProgress(status, true),
-        "speed" to if (dl.userPaused) 0 else status.downloadRate(),
+        "speed" to if (dl.userPaused || dl.wifiHeld) 0 else status.downloadRate(),
         "seeds" to status.numSeeds(),
         "peers" to status.numPeers(),
         "dhtNodes" to session.stats().dhtNodes().toInt(),
         "state" to status.state().name,
-        "paused" to dl.userPaused,
+        "paused" to (dl.userPaused || dl.wifiHeld),
+        "waitingWifi" to dl.wifiHeld,
         "uri" to dl.uri,
         "id" to dl.hash,
       )
@@ -2671,7 +2822,8 @@ class TorrentStreamModule : Module() {
     val name =
       if (downloads.size > 1) "${downloads.size} downloads"
       else running.first().info.name()
-    val paused = false
+    // Every running download held for Wi-Fi — say that, not "0 B/s".
+    val paused = running.all { it.wifiHeld }
     val rateKey = rate / 25_000
     if (pct == lastNotifPct && lastNotifPaused == paused && rateKey == lastNotifRate) return
     lastNotifPct = pct
@@ -2691,7 +2843,7 @@ class TorrentStreamModule : Module() {
       launch,
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
-    val title = "Downloading · $pct%"
+    val title = if (paused) "Waiting for Wi-Fi · $pct%" else "Downloading · $pct%"
     val text = "$speedText · $etaText\n$name"
     val notif = NotificationCompat.Builder(ctx, NOTIF_CHANNEL)
       .setSmallIcon(android.R.drawable.stat_sys_download)
@@ -2732,6 +2884,12 @@ class TorrentStreamModule : Module() {
 
   /** Public Movies/Watchly — visible in the system Files app. */
   private fun watchlyDir(): File {
+    val ctx0 = appContext.reactContext!!
+    if (prefs().getBoolean("sdCard", false)) {
+      sdRoot(ctx0, Environment.DIRECTORY_MOVIES)?.let {
+        return File(it, "Watchly").apply { mkdirs() }
+      }
+    }
     val pub = File(
       Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
       "Watchly"
@@ -2747,13 +2905,23 @@ class TorrentStreamModule : Module() {
     ).apply { mkdirs() }
   }
 
-  /** Movies/Watchly plus leftover Downloads/Watchly from earlier builds. */
+  /**
+   * Movies/Watchly, the card's Watchly, and leftover Downloads/Watchly from
+   * earlier builds — files saved before the storage setting changed are still
+   * found and deleted where they are.
+   */
   private fun watchlyRoots(): List<File> {
+    val ctx = appContext.reactContext!!
     val old = File(
       Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
       "Watchly"
     )
-    return listOf(watchlyDir(), old)
+    val pub = File(
+      Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
+      "Watchly"
+    )
+    val sd = sdRoot(ctx, Environment.DIRECTORY_MOVIES)?.let { File(it, "Watchly") }
+    return listOfNotNull(watchlyDir(), pub, sd, old).distinct()
   }
 
   private fun safeName(name: String) =
