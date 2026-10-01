@@ -2,6 +2,7 @@ package expo.modules.vlcplayer
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.PixelFormat
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
@@ -102,6 +103,18 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
    * what ExpoView provides for exactly this case.
    */
   override val shouldUseAndroidLayout = true
+
+  /**
+   * The SurfaceViews inside ask the window for a "transparent region", which
+   * Android only recomputes on a layout pass of the whole window. React mounts
+   * overlays without one, so after a restart made while they were hidden the
+   * window could stay marked see-through and they drew into nothing. The
+   * surfaces punch their own hole when drawn; the request also made the window
+   * translucent, without which that hole is black — so do that part ourselves.
+   */
+  override fun requestTransparentRegion(child: View?) {
+    appContext.currentActivity?.window?.setFormat(PixelFormat.TRANSLUCENT)
+  }
 
   init {
     addView(videoLayout, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))

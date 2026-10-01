@@ -398,6 +398,40 @@ function HomeScreenView({
   const later = inList(saved, 'later');
   const favorites = inList(saved, 'favorite');
 
+  /**
+   * Each title once on the page.
+   *
+   * Cinemeta's genre lists overlap heavily — a film tagged Action, Crime and
+   * Thriller led all three rows, and the banner, and Trending besides. Walking
+   * the rows top to bottom with one shared set gives every title to the first
+   * row that has it; the rows below show what is left of theirs. What sits
+   * above the rows (the banner, Continue watching, new episodes, the saved
+   * lists) counts as shown already. A row whose catalogue has not arrived
+   * claims nothing yet, so a title can move up once it does.
+   */
+  const seen = new Set<string>([
+    ...featured.map((t) => t.imdb),
+    ...(resumable.map((item) => item.imdb).filter(Boolean) as string[]),
+    ...fresh.map((f) => f.title.imdb),
+    ...later.map((s) => s.imdb),
+    ...favorites.map((s) => s.imdb),
+  ]);
+  const rows: Record<string, Title[] | null> = {};
+  for (const shelf of shelves) {
+    const raw = loaded[shelfKey(shelf)];
+    if (!raw) {
+      rows[shelfKey(shelf)] = null;
+      continue;
+    }
+    // Genre shelves are recommendations: nothing already watched either.
+    // Trending / Popular keep the watched ones — they are the chart.
+    const own = raw.filter(
+      (t) => !seen.has(t.imdb) && !(shelf.genre && watchedIds.has(t.imdb))
+    );
+    for (const t of own) seen.add(t.imdb);
+    rows[shelfKey(shelf)] = own;
+  }
+
   return (
     <View style={styles.page}>
       <StatusBar
@@ -523,14 +557,10 @@ function HomeScreenView({
           </>
         }
         renderItem={({ item: shelf, index: i }) => {
-          const raw = loaded[shelfKey(shelf)];
-          // Genre shelves = recommendations: drop anything already watched.
-          // Trending / Popular keep the full chart.
-          const data = raw
-            ? shelf.genre
-              ? raw.filter((t) => !watchedIds.has(t.imdb))
-              : raw
-            : null;
+          // This row's share of the page — see `rows`.
+          const data = rows[shelfKey(shelf)] ?? null;
+          // Everything it had is already on the page above: no empty heading.
+          if (data && data.length === 0) return null;
           return (
           <View style={styles.shelf}>
             <Head
