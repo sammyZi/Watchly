@@ -89,6 +89,7 @@ function fromHistory(item: Item, saved: Saved[]): Title {
     cast: [],
     directors: [],
     awards: null,
+    trailer: null,
     backdrop: null,
     runtime: null,
     episodes: [],

@@ -616,6 +616,24 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     player?.videoScale = scale
   }
 
+  /** Subtitle offset in ms; positive shows them later. Kept for the next load,
+   *  which starts a new player at zero. */
+  private var spuDelayMs = 0
+
+  fun setSubtitleDelay(ms: Int) {
+    spuDelayMs = ms
+    player?.let { runCatching { it.setSpuDelay(ms * 1000L) } }
+  }
+
+  /**
+   * Subtitle text, as libVLC's freetype options — instance-wide, so they apply
+   * from the next load. `subtitleSize` is VLC's relative size, where *smaller*
+   * is bigger text: 16 is normal, 12 large, 20 small.
+   */
+  var subtitleSize = 16
+  var subtitleColor = 0xFFFFFF
+  var subtitleBackground = false
+
   fun setSubtitleFiles(paths: List<String>?) {
     val normalized = paths?.map { localPath(it) }?.filter { it.isNotEmpty() }
     subtitleFiles = normalized
@@ -791,7 +809,12 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
           "--network-caching=1000",
           "--file-caching=1000",
           "--no-video-title-show",
-          "--audio-time-stretch"
+          "--audio-time-stretch",
+          // The same options VLC for Android sets from its subtitle settings.
+          "--freetype-rel-fontsize=$subtitleSize",
+          "--freetype-color=$subtitleColor",
+          "--freetype-background-color=0",
+          "--freetype-background-opacity=${if (subtitleBackground) 160 else 0}"
         )
       )
       val mediaPlayer = MediaPlayer(instance)
@@ -892,6 +915,7 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     // itself. Subtitles appeared while the picker still said Off, and choosing
     // Off did nothing because that was already the state it thought it was in.
     p.setSpuTrack(wantedSpu ?: -1)
+    if (spuDelayMs != 0) runCatching { p.setSpuDelay(spuDelayMs * 1000L) }
     if (defaultAudioId == null) {
       val id = p.audioTrack
       if (id >= 0) defaultAudioId = id

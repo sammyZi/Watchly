@@ -1,8 +1,18 @@
 import { requireNativeModule, requireNativeView } from 'expo';
 
+const native = () =>
+  requireNativeModule<{
+    isInPip(): boolean;
+    getVolume(): number;
+    setVolume(level: number): void;
+  }>('VlcPlayer');
+
 /** Whether the app is in the picture-in-picture window right now. */
-export const isInPip = (): boolean =>
-  requireNativeModule<{ isInPip(): boolean }>('VlcPlayer').isInPip();
+export const isInPip = (): boolean => native().isInPip();
+
+/** System media volume, 0–1. Synchronous, for a drag. */
+export const getVolume = (): number => native().getVolume();
+export const setVolume = (level: number): void => native().setVolume(level);
 import type { ViewStyle } from 'react-native';
 import type { ComponentType, Ref } from 'react';
 
@@ -80,6 +90,15 @@ export type VlcPlayerProps = {
   subtitleFiles?: string[] | null;
   /** How the picture is fitted to the surface. Defaults to best fit. */
   scaleType?: VlcScaleType;
+  /** Subtitle offset in ms; positive shows them later. */
+  subtitleDelay?: number;
+  /** libVLC's relative font size — smaller is bigger: 16 normal, 12 large.
+   *  This and the two below apply from the next load. */
+  subtitleSize?: number;
+  /** 0xRRGGBB. */
+  subtitleColor?: number;
+  /** A dark box behind the text. */
+  subtitleBackground?: boolean;
   /** Go to picture-in-picture on Home while playing (Android 12+). */
   autoPip?: boolean;
   /** Shown on the playback notification and the lock screen. */

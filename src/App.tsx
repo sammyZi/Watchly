@@ -38,6 +38,8 @@ import {
   setPosition,
   type Item,
 } from './lib/history';
+import * as DocumentPicker from 'expo-document-picker';
+import { exportLibrary, importLibrary } from './lib/backup';
 import { DEFAULTS, loadSettings, saveSettings, type Settings } from './lib/settings';
 import { linkEpisode, loadEpisodeLinks, type EpisodeLinks } from './lib/watched';
 import { isTorrentSource } from './lib/magnet';
@@ -764,6 +766,60 @@ function ShellApp({
     [history.length]
   );
 
+  /** One-button notice, for the backup results. */
+  const tell = useCallback(
+    (title: string, message: string) =>
+      setConfirm({ title, message, icon: 'info', confirmLabel: 'OK', notice: true, onConfirm: () => {} }),
+    []
+  );
+
+  const backup = useCallback(async () => {
+    try {
+      const day = new Date().toISOString().slice(0, 10);
+      const where = await TorrentStream.writeDownloadText(
+        `watchly-backup-${day}.json`,
+        await exportLibrary()
+      );
+      tell('Library backed up', `Saved to ${where}. Restore it from Settings on this phone or another.`);
+    } catch (e: any) {
+      tell('Backup failed', String(e?.message ?? e));
+    }
+  }, [tell]);
+
+  const restore = useCallback(async () => {
+    const picked = await DocumentPicker.getDocumentAsync({
+      type: ['application/json', 'application/octet-stream', 'text/plain'],
+      copyToCacheDirectory: true,
+    });
+    if (picked.canceled) return;
+    setConfirm({
+      title: 'Restore this backup?',
+      message: 'History, saved lists and settings on this phone are replaced by the backup’s.',
+      icon: 'upload',
+      confirmLabel: 'Restore',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          const count = await importLibrary(await TorrentStream.readText(picked.assets[0].uri));
+          // Everything that was read at startup, read again.
+          const [h, s, links, next] = await Promise.all([
+            loadHistory(),
+            loadSaved(),
+            loadEpisodeLinks(),
+            loadSettings(),
+          ]);
+          setHistory(h);
+          setSaved(s);
+          setEpisodeLinks(links);
+          changeSettings(next);
+          tell('Library restored', `${count} part(s) of your library were restored.`);
+        } catch (e: any) {
+          tell('Restore failed', String(e?.message ?? e));
+        }
+      },
+    });
+  }, [tell, changeSettings]);
+
   // Back key unwinds overlays; an active download is not an overlay.
   useEffect(() => {
     if (phase === 'playing' && torrentMode !== 'download') return;
@@ -1298,6 +1354,8 @@ function ShellApp({
             onChange={changeSettings}
             onClearHistory={askClear}
             historyCount={history.length}
+            onBackup={backup}
+            onRestore={restore}
           />
         </TabPage>
       </View>

@@ -9,6 +9,8 @@ export type Confirm = {
   icon?: IconName;
   confirmLabel?: string;
   destructive?: boolean;
+  /** Nothing to decide — one button, no Cancel. */
+  notice?: boolean;
   onConfirm: () => void;
 };
 
@@ -89,7 +91,9 @@ export function ConfirmModal({
           {!!request?.message && <Text style={styles.message}>{request.message}</Text>}
 
           <View style={styles.actions}>
-            <Button label="Cancel" onPress={onClose} style={styles.action} />
+            {!request?.notice && (
+              <Button label="Cancel" onPress={onClose} style={styles.action} />
+            )}
             <Button
               label={request?.confirmLabel ?? 'Confirm'}
               variant={request?.destructive ? 'danger' : 'solid'}

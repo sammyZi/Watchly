@@ -13,6 +13,7 @@ assert.deepEqual(
     director: ['Lana Wachowski'],
     awards: 'Won 4 Oscars',
     released: '1999-03-31T00:00:00.000Z',
+    trailers: [{ source: 'clip1', type: 'Clip' }, { source: 'vKQi3bBA1y8', type: 'Trailer' }],
   }),
   {
     title: 'The Matrix',
@@ -24,8 +25,12 @@ assert.deepEqual(
     cast: ['Keanu Reeves'],
     directors: ['Lana Wachowski'],
     awards: 'Won 4 Oscars',
+    // The trailer, not the first clip.
+    trailer: 'vKQi3bBA1y8',
   }
 );
+// Newer records carry `trailerStreams` instead.
+assert.equal(toMeta({ name: 'x', trailerStreams: [{ ytId: 'abc' }] }).trailer, 'abc');
 
 // Cinemeta omits fields rather than nulling them, so every one has to be optional.
 assert.deepEqual(toMeta({ name: 'Untagged' }), {
@@ -38,6 +43,7 @@ assert.deepEqual(toMeta({ name: 'Untagged' }), {
   cast: [],
   directors: [],
   awards: null,
+  trailer: null,
 });
 
 // A series carries `year` as a range ("2008–2013"), not a release date.

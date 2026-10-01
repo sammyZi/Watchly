@@ -23,6 +23,8 @@ export type Progress = {
   dhtNodes: number;
   state: string; // libtorrent state, e.g. DOWNLOADING_METADATA
   paused?: boolean;
+  /** Paused by the Wi-Fi-only setting rather than by the viewer. */
+  waitingWifi?: boolean;
   /** Set on download-mode ticks so JS can tell torrents apart. */
   uri?: string;
   id?: string;
@@ -57,6 +59,15 @@ export type PlayOptions = {
   season?: number;
   /** Show name for Movies/Watchly/<this>/. */
   saveFolder?: string;
+};
+
+export type DownloadPrefs = {
+  wifiOnly: boolean;
+  sdCard: boolean;
+  sdAvailable: boolean;
+  /** Bytes free where each would write. */
+  internalFree: number;
+  sdFree: number;
 };
 
 type TorrentStream = {
@@ -121,6 +132,17 @@ type TorrentStream = {
   stop(): Promise<void>;
   /** Delete cached stream piece data. No-op while a torrent is active. */
   clearCache(): Promise<boolean>;
+  /** Stored natively, so they hold for downloads the service resumes with no JS. */
+  downloadPrefs(): Promise<DownloadPrefs>;
+  /** Hold downloads while on a metered network; Resume on one overrides it. */
+  setWifiOnly(on: boolean): Promise<void>;
+  /** Torrents and finished downloads to the SD card. False while anything is
+   *  running, or when there is no card. */
+  setSdCard(on: boolean): Promise<boolean>;
+  /** Write a text file to public Downloads; returns where it went. */
+  writeDownloadText(name: string, text: string): Promise<string>;
+  /** Read a picked `content://` or `file://` text file. */
+  readText(uri: string): Promise<string>;
   addListener(
     event: 'log' | 'progress' | 'ready' | 'error',
     cb: (e: any) => void
