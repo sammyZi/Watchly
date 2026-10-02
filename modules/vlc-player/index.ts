@@ -1,18 +1,8 @@
 import { requireNativeModule, requireNativeView } from 'expo';
 
-const native = () =>
-  requireNativeModule<{
-    isInPip(): boolean;
-    getVolume(): number;
-    setVolume(level: number): void;
-  }>('VlcPlayer');
-
 /** Whether the app is in the picture-in-picture window right now. */
-export const isInPip = (): boolean => native().isInPip();
-
-/** System media volume, 0–1. Synchronous, for a drag. */
-export const getVolume = (): number => native().getVolume();
-export const setVolume = (level: number): void => native().setVolume(level);
+export const isInPip = (): boolean =>
+  requireNativeModule<{ isInPip(): boolean }>('VlcPlayer').isInPip();
 import type { ViewStyle } from 'react-native';
 import type { ComponentType, Ref } from 'react';
 

@@ -28,9 +28,7 @@ import {
 } from 'react-native-google-cast';
 import {
   VlcPlayer,
-  getVolume,
   isInPip,
-  setVolume,
   type VlcPlayerRef,
   type VlcStats,
   type VlcTrack,
@@ -361,8 +359,8 @@ export function PlayerScreen({
    * re-rendering the player at that rate is what made it feel heavy.
    */
   const [brightPct, setBrightPct] = useState(50);
-  /** An edge drag in progress: brightness on the left, system volume on the right. */
-  const edgeDrag = useRef<{ y: number; start: number; volume: boolean } | null>(null);
+  /** A brightness drag in progress on the left side. */
+  const edgeDrag = useRef<{ y: number; start: number } | null>(null);
   /** Held down on the picture: playing at HOLD_RATE until the finger lifts. */
   const [boost, setBoost] = useState(false);
   const boosting = useRef(false);
@@ -748,9 +746,8 @@ export function PlayerScreen({
   );
 
   /**
-   * Vertical drags on the edges, the gestures VLC uses: brightness on the left,
-   * volume on the right. A tap or double-tap still falls through when the
-   * finger barely moved.
+   * Left side, vertical drag — the gesture VLC uses for brightness. A tap or
+   * double-tap still falls through when the finger barely moved.
    */
   const onPictureTouch = useCallback(
     (phase: 'start' | 'move' | 'end', x: number, y: number) => {
@@ -759,12 +756,7 @@ export function PlayerScreen({
         return;
       }
       if (phase === 'start') {
-        edgeDrag.current =
-          x < width * 0.4
-            ? { y, start: brightness.current, volume: false }
-            : x > width * 0.6
-              ? { y, start: getVolume(), volume: true }
-              : null;
+        edgeDrag.current = x < width * 0.4 ? { y, start: brightness.current } : null;
         // A press that stays put becomes a hold: double speed, one short buzz
         // to say so, until the finger lifts. Nothing to speed up while paused.
         endHold();
@@ -798,15 +790,8 @@ export function PlayerScreen({
           clearTimeout(tapTimer.current);
           tapTimer.current = null;
         }
-        const level = drag.start - dy / (height * 0.7);
-        if (drag.volume) {
-          const v = Math.max(0, Math.min(1, level));
-          setVolume(v);
-          showHud({ icon: v === 0 ? 'volume-x' : 'volume-2', label: `${Math.round(v * 100)}%` });
-        } else {
-          const next = setBright(level);
-          showHud({ icon: 'sun', label: `${Math.round(next * 100)}%` });
-        }
+        const next = setBright(drag.start - dy / (height * 0.7));
+        showHud({ icon: 'sun', label: `${Math.round(next * 100)}%` });
         return;
       }
       endHold();
