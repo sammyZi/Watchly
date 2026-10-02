@@ -39,6 +39,7 @@ static class Smoke
             try { _ = Engine.TorrentEngine.Instance; } catch (Exception ex) { Failures.Add($"torrent engine: {ex}"); }
             Logic();
             Screens();
+            Peek();
         }
         catch (Exception e)
         {
@@ -47,6 +48,43 @@ static class Smoke
         Engine.Downloads.Instance.Live.Clear();
         File.WriteAllText(log, Failures.Count == 0 ? "ok\n" : string.Join("\n", Failures) + "\n");
         return Failures.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// With WATCHLY_SMOKE_VIDEO set to a video of 8 s or more: the seek bar's hover frames
+    /// decode, stay paused between hovers, and a hover elsewhere draws a different frame.
+    /// </summary>
+    static void Peek()
+    {
+        if (Environment.GetEnvironmentVariable("WATCHLY_SMOKE_VIDEO") is not { } path) return;
+        LibVLCSharp.Shared.Core.Initialize();
+        var frames = new List<byte[]>();
+        using var preview = new SeekPreview(VlcLibrary.Instance.Value, path, image =>
+        {
+            var pixels = new byte[image.PixelWidth * 4 * image.PixelHeight];
+            image.CopyPixels(pixels, image.PixelWidth * 4, 0);
+            frames.Add(pixels);
+        });
+        static void Wait(double seconds)
+        {
+            var frame = new System.Windows.Threading.DispatcherFrame();
+            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(seconds) };
+            timer.Tick += (_, _) => { timer.Stop(); frame.Continue = false; };
+            timer.Start();
+            System.Windows.Threading.Dispatcher.PushFrame(frame);
+        }
+        Wait(2);
+        Ok(frames.Count > 0, "peek: no first frame");
+        var settled = frames.Count;
+        Wait(1);
+        Eq(frames.Count, settled, "peek: new frames while paused");
+        preview.Show(1000);
+        Wait(1.5);
+        var early = frames.Count > settled ? frames[^1] : null;
+        Ok(early is not null, "peek: no frame after a hover");
+        preview.Show(6000);
+        Wait(1.5);
+        Ok(early is not null && !frames[^1].SequenceEqual(early), "peek: a hover elsewhere drew the same frame");
     }
 
     static void Logic()

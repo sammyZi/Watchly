@@ -849,21 +849,54 @@ public sealed class WindowedRequester : IStreamingPieceRequester
         Apply();
     }
 
+    /// <summary>
+    /// Pieces fetched at once when the whole file is wanted. Calibration knob: too few and fast
+    /// swarms idle peers that hold none of them; too many and the order scatters again.
+    /// </summary>
+    const int AheadPieces = 64;
+    long openAt;
+
     void Apply()
     {
         if (data is null || outside is null) return;
         var now = (fileIndex, inner.HighPriorityPieceIndex, Interlocked.Read(ref wantFrom), Interlocked.Read(ref wantTo), open);
-        if (now == applied) return;
+        // Open, the window moves as pieces finish, so it is worked out again (four times a second at most).
+        if (now == applied && !(open && Environment.TickCount64 - openAt > 250)) return;
         var (file, reader, from, to, isOpen) = now;
         if (file != applied.File)
             for (var i = 0; i < outside.Length; i++) outside[i] = false;
         applied = now;
+        openAt = Environment.TickCount64;
         if (file < 0 || file >= data.Files.Count) return;
         var f = data.Files[file];
+        if (isOpen)
+        {
+            // The whole file, in order: the next missing pieces from the playhead on, then from
+            // the start — not rarest-first across the film, which scattered what was on disk
+            // instead of growing it ahead of playback.
+            var count = f.EndPieceIndex - f.StartPieceIndex + 1;
+            var start = Math.Clamp(reader, f.StartPieceIndex, f.EndPieceIndex) - f.StartPieceIndex;
+            var left = AheadPieces;
+            for (var n = 0; n < count; n++)
+            {
+                var i = f.StartPieceIndex + (start + n) % count;
+                var wanted = left > 0 && !Have(i);
+                if (wanted) left--;
+                outside[i] = !wanted && !(i >= reader && i <= reader + ReadAhead);
+            }
+            return;
+        }
         int PieceAt(long offset) => data.ByteOffsetToPieceIndex(f.OffsetInTorrent + Math.Clamp(offset, 0, Math.Max(0, f.Length - 1)));
         int spanFrom = to > 0 ? PieceAt(from) : int.MaxValue, spanTo = to > 0 ? PieceAt(to) : int.MinValue;
         for (var i = f.StartPieceIndex; i <= f.EndPieceIndex; i++)
-            outside[i] = !(isOpen || (i >= reader && i <= reader + ReadAhead) || (i >= spanFrom && i <= spanTo));
+            outside[i] = !((i >= reader && i <= reader + ReadAhead) || (i >= spanFrom && i <= spanTo));
+    }
+
+    bool Have(int piece)
+    {
+        foreach (var ignored in alreadyHave)
+            if (ignored[piece]) return true;
+        return false;
     }
 
     public bool InEndgameMode => inner.InEndgameMode;
@@ -898,11 +931,7 @@ public sealed class WindowedRequester : IStreamingPieceRequester
             if (file.Priority == Priority.DoNotDownload) continue;
             for (var i = file.StartPieceIndex; i <= file.EndPieceIndex; i++)
             {
-                if (!bitField[i]) continue;
-                var have = false;
-                foreach (var ignored in alreadyHave)
-                    if (ignored[i]) { have = true; break; }
-                if (!have) return true;
+                if (bitField[i] && !Have(i)) return true;
             }
         }
         return false;

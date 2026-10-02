@@ -275,27 +275,34 @@ function SettingsScreenView({
             />
           </Row>
 
-          {!!dl?.sdAvailable && (
+          {/* Always listed, so a phone without a card says so rather than the
+              setting looking missing. */}
+          {!!dl && (
             <>
               <Divider />
-              <View style={styles.choiceRow}>
+              <View style={dl.sdAvailable ? styles.choiceRow : undefined}>
                 <Row
                   icon="hard-drive"
                   title="Save to"
                   subtitle={
                     storageHint ??
-                    `${bytes(dl.internalFree)} free on the phone, ${bytes(dl.sdFree)} on the card. ` +
-                      'The card copy is removed if the app is uninstalled.'
+                    (dl.sdAvailable
+                      ? `${bytes(dl.internalFree)} free on the phone, ${bytes(dl.sdFree)} on the card. ` +
+                        'The card copy is removed if the app is uninstalled.'
+                      : `Phone storage, ${bytes(dl.internalFree)} free. No SD card found — ` +
+                        'insert one and it can be chosen here.')
                   }
                 />
-                <Chips
-                  options={[
-                    { key: 'phone' as const, label: 'Phone' },
-                    { key: 'card' as const, label: 'SD card' },
-                  ]}
-                  value={dl.sdCard ? 'card' : 'phone'}
-                  onPick={(v) => chooseCard(v === 'card')}
-                />
+                {dl.sdAvailable && (
+                  <Chips
+                    options={[
+                      { key: 'phone' as const, label: 'Phone' },
+                      { key: 'card' as const, label: 'SD card' },
+                    ]}
+                    value={dl.sdCard ? 'card' : 'phone'}
+                    onPick={(v) => chooseCard(v === 'card')}
+                  />
+                )}
               </View>
             </>
           )}
