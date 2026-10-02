@@ -601,6 +601,11 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     player?.setSpuTrack(id ?: -1)
   }
 
+  private fun applyWantedSpu(p: MediaPlayer) {
+    val id = wantedSpu ?: -1
+    if (runCatching { p.spuTrack }.getOrDefault(id) != id) runCatching { p.setSpuTrack(id) }
+  }
+
   /**
    * Kept, like [wantedSpu]: coming back to the app reloads the stream into a new player,
    * which starts on the file's default audio (an Italian dub, say) while the picker —
@@ -936,9 +941,16 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
 
       // Tracks appear as the demuxer finds them, not all at once.
       MediaPlayer.Event.ESAdded, MediaPlayer.Event.ESDeleted -> {
-        if (event.type == MediaPlayer.Event.ESAdded && announced &&
-          event.esChangedType == IMedia.Track.Type.Audio && event.esChangedID == wantedAudio
-        ) applyWantedAudio(p)
+        if (event.type == MediaPlayer.Event.ESAdded && announced) {
+          if (event.esChangedType == IMedia.Track.Type.Audio && event.esChangedID == wantedAudio) {
+            applyWantedAudio(p)
+          }
+          // After a restart the subtitle files open after the film's own tracks,
+          // so the choice was applied before its track existed — and libVLC then
+          // switched to the first one that showed up, while the picker still
+          // marked the viewer's pick. Put the pick back as each one arrives.
+          if (event.esChangedType == IMedia.Track.Type.Text) applyWantedSpu(p)
+        }
         sendTracks(p)
       }
 
@@ -990,6 +1002,7 @@ class VlcPlayerView(context: Context, appContext: AppContext) : ExpoView(context
     val audio = (p.audioTracks ?: emptyArray())
       .filter { it.id >= 0 }
       .map { mapOf("id" to it.id, "name" to it.name) }
+    Log.i(TAG, "subtitles: showing ${p.spuTrack}, wanted $wantedSpu, of ${subtitles.map { it["id"] }}")
     onTracks(
       mapOf(
         "subtitles" to subtitles,

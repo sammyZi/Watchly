@@ -251,6 +251,15 @@ export function PlayerScreen({
       if (RATES.includes(s.playbackRate)) setRate(s.playbackRate);
     });
   }, []);
+  // That restart renumbers the tracks like any other reload, so the chosen
+  // subtitle is found again by name.
+  const styleKey = `${prefs?.subSize}|${prefs?.subColor}|${prefs?.subBackground}`;
+  const lastStyle = useRef(styleKey);
+  useEffect(() => {
+    if (lastStyle.current === styleKey) return;
+    lastStyle.current = styleKey;
+    markReload();
+  }, [styleKey]);
   /** Subtitle look, changed from the subtitle panel. The view restarts itself
    *  in place to apply it — see VlcPlayerView.restyle. */
   const setSubStyle = (patch: Partial<Settings>) => {
@@ -1455,6 +1464,16 @@ export function PlayerScreen({
                     {!!next && !!onNext && (
                       <Action icon="skip-forward" label="Next" onPress={playNext} />
                     )}
+                    {/* Up front with Next: the row scrolls sideways on a phone,
+                        and at the far end this was never seen. */}
+                    {!!showKey && (
+                      <Action
+                        icon="scissors"
+                        label={introMark != null ? 'Intro ends' : intro ? 'Re-mark intro' : 'Mark intro'}
+                        on={introMark != null}
+                        onPress={markIntro}
+                      />
+                    )}
                     <Action
                       icon="maximize"
                       label={SCALES[scaleIdx].label}
@@ -1527,14 +1546,6 @@ export function PlayerScreen({
                       on={SLEEP[sleepIdx] !== 0}
                       onPress={cycleSleep}
                     />
-                    {!!showKey && (
-                      <Action
-                        icon="scissors"
-                        label={introMark != null ? 'Intro ends' : intro ? 'Re-mark intro' : 'Mark intro'}
-                        on={introMark != null}
-                        onPress={markIntro}
-                      />
-                    )}
                     <Action
                       icon="external-link"
                       label="Open in"
