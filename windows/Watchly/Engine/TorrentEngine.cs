@@ -3,6 +3,7 @@ using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using MonoTorrent;
+using MonoTorrent.BEncoding;
 using MonoTorrent.Client;
 using MonoTorrent.PiecePicking;
 using MonoTorrent.Streaming;
@@ -89,8 +90,11 @@ public sealed class TorrentEngine
     /// only through router.bittorrent.com, which doesn't answer on some networks (measured here:
     /// no reply; DHT stayed at 0 nodes, so every torrent got tracker peers only). It also starts
     /// from the nodes it saved last time, so when that cache is empty this writes bootstrap
-    /// servers into it — compact node entries: a 20-byte id (any), IPv4 address, port. Once DHT
-    /// is up the engine saves real nodes over these.
+    /// servers into it — compact node entries: a 20-byte id (any), IPv4 address, port.
+    ///
+    /// MonoTorrent 3.0.2 saves its nodes as a bencoded list of those entries but loads only the
+    /// raw entries, so its own save never loads (measured: reloaded, 0 nodes) — every launch after
+    /// a good one started with DHT dead. The save is flattened back here, bootstrap servers added.
     /// </summary>
     static async Task SeedDhtNodes()
     {
@@ -98,17 +102,34 @@ public sealed class TorrentEngine
         var cache = Path.Combine(Paths.EngineCache, "dht_nodes.cache");
         try
         {
-            if (File.Exists(cache) && new FileInfo(cache).Length >= Compact * 8) return;
+            var entries = new List<byte>();
+            if (File.Exists(cache))
+            {
+                var bytes = await File.ReadAllBytesAsync(cache);
+                if (bytes.Length > 0 && bytes[0] == 'l')
+                {
+                    try
+                    {
+                        foreach (var node in BEncodedValue.Decode<BEncodedList>(bytes).OfType<BEncodedString>())
+                            if (node.Span.Length == Compact) entries.AddRange(node.Span.ToArray());
+                    }
+                    catch { }
+                }
+                else if (bytes.Length % Compact == 0) entries.AddRange(bytes);
+            }
+            var saved = entries.Count / Compact;
             (string Host, int Port)[] routers =
             {
                 ("dht.transmissionbt.com", 6881), ("dht.libtorrent.org", 25401), ("router.bittorrent.com", 6881),
                 ("router.utorrent.com", 6881), ("dht.aelitis.com", 6881), ("router.bitcomet.com", 6881),
             };
-            var entries = new List<byte>();
-            foreach (var (host, port) in routers)
+            var lookups = await Task.WhenAll(routers.Select(async r =>
             {
-                IPAddress[] addresses;
-                try { addresses = await Dns.GetHostAddressesAsync(host); } catch { continue; }
+                try { return (r.Port, Addresses: await Dns.GetHostAddressesAsync(r.Host)); }
+                catch { return (r.Port, Addresses: Array.Empty<IPAddress>()); }
+            }));
+            foreach (var (port, addresses) in lookups)
+            {
                 foreach (var address in addresses.Where(a => a.AddressFamily == AddressFamily.InterNetwork).Take(4))
                 {
                     entries.AddRange(System.Security.Cryptography.RandomNumberGenerator.GetBytes(20));
@@ -119,7 +140,7 @@ public sealed class TorrentEngine
             }
             if (entries.Count == 0) return;
             await File.WriteAllBytesAsync(cache, entries.ToArray());
-            Log.Torrent($"DHT: seeded {entries.Count / Compact} bootstrap nodes");
+            Log.Torrent($"DHT: {saved} saved nodes + {entries.Count / Compact - saved} bootstrap nodes");
         }
         catch (Exception e)
         {

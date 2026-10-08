@@ -628,7 +628,7 @@ class TorrentStreamModule : Module() {
      * Empty when nothing is streaming (a file already on disk has no gaps).
      */
     AsyncFunction("downloadedSpans") {
-      val none = emptyList<List<Double>>()
+      val none = mapOf("spans" to emptyList<List<Double>>(), "at" to -1.0)
       val ti = info ?: return@AsyncFunction none
       val h = handle?.takeIf { it.isValid } ?: return@AsyncFunction none
       val index = fileIndex
@@ -650,7 +650,11 @@ class TorrentStreamModule : Module() {
             start = -1
           }
         }
-        spans
+        // Where the player is reading, on the same scale — the bar's playhead is
+        // time, and a variable-bitrate file is nowhere near as far through its
+        // bytes as through its running time. A tail reader is the index, not playback.
+        val at = readers.values.map { pieceAt(it) }.filter { it < tailPiece }.minOrNull()
+        mapOf("spans" to spans, "at" to (at?.let { (it - first) / count } ?: -1.0))
       }.getOrDefault(none)
     }
 
