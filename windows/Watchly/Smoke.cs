@@ -51,8 +51,8 @@ static class Smoke
     }
 
     /// <summary>
-    /// With WATCHLY_SMOKE_VIDEO set to a video of 8 s or more: the seek bar's hover frames
-    /// decode, stay paused between hovers, and a hover elsewhere draws a different frame.
+    /// With WATCHLY_SMOKE_VIDEO set to a film or an episode (15 min or more): the seek bar's
+    /// hover frames decode, stay paused between hovers, and spots across it differ.
     /// </summary>
     static void Peek()
     {
@@ -78,13 +78,23 @@ static class Smoke
         var settled = frames.Count;
         Wait(1);
         Eq(frames.Count, settled, "peek: new frames while paused");
-        preview.Show(1000);
-        Wait(1.5);
-        var early = frames.Count > settled ? frames[^1] : null;
-        Ok(early is not null, "peek: no frame after a hover");
-        preview.Show(6000);
-        Wait(1.5);
-        Ok(early is not null && !frames[^1].SequenceEqual(early), "peek: a hover elsewhere drew the same frame");
+        // Spots across a film or an episode; each must draw a picture of its own, quickly.
+        var seen = new List<byte[]>();
+        // First the very end, which must not leave the preview stuck there.
+        preview.Show(24 * 3600_000);
+        Wait(1);
+        foreach (var at in new long[] { 30_000, 120_000, 300_000, 600_000, 900_000 })
+        {
+            var before = frames.Count;
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            preview.Show(at);
+            while (frames.Count == before && clock.ElapsedMilliseconds < 3000) Wait(0.05);
+            Wait(0.3); // let the last picture of this hover land
+            Log.Player($"peek {at / 1000}s: {frames.Count - before} frames, first after {clock.ElapsedMilliseconds - 300} ms");
+            Ok(frames.Count > before, $"peek: no frame for {at / 1000}s");
+            if (frames.Count > 0) seen.Add(frames[^1]);
+        }
+        Eq(seen.Select(Convert.ToBase64String).Distinct().Count(), 5, "peek: distinct pictures for five spots");
     }
 
     static void Logic()

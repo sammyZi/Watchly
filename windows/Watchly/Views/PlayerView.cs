@@ -164,7 +164,8 @@ public sealed class PlayerView : UserControl, IDisposable
     readonly TextBlock lengthText = new() { Foreground = Brushes.White, FontSize = 12, FontWeight = FontWeights.Medium, MinWidth = 52, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
     readonly SeekBar seek = new();
     SeekPreview? preview;
-    bool peekOnDisk;
+    /// <summary>The hovered time, in ms, when it has a picture to show; -1 for the time alone.</summary>
+    long peekAt = -1;
 
     public PlayerView(PlaybackRequest request)
     {
@@ -1494,12 +1495,20 @@ public sealed class PlayerView : UserControl, IDisposable
     {
         if (duration <= 0) return;
         // A stream has only the downloaded parts to show; elsewhere the time alone.
-        peekOnDisk = session is null || seek.Downloaded.Any(s => ratio >= s.From && ratio <= s.To);
-        if (!peekOnDisk) { seek.Preview = null; return; }
-        preview ??= OpenPreview();
-        preview?.Show((long)(ratio * duration));
-        seek.Preview = preview?.Image;
+        var onDisk = session is null || seek.Downloaded.Any(s => ratio >= s.From && ratio <= s.To);
+        // Short of the very end: stepping a frame past it would end the preview's playback.
+        peekAt = onDisk ? Math.Min((long)(ratio * duration), duration - 3000) : -1;
+        if (onDisk) (preview ??= OpenPreview())?.Show(peekAt);
+        ShowPeek();
     }
+
+    /// <summary>
+    /// Only a picture from near the hovered spot. The last one stays up until the next lands,
+    /// and where that never comes (the keyframe before the spot isn't downloaded) it would
+    /// show some other moment as this one.
+    /// </summary>
+    void ShowPeek() =>
+        seek.Preview = preview is { Image: { } image } p && peekAt >= 0 && Math.Abs(p.FrameAt - peekAt) <= duration / 50 ? image : null;
 
     SeekPreview? OpenPreview()
     {
@@ -1507,7 +1516,7 @@ public sealed class PlayerView : UserControl, IDisposable
         if (path is null || !File.Exists(path)) return null;
         try
         {
-            return new SeekPreview(vlc, path, image => seek.Preview = peekOnDisk ? image : null);
+            return new SeekPreview(vlc, path, _ => ShowPeek());
         }
         catch (Exception e)
         {
@@ -2380,7 +2389,8 @@ public sealed class SeekBar : FrameworkElement
 
 /// <summary>
 /// The seek bar's hover frames: a second libVLC player on the same file, silent and paused,
-/// decoding into a small bitmap; each hover seeks it (to keyframes, for speed) and steps one frame. YouTube reads
+/// decoding into a small bitmap; each hover seeks it (to keyframes, for speed) and plays it
+/// to the first new picture. YouTube reads
 /// these off a pre-made storyboard; here the file itself is the storyboard. It reads the file
 /// off disk — a torrent's HTTP stream has one reader, the playback — shared so the torrent
 /// can keep writing it and rename it once complete.
@@ -2403,10 +2413,14 @@ sealed class SeekPreview : IDisposable
     int height;
     byte[]? last;
     long wanted = -1, asked = -1;
-    bool paused;
+    /// <summary>Pause on the next new picture: set at the start and by each seek.</summary>
+    volatile bool hold = true;
     volatile bool disposed;
 
     public WriteableBitmap? Image { get; private set; }
+
+    /// <summary>The time, in ms, <see cref="Image"/> was asked for (the latest seek when it came).</summary>
+    public long FrameAt { get; private set; }
 
     public SeekPreview(LibVLC vlc, string path, Action<WriteableBitmap> shown)
     {
@@ -2424,9 +2438,11 @@ sealed class SeekPreview : IDisposable
         {
             if (wanted == asked || disposed) { pump.Stop(); return; }
             asked = wanted;
+            // Seek, then play until the new picture lands (Display pauses it again). Paused,
+            // a seek plus a frame step drew nothing for some files (4K x265).
+            hold = true;
             player.Time = asked;
-            // Paused, a seek alone may not draw; stepping a frame does.
-            player.NextFrame();
+            player.SetPause(false);
         };
         player.Play();
     }
@@ -2466,23 +2482,24 @@ sealed class SeekPreview : IDisposable
     void Display(IntPtr opaque, IntPtr picture)
     {
         if (disposed) return;
-        // Played only to get going: the first frame pauses it, and hovers seek from there.
-        if (!paused)
-        {
-            paused = true;
-            ThreadPool.QueueUserWorkItem(_ => { if (!disposed) player.SetPause(true); });
-        }
         var h = height;
         var pixels = new byte[Width * 4 * h];
         Marshal.Copy(buffer, pixels, 0, pixels.Length);
         // Paused, libVLC keeps redrawing the same picture; only a new one goes up.
         if (last is not null && pixels.AsSpan().SequenceEqual(last)) return;
         last = pixels;
+        if (hold)
+        {
+            hold = false;
+            // Not if a newer seek wants it playing again meanwhile.
+            ThreadPool.QueueUserWorkItem(_ => { if (!disposed && !hold) player.SetPause(true); });
+        }
         ui.BeginInvoke(() =>
         {
             if (disposed) return;
             if (Image is null || Image.PixelHeight != h) Image = new WriteableBitmap((int)Width, h, 96, 96, PixelFormats.Bgr32, null);
             Image.WritePixels(new Int32Rect(0, 0, (int)Width, h), pixels, (int)Width * 4, 0);
+            FrameAt = Math.Max(0, asked);
             shown(Image);
         });
     }

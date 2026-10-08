@@ -954,7 +954,10 @@ export function PlayerScreen({
    * — so a seek into a filled stretch is known to be instant. Read only while
    * the bar is on screen, and never for a file that is already local.
    */
-  const [spans, setSpans] = useState<[number, number][]>([]);
+  const [spans, setSpans] = useState<{ spans: [number, number][]; at: number }>({
+    spans: [],
+    at: -1,
+  });
   useEffect(() => {
     if (!showUi || fileIndex < 0 || !url) return;
     let live = true;
@@ -2206,8 +2209,9 @@ function SeekBar({
   onSeek,
 }: {
   value: number;
-  /** Downloaded stretches, [from, to] as fractions of the file. */
-  spans: [number, number][];
+  /** Downloaded stretches as fractions of the file's bytes, and the byte
+   *  fraction the player is reading at (-1 when nothing is reading). */
+  spans: { spans: [number, number][]; at: number };
   onScrub: (ratio: number) => void;
   onSeek: (ratio: number) => void;
 }) {
@@ -2216,6 +2220,23 @@ function SeekBar({
   // Local, so the bar tracks the finger without waiting on a parent render.
   const [dragging, setDragging] = useState<number | null>(null);
   const pct = Math.max(0, Math.min(1, dragging ?? value));
+
+  // The knob is time, the spans are bytes, and a variable-bitrate film is
+  // rarely as far through one as the other — 27 minutes into an action-heavy
+  // opening was 24% of the bytes but 20% of the time, so what was downloading
+  // at the playhead drew well past the knob. Bend the byte scale through the
+  // read position so it lands on the playhead; held still during a drag,
+  // where `value` is the finger and not the player.
+  const played = useRef(value);
+  if (dragging === null) played.current = value;
+  const at = spans.at;
+  const t = Math.max(0, Math.min(1, played.current));
+  const toTime = (b: number) =>
+    at <= 0 || at >= 1
+      ? b
+      : b <= at
+        ? (b / at) * t
+        : t + ((b - at) / (1 - at)) * (1 - t);
 
   /** The bar's left edge on screen, fixed by the touch that starts a drag. */
   const origin = useRef(0);
@@ -2259,10 +2280,13 @@ function SeekBar({
           band (which starts partway along) read as a position near zero and
           the thumb jumped. With these out of the way it is always this bar's. */}
       <View style={styles.track} pointerEvents="none">
-        {spans.map(([from, to]) => (
+        {spans.spans.map(([from, to]) => (
           <View
             key={from}
-            style={[styles.have, { left: `${from * 100}%`, width: `${(to - from) * 100}%` }]}
+            style={[
+              styles.have,
+              { left: `${toTime(from) * 100}%`, width: `${(toTime(to) - toTime(from)) * 100}%` },
+            ]}
           />
         ))}
         <View style={[styles.fill, { width: `${pct * 100}%` }]} />

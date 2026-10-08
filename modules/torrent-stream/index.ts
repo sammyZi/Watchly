@@ -90,8 +90,9 @@ type TorrentStream = {
   openExternally(url: string, positionSeconds: number): Promise<void>;
   /** Copy finished wanted videos into Downloads without stopping the torrent. */
   saveReady(): Promise<{ index: number; name: string; uri: string; size: number; id?: string }[]>;
-  /** The streaming file's finished stretches, as [from, to] fractions of it. */
-  downloadedSpans(): Promise<[number, number][]>;
+  /** The streaming file's finished stretches, as [from, to] fractions of its
+   *  bytes, and the player's read position on that scale (-1 when idle). */
+  downloadedSpans(): Promise<{ spans: [number, number][]; at: number }>;
   /** `file://` URI for a finished episode — its Movies/Watchly copy, else the torrent cache. */
   fileUri(index: number, id?: string): Promise<string>;
   /** `file://` URI for a finished file in public Downloads/. */
