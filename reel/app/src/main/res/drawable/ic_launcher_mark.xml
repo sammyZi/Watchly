@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- The mark centred on the 108dp adaptive canvas, well inside the 66dp safe zone. -->
-<inset xmlns:android="http://schemas.android.com/apk/res/android"
-    android:drawable="@drawable/logo_mark"
-    android:inset="35dp" />
