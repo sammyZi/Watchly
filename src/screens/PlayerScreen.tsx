@@ -1807,10 +1807,10 @@ export function PlayerScreen({
                 <Pressable
                   onPress={() => stepBright(1)}
                   onLongPress={() => stepBright(10)}
-                  hitSlop={8}
+                  hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
                   style={styles.brightBtn}
                 >
-                  <Icon name="plus" size={18} color="#fff" />
+                  <Icon name="plus" size={15} color="#fff" />
                 </Pressable>
                 {/* The meter is a target too: tap anywhere on it to jump there. */}
                 <Pressable
@@ -1828,16 +1828,16 @@ export function PlayerScreen({
                   />
                 </Pressable>
                 <View style={styles.brightValue}>
-                  <Icon name="sun" size={14} color="#fff" />
+                  <Icon name="sun" size={12} color="#fff" />
                   <Text style={styles.brightText}>{brightPct}</Text>
                 </View>
                 <Pressable
                   onPress={() => stepBright(-1)}
                   onLongPress={() => stepBright(-10)}
-                  hitSlop={8}
+                  hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
                   style={styles.brightBtn}
                 >
-                  <Icon name="minus" size={18} color="#fff" />
+                  <Icon name="minus" size={15} color="#fff" />
                 </Pressable>
               </View>
             </View>
@@ -2972,30 +2972,31 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   brightPill: {
-    width: 48,
+    width: 32,
     alignItems: 'center',
-    paddingVertical: 4,
+    paddingVertical: 2,
     borderRadius: 999,
     backgroundColor: '#0b0e14b3',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#ffffff2e',
   },
-  // Finger-sized: this gets pressed repeatedly to walk a few points, so it has
-  // to stay under the thumb without aiming.
-  brightBtn: { width: 48, height: 44, alignItems: 'center', justifyContent: 'center' },
+  // Slim to look at, but hitSlop keeps it finger-sized: this gets pressed
+  // repeatedly to walk a few points, so it has to stay under the thumb.
+  brightBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
   brightTrack: {
-    width: 6,
+    width: 4,
     height: BRIGHT_TRACK,
     marginVertical: 4,
-    borderRadius: 3,
+    borderRadius: 2,
     overflow: 'hidden',
     justifyContent: 'flex-end',
     backgroundColor: '#ffffff33',
   },
-  brightFill: { width: '100%', borderRadius: 3, backgroundColor: '#fff' },
-  brightValue: { alignItems: 'center', gap: 3, paddingTop: 8, paddingBottom: 2 },
+  brightFill: { width: '100%', borderRadius: 2, backgroundColor: '#fff' },
+  brightValue: { alignItems: 'center', gap: 2, paddingTop: 6, paddingBottom: 2 },
   brightText: {
     ...type.meta,
+    fontSize: 11,
     color: '#fff',
     fontFamily: font.semibold,
     fontVariant: ['tabular-nums'],

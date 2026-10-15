@@ -1033,7 +1033,10 @@ function ShellApp({
         onNext={upNext ? upNext.go : undefined}
         progress={progress}
         onSavePosition={(seconds) =>
-          setPosition(stored, playingIndex, seconds).then(setHistory)
+          TorrentStream.downloadedSpans()
+            .then((s) => s.at, () => -1)
+            .then((at) => setPosition(stored, playingIndex, seconds, at))
+            .then(setHistory)
         }
         onDuration={(seconds) =>
           setDuration(stored, playingIndex, seconds).then(setHistory)
