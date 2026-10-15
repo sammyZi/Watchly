@@ -25,6 +25,10 @@ export type Item = {
   /** Resume point and duration per file index, both in seconds. */
   positions?: Record<string, number>;
   durations?: Record<string, number>;
+  /** Where the player was reading at the resume point, 0-1 of the file's bytes.
+   *  A variable-bitrate file is nowhere near as far through its bytes as through
+   *  its running time, so this — not position/duration — is what to pre-buffer. */
+  byteAts?: Record<string, number>;
 
   /** SubDL downloads kept for next play, keyed by file index. */
   subtitles?: Record<string, SavedSub[]>;
@@ -130,11 +134,13 @@ export function patch(uri: string, fields: Partial<Item>) {
   });
 }
 
-/** Resume point for one file, without clobbering the others. */
-export const setPosition = (item: Item, index: number, seconds: number) =>
+/** Resume point for one file, without clobbering the others. `byteAt` < 0 (the
+ *  player had no open reader) keeps the last one seen. */
+export const setPosition = (item: Item, index: number, seconds: number, byteAt = -1) =>
   patch(item.uri, {
     lastFileIndex: index,
     positions: { ...item.positions, [index]: seconds },
+    ...(byteAt >= 0 && { byteAts: { ...item.byteAts, [index]: byteAt } }),
   });
 
 export const setDuration = (item: Item, index: number, seconds: number) =>

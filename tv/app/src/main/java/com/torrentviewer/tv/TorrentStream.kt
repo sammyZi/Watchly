@@ -221,6 +221,14 @@ class TorrentStream(private val context: Context) {
     private var lastRollTick = -1000
 
     private var zoneStarts = emptyList<Int>()
+    /**
+     * One piece the last applyZone set to IGNORE, or -1. Wanted again means the
+     * priorities were rewritten under us — the file-priority update from a fresh
+     * add lands after the zone and wants the whole file. Seen on the phone: pieces
+     * 0–45 in order at 5MB/s, every request slot full, and the last piece the
+     * ready check needs never got one. Checked each tick, so the zone is put back.
+     */
+    private var zoneIgnored = -1
     private var zoneWidth = -1
     private var zoneRushedTail = false
     private var windowPieces = 4
@@ -782,6 +790,7 @@ class TorrentStream(private val context: Context) {
         peerSaveTick = 0
         ticks = 0
         zoneStarts = emptyList()
+        zoneIgnored = -1
         zoneWidth = -1
         zoneRushedTail = false
         lately.clear()
@@ -1018,7 +1027,10 @@ class TorrentStream(private val context: Context) {
             zoneRushedTail != announcedReady ||
             zoneStarts.size != targets.size ||
             targets.any { t -> zoneStarts.none { t >= it - back && t <= it + width / 2 } }
-        if (stale) applyZone(h, targets, width, back, rushTail = announcedReady)
+        val clobbered = !stale && zoneIgnored >= 0 &&
+            runCatching { h.piecePriority(zoneIgnored) != Priority.IGNORE }.getOrDefault(false)
+        if (clobbered) log("zone: priorities were rewritten (piece $zoneIgnored wanted again) — re-applying")
+        if (stale || clobbered) applyZone(h, targets, width, back, rushTail = announcedReady)
 
         val keep = mutableSetOf<Int>()
         targets.forEachIndexed { rank, target ->
@@ -1154,6 +1166,7 @@ class TorrentStream(private val context: Context) {
 
             handle = next
             zoneStarts = emptyList()
+            zoneIgnored = -1
             zoneWidth = -1
             zoneRushedTail = false
             if (readers.isEmpty()) {
@@ -1200,6 +1213,10 @@ class TorrentStream(private val context: Context) {
             }
         }
         runCatching { h.prioritizePieces(prios) }
+        zoneIgnored = (firstPiece..lastPiece).firstOrNull { prios[it] == Priority.IGNORE } ?: -1
+        // A rewrite can bring sequential back with it, and then in-order requests
+        // fill every slot ahead of the deadlines.
+        runCatching { h.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD) }
         runCatching { h.clearPieceDeadlines() }
         deadlined.clear()
         zoneStarts = targets
@@ -1237,6 +1254,17 @@ class TorrentStream(private val context: Context) {
             ?: return "nothing requested yet"
         return "${q.finished()} done, ${q.writing()} writing, ${q.requested()} requested of ${q.blocksInPiece()} blocks"
     }
+
+    /**
+     * Where the player is reading, 0–1 of the file's bytes; -1 with no open reader.
+     * Saved with the resume point: a variable-bitrate file is nowhere near as far
+     * through its bytes as through its running time. A tail reader is the index.
+     */
+    fun readRatio(): Double = runCatching {
+        val size = info?.files()?.fileSize(fileIndex)?.takeIf { it > 0 }
+        val at = readers.values.filter { pieceAt(it) < tailPiece }.minOrNull()
+        if (size == null || at == null) -1.0 else at.toDouble() / size
+    }.getOrDefault(-1.0)
 
     /** Piece holding the given byte offset within the selected file. */
     private fun pieceAt(offset: Long): Int {
@@ -1299,6 +1327,7 @@ class TorrentStream(private val context: Context) {
         lately.clear()
         blockingPiece = -1
         zoneStarts = emptyList()
+        zoneIgnored = -1
         zoneWidth = -1
         zoneRushedTail = false
         subtitleFiles = emptyList()
