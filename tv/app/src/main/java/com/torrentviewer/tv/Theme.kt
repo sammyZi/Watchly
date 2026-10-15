@@ -433,15 +433,29 @@ val NoScroll = object : androidx.compose.foundation.gestures.BringIntoViewSpec {
     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float = 0f
 }
 
-/** Bring a focused item into view by the least scroll, not the TV's pivot to a third of the way. */
+/**
+ * Bring a focused item into view by the least scroll, not the TV's pivot to a third of the
+ * way: nothing moves while it is on screen, and [margin] keeps that much around it visible.
+ */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
-val MinimalScroll = object : androidx.compose.foundation.gestures.BringIntoViewSpec {
+fun minimalScroll(margin: Float = 0f) = object : androidx.compose.foundation.gestures.BringIntoViewSpec {
     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
-        val end = offset + size
+        val start = offset - margin
+        val end = offset + size + margin
         return when {
-            offset >= 0f && end <= containerSize -> 0f
-            offset < 0f || size > containerSize -> offset
+            start >= 0f && end <= containerSize -> 0f
+            start < 0f || end - start > containerSize -> start
             else -> end - containerSize
         }
     }
+}
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+val MinimalScroll = minimalScroll()
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+fun rememberMinimalScroll(margin: Dp): androidx.compose.foundation.gestures.BringIntoViewSpec {
+    val px = with(androidx.compose.ui.platform.LocalDensity.current) { margin.toPx() }
+    return remember(px) { minimalScroll(px) }
 }

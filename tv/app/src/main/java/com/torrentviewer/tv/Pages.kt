@@ -162,9 +162,10 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
         busy = false
     }
 
-    // The focused row holds a fixed spot near the top and the grid glides under it; the TV
-    // default pivots each row to a third of the way down, which jerked the grid.
-    CompositionLocalProvider(LocalBringIntoViewSpec provides rememberEdgeScroll(110.dp)) {
+    // The page holds still while focus moves between cards already on screen, and scrolls
+    // only enough to show the next one with its title. Pinning every row to the top shoved
+    // the whole page, header and all, on each move.
+    CompositionLocalProvider(LocalBringIntoViewSpec provides rememberMinimalScroll(60.dp)) {
     LazyVerticalGrid(
         columns = GridCells.Adaptive(140.dp),
         modifier = Modifier.fillMaxSize(),

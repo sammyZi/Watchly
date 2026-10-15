@@ -92,6 +92,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -763,7 +764,7 @@ private fun TopBar(title: Title?, episode: Episode?, file: TorrentFile?, progres
 
 /**
  * Netflix's bar: the played part red, what is on disk lighter, a knob that swells
- * when the remote is on it, the time left on the right, and while scrubbing a bubble
+ * when the remote is on it, the time so far on the left and left on the right, and while scrubbing a bubble
  * with where the press has got to and how far that is from now.
  */
 @Composable
@@ -775,6 +776,12 @@ private fun SeekBar(at: () -> Double, playing: () -> Double, duration: Double, s
     val red = Ink.accent
     // Fixed height: the bubble floats above, so scrubbing never moves the buttons below.
     Row(modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            clock(at()),
+            Modifier.padding(end = 18.dp).widthIn(min = 64.dp),
+            style = Type.label.copy(fontWeight = FontWeight.SemiBold),
+            textAlign = TextAlign.End,
+        )
         BoxWithConstraints(Modifier.weight(1f).height(28.dp), contentAlignment = Alignment.CenterStart) {
             val width = maxWidth
             Canvas(Modifier.fillMaxSize()) {

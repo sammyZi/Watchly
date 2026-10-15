@@ -422,4 +422,23 @@ class VlcView(context: Context) : FrameLayout(context) {
         release()
         super.onDetachedFromWindow()
     }
+
+    private var hidden = false
+
+    /**
+     * The screen saver hides the window and abandons the video surface; libVLC's picture
+     * dies with it ("cannot create EGL window surface") while the sound plays on, and it
+     * never rebuilds the picture on the new surface. Reopen where it was when we come back.
+     */
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility != VISIBLE) {
+            hidden = true
+            return
+        }
+        if (!hidden) return
+        hidden = false
+        // Not loaded yet reports 0: keep the start point rather than rewind to the top.
+        player?.let { reload(it.time.takeIf { t -> t > 0 } ?: startMs) }
+    }
 }
