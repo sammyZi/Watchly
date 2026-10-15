@@ -125,6 +125,12 @@ private const val REWIND_BYTES = 32L * 1024 * 1024
 /** Reader id for a seek the player has not made yet; real ids count up from zero. */
 private const val SEEK_READER = -1L
 
+/** A seek aim the player never followed with a connection is dropped after this long. */
+private const val SEEK_AIM_MS = 30_000L
+
+/** A reopened player reads this much of the head (header, then its 4MB read-ahead) before it seeks. */
+private const val REOPEN_HEAD_BYTES = 16L * 1024 * 1024
+
 /** A closed reader still counts this long — players hop between two spots in one file. */
 private const val READER_LINGER_MS = 10_000L
 
@@ -233,6 +239,10 @@ class TorrentStream(private val context: Context) {
     /** Byte offset each live HTTP reader is at, keyed by connection id. */
     private val readers = ConcurrentHashMap<Long, Long>()
 
+    /** Server connections already open when [SEEK_READER] was set; one past these replaces it. */
+    @Volatile private var seekAfter = 0L
+    @Volatile private var seekSetAt = 0L
+
     /** Readers that closed recently: connection id → (offset, closed at). */
     private val lately = ConcurrentHashMap<Long, Pair<Long, Long>>()
 
@@ -294,14 +304,28 @@ class TorrentStream(private val context: Context) {
         val size = ti.files().fileSize(fileIndex)
         if (size <= 0) return
         val offset = (size * ratio.coerceIn(0.0, 0.999)).toLong()
+        // Before the put: pump() must never see the new aim paired with the old count.
+        seekAfter = server?.connections() ?: 0L
+        seekSetAt = System.currentTimeMillis()
         readers[SEEK_READER] = offset
         log("seek: aiming window at ${(ratio * 100).toInt()}% (byte $offset)")
     }
+
+    /** The player is blocked on a piece that has not arrived — a seek now would wait on it. */
+    fun starved(): Boolean = server?.starved() == true
+
+    /** Connections the player has opened to the stream so far. */
+    fun connections(): Long = server?.connections() ?: 0L
 
     fun stop() {
         playGen++
         val h = handle?.takeIf { it.isValid }
         handle = null
+        // Readers and the poll thread both look into the torrent's metadata, which the
+        // removal below frees: stop them first, or a tick in flight reads freed memory.
+        server?.stop()
+        server = null
+        stopPolling()
         if (h != null) {
             runCatching { h.unsetFlags(TorrentFlags.AUTO_MANAGED) }
             runCatching { h.pause() }
@@ -877,6 +901,16 @@ class TorrentStream(private val context: Context) {
         handler.post(tick)
     }
 
+    /** Ends the poll loop, waiting out a tick in flight — unless called from that tick. */
+    private fun stopPolling() {
+        val thread = pollThread
+        poller?.removeCallbacksAndMessages(null)
+        thread?.quitSafely()
+        poller = null
+        pollThread = null
+        if (thread != null && Thread.currentThread() !== thread) runCatching { thread.join(REMOVE_WAIT_MS + 2_000L) }
+    }
+
     private fun pump() {
         ticks++
 
@@ -901,8 +935,14 @@ class TorrentStream(private val context: Context) {
 
         if (ticks % 4 == 0 && rollCache(h, ti)) return
 
-        // A seeded seek stands in for a reader that has not connected yet.
-        if (readers.keys.any { it >= 0L }) readers.remove(SEEK_READER)
+        // A seeded seek stands in for a reader that has not connected yet — not for the
+        // ones already open, which are where the player is leaving from, nor for a reopened
+        // player re-reading the header and the index on its way to the target.
+        val clock = System.currentTimeMillis()
+        if (readers.containsKey(SEEK_READER)) {
+            val arrived = readers.entries.any { it.key > seekAfter && it.value >= REOPEN_HEAD_BYTES && pieceAt(it.value) < tailPiece }
+            if (arrived || clock - seekSetAt > SEEK_AIM_MS) readers.remove(SEEK_READER)
+        }
 
         val pieceLen = ti.pieceLength().toLong().coerceAtLeast(1L)
         val prerollPieces = maxOf(1, Math.ceil(prepareBytes.toDouble() / pieceLen).toInt())
@@ -910,10 +950,14 @@ class TorrentStream(private val context: Context) {
         val preroll = if (startPiece - firstPiece <= prerollPieces) listOf(firstPiece) else listOf(firstPiece, startPiece)
 
         // A reader parked in the tail is the player reading the container index, not
-        // playback. Lingering closed readers only add zones, never lead.
-        val clock = System.currentTimeMillis()
+        // playback. Lingering closed readers only add zones, never lead. The newest
+        // connection leads: after a seek it is where the picture is waiting, and ranked by
+        // offset a forward seek came second to the spot the player had just left.
         lately.entries.removeIf { clock - it.value.second > READER_LINGER_MS }
-        val live = readers.values.map { pieceAt(it) }.distinct().sorted()
+        val live = readers.entries
+            .sortedByDescending { if (it.key == SEEK_READER) Long.MAX_VALUE else it.key }
+            .map { pieceAt(it.value) }
+            .distinct()
         val open = live.filter { it < tailPiece }.ifEmpty { live }
         val closed = lately.values.map { pieceAt(it.first) }.filter { it < tailPiece && it !in open }.distinct().sorted()
         val targets = (open + closed).ifEmpty { preroll }
@@ -1112,7 +1156,11 @@ class TorrentStream(private val context: Context) {
             zoneStarts = emptyList()
             zoneWidth = -1
             zoneRushedTail = false
-            if (readers.isEmpty()) readers[SEEK_READER] = at
+            if (readers.isEmpty()) {
+                seekAfter = server?.connections() ?: 0L
+                seekSetAt = System.currentTimeMillis()
+                readers[SEEK_READER] = at
+            }
             server?.reopen()
             return true
         } catch (e: Exception) {
@@ -1207,10 +1255,7 @@ class TorrentStream(private val context: Context) {
         persistSession()
         server?.stop()
         server = null
-        poller?.removeCallbacksAndMessages(null)
-        pollThread?.quitSafely()
-        poller = null
-        pollThread = null
+        stopPolling()
 
         val keeping = keep != null && keep == infoHashHex
         // Read the paths before the torrent leaves the session: afterwards it is a

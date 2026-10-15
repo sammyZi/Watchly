@@ -13,7 +13,7 @@ import kotlinx.coroutines.withContext
 enum class Phase { IDLE, INSPECTING, PLAYING }
 
 /** "136 min" → 8160 s: the only duration a never-played torrent has, and bitrate needs one. */
-private fun runtimeSeconds(runtime: String?): Double =
+fun runtimeSeconds(runtime: String?): Double =
     Regex("(\\d+)\\s*min", RegexOption.IGNORE_CASE).find(runtime.orEmpty())?.groupValues?.get(1)?.toDouble()?.times(60) ?: 0.0
 
 private fun bitrateOf(bytes: Long, seconds: Double) = if (bytes > 0 && seconds > 0) bytes / seconds else 0.0
