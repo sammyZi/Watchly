@@ -102,9 +102,13 @@ public sealed class PlayerView : UserControl, IDisposable
     long reloadFrom;
     int scaleIdx;
     double rate = 1;
+    /// <summary>Audio &amp; Subtitles: the two lists side by side, as Netflix shows them.</summary>
     bool picking;
-    bool pickingAudio;
     bool searchingSubs;
+    /// <summary>Everything that is not in the bottom row — the phone's More sheet.</summary>
+    bool more;
+    bool SheetOpen => picking || searchingSubs || more;
+    void CloseSheets() => picking = searchingSubs = more = false;
     bool dismissedNext;
     bool fullscreen;
     bool pip;
@@ -225,11 +229,12 @@ public sealed class PlayerView : UserControl, IDisposable
         hideTimer.Tick += (_, _) =>
         {
             if (disposed) return;
-            if (picking || pickingAudio || searchingSubs)
+            if (SheetOpen)
             {
                 return;
             }
-            if (IsPlayingSafe || SafeState == VLCState.Playing)
+            // Paused hides too: the paused screen is the pause card, not the controls.
+            if (IsPlayingSafe || SafeState is VLCState.Playing or VLCState.Paused)
             {
                 hideTimer.Stop();
                 showUi = false;
@@ -320,7 +325,7 @@ public sealed class PlayerView : UserControl, IDisposable
     void OnOverlayMouseLeave(object sender, MouseEventArgs e)
     {
         if (disposed) return;
-        if (!picking && !pickingAudio && !searchingSubs && IsPlayingSafe)
+        if (!SheetOpen && IsPlayingSafe)
         {
             hideTimer.Stop();
             hideTimer.Interval = TimeSpan.FromSeconds(1);
@@ -472,7 +477,7 @@ public sealed class PlayerView : UserControl, IDisposable
                             }
                         }
                     }
-                    if (found && (picking || pickingAudio)) Render();
+                    if (found && picking) Render();
                 });
                 if (found) break;
             }
@@ -559,8 +564,8 @@ public sealed class PlayerView : UserControl, IDisposable
     /// otherwise just updates the numbers in place.
     /// </summary>
     string Signature() => string.Join('|',
-        started, Preparing, showUi, locked, buffering || stalled, started && IsPlayingSafe,
-        picking, pickingAudio, searchingSubs, hud, UpNextVisible,
+        started, Preparing, showUi, locked, buffering || stalled, started && IsPlayingSafe, PauseCard,
+        picking, more, searchingSubs, hud, UpNextVisible,
         failure, failureFatal, scaleIdx, rate, fullscreen, pip, showInfo,
         userMuted, tracksVersion,
         stats != null, subLoading, subResults.Count);
@@ -600,6 +605,13 @@ public sealed class PlayerView : UserControl, IDisposable
         liveStage.Text = request.LocalPath is not null ? "Opening" : !started ? StageLabel(stats) : $"Buffering {Math.Round(bufferPct)}%";
         liveUpNext.Text = $"Up next in {Math.Max(0, (int)Math.Ceiling((duration - current) / 1000.0))}s";
         liveVolume.Text = shell.Settings.Volume.ToString();
+        volumeFill.Height = VolumeTrack * Math.Clamp(shell.Settings.Volume, 0, 150) / 150.0;
+        var ends = DateTime.Now.AddMilliseconds(Math.Max(0, duration - current) / rate);
+        liveNow.Text = DateTime.Now.ToString("t");
+        liveEnds.Text = duration > 0 ? $"Ends at {ends:t}" : "";
+        livePauseEnds.Text = $"Ends at {ends:t} if you resume now";
+        liveDot.Fill = request.LocalPath is not null || (stats?.Peers ?? 0) > 0 ? Green : White(0x55);
+        ring.Percent = bufferPct;
     }
 
     static TextBlock Live(double size, byte alpha, FontWeight? weight = null) => new()
@@ -617,6 +629,14 @@ public sealed class PlayerView : UserControl, IDisposable
     readonly TextBlock liveStage = Live(12, 0xb0);
     readonly TextBlock liveUpNext = Live(11, 0xa0);
     readonly TextBlock liveVolume = Live(12, 0xff, FontWeights.SemiBold);
+    readonly TextBlock liveNow = Live(14, 0xff, FontWeights.Bold);
+    readonly TextBlock liveEnds = Live(11, 0xa0);
+    readonly TextBlock livePauseEnds = Live(11, 0x80);
+    readonly System.Windows.Shapes.Ellipse liveDot = new() { Width = 8, Height = 8, VerticalAlignment = VerticalAlignment.Center };
+    readonly Ring ring = new();
+    /// <summary>The volume meter's fill, out of 150 (libVLC's ceiling).</summary>
+    readonly Border volumeFill = new() { CornerRadius = new CornerRadius(3), VerticalAlignment = VerticalAlignment.Bottom, Background = Brushes.White, IsHitTestVisible = false };
+    const double VolumeTrack = 72;
 
     void SavePosition()
     {
@@ -624,7 +644,10 @@ public sealed class PlayerView : UserControl, IDisposable
         shell.SavePosition(request.HistoryUri, request.FileIndex, current / 1000.0);
     }
 
-    bool UpNextVisible => request.Next is not null && !dismissedNext && duration > 0 && duration - current <= UpNextSeconds * 1000;
+    /// <summary>Paused with the controls away: what you are watching and how much is left.</summary>
+    bool PauseCard => started && !Preparing && !showUi && !locked && !pip && !buffering && !stalled && SafeState == VLCState.Paused;
+
+    bool UpNextVisible =>request.Next is not null && !dismissedNext && duration > 0 && duration - current <= UpNextSeconds * 1000;
 
     void OnEnded()
     {
@@ -672,14 +695,14 @@ public sealed class PlayerView : UserControl, IDisposable
         overlay.Cursor = null;
         if (!showUi) { showUi = true; Render(); }
         hideTimer.Stop();
-        hideTimer.Interval = TimeSpan.FromSeconds(picking || pickingAudio || searchingSubs ? 12 : 3.5);
+        hideTimer.Interval = TimeSpan.FromSeconds(SheetOpen ? 12 : 3.5);
         hideTimer.Start();
     }
 
     void ToggleUi()
     {
         if (locked) { Bump(); return; }
-        if (picking || pickingAudio || searchingSubs) { picking = pickingAudio = searchingSubs = false; Render(); return; }
+        if (SheetOpen) { CloseSheets(); Render(); return; }
         showUi = !showUi;
         if (showUi) Bump();
         Render();
@@ -688,7 +711,7 @@ public sealed class PlayerView : UserControl, IDisposable
     void OnPictureDown(object sender, MouseButtonEventArgs e)
     {
         if (e.OriginalSource != overlay && e.OriginalSource is not Border { Tag: "dim" }) return;
-        if (picking || pickingAudio || searchingSubs) { picking = pickingAudio = searchingSubs = false; Render(); return; }
+        if (SheetOpen) { CloseSheets(); Render(); return; }
         if (pip)
         {
             // The mini window has no title bar: the picture is the handle. Double-click goes back.
@@ -815,7 +838,7 @@ public sealed class PlayerView : UserControl, IDisposable
                 break;
             case Key.Escape:
                 if (locked) { Lock(false); break; }
-                if (picking || pickingAudio || searchingSubs) { picking = pickingAudio = searchingSubs = false; Render(); break; }
+                if (SheetOpen) { CloseSheets(); Render(); break; }
                 if (fullscreen) { ToggleFullscreen(); break; }
                 if (pip) { TogglePip(); break; }
                 RequestExit();
@@ -960,9 +983,11 @@ public sealed class PlayerView : UserControl, IDisposable
         ShowHud($"{(seconds < 0 ? "−" : "+")}{Math.Abs(seconds)} seconds");
     }
 
-    void StepVolume(int by)
+    void StepVolume(int by) => SetVolume(shell.Settings.Volume + by);
+
+    void SetVolume(int level)
     {
-        var next = Math.Clamp(shell.Settings.Volume + by, 0, 150);
+        var next = Math.Clamp(level, 0, 150);
         player.Volume = next;
         player.Mute = false;
         userMuted = false;
@@ -1456,9 +1481,40 @@ public sealed class PlayerView : UserControl, IDisposable
     static Brush White(byte alpha = 255) => new SolidColorBrush(Color.FromArgb(alpha, 255, 255, 255));
     static Brush Black(byte alpha) => new SolidColorBrush(Color.FromArgb(alpha, 0, 0, 0));
     // Frozen: a shared brush then belongs to no thread.
-    static readonly Brush Blue = Frozen(Color.FromRgb(0x3b, 0x6f, 0xe0));
-    static readonly Brush BlueLight = Frozen(Color.FromRgb(0x7a, 0xa2, 0xff));
+    // The phone's and the TV's red: the played part, what is on, what is selected.
+    static readonly Brush Red = Frozen(Color.FromRgb(0xe5, 0x09, 0x14));
+    static readonly Brush RedLight = Frozen(Color.FromRgb(0xff, 0x5a, 0x63));
+    static readonly Brush Green = Frozen(Color.FromRgb(0x46, 0xd3, 0x69));
+    static readonly Brush Sheet = Frozen(Color.FromArgb(0xf2, 0x14, 0x14, 0x14));
     static Brush Frozen(Color color) { var b = new SolidColorBrush(color); b.Freeze(); return b; }
+
+    /// <summary>Dark at the top and bottom where the controls are, the picture left clear in the middle.</summary>
+    static readonly Brush Scrim = Gradient(new Point(0, 0), new Point(0, 1), (0xbf, 0), (0x26, 0.3), (0x26, 0.6), (0xd9, 1));
+    /// <summary>Under the loading screen's and the pause card's text: dark on the left, the picture showing on the right.</summary>
+    static readonly Brush Veil = Gradient(new Point(0, 0), new Point(1, 0), (0xeb, 0), (0x99, 0.7), (0x73, 1));
+    static readonly Brush PauseVeil = Gradient(new Point(0, 0), new Point(1, 0), (0xe0, 0), (0x8c, 0.6), (0x4d, 1));
+
+    static Brush Gradient(Point from, Point to, params (byte Alpha, double At)[] stops)
+    {
+        var b = new LinearGradientBrush { StartPoint = from, EndPoint = to };
+        foreach (var (alpha, at) in stops) b.GradientStops.Add(new GradientStop(Color.FromArgb(alpha, 0, 0, 0), at));
+        b.Freeze();
+        return b;
+    }
+
+    /// <summary>The title's own name, the release file name only when nothing better is known.</summary>
+    string ShownTitle
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(request.MetaTitle)) return request.MetaTitle;
+            var name = TitleText.SearchableName(request.Title);
+            return name.Length > 0 ? name : request.Title;
+        }
+    }
+
+    /// <summary>"S1:E4" when the file names an episode.</summary>
+    string? EpisodeLine => Search.ParseEpisode(request.Title) is { } at ? $"S{at.Season}:E{at.Episode}" : null;
 
     static Icon WIcon(string kind, double size, Brush? brush = null) => new() { Kind = kind, Size = size, Foreground = brush ?? Brushes.White };
 
@@ -1485,7 +1541,8 @@ public sealed class PlayerView : UserControl, IDisposable
     void UpdateClock()
     {
         clockText.Text = Format.Clock(current / 1000.0);
-        lengthText.Text = Format.Clock(duration / 1000.0);
+        // Time left, as Netflix shows it — the number people actually want.
+        lengthText.Text = duration > 0 ? $"-{Format.Clock(Math.Max(0, duration - current) / 1000.0)}" : "--:--";
         seek.Value = duration > 0 ? (double)current / duration : 0;
         seek.Duration = duration;
     }
@@ -1538,33 +1595,51 @@ public sealed class PlayerView : UserControl, IDisposable
         if (disposed) return;
         lastSignature = Signature();
         chrome.Children.Clear();
-        foreach (var live in new[] { liveSwarm, liveSpeed, livePct, liveMeta, liveStage, liveUpNext, liveVolume }) Detach(live);
+        foreach (var live in new FrameworkElement[] { liveSwarm, liveSpeed, livePct, liveMeta, liveStage, liveUpNext, liveVolume, liveNow, liveEnds, livePauseEnds, liveDot, ring, volumeFill }) Detach(live);
         if (infoPanel.IsValueCreated) Detach(infoPanel.Value);
         overlay.Cursor = !showUi && started && player.IsPlaying ? Cursors.None : null;
         Dispatcher.BeginInvoke(UpdateLive, DispatcherPriority.Render);
 
         if (Preparing)
         {
+            // One loading screen, the phone's: the title's own backdrop, its name, and a ring
+            // that fills with libVLC's buffer once it has the stream.
             overlay.Background = Brushes.Black;
-            var preparing = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MaxWidth = 700 };
-            var name = WText(request.Title, 15, null, FontWeights.Medium);
-            name.TextWrapping = TextWrapping.Wrap;
-            name.TextAlignment = TextAlignment.Center;
-            name.Margin = new Thickness(0, 0, 0, 16);
-            preparing.Children.Add(name);
-            var spin = Controls.Ui.Spinner(26);
-            ((Control)spin).Foreground = Brushes.White;
-            preparing.Children.Add(spin);
-            liveStage.HorizontalAlignment = HorizontalAlignment.Center;
-            liveStage.Margin = new Thickness(0, 12, 0, 0);
-            preparing.Children.Add(liveStage);
-            if (stats is not null)
+            if (request.Imdb is { Length: > 0 } imdb && ImageUrl.Load($"https://images.metahub.space/background/medium/{imdb}/img", 1280) is { } backdrop)
             {
-                liveMeta.HorizontalAlignment = HorizontalAlignment.Center;
-                liveMeta.Margin = new Thickness(0, 4, 0, 0);
-                preparing.Children.Add(liveMeta);
+                chrome.Children.Add(new Grid
+                {
+                    ClipToBounds = true,
+                    // Past the edges: a blur fades out at its own border.
+                    Children = { new Border { Margin = new Thickness(-24), Background = new ImageBrush(backdrop) { Stretch = Stretch.UniformToFill }, Effect = new System.Windows.Media.Effects.BlurEffect { Radius = 14 } } },
+                });
             }
-            chrome.Children.Add(preparing);
+            chrome.Children.Add(new Border { Background = Veil });
+
+            var body = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            var name = WText(ShownTitle, 30, null, FontWeights.Bold);
+            name.TextWrapping = TextWrapping.Wrap;
+            name.MaxHeight = 84;
+            body.Children.Add(name);
+            if (EpisodeLine is { } episode)
+            {
+                var line = WText(episode, 14, null, FontWeights.SemiBold);
+                line.Margin = new Thickness(0, 6, 0, 0);
+                body.Children.Add(line);
+            }
+            var status = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 18, 0, 0) };
+            status.Children.Add(Pad(liveDot, 0, 8));
+            status.Children.Add(Pad(liveStage, 0, 0));
+            if (stats is not null) status.Children.Add(Pad(liveMeta, 10, 0));
+            body.Children.Add(status);
+
+            var row = new DockPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(56, 0, 56, 0), MaxWidth = 900, HorizontalAlignment = HorizontalAlignment.Left };
+            // Before libVLC has the stream there is no buffer to count: a spinner, not an empty ring.
+            UIElement gauge = started ? Pad(ring, 32, 0) : Pad((FrameworkElement)Spin(), 32, 0);
+            DockPanel.SetDock(gauge, Dock.Right);
+            row.Children.Add(gauge);
+            row.Children.Add(body);
+            chrome.Children.Add(row);
             var back = Circle(WIcon("arrow-left", 20), 40, RequestExit, 0x88, "Back");
             back.HorizontalAlignment = HorizontalAlignment.Left;
             back.VerticalAlignment = VerticalAlignment.Top;
@@ -1614,46 +1689,39 @@ public sealed class PlayerView : UserControl, IDisposable
 
         if (showUi && !locked)
         {
-            chrome.Children.Add(new Border { Background = Black(0x60), Tag = "dim" });
+            // Dark at the top and bottom where the controls are, not a flat wash over the picture.
+            chrome.Children.Add(new Border { Background = Scrim, Tag = "dim" });
 
-            // Top: back, title, swarm stats.
+            // Top: back, the title big with the episode under it; on the right the clock, when
+            // the film ends, and how fast it is arriving. The swarm went to More.
             var top = new DockPanel { VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(16) };
-            var back = Circle(WIcon("arrow-left", 20), 40, RequestExit, 0x88, "Back (Esc)");
+            var back = Circle(WIcon("arrow-left", 20), 40, RequestExit, 0x55, "Back (Esc)");
             DockPanel.SetDock(back, Dock.Left);
             top.Children.Add(back);
+            var right = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            liveNow.HorizontalAlignment = HorizontalAlignment.Right;
+            liveEnds.HorizontalAlignment = HorizontalAlignment.Right;
+            right.Children.Add(new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { liveNow, liveEnds } });
             if (session is not null && stats is not null)
             {
-                var pill = new Border
+                // Fixed width: it changes every second and must not shove the clock around.
+                liveSpeed.MinWidth = 58;
+                right.Children.Add(new Border
                 {
-                    CornerRadius = new CornerRadius(16),
-                    Background = Black(0x88),
-                    Height = 32,
-                    Padding = new Thickness(12, 0, 12, 0),
-                    Child = new StackPanel
-                    {
-                        Orientation = Orientation.Horizontal,
-                        VerticalAlignment = VerticalAlignment.Center,
-                        Children =
-                        {
-                            WIcon("users", 12, White(0x90)),
-                            Pad(liveSwarm, 6, 12),
-                            WIcon("download", 12, White(0x90)),
-                            Pad(liveSpeed, 6, 0),
-                            Pad(livePct, 6, 0),
-                        },
-                    },
-                };
-                DockPanel.SetDock(pill, Dock.Right);
-                top.Children.Add(pill);
+                    CornerRadius = new CornerRadius(14),
+                    Background = Black(0x77),
+                    Height = 28,
+                    Padding = new Thickness(10, 0, 10, 0),
+                    Margin = new Thickness(14, 0, 0, 0),
+                    Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { WIcon("download", 12, White(0xb0)), Pad(liveSpeed, 5, 0) } },
+                });
             }
-            var info = Circle(WIcon("info", 16), 32, ToggleInfo, (byte)(showInfo ? 0xdd : 0x88), "Stats (I)");
-            info.Margin = new Thickness(0, 0, 8, 0);
-            DockPanel.SetDock(info, Dock.Right);
-            top.Children.Add(info);
-            var title = WText(request.Title, 13, null, FontWeights.Medium);
-            title.VerticalAlignment = VerticalAlignment.Center;
-            title.Margin = new Thickness(12, 0, 12, 0);
-            top.Children.Add(title);
+            DockPanel.SetDock(right, Dock.Right);
+            top.Children.Add(right);
+            var heading = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 12, 0) };
+            heading.Children.Add(WText(ShownTitle, 18, null, FontWeights.Bold));
+            if (EpisodeLine is { } episode) heading.Children.Add(WText(episode, 12, White(0xb0)));
+            top.Children.Add(heading);
             chrome.Children.Add(top);
 
             // Centre: transport.
@@ -1666,11 +1734,34 @@ public sealed class PlayerView : UserControl, IDisposable
             center.Children.Add(Circle(SkipGlyph("rotate-cw"), 56, () => Skip(SkipSeconds), 0x88, "Forward 10 seconds (→)"));
             chrome.Children.Add(center);
 
-            // Left edge: volume, a point at a time — the phone's brightness rail.
+            // Left edge: volume, the phone's brightness pill — a step at a time, or click the meter.
+            var meter = new Border
+            {
+                Width = 6,
+                Height = VolumeTrack,
+                CornerRadius = new CornerRadius(3),
+                Background = White(0x33),
+                Margin = new Thickness(0, 4, 0, 4),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Cursor = Cursors.Hand,
+                ToolTip = "Volume",
+                Child = volumeFill,
+            };
+            meter.MouseLeftButtonDown += (_, e) =>
+            {
+                SetVolume((int)Math.Round((1 - e.GetPosition(meter).Y / VolumeTrack) * 150));
+                Bump();
+                e.Handled = true;
+            };
+            var speaker = WIcon(userMuted ? "volume-x" : "volume", 14);
+            speaker.HorizontalAlignment = HorizontalAlignment.Center;
             var rail = new Border
             {
-                CornerRadius = new CornerRadius(22),
-                Background = Black(0x73),
+                Width = 48,
+                CornerRadius = new CornerRadius(24),
+                Background = new SolidColorBrush(Color.FromArgb(0xb3, 0x0b, 0x0e, 0x14)),
+                BorderBrush = White(0x2e),
+                BorderThickness = new Thickness(1),
                 Padding = new Thickness(0, 4, 0, 4),
                 HorizontalAlignment = HorizontalAlignment.Left,
                 VerticalAlignment = VerticalAlignment.Center,
@@ -1680,14 +1771,15 @@ public sealed class PlayerView : UserControl, IDisposable
                     Children =
                     {
                         RailButton("plus", () => StepVolume(5), "Louder (↑)"),
-                        new StackPanel { Margin = new Thickness(0, 2, 0, 2), Children = { WIcon(userMuted ? "volume-x" : "volume", 13, White(0xb0)), Centered(liveVolume) } },
+                        meter,
+                        new StackPanel { Margin = new Thickness(0, 8, 0, 2), Children = { speaker, Centered(liveVolume) } },
                         RailButton("minus", () => StepVolume(-5), "Quieter (↓)"),
                     },
                 },
             };
             chrome.Children.Add(rail);
 
-            // Bottom: clock, scrubber, and the labelled action row.
+            // Bottom: the time so far, the red bar and the time left; under it the short Netflix row.
             var bottom = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(16, 0, 16, 10) };
             var seekRow = new DockPanel();
             DockPanel.SetDock(clockText, Dock.Left);
@@ -1702,49 +1794,32 @@ public sealed class PlayerView : UserControl, IDisposable
             bottom.Children.Add(seekRow);
             UpdateClock();
 
+            // What you reach for while watching, and nothing else; the rest waits in More.
             var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 4, 0, 0) };
-            actions.Children.Add(Action("lock", null, "Lock", false, () => Lock(true)));
-            if (request.Next is not null) actions.Children.Add(Action("skip-forward", null, "Next", false, PlayNext));
-            actions.Children.Add(Action("maximize", null, Scales[scaleIdx].Label, scaleIdx != 0, CycleScale));
-            actions.Children.Add(Action("volume", null, "Audio", pickingAudio, () =>
-            {
-                picking = false;
-                searchingSubs = false;
-                pickingAudio = !pickingAudio;
-                Render();
-            }));
-            actions.Children.Add(Action("subtitles", null, "Subtitles", player.Spu >= 0 || picking, () =>
-            {
-                pickingAudio = false;
-                searchingSubs = false;
-                picking = !picking;
-                Render();
-            }));
-            actions.Children.Add(Action("search", null, "Find subs", searchingSubs, () =>
-            {
-                picking = false;
-                pickingAudio = false;
-                searchingSubs = !searchingSubs;
-                if (searchingSubs)
-                {
-                    subQuery = request.MetaTitle ?? TitleText.SearchableName(request.Title);
-                    subResults = new();
-                    SearchSubs(subQuery);
-                }
-                Render();
-            }));
-            actions.Children.Add(Action(null, $"{rate}x", "Speed", rate != 1, () =>
+            actions.Children.Add(Action("fast-forward", $"Speed ({rate}x)", rate != 1, () =>
             {
                 rate = Rates[(Array.IndexOf(Rates, rate) + 1) % Rates.Length];
                 player.SetRate((float)rate);
                 shell.ChangeSettings(shell.Settings with { PlaybackRate = rate });
                 Render();
             }));
-            if (session is not null && !session.Borrowed)
-                actions.Children.Add(Action(session.WholeFile ? "hard-drive" : "clock", null, session.WholeFile ? "Whole file" : "Next 5 min", session.WholeFile, ToggleWholeFile));
-            if (session is not null) actions.Children.Add(Action("download", null, "Save", false, SaveCopy));
-            actions.Children.Add(Action("pip", null, "Mini player", false, TogglePip));
-            actions.Children.Add(Action(fullscreen ? "minimize" : "maximize", null, fullscreen ? "Exit full" : "Fullscreen", fullscreen, ToggleFullscreen));
+            actions.Children.Add(Action("lock", "Lock", false, () => Lock(true)));
+            actions.Children.Add(Action("subtitles", "Audio & Subtitles", player.Spu >= 0 || picking, () =>
+            {
+                var open = !picking;
+                CloseSheets();
+                picking = open;
+                Render();
+            }));
+            if (request.Next is not null) actions.Children.Add(Action("skip-forward", "Next Episode", false, PlayNext));
+            actions.Children.Add(Action("more-horizontal", "More", more, () =>
+            {
+                var open = !more;
+                CloseSheets();
+                more = open;
+                Render();
+            }));
+            actions.Children.Add(Action(fullscreen ? "minimize" : "maximize", fullscreen ? "Exit full screen" : "Full screen", false, ToggleFullscreen));
             bottom.Children.Add(actions);
             chrome.Children.Add(bottom);
         }
@@ -1753,8 +1828,9 @@ public sealed class PlayerView : UserControl, IDisposable
         if (showInfo) chrome.Children.Add(infoPanel.Value);
 
         if (picking) chrome.Children.Add(TrackSheet());
-        if (pickingAudio) chrome.Children.Add(AudioSheet());
+        if (more) chrome.Children.Add(MoreSheet());
         if (searchingSubs) chrome.Children.Add(SearchSheet());
+        if (PauseCard) chrome.Children.Add(PauseCardView());
 
         if (waiting && !showUi)
         {
@@ -1857,20 +1933,145 @@ public sealed class PlayerView : UserControl, IDisposable
         return b;
     }
 
-    Button Action(string? icon, string? text, string label, bool on, Action onClick)
+    /// <summary>One button of the bottom row: icon beside its label, as Netflix lays it out.</summary>
+    Button Action(string icon, string label, bool on, Action onClick)
     {
-        var tint = on ? BlueLight : Brushes.White;
-        UIElement glyph = icon is not null
-            ? WIcon(icon, 18, tint)
-            : new TextBlock { Text = text, FontSize = 15, FontWeight = FontWeights.Medium, Foreground = tint, HorizontalAlignment = HorizontalAlignment.Center };
-        var labelText = WText(label, 10, on ? BlueLight : White(0xa0));
-        labelText.HorizontalAlignment = HorizontalAlignment.Center;
-        labelText.Margin = new Thickness(0, 3, 0, 0);
-        var b = Controls.Ui.Button(new StackPanel { Children = { new Grid { Height = 20, Children = { glyph } }, labelText } }, () => { onClick(); Bump(); }, "Bare", label);
-        b.MinWidth = 72;
-        b.Padding = new Thickness(6, 4, 6, 4);
+        var tint = on ? RedLight : Brushes.White;
+        var glyph = WIcon(icon, 18, tint);
+        glyph.VerticalAlignment = VerticalAlignment.Center;
+        var labelText = WText(label, 13, tint, FontWeights.Medium);
+        labelText.VerticalAlignment = VerticalAlignment.Center;
+        labelText.Margin = new Thickness(8, 0, 0, 0);
+        var b = Controls.Ui.Button(new StackPanel { Orientation = Orientation.Horizontal, Children = { glyph, labelText } }, () => { onClick(); Bump(); }, "Bare", label);
+        b.Padding = new Thickness(10, 8, 10, 8);
+        b.Margin = new Thickness(4, 0, 4, 0);
         b.Tag = 8;
         return b;
+    }
+
+    /// <summary>One line of the More sheet: glyph, name, and the current setting on the right.</summary>
+    Button MoreRow(string icon, string label, string? value, bool on, Action onClick)
+    {
+        var dock = new DockPanel();
+        var glyph = WIcon(icon, 18, on ? RedLight : Brushes.White);
+        glyph.Margin = new Thickness(0, 0, 14, 0);
+        glyph.VerticalAlignment = VerticalAlignment.Center;
+        DockPanel.SetDock(glyph, Dock.Left);
+        dock.Children.Add(glyph);
+        if (value is not null)
+        {
+            var shown = WText(value, 12, on ? RedLight : White(0x90));
+            shown.VerticalAlignment = VerticalAlignment.Center;
+            shown.Margin = new Thickness(12, 0, 0, 0);
+            DockPanel.SetDock(shown, Dock.Right);
+            dock.Children.Add(shown);
+        }
+        var name = WText(label, 13);
+        name.VerticalAlignment = VerticalAlignment.Center;
+        dock.Children.Add(name);
+        var b = Controls.Ui.Button(dock, () => { onClick(); Bump(); }, "Bare", label);
+        b.Padding = new Thickness(16, 11, 16, 11);
+        b.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        b.Tag = 8;
+        return b;
+    }
+
+    /// <summary>Above the bottom row, at the right — where the phone's sheets and Netflix's panels sit.</summary>
+    static Border SheetBox(UIElement content) => new()
+    {
+        CornerRadius = new CornerRadius(14),
+        Background = Sheet,
+        Padding = new Thickness(6),
+        HorizontalAlignment = HorizontalAlignment.Right,
+        VerticalAlignment = VerticalAlignment.Bottom,
+        Margin = new Thickness(0, 68, 16, 96),
+        Child = content,
+    };
+
+    FrameworkElement MoreSheet()
+    {
+        var list = new StackPanel { Width = 300 };
+        // The swarm, which used to crowd the top bar.
+        if (session is not null && stats is not null)
+        {
+            liveMeta.HorizontalAlignment = HorizontalAlignment.Left;
+            liveMeta.Margin = new Thickness(16, 8, 16, 6);
+            list.Children.Add(liveMeta);
+        }
+        list.Children.Add(MoreRow("maximize", "Picture", Scales[scaleIdx].Label, scaleIdx != 0, CycleScale));
+        list.Children.Add(MoreRow("search", "Find subtitles", null, false, () =>
+        {
+            CloseSheets();
+            searchingSubs = true;
+            subQuery = request.MetaTitle ?? TitleText.SearchableName(request.Title);
+            subResults = new();
+            SearchSubs(subQuery);
+            Render();
+        }));
+        if (session is not null && !session.Borrowed)
+            list.Children.Add(MoreRow(session.WholeFile ? "hard-drive" : "clock", "Download", session.WholeFile ? "Whole file" : "Next 5 min", session.WholeFile, ToggleWholeFile));
+        if (session is not null) list.Children.Add(MoreRow("download", "Save a copy", null, false, SaveCopy));
+        list.Children.Add(MoreRow("pip", "Mini player", null, false, () => { more = false; TogglePip(); }));
+        list.Children.Add(MoreRow("info", "Stats for nerds", showInfo ? "On" : "Off", showInfo, ToggleInfo));
+        list.Children.Add(MoreRow("type", "Keyboard shortcuts", "H", false, ShowShortcutsHelp));
+        return SheetBox(new ScrollViewer { MaxHeight = Math.Max(160, ActualHeight / ControlsScale - 200), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = list });
+    }
+
+    /// <summary>
+    /// Paused with the controls away: what you are watching, where you are in it and how much
+    /// is left — the reason to glance at a paused screen. Clicks go through to the picture.
+    /// </summary>
+    FrameworkElement PauseCardView()
+    {
+        var body = new StackPanel { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(64, 0, 64, 0), MaxWidth = 640 };
+        body.Children.Add(WText("You're watching", 14, White(0xa0)));
+        var name = WText(ShownTitle, 34, null, FontWeights.Bold);
+        name.TextWrapping = TextWrapping.Wrap;
+        name.Margin = new Thickness(0, 6, 0, 0);
+        body.Children.Add(name);
+        if (EpisodeLine is { } episode)
+        {
+            var line = WText(episode, 15, null, FontWeights.SemiBold);
+            line.Margin = new Thickness(0, 6, 0, 0);
+            body.Children.Add(line);
+        }
+        if (duration > 0)
+        {
+            const double width = 360;
+            var ratio = Math.Clamp((double)current / duration, 0, 1);
+            body.Children.Add(new Grid
+            {
+                Width = width,
+                Height = 4,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Margin = new Thickness(0, 22, 0, 0),
+                Children =
+                {
+                    new Border { CornerRadius = new CornerRadius(2), Background = White(0x40) },
+                    new Border { CornerRadius = new CornerRadius(2), Background = Red, Width = width * ratio, HorizontalAlignment = HorizontalAlignment.Left },
+                },
+            });
+            var times = new DockPanel { Width = width, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 0) };
+            var left = WText(TimeLeft(duration - current), 13, White(0xa0));
+            DockPanel.SetDock(left, Dock.Right);
+            times.Children.Add(left);
+            times.Children.Add(WText($"{Format.Clock(current / 1000.0)} of {Format.Clock(duration / 1000.0)}", 13, null, FontWeights.SemiBold));
+            body.Children.Add(times);
+            livePauseEnds.HorizontalAlignment = HorizontalAlignment.Left;
+            livePauseEnds.Margin = new Thickness(0, 2, 0, 0);
+            body.Children.Add(livePauseEnds);
+        }
+        var paused = WText("PAUSED", 12, White(0x90), FontWeights.SemiBold);
+        paused.Margin = new Thickness(0, 22, 0, 0);
+        body.Children.Add(paused);
+        return new Grid { Background = PauseVeil, IsHitTestVisible = false, Children = { body } };
+    }
+
+    /// <summary>Coarse "how much is left" — "1h 07m left", "23m left".</summary>
+    static string TimeLeft(long ms)
+    {
+        var m = Math.Max(0, (int)Math.Round(ms / 60000.0));
+        return m >= 60 ? $"{m / 60}h {m % 60:00}m left" : $"{m}m left";
     }
 
     FrameworkElement Option(string label, bool active, Action onClick, string? note = null)
@@ -1888,14 +2089,26 @@ public sealed class PlayerView : UserControl, IDisposable
         var b = Controls.Ui.Button(dock, () => { onClick(); Bump(); }, "Bare", label);
         b.Padding = new Thickness(10, 9, 10, 9);
         b.Tag = 8;
-        b.Background = active ? Blue : Brushes.Transparent;
+        b.Background = active ? Red : Brushes.Transparent;
         return b;
     }
 
-    FrameworkElement AudioSheet()
+    /// <summary>Audio on the left, subtitles on the right, in one panel — Netflix's Audio &amp; Subtitles.</summary>
+    FrameworkElement TrackSheet() => SheetBox(new StackPanel
     {
-        var panel = new StackPanel { Width = 260 };
-        panel.Children.Add(SheetTitle("AUDIO TRACKS"));
+        Orientation = Orientation.Horizontal,
+        Children =
+        {
+            new ScrollViewer { MaxHeight = Math.Max(160, ActualHeight / ControlsScale - 200), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = AudioList() },
+            new Border { Width = 1, Background = White(0x1a), Margin = new Thickness(6, 8, 6, 8) },
+            new ScrollViewer { MaxHeight = Math.Max(160, ActualHeight / ControlsScale - 200), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = SubtitleList() },
+        },
+    });
+
+    StackPanel AudioList()
+    {
+        var panel = new StackPanel { Width = 240 };
+        panel.Children.Add(SheetTitle("AUDIO"));
         var audio = player.AudioTrackDescription.Where(t => t.Id >= 0).ToList();
         if (audio.Count == 0)
         {
@@ -1911,27 +2124,17 @@ public sealed class PlayerView : UserControl, IDisposable
                 var label = string.IsNullOrWhiteSpace(t.Name) ? $"Audio Track {id}" : t.Name;
                 panel.Children.Add(Option(label, player.AudioTrack == id, () =>
                 {
+                    // Stays open: the subtitles beside it are often the next thing changed.
                     player.SetAudioTrack(id);
-                    pickingAudio = false;
                     ShowHud($"Audio: {label}");
                     Render();
                 }));
             }
         }
-
-        return new Border
-        {
-            CornerRadius = new CornerRadius(12),
-            Background = Black(0xdd),
-            Padding = new Thickness(6),
-            HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(0, 68, 16, 0),
-            Child = new ScrollViewer { MaxHeight = Math.Max(160, ActualHeight - 200), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = panel },
-        };
+        return panel;
     }
 
-    FrameworkElement TrackSheet()
+    StackPanel SubtitleList()
     {
         var subs = new StackPanel { Width = 280 };
         subs.Children.Add(SheetTitle("SUBTITLES"));
@@ -1945,22 +2148,12 @@ public sealed class PlayerView : UserControl, IDisposable
         }
         if (tracks.Count == 0)
         {
-            var none = WText(SubDL.Key is not null ? "No subtitles found. Use Find subs to search online." : "No subtitles found.", 12, White(0x70));
+            var none = WText(SubDL.Key is not null ? "No subtitles found. Use More → Find subtitles to search online." : "No subtitles found.", 12, White(0x70));
             none.TextWrapping = TextWrapping.Wrap;
             none.Margin = new Thickness(10, 8, 10, 8);
             subs.Children.Add(none);
         }
-
-        return new Border
-        {
-            CornerRadius = new CornerRadius(12),
-            Background = Black(0xdd),
-            Padding = new Thickness(6),
-            HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(0, 68, 16, 0),
-            Child = new ScrollViewer { MaxHeight = Math.Max(160, ActualHeight - 200), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = subs },
-        };
+        return subs;
     }
 
     string FriendlySub(string? raw, int id)
@@ -2005,7 +2198,7 @@ public sealed class PlayerView : UserControl, IDisposable
         var go = Controls.Ui.Button(subLoading ? Spin() : WIcon("search", 16), () => { subQuery = subBox.Text; SearchSubs(subBox.Text); }, "Bare", "Search");
         go.Width = go.Height = 36;
         go.Tag = 8;
-        go.Background = Blue;
+        go.Background = Red;
         go.HorizontalContentAlignment = HorizontalAlignment.Center;
         go.VerticalContentAlignment = VerticalAlignment.Center;
         go.Margin = new Thickness(8, 0, 0, 0);
@@ -2166,16 +2359,16 @@ public sealed class PlayerView : UserControl, IDisposable
 
 /// <summary>The thin scrubber: click anywhere on the track, or drag the head.</summary>
 /// <summary>
-/// Two lines over the last two minutes, one sample a second, in Mb/s: download speed (blue, filled)
-/// and the video's own bitrate (white). Blue above white = the buffer is growing.
+/// Two lines over the last two minutes, one sample a second, in Mb/s: download speed (red, filled)
+/// and the video's own bitrate (white). Red above white = the buffer is growing.
 /// </summary>
 public sealed class SpeedGraph : FrameworkElement
 {
     const int Samples = 120;
     readonly List<(double Down, double Rate)> points = new();
-    static readonly Brush Blue = Frozen(new SolidColorBrush(Color.FromRgb(0x3b, 0x6f, 0xe0)));
-    static readonly Brush Fill = Frozen(new SolidColorBrush(Color.FromArgb(0x40, 0x3b, 0x6f, 0xe0)));
-    static readonly Pen BluePen = Frozen(new Pen(Blue, 1.5));
+    static readonly Brush Red = Frozen(new SolidColorBrush(Color.FromRgb(0xe5, 0x09, 0x14)));
+    static readonly Brush Fill = Frozen(new SolidColorBrush(Color.FromArgb(0x40, 0xe5, 0x09, 0x14)));
+    static readonly Pen RedPen = Frozen(new Pen(Red, 1.5));
     static readonly Pen WhitePen = Frozen(new Pen(new SolidColorBrush(Color.FromArgb(0xd0, 255, 255, 255)), 1.2));
     static readonly Pen GridPen = Frozen(new Pen(new SolidColorBrush(Color.FromArgb(0x26, 255, 255, 255)), 1));
     static readonly Typeface Face = new("Segoe UI");
@@ -2225,7 +2418,7 @@ public sealed class SpeedGraph : FrameworkElement
                 return g;
             }
             dc.DrawGeometry(Fill, null, Line(p => p.Down, true));
-            dc.DrawGeometry(null, BluePen, Line(p => p.Down, false));
+            dc.DrawGeometry(null, RedPen, Line(p => p.Down, false));
             dc.DrawGeometry(null, WhitePen, Line(p => p.Rate, false));
         }
 
@@ -2234,12 +2427,69 @@ public sealed class SpeedGraph : FrameworkElement
         var (down, rate) = points.Count > 0 ? points[^1] : (0, 0);
         var legend = h + 6;
         FormattedText Label(string text) => new(text, System.Globalization.CultureInfo.CurrentCulture, FlowDirection.LeftToRight, Face, 10.5, Brushes.White, dpi);
-        dc.DrawRectangle(Blue, null, new Rect(0, legend + 5, 10, 3));
+        dc.DrawRectangle(Red, null, new Rect(0, legend + 5, 10, 3));
         var first = Label($"Download {down:0.0} Mb/s");
         dc.DrawText(first, new Point(14, legend));
         var x = 14 + first.Width + 16;
         dc.DrawRectangle(WhitePen.Brush, null, new Rect(x, legend + 5, 10, 3));
         dc.DrawText(Label($"Video {rate:0.0} Mb/s"), new Point(x + 14, legend));
+    }
+}
+
+/// <summary>The loading screen's ring: it fills red with the buffer, the percentage inside it.</summary>
+public sealed class Ring : FrameworkElement
+{
+    const double Size = 64, Radius = 26;
+    static readonly Pen TrackPen = Frozen(new Pen(new SolidColorBrush(Color.FromArgb(0x22, 255, 255, 255)), 5));
+    static readonly Pen ArcPen = Frozen(new Pen(new SolidColorBrush(Color.FromRgb(0xe5, 0x09, 0x14)), 5) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round });
+    static readonly Typeface Face = new(new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal);
+
+    static T Frozen<T>(T f) where T : Freezable { f.Freeze(); return f; }
+
+    double percent;
+
+    public double Percent
+    {
+        get => percent;
+        set
+        {
+            var next = Math.Clamp(value, 0, 100);
+            if (Math.Abs(next - percent) < 0.5) return;
+            percent = next;
+            InvalidateVisual();
+        }
+    }
+
+    public Ring()
+    {
+        Width = Height = Size;
+    }
+
+    protected override void OnRender(DrawingContext dc)
+    {
+        var c = new Point(Size / 2, Size / 2);
+        dc.DrawEllipse(null, TrackPen, c, Radius, Radius);
+        var p = percent / 100;
+        if (p >= 0.999)
+        {
+            dc.DrawEllipse(null, ArcPen, c, Radius, Radius);
+        }
+        else if (p > 0)
+        {
+            // Clockwise from twelve o'clock.
+            var a = p * 2 * Math.PI;
+            var arc = new StreamGeometry();
+            using (var g = arc.Open())
+            {
+                g.BeginFigure(new Point(c.X, c.Y - Radius), false, false);
+                g.ArcTo(new Point(c.X + Radius * Math.Sin(a), c.Y - Radius * Math.Cos(a)), new Size(Radius, Radius), 0, a > Math.PI, SweepDirection.Clockwise, true, false);
+            }
+            arc.Freeze();
+            dc.DrawGeometry(null, ArcPen, arc);
+        }
+        var text = new FormattedText($"{Math.Round(percent)}%", System.Globalization.CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+            Face, 13, Brushes.White, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        dc.DrawText(text, new Point(c.X - text.Width / 2, c.Y - text.Height / 2));
     }
 }
 
@@ -2303,18 +2553,22 @@ public sealed class SeekBar : FrameworkElement
         var w = ActualWidth;
         var y = ActualHeight / 2;
         var pct = Math.Clamp(dragging ?? value, 0, 1);
+        // The phone's and the TV's bar: 4px, the played part red, what is on disk lighter.
         dc.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, ActualHeight));
-        dc.DrawRoundedRectangle(new SolidColorBrush(Color.FromArgb(0x40, 255, 255, 255)), null, new Rect(0, y - 1.5, w, 3), 1.5, 1.5);
-        var white = new SolidColorBrush(Color.FromArgb(0xB0, 255, 255, 255));
+        dc.DrawRoundedRectangle(new SolidColorBrush(Color.FromArgb(0x40, 255, 255, 255)), null, new Rect(0, y - 2, w, 4), 2, 2);
+        var white = new SolidColorBrush(Color.FromArgb(0x70, 255, 255, 255));
         foreach (var (from, to) in downloaded)
-            dc.DrawRectangle(white, null, new Rect(w * from, y - 1.5, Math.Max(1, w * (to - from)), 3));
+            dc.DrawRectangle(white, null, new Rect(w * from, y - 2, Math.Max(1, w * (to - from)), 4));
         var at = dragging ?? (IsMouseOver ? hover : null);
         // Hovering ahead of the playhead lights the stretch up to the mouse, as YouTube does.
         if (dragging is null && at is double ahead && ahead > pct)
-            dc.DrawRectangle(new SolidColorBrush(Color.FromArgb(0x60, 255, 255, 255)), null, new Rect(w * pct, y - 1.5, w * (ahead - pct), 3));
-        var blue = new SolidColorBrush(Color.FromRgb(0x3b, 0x6f, 0xe0));
-        dc.DrawRoundedRectangle(blue, null, new Rect(0, y - 1.5, w * pct, 3), 1.5, 1.5);
-        dc.DrawEllipse(blue, null, new Point(w * pct, y), IsMouseOver || dragging is not null ? 7 : 6, IsMouseOver || dragging is not null ? 7 : 6);
+            dc.DrawRectangle(new SolidColorBrush(Color.FromArgb(0x60, 255, 255, 255)), null, new Rect(w * pct, y - 2, w * (ahead - pct), 4));
+        var red = new SolidColorBrush(Color.FromRgb(0xe5, 0x09, 0x14));
+        dc.DrawRoundedRectangle(red, null, new Rect(0, y - 2, w * pct, 4), 2, 2);
+        // The knob swells under the mouse, with a soft red halo while held — the TV's knob.
+        var held = IsMouseOver || dragging is not null;
+        if (held) dc.DrawEllipse(new SolidColorBrush(Color.FromArgb(0x55, 0xe5, 0x09, 0x14)), null, new Point(w * pct, y), 13, 13);
+        dc.DrawEllipse(red, null, new Point(w * pct, y), held ? 9 : 7, held ? 9 : 7);
         if (at is double r && Duration > 0) DrawPeek(dc, r, w, y);
     }
 
