@@ -295,6 +295,8 @@ class TorrentStreamModule : Module() {
   private var startPiece = 0
   private var headPiece = 0
   private var tailPiece = 0
+  /** Last piece of the streaming file — where a Matroska index actually ends. */
+  private var endPiece = 0
   private var ticks = 0
   private var readyAt = 0L
   /** Last piece of the container header region. */
@@ -1781,6 +1783,7 @@ class TorrentStreamModule : Module() {
     }
     tailPiece =
       maxOf(firstPiece, ti.mapFile(index, maxOf(0, size - tailBytesFor(size)), 1).piece())
+    endPiece = ti.mapFile(index, maxOf(0, size - 1), 1).piece()
     headEndPiece = ti.mapFile(index, minOf(HEAD_BYTES, maxOf(0, size - 1)), 1).piece()
 
     // Resuming seeks the player straight to this point the moment it attaches,
@@ -2357,12 +2360,14 @@ class TorrentStreamModule : Module() {
         h.setPieceDeadline(p, rank * 3000 + (p - target) * 300)
       }
     }
-    // During preroll, only the first ~2MB of the index — enough for VLC to
-    // parse Cues/moov — so the rest of a 16MB tail does not steal the opening
-    // piece. After ready, the full tail stays wanted at a distant deadline.
-    val tailEnd = if (announcedReady) lastPiece
-      else minOf(lastPiece, tailPiece + maxOf(0, (2L * 1024 * 1024 / pieceLen).toInt() - 1))
-    for (p in tailPiece..tailEnd) {
+    // During preroll, only the last ~2MB of the file — enough for VLC to parse
+    // Cues/moov — so the rest of a 16MB tail does not steal the opening piece.
+    // The *last* 2MB, not the first of the tail: an MKV's Cues end at EOF, and
+    // with 4MB pieces the first tail piece left the final one unwanted, VLC
+    // blocked on it, gave up on the index and never played. After ready, the
+    // full tail stays wanted at a distant deadline.
+    val tailRange = if (announcedReady) tailPiece..lastPiece else prerollTail(pieceLen)
+    for (p in tailRange) {
       keep.add(p)
       if (!h.havePiece(p) && deadlined.add(p)) {
         h.setPieceDeadline(p, 10_000 + (p - tailPiece) * 300)
@@ -2388,7 +2393,9 @@ class TorrentStreamModule : Module() {
     )
 
     val buffered = minOf(startHave, headHave)
-    val ready = headHave >= headNeed && startHave >= startNeed
+    // And the file's last piece: VLC reads an MKV's index there before the first
+    // frame and gives up within seconds if it is not on disk.
+    val ready = headHave >= headNeed && startHave >= startNeed && h.havePiece(endPiece)
 
     // stats() only advances when session stats alerts are posted.
     session.postSessionStats()
@@ -2453,6 +2460,10 @@ class TorrentStreamModule : Module() {
     }
   }
 
+  /** The tail wanted before ready: the file's last ~2MB, inside the tail. */
+  private fun prerollTail(pieceLen: Long) =
+    maxOf(tailPiece, endPiece - maxOf(0, (2L * 1024 * 1024 / pieceLen).toInt() - 1))..endPiece
+
   /**
    * Point the download at where the readers actually are.
    *
@@ -2500,8 +2511,7 @@ class TorrentStreamModule : Module() {
     // stall on resume.
     val spare = targets.map { (it + width + 1)..minOf(it + width + width / 2, lastPiece) }
     val pieceLen = (info?.pieceLength() ?: 1).toLong().coerceAtLeast(1L)
-    val tailEnd = if (rushTail) lastPiece
-      else minOf(lastPiece, tailPiece + maxOf(0, (2L * 1024 * 1024 / pieceLen).toInt() - 1))
+    val tail = if (rushTail) tailPiece..lastPiece else prerollTail(pieceLen)
 
     for (p in firstPiece..lastPiece) {
       if (p >= prios.size) break
@@ -2510,7 +2520,7 @@ class TorrentStreamModule : Module() {
       // is the only value that takes a piece out of the running entirely, and
       // the whole point is that the swarm has exactly one job.
       prios[p] = when {
-        p in tailPiece..tailEnd || zones.any { p in it } -> Priority.DEFAULT
+        p in tail || zones.any { p in it } -> Priority.DEFAULT
         spare.any { p in it } || behind.any { p in it } || p in band -> Priority.LOW
         else -> Priority.IGNORE
       }
@@ -2526,7 +2536,7 @@ class TorrentStreamModule : Module() {
     zoneFront = front
     log(
       "zone: ${zones.joinToString(", ") { "${it.first}..${it.last}" }} " +
-        "(back $back, tail $tailPiece..$tailEnd" +
+        "(back $back, tail $tail" +
         "${if (front >= 0) ", whole-file front $front" else ""}) of $firstPiece..$lastPiece"
     )
   }

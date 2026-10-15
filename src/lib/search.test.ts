@@ -1,6 +1,6 @@
 // node --experimental-strip-types src/lib/search.test.ts
 import assert from 'node:assert';
-import { aliasOf, episodeTag, merge, namesTitle, parseEpisode, parseAbsolute, releaseTitle, sameTitle, seasonsIn, health, kindOf, quality, rank, rankEpisode, scopeOf, toCsvHits, toEztvHits, toHits, toKnabenHits, toNyaaHits, toTorrentioHits, toYtsHits, type Hit } from './search.ts';
+import { aliasOf, episodeTag, merge, namesTitle, parseEpisode, parseAbsolute, releaseTitle, sameTitle, seasonsIn, settle, health, kindOf, quality, rank, rankEpisode, scopeOf, toCsvHits, toEztvHits, toHits, toKnabenHits, toNyaaHits, toTorrentioHits, toYtsHits, type Hit } from './search.ts';
 
 const row = (over: Record<string, string | number> = {}) => ({
   id: '1',
@@ -227,6 +227,19 @@ assert.ok(sameTitle('The.Office.US.S02E01.1080p', 'The Office'));
 // A sequel is a different film, whatever its seed count.
 assert.ok(!sameTitle('The.Matrix.Reloaded.2003.1080p', 'The Matrix'));
 assert.ok(sameTitle('The.Matrix.1999.2160p.BluRay.x265', 'The Matrix'));
+// A colon title is matched whole too, not only by its alias — on "Spider-Man"
+// alone every real Spider-Verse release fell out and one stray rip was the page.
+const verse = settle(
+  [[
+    { ...swarm('v1', 90, 0), name: 'Spider-Man.Into.The.Spider-Verse.2018.2160p.BluRay.x265' } as Hit,
+    { ...swarm('v2', 40, 0), name: 'Spider-Man Into the Spider-Verse (2018) 1080p' } as Hit,
+    { ...swarm('s1', 5, 0), name: 'Spider-Man 2018 PS4' } as Hit,
+  ]],
+  'Spider-Man: Into the Spider-Verse 2018',
+  'Spider-Man: Into the Spider-Verse',
+  aliasOf('Spider-Man: Into the Spider-Verse')
+);
+assert.deepEqual(verse.map((h) => h.id).sort(), ['s1', 'v1', 'v2']);
 // Nothing but metadata means no title to compare.
 assert.deepEqual(releaseTitle('S01E01.1080p.WEB'), []);
 const houses = merge([

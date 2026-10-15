@@ -802,7 +802,7 @@ export async function searchTorrents(
 }
 
 /** Everything the indexes said so far, as one ranked, on-topic list. */
-function settle(
+export function settle(
   bags: Hit[][],
   full: string,
   title: string,
@@ -834,7 +834,12 @@ function settle(
    * from strict to unfiltered was the mistake: it put the whole wrong show back
    * the moment the strict pass found nothing.
    */
-  const exact = found.filter((h) => sameTitle(h.name, alias ?? title));
+  // Strict against the full title as well as the alias: on the alias alone,
+  // "Spider-Man: Into the Spider-Verse" became "Spider-Man", every real release
+  // failed on the extra words, and one stray "Spider-Man" rip was the page.
+  const exact = found.filter(
+    (h) => sameTitle(h.name, title) || (alias != null && sameTitle(h.name, alias))
+  );
   const named = found.filter((h) => namesTitle(h.name, alias ?? title));
   return exact.length ? exact : named.length ? named : found;
 }

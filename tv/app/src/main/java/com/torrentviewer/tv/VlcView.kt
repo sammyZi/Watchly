@@ -1,0 +1,397 @@
+package com.torrentviewer.tv
+
+import android.content.Context
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import android.net.Uri
+import android.os.Build
+import android.util.Log
+import android.widget.FrameLayout
+import org.videolan.libvlc.LibVLC
+import org.videolan.libvlc.Media
+import org.videolan.libvlc.MediaPlayer
+import org.videolan.libvlc.interfaces.IMedia
+import org.videolan.libvlc.util.VLCVideoLayout
+import java.io.File
+
+private const val TAG = "VlcView"
+
+/** One selectable stream inside the media. `id` is libVLC's, not an index. */
+data class Track(val id: Int, val name: String)
+
+data class Tracks(val subtitles: List<Track>, val audio: List<Track>, val audioId: Int, val defaultAudio: Int, /** What libVLC is showing now; -1 is off. */ val spuId: Int = -1)
+
+data class Stats(
+    val videoCodec: String?,
+    val width: Int,
+    val height: Int,
+    val fps: Double,
+    val audioCodec: String?,
+    val channels: Int,
+    val sampleRate: Int,
+    val language: String?,
+    val inputKbps: Double,
+    val contentKbps: Double,
+    val displayed: Int,
+    val lostFrames: Int,
+    val lostBuffers: Int,
+    val cacheMs: Int,
+)
+
+/**
+ * A video surface backed by libVLC — chosen over Media3 because it carries its own
+ * AC3/E-AC3/DTS decoders (most TVs ship none) and renders PGS/VOBSUB subtitles.
+ */
+class VlcView(context: Context) : FrameLayout(context) {
+    var onLoaded: (durationMs: Long) -> Unit = {}
+    var onTime: (ms: Long) -> Unit = {}
+    var onBuffering: (Boolean) -> Unit = {}
+    var onEnded: () -> Unit = {}
+    var onFailed: (String) -> Unit = {}
+    var onTracks: (Tracks) -> Unit = {}
+    var onPlaying: (Boolean) -> Unit = {}
+
+    private val videoLayout = VLCVideoLayout(context)
+    private var vlc: LibVLC? = null
+    private var player: MediaPlayer? = null
+
+    private var source: String? = null
+    private var startMs = 0L
+    private var paused = false
+    private var rate = 1f
+    private var cacheMs = 3000
+    /** Applied on load — tracks do not exist until the media is parsed. */
+    private var wantedSpu: Int? = null
+    private var announced = false
+    private var buffering = false
+    private var subtitleFiles: List<String> = emptyList()
+    private val attachedSubs = mutableSetOf<String>()
+    private var subRetries = 0
+    private val attachSubs = Runnable { attachPendingSubs() }
+    private var scale = MediaPlayer.ScaleType.SURFACE_BEST_FIT
+    private var defaultAudioId: Int? = null
+    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private var focusRequest: AudioFocusRequest? = null
+    private var holdingFocus = false
+    private val onAudioFocus = AudioManager.OnAudioFocusChangeListener { change ->
+        if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) setPaused(true)
+    }
+
+    init {
+        addView(videoLayout, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        // The TV screen saver watches for input, not for a film playing.
+        keepScreenOn = true
+    }
+
+    /** Load [url], starting at [startAt] ms. libVLC's buffer is [cacheMs] of stream. */
+    fun open(url: String, startAt: Long, cacheMs: Int, subtitles: List<String>) {
+        source = url
+        startMs = startAt
+        this.cacheMs = cacheMs.coerceIn(500, 8000)
+        subtitleFiles = subtitles
+        restart()
+    }
+
+    /** Reopen at [ms] — recovery for a dropped connection that looked like the end. */
+    fun reload(ms: Long) {
+        startMs = ms
+        restart()
+    }
+
+    val time: Long get() = player?.time ?: 0L
+
+    fun seekTo(ms: Long) {
+        // Fast seek; a precise one over a torrent waits on data we may not have.
+        player?.setTime(ms, true)
+    }
+
+    fun setPaused(value: Boolean) {
+        paused = value
+        // Paused is idle: let the screen saver have a still frame.
+        keepScreenOn = !value
+        if (value) dropAudioFocus() else takeAudioFocus()
+        // Unconditional: while buffering libVLC reports not-playing yet resumes on its own.
+        runCatching { if (value) player?.pause() else player?.play() }
+        onPlaying(!value)
+    }
+
+    val isPaused: Boolean get() = paused
+
+    fun setRate(value: Float) {
+        rate = value
+        player?.rate = value
+    }
+
+    /** null turns subtitles off. libVLC uses -1 for "no track". */
+    fun setSubtitleTrack(id: Int?) {
+        wantedSpu = id
+        player?.setSpuTrack(id ?: -1)
+    }
+
+    fun setAudioTrack(id: Int) {
+        player?.setAudioTrack(id)
+    }
+
+    fun setScale(type: MediaPlayer.ScaleType) {
+        scale = type
+        player?.videoScale = type
+    }
+
+    fun addSubtitleFiles(paths: List<String>) {
+        subtitleFiles = (subtitleFiles + paths).distinct()
+        subRetries = 0
+        attachPendingSubs()
+    }
+
+    private fun attachPendingSubs() {
+        removeCallbacks(attachSubs)
+        val p = player ?: return
+        val pending = subtitleFiles.filter { it !in attachedSubs }
+        if (pending.isEmpty()) return
+        var waiting = false
+        for (path in pending) {
+            val file = File(path)
+            // Sidecar files from the torrent often land after the video starts.
+            if (!file.exists() || file.length() == 0L) {
+                waiting = true
+                continue
+            }
+            // MediaPlayer.addSlave works while playing; Media.addSlave after setMedia often does not.
+            if (p.addSlave(IMedia.Slave.Type.Subtitle, Uri.fromFile(file), false)) attachedSubs.add(path)
+        }
+        if (attachedSubs.isNotEmpty()) {
+            postDelayed({
+                val pl = player ?: return@postDelayed
+                pl.setSpuTrack(wantedSpu ?: -1)
+                sendTracks(pl)
+            }, 600)
+        }
+        if (waiting && subRetries++ < 20) postDelayed(attachSubs, 1500)
+    }
+
+    fun stats(): Stats? {
+        val p = player ?: return null
+        val m = runCatching { p.media }.getOrNull() ?: return null
+        try {
+            val s = runCatching { m.stats }.getOrNull()
+            val video = runCatching { p.currentVideoTrack }.getOrNull()
+            val audioId = runCatching { p.audioTrack }.getOrDefault(-1)
+            var audio: IMedia.AudioTrack? = null
+            for (i in 0 until runCatching { m.trackCount }.getOrDefault(0)) {
+                val t = runCatching { m.getTrack(i) }.getOrNull() as? IMedia.AudioTrack ?: continue
+                if (audio == null || t.id == audioId) audio = t
+                if (t.id == audioId) break
+            }
+            return Stats(
+                videoCodec = video?.codec?.let(::codecName),
+                width = video?.width ?: 0,
+                height = video?.height ?: 0,
+                fps = video?.takeIf { it.frameRateDen > 0 }?.let { it.frameRateNum.toDouble() / it.frameRateDen } ?: 0.0,
+                audioCodec = audio?.codec?.let(::codecName),
+                channels = audio?.channels ?: 0,
+                sampleRate = audio?.rate ?: 0,
+                language = audio?.language,
+                // × 8000 = kb/s, the scaling VLC's own statistics use.
+                inputKbps = (s?.inputBitrate ?: 0f) * 8000.0,
+                contentKbps = (s?.demuxBitrate ?: 0f) * 8000.0,
+                displayed = s?.displayedPictures ?: 0,
+                lostFrames = s?.lostPictures ?: 0,
+                lostBuffers = s?.lostAbuffers ?: 0,
+                cacheMs = cacheMs,
+            )
+        } finally {
+            runCatching { m.release() }
+        }
+    }
+
+    private fun codecName(fourcc: String): String = when (fourcc.trim().lowercase()) {
+        "h264", "avc1", "x264" -> "H.264"
+        "hevc", "h265", "hev1", "hvc1" -> "HEVC"
+        "av01" -> "AV1"
+        "vp90", "vp09" -> "VP9"
+        "mp4v", "xvid", "divx", "dx50" -> "MPEG-4"
+        "mpgv", "mp2v" -> "MPEG-2"
+        "mp4a", "aac" -> "AAC"
+        "a52", "ac-3", "ac3" -> "Dolby Digital"
+        "eac3", "ec-3" -> "Dolby Digital+"
+        "mlp", "trhd" -> "Dolby TrueHD"
+        "dts", "dtsh", "dtsl" -> "DTS"
+        "opus" -> "Opus"
+        "vorb" -> "Vorbis"
+        "flac" -> "FLAC"
+        "mpga", "mp3" -> "MP3"
+        else -> fourcc.trim().uppercase()
+    }
+
+    /**
+     * Tell libVLC the screen size. Its own helper finds no Activity from here, and not
+     * knowing, it makes a 4K subtitle surface redrawn on every change — dropped frames.
+     */
+    private fun tellWindowSize() {
+        val tell = Runnable {
+            val w = videoLayout.width
+            val h = videoLayout.height
+            if (w > 0 && h > 0) runCatching { player?.vlcVout?.setWindowSize(w, h) }
+        }
+        tell.run()
+        postDelayed(tell, 500)
+    }
+
+    private fun restart() {
+        release()
+        val uri = source?.takeIf { it.isNotBlank() } ?: return
+        try {
+            val instance = LibVLC(
+                context,
+                arrayListOf("--network-caching=$cacheMs", "--file-caching=$cacheMs", "--no-video-title-show", "--audio-time-stretch"),
+            )
+            val mediaPlayer = MediaPlayer(instance)
+            mediaPlayer.attachViews(videoLayout, null, true, false)
+            mediaPlayer.videoScale = scale
+            mediaPlayer.setEventListener(::onVlcEvent)
+
+            val media = Media(instance, Uri.parse(uri))
+            // HEVC 10-bit is common and not every TV decodes it in hardware.
+            media.setHWDecoderEnabled(true, true)
+            // Start the demuxer there rather than seeking after play.
+            if (startMs > 0) media.addOption(":start-time=${startMs / 1000.0}")
+            attachedSubs.clear()
+            subRetries = 0
+            removeCallbacks(attachSubs)
+            subtitleFiles.forEach { path ->
+                val file = File(path)
+                if (file.exists() && file.length() > 0L) {
+                    media.addSlave(IMedia.Slave(IMedia.Slave.Type.Subtitle, 4, Uri.fromFile(file).toString()))
+                    attachedSubs.add(path)
+                }
+            }
+            mediaPlayer.media = media
+            media.release()
+
+            vlc = instance
+            player = mediaPlayer
+            announced = false
+            mediaPlayer.rate = rate
+            if (!paused) {
+                takeAudioFocus()
+                mediaPlayer.play()
+            }
+            mediaPlayer.setSpuTrack(wantedSpu ?: -1)
+            attachPendingSubs()
+        } catch (e: Throwable) {
+            Log.e(TAG, "could not start playback", e)
+            onFailed(e.message ?: "Playback could not start")
+        }
+    }
+
+    private fun onVlcEvent(event: MediaPlayer.Event) {
+        val p = player ?: return
+        when (event.type) {
+            MediaPlayer.Event.Playing -> {
+                report(false)
+                onPlaying(true)
+                if (!announced) announceLoaded(p)
+            }
+            MediaPlayer.Event.Paused -> onPlaying(false)
+            MediaPlayer.Event.LengthChanged -> if (!announced) announceLoaded(p)
+            MediaPlayer.Event.Vout -> if (event.voutCount > 0) tellWindowSize()
+            MediaPlayer.Event.TimeChanged -> onTime(event.timeChanged)
+            // Fires continuously; 100 means done.
+            MediaPlayer.Event.Buffering -> report(event.buffering < 100f)
+            MediaPlayer.Event.EndReached -> onEnded()
+            MediaPlayer.Event.EncounteredError -> onFailed("This file could not be played")
+            MediaPlayer.Event.ESAdded, MediaPlayer.Event.ESDeleted -> sendTracks(p)
+            else -> Unit
+        }
+    }
+
+    private fun report(value: Boolean) {
+        if (value == buffering) return
+        buffering = value
+        onBuffering(value)
+    }
+
+    private fun announceLoaded(p: MediaPlayer) {
+        val length = p.length
+        if (length <= 0) return
+        announced = true
+        // -1, not "leave it": with nothing chosen libVLC turns the first track on itself.
+        p.setSpuTrack(wantedSpu ?: -1)
+        if (defaultAudioId == null) p.audioTrack.takeIf { it >= 0 }?.let { defaultAudioId = it }
+        onLoaded(length)
+        sendTracks(p)
+    }
+
+    private fun sendTracks(p: MediaPlayer) {
+        val subtitles = (p.spuTracks ?: emptyArray()).filter { it.id >= 0 }.mapIndexed { i, t ->
+            // libVLC names external files "Track 1 - [/data/…/subs/EN_Film.srt]": keep the bracket,
+            // and of a path only the file's own name.
+            val raw = t.name?.trim().orEmpty().let { n ->
+                Regex("""^Track \d+ - \[(.*)]$""").find(n)?.groupValues?.get(1)?.substringAfterLast('/')?.substringBeforeLast('.') ?: n
+            }
+            val label = if (raw.isEmpty() || raw == "..." || raw.equals("Track", true)) "Subtitle ${i + 1}"
+            else raw.replace(Regex("\\.zip$", RegexOption.IGNORE_CASE), "").replace('_', ' ')
+            Track(t.id, label)
+        }
+        val audio = (p.audioTracks ?: emptyArray()).filter { it.id >= 0 }.map { Track(it.id, it.name ?: "Track ${it.id}") }
+        onTracks(Tracks(subtitles, audio, p.audioTrack, defaultAudioId ?: p.audioTrack, p.spuTrack))
+    }
+
+    private fun takeAudioFocus() {
+        if (holdingFocus) return
+        val granted = if (Build.VERSION.SDK_INT >= 26) {
+            val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
+                        .build(),
+                )
+                .setOnAudioFocusChangeListener(onAudioFocus)
+                .build()
+            focusRequest = req
+            audioManager.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager.requestAudioFocus(onAudioFocus, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) ==
+                AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        }
+        holdingFocus = granted
+    }
+
+    private fun dropAudioFocus() {
+        if (!holdingFocus) return
+        if (Build.VERSION.SDK_INT >= 26) {
+            focusRequest?.let { runCatching { audioManager.abandonAudioFocusRequest(it) } }
+            focusRequest = null
+        } else {
+            @Suppress("DEPRECATION")
+            runCatching { audioManager.abandonAudioFocus(onAudioFocus) }
+        }
+        holdingFocus = false
+    }
+
+    fun release() {
+        dropAudioFocus()
+        removeCallbacks(attachSubs)
+        subRetries = 0
+        player?.let { p ->
+            runCatching { p.setEventListener(null) }
+            runCatching { if (p.isPlaying) p.stop() }
+            runCatching { p.detachViews() }
+            runCatching { p.release() }
+        }
+        runCatching { vlc?.release() }
+        player = null
+        vlc = null
+        announced = false
+        buffering = false
+        defaultAudioId = null
+    }
+
+    override fun onDetachedFromWindow() {
+        release()
+        super.onDetachedFromWindow()
+    }
+}

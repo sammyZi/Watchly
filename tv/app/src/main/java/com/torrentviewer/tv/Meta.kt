@@ -1,0 +1,249 @@
+package com.torrentviewer.tv
+
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
+
+data class Episode(
+    /** Cinemeta's own "tt10986410:1:2". */
+    val id: String,
+    val season: Int,
+    val episode: Int,
+    val name: String,
+    val overview: String?,
+    val thumbnail: String?,
+    val released: String?,
+)
+
+/** A browsable title, from Stremio's public Cinemeta (no API key needed). */
+data class Title(
+    val imdb: String,
+    /** "movie" or "tv". */
+    val kind: String,
+    val title: String,
+    val year: String? = null,
+    val rating: String? = null,
+    val genres: List<String> = emptyList(),
+    val poster: String? = null,
+    val plot: String? = null,
+    val cast: List<String> = emptyList(),
+    val directors: List<String> = emptyList(),
+    val awards: String? = null,
+    val backdrop: String? = null,
+    val logo: String? = null,
+    val runtime: String? = null,
+    /** Series only, and only from /meta — a catalog row carries no episode list. */
+    val episodes: List<Episode> = emptyList(),
+) {
+    val isSeries get() = kind == "tv"
+    val art get() = backdrop ?: poster
+
+    /** 16:9 art for a landscape card; MetaHub carries a background for nearly every id. */
+    val wide get() = backdrop ?: "https://images.metahub.space/background/medium/$imdb/img"
+
+    /** "2021 · 2h 35m · Sci-Fi · Drama" */
+    fun facts(): List<String> = listOfNotNull(year?.take(9), runtime) + genres.take(3)
+}
+
+/** Not a Cinemeta genre: asking for it switches to the Kitsu anime catalogue. */
+const val ANIME_GENRE = "Anime"
+
+val GENRES = listOf(
+    ANIME_GENRE, "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary", "Drama", "Family", "Fantasy",
+    "History", "Horror", "Mystery", "Romance", "Sci-Fi", "Sport", "Thriller", "War", "Western",
+)
+
+fun kindOfGenre(genre: String) = if (genre == ANIME_GENRE) "tv" else "movie"
+
+object Meta {
+    private const val BASE = "https://v3-cinemeta.strem.io/meta"
+    /** Popularity shelves, asked for directly to save a redirect per rail. */
+    private const val CATALOG = "https://cinemeta-catalogs.strem.io/top/catalog"
+    /** Search has to go through the front door, which actually reads the query. */
+    private const val SEARCH = "https://v3-cinemeta.strem.io/catalog"
+    private const val ANIME = "https://anime-kitsu.strem.fun/catalog/series/kitsu-anime-trending.json"
+
+    /** A day: charts move slowly and ratings slower. */
+    private const val TTL = 24 * 60 * 60 * 1000L
+    /** Bumped whenever Title gains a field, so old snapshots are never read back. */
+    private const val STORE = "meta:tv4:"
+
+    private val memory = ConcurrentHashMap<String, Any>()
+
+    /** Memory over disk over network; a stale disk copy is served if the fetch fails. */
+    private suspend fun <T> remember(key: String, read: (String) -> T, write: (T) -> String, fetch: suspend () -> T): T {
+        @Suppress("UNCHECKED_CAST")
+        (memory[key] as T?)?.let { return it }
+        var stale: T? = null
+        Kv.global(STORE + key)?.let { raw ->
+            runCatching {
+                val o = JSONObject(raw)
+                val value = read(o.getString("value"))
+                if (System.currentTimeMillis() - o.getLong("at") < TTL) {
+                    memory[key] = value as Any
+                    return value
+                }
+                stale = value
+            }
+        }
+        return try {
+            val value = fetch()
+            memory[key] = value as Any
+            Kv.setGlobal(STORE + key, JSONObject().put("at", System.currentTimeMillis()).put("value", write(value)).toString())
+            value
+        } catch (e: Exception) {
+            stale ?: throw e
+        }
+    }
+
+    /** Shelves already in memory, for painting a remount on its first frame. */
+    @Suppress("UNCHECKED_CAST")
+    fun peekCatalog(kind: String, genre: String?): List<Title>? = memory["shelf:$kind:${genre.orEmpty()}"] as List<Title>?
+
+    suspend fun catalog(kind: String, genre: String? = null): List<Title> = runCatching {
+        val type = if (kind == "tv") "series" else "movie"
+        val url = if (genre == ANIME_GENRE) ANIME else "$CATALOG/$type/top${genre?.let { "/genre=${enc(it)}" }.orEmpty()}.json"
+        remember("shelf:$kind:${genre.orEmpty()}", ::titlesFrom, ::titlesJson) {
+            toTitles(JSONObject(Net.get(url)).optJSONArray("metas") ?: JSONArray(), kind)
+        }
+    }.getOrDefault(emptyList())
+
+    suspend fun title(imdb: String, kind: String): Title? = runCatching {
+        remember("title:$kind:$imdb", { titlesFrom(it).first() }, { titlesJson(listOf(it)) }) {
+            val type = if (kind == "tv") "series" else "movie"
+            val meta = JSONObject(Net.get("$BASE/$type/$imdb.json")).getJSONObject("meta")
+            meta.put("imdb_id", imdb)
+            toTitles(JSONArray().put(meta), kind, withEpisodes = true).first()
+        }
+    }.getOrNull()
+
+    /** Not persisted: queries are one-off. */
+    suspend fun search(query: String, kind: String): List<Title> = runCatching {
+        val key = "find:$kind:${query.lowercase()}"
+        @Suppress("UNCHECKED_CAST")
+        (memory[key] as List<Title>?) ?: run {
+            val type = if (kind == "tv") "series" else "movie"
+            toTitles(JSONObject(Net.get("$SEARCH/$type/top/search=${enc(query)}.json")).optJSONArray("metas") ?: JSONArray(), kind)
+                .also { memory[key] = it }
+        }
+    }.getOrDefault(emptyList())
+
+    /** What a torrent is, from its release name alone. Null rather than a guess. */
+    suspend fun resolve(releaseName: String): Title? = coroutineScope {
+        val query = searchableName(releaseName)
+        if (query.length < 2) return@coroutineScope null
+        val year = yearOf(releaseName)
+        val kind = if (isSeries(releaseName)) "tv" else "movie"
+        val likely = async { search(query, kind) }
+        val other = async { search(query, if (kind == "tv") "movie" else "tv") }
+        bestMatch(likely.await(), query, year) ?: bestMatch(other.await(), query, year)
+    }
+
+    /** Genres the viewer's own titles are mostly made of, each with the kind it was watched as. */
+    suspend fun watchedGenres(seen: List<Pair<String, String>>, limit: Int = 3): List<Pair<String, String>> = coroutineScope {
+        val titles = seen.map { (imdb, kind) -> async { title(imdb, kind) } }.awaitAll().filterNotNull()
+        topGenres(titles, limit)
+    }
+}
+
+/** Every genre counts; ties keep input order. Each carries the kind it was mostly seen as. */
+fun topGenres(titles: List<Title>, limit: Int = 3): List<Pair<String, String>> {
+    val tally = LinkedHashMap<String, IntArray>()
+    for (t in titles) for (g in t.genres) {
+        val at = tally.getOrPut(g) { IntArray(2) }
+        at[0]++
+        if (t.kind == "movie") at[1]++
+    }
+    return tally.entries.sortedByDescending { it.value[0] }.take(limit)
+        .map { (g, at) -> g to if (at[1] * 2 >= at[0]) "movie" else "tv" }
+}
+
+private fun norm(s: String) = s.lowercase().replace(Regex("[^a-z0-9]+"), " ").trim()
+
+/**
+ * The candidate that is actually the thing asked for, or nothing. Cinemeta answers
+ * *something* for any query: same name wins, a prefix (sequel) is second, a name
+ * missing a word is out, and a film's year settles ties.
+ */
+fun bestMatch(titles: List<Title>, query: String, year: String?): Title? {
+    val want = norm(query)
+    if (want.isEmpty()) return null
+    val words = want.split(' ')
+    var best: Pair<Title, Int>? = null
+    for (t in titles) {
+        val got = norm(t.title)
+        var score = when {
+            got == want -> 100
+            got.startsWith(want) -> 60
+            words.all { it in got.split(' ') } -> 45
+            else -> continue
+        }
+        if (year != null && t.kind == "movie" && t.year != null) score += if (t.year.take(4) == year) 25 else -30
+        if (best == null || score > best.second) best = t to score
+    }
+    return best?.takeIf { it.second >= 45 }?.first
+}
+
+/** Rows without art are unusable on a shelf. One row per id. Episodes only from /meta. */
+fun toTitles(metas: JSONArray, kind: String, withEpisodes: Boolean = false): List<Title> {
+    val seen = HashSet<String>()
+    return metas.objects().mapNotNull { m ->
+        val id = m.str("imdb_id") ?: m.str("id") ?: return@mapNotNull null
+        if (!Regex("^tt\\d+$").matches(id) || m.str("poster") == null || !seen.add(id)) return@mapNotNull null
+        Title(
+            imdb = id,
+            kind = kind,
+            title = m.optString("name"),
+            // A series' releaseInfo is a range ("2020–2023"); the leading year matters.
+            year = m.str("year") ?: m.str("releaseInfo") ?: m.str("released")?.take(4),
+            rating = m.str("imdbRating"),
+            genres = (m.optJSONArray("genre") ?: m.optJSONArray("genres"))?.let { g -> (0 until minOf(3, g.length())).map { g.optString(it) } }.orEmpty(),
+            poster = m.str("poster"),
+            plot = m.str("description"),
+            cast = m.strings("cast"),
+            directors = m.strings("director"),
+            awards = m.str("awards"),
+            backdrop = m.str("background"),
+            logo = m.str("logo"),
+            runtime = m.str("runtime"),
+            episodes = if (withEpisodes) toEpisodes(m.optJSONArray("videos")) else emptyList(),
+        )
+    }
+}
+
+/** Broadcast order. Season 0 (specials) keeps its own group. */
+fun toEpisodes(videos: JSONArray?): List<Episode> = videos?.objects().orEmpty()
+    .filter { it.has("season") && it.has("episode") && it.optInt("season", -1) >= 0 }
+    .map {
+        val s = it.optInt("season")
+        val e = it.optInt("episode")
+        Episode(
+            id = it.str("id") ?: "$s:$e",
+            season = s,
+            episode = e,
+            name = it.str("name") ?: it.str("title") ?: "Episode $e",
+            overview = it.str("overview") ?: it.str("description"),
+            thumbnail = it.str("thumbnail"),
+            released = it.str("released"),
+        )
+    }
+    .sortedWith(compareBy({ it.season }, { it.episode }))
+
+private fun titlesJson(list: List<Title>): String = JSONArray(list.map { t ->
+    JSONObject().put("imdb_id", t.imdb).put("kind", t.kind).put("name", t.title).put("year", t.year).put("imdbRating", t.rating)
+        .put("genre", JSONArray(t.genres)).put("poster", t.poster).put("description", t.plot).put("cast", JSONArray(t.cast))
+        .put("director", JSONArray(t.directors)).put("awards", t.awards).put("background", t.backdrop).put("logo", t.logo)
+        .put("runtime", t.runtime)
+        .put("videos", JSONArray(t.episodes.map { e ->
+            JSONObject().put("id", e.id).put("season", e.season).put("episode", e.episode).put("name", e.name)
+                .put("overview", e.overview).put("thumbnail", e.thumbnail).put("released", e.released)
+        }))
+}).toString()
+
+private fun titlesFrom(raw: String): List<Title> {
+    val a = JSONArray(raw)
+    return a.objects().flatMap { o -> toTitles(JSONArray().put(o), o.optString("kind", "movie"), withEpisodes = true) }
+}

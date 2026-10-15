@@ -1,106 +1,73 @@
 # Watchly TV
 
-The television build. A separate Expo project from the phone app in `../` —
-its own `android/`, its own copy of the native modules, its own `package.json`.
-Nothing here is imported by the phone app and nothing in the phone app is
-imported by this.
+The television build: a native Kotlin app (Jetpack Compose, libtorrent4j,
+libVLC). Separate from the phone app in `../` — nothing is shared at build time.
 
 ```bash
-cd tv && npm install
+cd tv && ./gradlew :app:compileDebugKotlin :app:testDebugUnitTest
 ```
 
-```bash
-cd tv && npx expo run:android
-```
+`applicationId` is `com.torrentviewer.tv`, signed with the same debug keystore
+as the old Expo build, so it installs over it in place. On first launch the old
+build's AsyncStorage database (`RKStorage`) is imported once, so profiles,
+history, My List, recent searches and settings carry over.
 
-Different `applicationId` (`com.torrentviewer.tv`), so it installs alongside
-the phone build on the same device.
+Put a SubDL key in `tv/.env` (see `.env.example`) for "Find subtitles online";
+it is read into `BuildConfig.SUBDL_KEY` at build time and never committed.
 
-## What is different from the phone app
+## Layout
 
-**No downloads.** A television has no file manager to browse them with and no
-storage to hold them. `useDownloads`, `downloadJob`, the Downloads tab and the
-download notification are all gone from the JS; `removeFilesAfterStop` is
-hard-wired on.
+| File | What |
+| --- | --- |
+| `TorrentStream.kt` | The streaming engine: one libtorrent session, piece deadlines aimed at each reader, the rolling cache. Ported from the Expo build's `TorrentStreamModule` minus downloads/notifications/casting. |
+| `LocalFileServer.kt` | Loopback HTTP server that blocks on pieces that have not landed, so libVLC never reads holes. |
+| `VlcView.kt` | libVLC surface: AC3/DTS decoders, PGS subtitles, audio focus, stats. |
+| `Watch.kt` | One stream at a time: resolve, pick the file, play, next/previous episode. |
+| `Search.kt` / `Meta.kt` | Indexers (apibay, torrents-csv, Knaben, Nyaa, YTS, EZTV, Torrentio), Cinemeta metadata, SubDL. |
+| `Store.kt` | SharedPreferences with the Expo build's keys and JSON; per-profile namespaces; guest in memory only. |
+| `Player.kt` | The player. |
+| `App.kt`, `Home.kt`, `Detail.kt`, `Pages.kt`, `Theme.kt` | Shell, nav rail, screens, focus primitives. |
 
-**No Google Cast.** The television *is* the receiver. The dependency, its
-Play Services framework, the manifest metadata and the discovery callbacks are
-all removed — several TV boxes ship without Play Services at all and the old
-`onCreate` path would have thrown on them.
+## The player
 
-**Leanback.** `android.software.leanback` is required and touchscreen is not,
-which is what makes the store offer this APK to a television and not to a
-phone. The launcher entry carries `LEANBACK_LAUNCHER` and a generated
-`@drawable/tv_banner` — without a banner the app is invisible on the TV home
-screen. Locked to landscape.
+Netflix-style, driven entirely by the remote:
 
-**D-pad everything.** `components/Focusable.tsx` is the one focus primitive;
-every pressable thing on every screen goes through it. It draws a transparent
-border when unfocused so that focus does not resize the view and reflow the
-rail around it. Exactly one element per screen sets `first`, which is where
-focus lands when the screen appears.
-
-**Ten-foot scale.** `theme.ts` keeps the phone's palette and roughly doubles
-its type and spacing, and adds `SAFE` — televisions crop the edges of the
-picture by a few percent and every set does it differently.
+- **Bar down:** OK plays/pauses, ‹ › scrub (the step grows the longer the key is
+  held: 10 s → 2 min) and commit 0.7 s after the last press, ▲ raises the bar on
+  the scrubber, ▼ on the buttons. Media keys work everywhere.
+- **Bar up:** title and episode top-left; clock, "Ends at", speed and peers
+  top-right; a red seek bar with time left, a scrub bubble showing the target
+  and the jump; round controls whose names rise above them on focus.
+- **Audio & subtitles** side by side, with "Find subtitles online" (SubDL);
+  speed, picture fit and "stats for nerds" (codecs, bitrate, dropped frames).
+- **Loading** over the title's own backdrop and logo with a ring that fills;
+  a stall spinner mid-film; Netflix's "You're watching" card when paused; an
+  Up Next card with the next episode's still and a filling Play button.
+- BACK closes a panel, then the bar, then the stats — and only then leaves.
 
 ## The rolling cache
 
-The reason this exists: a 4K film is tens of gigabytes and a TV box has single
-digits free, so a stream cannot simply accumulate the way it does on a phone.
-
-libtorrent has no way to forget a piece — priorities decide what to *fetch*,
-never what to drop — so `rollCache()` in `TorrentStreamModule.kt` removes the
-torrent, deletes its data, and adds it again. have-state resets, the sparse
-file is recreated empty, and the readahead zone re-aims at wherever the viewer
-is on the next tick.
-
-Playback survives it. The player's HTTP connection stays open because
-`LocalFileServer` blocks on `available` — false for every piece until the ones
-under the playhead arrive again — then reopens the file (see `epoch`) and
-carries on. Seeking backwards still works: it moves a reader, the zone follows,
-and those pieces are fetched again rather than read as holes.
-
-The cost is one rebuffer per roll, so the cap wants to be as large as the disk
-allows. It is **Settings → Storage for one film**, default 4 GB, passed to
-native as `cacheCapMb`. Native also rolls early if free space is genuinely
-about to run out, so a cap set too high degrades into more rebuffers rather
-than the hard out-of-space stop that kills the stream.
-
-Evicting continuously instead of rolling would need `FALLOC_FL_PUNCH_HOLE`
-through JNI, and libtorrent would then seed the zeros it still believes are
-pieces — worth doing only if the stall becomes the thing people notice.
+A 4K film is tens of gigabytes and a TV has single digits free. libtorrent cannot
+forget a piece, so `rollCache()` removes the torrent, deletes its data and adds
+it again at the playhead; the player's connection survives because the server
+blocks until those pieces return. One rebuffer per roll — **Settings → Storage
+for one film** (default 4 GB) sets the cap.
 
 ## Incoming connections
 
-The engine listens on a fixed port, **6881**, on IPv4 and IPv6, and asks the
-router to forward it with UPnP and NAT-PMP — with UPnP on in the router, peers
-can connect in with nothing set up. It is not the phone's 6882 or the Windows
-app's 51413 because a router forwards a port to one device only, and all three
-can be on one network at once.
+Fixed port **6881** (IPv4 + IPv6), forwarded by UPnP/NAT-PMP — not the phone's
+6882 or the Windows app's 51413, since a router forwards a port to one device.
 
-## Installing a release on a TV
+## Installing on a TV
 
-Most Android TVs are 32-bit ARM (`getprop ro.product.cpu.abilist` says), so
-build only that and install over network debugging:
+Most Android TVs are 32-bit ARM. Build that split and install over network debugging:
 
 ```bash
-cd tv/android && ./gradlew assembleRelease -PreactNativeArchitectures=armeabi-v7a
+cd tv && ./gradlew assembleRelease
 ```
 
 ```bash
-adb connect <tv-ip>:5555
+adb install -r tv/app/build/outputs/apk/release/app-armeabi-v7a-release.apk
 ```
 
-```bash
-adb install -r tv/android/app/build/outputs/apk/release/app-armeabi-v7a-release.apk
-```
-
-Release builds are signed with the debug keystore, so this updates in place and
-keeps the app's data.
-
-## Checks
-
-```bash
-cd tv && npm run tsc && npm test
-```
+The emulator (`Television_4K_API_36`) is x86: install `app-x86-release.apk`.
