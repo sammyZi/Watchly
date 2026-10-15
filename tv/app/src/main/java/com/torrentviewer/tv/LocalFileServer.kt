@@ -218,7 +218,10 @@ class LocalFileServer(
         }
 
         raf.seek(position)
-        val want = minOf(buffer.size.toLong(), end - position + 1).toInt()
+        var want = minOf(buffer.size.toLong(), end - position + 1).toInt()
+        // An unaligned read can run past this piece into one not yet downloaded —
+        // the sparse file hands back zeros, and the demuxer sees a corrupt stream.
+        while (want > 1 && !available(position + want - 1)) want /= 2
         val read = raf.read(buffer, 0, want)
         if (read <= 0) {
           Thread.sleep(40)
