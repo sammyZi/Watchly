@@ -4,6 +4,7 @@ import {
   Animated,
   AppState,
   BackHandler,
+  Image,
   Pressable,
   ScrollView,
   StatusBar,
@@ -15,7 +16,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Line, Path } from 'react-native-svg';
+import Svg, { Circle, Line, Path } from 'react-native-svg';
 import * as Brightness from 'expo-brightness';
 import * as ScreenOrientation from 'expo-screen-orientation';
 // Feather has no closed-caption glyph, and "type" reads as a bare T. The badge
@@ -170,6 +171,9 @@ export function PlayerScreen({
    * there is, and `position` moves on every tick whether or not we re-render.
    */
   const [stalled, setStalled] = useState(false);
+  /** Frames are playing: the loading screen lifts. A new file (next episode) starts over. */
+  const [started, setStarted] = useState(false);
+  useEffect(() => setStarted(false), [url]);
   /** Every subtitle track libVLC found inside the media. */
   const [tracks, setTracks] = useState<VlcTrack[]>([]);
   /** Audio tracks, for the dubs and commentaries a release often carries. */
@@ -212,6 +216,8 @@ export function PlayerScreen({
     }, 10_000);
   };
   const [picking, setPicking] = useState(false);
+  /** The More sheet: everything that is not in the bottom row. */
+  const [more, setMore] = useState(false);
   /** Tracks that failed to select. libVLC renders essentially every subtitle
    *  format, so this should stay empty — it is a safety net, not a workaround. */
   const [badTracks, setBadTracks] = useState<number[]>([]);
@@ -334,6 +340,9 @@ export function PlayerScreen({
    * "Skip intro" on the rest. Series only — a film has no recurring titles.
    */
   const showKey = kind === 'tv' || parseEpisode(title ?? '') ? imdb || metaTitle || null : null;
+  /** "S2:E4" under the title, when the file is an episode. */
+  const episodeAt = parseEpisode(title ?? '');
+  const episodeLine = episodeAt ? `S${episodeAt.season}:E${episodeAt.episode}` : null;
   const [intro, setIntro] = useState<Intro | null>(null);
   const introRef = useRef<Intro | null>(null);
   introRef.current = intro;
@@ -396,6 +405,15 @@ export function PlayerScreen({
   const lockRef = useRef(false);
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+
+  // Paused with the controls down for a moment: Netflix's "You're watching" card.
+  const [pauseCard, setPauseCard] = useState(false);
+  useEffect(() => {
+    setPauseCard(false);
+    if (!paused || showUi || locked || pip) return;
+    const timer = setTimeout(() => setPauseCard(true), 800);
+    return () => clearTimeout(timer);
+  }, [paused, showUi, locked, pip]);
 
   /**
    * Casting.
@@ -617,8 +635,8 @@ export function PlayerScreen({
     setShowUi(true);
     if (hideTimer.current) clearTimeout(hideTimer.current);
     // The picker is a deliberate stop — do not yank it away mid-choice.
-    hideTimer.current = setTimeout(() => setShowUi(false), picking ? 12000 : 4000);
-  }, [picking]);
+    hideTimer.current = setTimeout(() => setShowUi(false), picking || more ? 12000 : 4000);
+  }, [picking, more]);
   bump.current = bumpUi;
 
   /** Absolute seek. `duration` is 0 until onLoad, so guard every caller. */
@@ -1044,25 +1062,7 @@ export function PlayerScreen({
     <View style={styles.screen}>
       <StatusBar hidden />
 
-      {!url || !prefs ? (
-        <View style={styles.preparing}>
-          {!!title && (
-            <Text numberOfLines={2} style={styles.preparingTitle}>
-              {title}
-            </Text>
-          )}
-          <ActivityIndicator color="#fff" />
-          <Text style={styles.preparingText}>
-            {progress ? stageLabel(progress.state) : 'Starting'}
-            {progress?.state === 'DOWNLOADING' ? ` ${progress.buffer}%` : ''}
-          </Text>
-          {!!progress && (progress.seeds > 0 || progress.peers > 0) && (
-            <Text style={styles.preparingMeta}>
-              {speed(progress.speed)} · {progress.seeds} seeds · {progress.peers} peers
-            </Text>
-          )}
-        </View>
-      ) : (
+      {!!url && !!prefs && (
         <View style={StyleSheet.absoluteFill}>
           <VlcPlayer
             ref={videoRef}
@@ -1164,6 +1164,8 @@ export function PlayerScreen({
               }
             }}
             onProgress={({ nativeEvent: { currentTime } }) => {
+              // The clock moving is the first frame on screen.
+              if (!started) setStarted(true);
               // Between asking for a seek and it landing, this still reports
               // where playback was — over a torrent that can be several seconds.
               // Taking it would snap the thumb back, hold it there, then jump.
@@ -1323,61 +1325,49 @@ export function PlayerScreen({
                     <Icon name="arrow-left" size={20} color="#fff" />
                   </Pressable>
 
-                  {!!title && (
+                  {/* The title's own name, big, with the episode under it — the
+                      release file name only when nothing better is known. */}
+                  <View style={styles.titleBlock}>
                     <Text numberOfLines={1} style={styles.title}>
-                      {title}
+                      {metaTitle || searchableName(title ?? '') || title}
                     </Text>
-                  )}
-
-                  <Pressable
-                    onPress={() => {
-                      setShowInfo((v) => !v);
-                      bumpUi();
-                    }}
-                    hitSlop={12}
-                    style={[styles.iconBtn, showInfo && styles.iconBtnOn]}
-                    accessibilityLabel="Stats"
-                  >
-                    <Icon name="info" size={18} color="#fff" />
-                  </Pressable>
-
-                  <View style={styles.topRight}>
-                    {/* Fixed-width, tabular figures — the numbers change every
-                        second and must not shove the buttons around. */}
-                    {fileIndex >= 0 && (
-                      <View style={styles.stats}>
-                        <Icon name="users" size={12} color="#ffffff90" />
-                        <Text style={styles.statsText}>
-                          {(stats?.seeds ?? 0).toString().padStart(2, ' ')}/
-                          {(stats?.peers ?? 0).toString().padStart(2, ' ')}
-                        </Text>
-                        <Icon name="download" size={12} color="#ffffff90" />
-                        <Text style={[styles.statsText, styles.statsSpeed]}>
-                          {speed(stats?.speed ?? 0)}
+                    {!!episodeLine && (
+                      <Text numberOfLines={1} style={styles.episode}>
+                        {episodeLine}
+                      </Text>
+                    )}
+                  </View>
+                  {/* The clock with when the film ends, and how fast it is arriving —
+                      one quiet line beside Cast. */}
+                  <View style={styles.topInfo}>
+                    {duration > 0 && (
+                      <View style={styles.clockBlock}>
+                        <Text style={styles.clockNow}>{timeOfDay(Date.now())}</Text>
+                        <Text style={styles.clockEnds}>
+                          Ends at {timeOfDay(Date.now() + ((duration - current) / rate) * 1000)}
                         </Text>
                       </View>
                     )}
-
-                    {/*
-                      The library's own button, not one of ours.
-
-                      On Android `showCastDialog()` is implemented as
-                      `RNGoogleCastButtonManager.getCurrent().performClick()` —
-                      it does nothing at all unless this native view is mounted,
-                      which is why a hand-rolled button could only ever resolve
-                      false. Wrapped in the stats pill so it still matches the
-                      row above it.
-                    */}
-                    {!!lanUrl && (
-                      <View style={[styles.stats, casting && styles.castOn]}>
-                        <CastButton
-                          style={styles.castButton}
-                          tintColor={casting ? '#7aa2ff' : '#fff'}
-                        />
+                    {fileIndex >= 0 && (
+                      <View style={styles.speedPill}>
+                        <Icon name="download" size={12} color="#ffffffb0" />
+                        <Text style={styles.speedText}>{speed(stats?.speed ?? 0)}</Text>
                       </View>
                     )}
                   </View>
-
+                  {/*
+                    The library's own button, not one of ours: on Android
+                    `showCastDialog()` does nothing unless this native view is
+                    mounted, so a hand-rolled button could only ever resolve false.
+                  */}
+                  {!!lanUrl && (
+                    <View style={[styles.castWrap, casting && styles.castOn]}>
+                      <CastButton
+                        style={styles.castButton}
+                        tintColor={casting ? '#ff5a63' : '#fff'}
+                      />
+                    </View>
+                  )}
                 </View>
 
                 <View style={styles.center} pointerEvents="box-none">
@@ -1425,6 +1415,7 @@ export function PlayerScreen({
                     <Text style={styles.time}>{clock(current)}</Text>
                     <SeekBar
                       value={duration ? current / duration : 0}
+                      duration={duration}
                       spans={spans}
                       onScrub={scrubTo}
                       onSeek={(ratio) => {
@@ -1432,72 +1423,19 @@ export function PlayerScreen({
                         bumpUi();
                       }}
                     />
-                    <Text style={styles.time}>{clock(duration)}</Text>
+                    {/* Time left, as Netflix shows it — the number people actually want. */}
+                    <Text style={[styles.time, styles.timeLeft]}>
+                      {duration ? `-${clock(Math.max(0, duration - current))}` : '--:--'}
+                    </Text>
                   </View>
 
-                  {/* Everything that is not playback itself. It was a stack of
-                      six buttons crowding the title; down here each one gets a
-                      label and the top bar is just context again. */}
-                  {/* Scrolls sideways once there are more than fit — a narrow
-                      phone does not have room for all of them in one row. */}
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.actions}
-                  >
-                    <Action icon="lock" label="Lock" onPress={() => lock(true)} />
-                    {/* The card at the end of an episode is easy to miss, and
-                        impossible to reach on purpose. This is the same thing,
-                        available whenever the controls are up. */}
-                    {!!next && !!onNext && (
-                      <Action icon="skip-forward" label="Next" onPress={playNext} />
-                    )}
-                    {/* Up front with Next: the row scrolls sideways on a phone,
-                        and at the far end this was never seen. */}
-                    {!!showKey && (
-                      <Action
-                        icon="scissors"
-                        label={introMark != null ? 'Intro ends' : intro ? 'Re-mark intro' : 'Mark intro'}
-                        on={introMark != null}
-                        onPress={markIntro}
-                      />
-                    )}
+                  {/* What you reach for while watching, and nothing else — the
+                      Netflix row. Ten labelled buttons across the bottom read as
+                      clutter; the rest wait one tap away in More. */}
+                  <View style={styles.actions}>
                     <Action
-                      icon="maximize"
-                      label={SCALES[scaleIdx].label}
-                      on={scaleIdx !== 0}
-                      onPress={cycleScale}
-                    />
-                    <Action
-                      material={subTrack === null ? 'subtitles-off' : 'subtitles'}
-                      label="Subtitles"
-                      on={subTrack !== null}
-                      onPress={() => {
-                        setSearching(false);
-                        setPicking((p) => !p);
-                        bumpUi();
-                      }}
-                    />
-                    <Action
-                      icon="search"
-                      label="Find subs"
-                      on={searching}
-                      onPress={() => {
-                        setPicking(false);
-                        const next = !searching;
-                        setSearching(next);
-                        if (next) {
-                          const q = metaTitle || searchableName(title ?? '') || '';
-                          setSubQuery(q);
-                          setSubResults([]);
-                          if (q || imdb) searchSubs(q);
-                        }
-                        bumpUi();
-                      }}
-                    />
-                    <Action
-                      text={`${rate}x`}
-                      label="Speed"
+                      icon="fast-forward"
+                      label={`Speed (${rate}x)`}
                       on={rate !== 1}
                       onPress={() => {
                         const next = RATES[(RATES.indexOf(rate) + 1) % RATES.length];
@@ -1506,41 +1444,112 @@ export function PlayerScreen({
                         bumpUi();
                       }}
                     />
-                    {fileIndex >= 0 && (
-                      <Action icon="download" label="Save" onPress={saveCopy} />
+                    <Action icon="lock" label="Lock" onPress={() => lock(true)} />
+                    <Action
+                      material={subTrack === null ? 'subtitles-off' : 'subtitles'}
+                      label="Audio & Subtitles"
+                      on={subTrack !== null}
+                      onPress={() => {
+                        setSearching(false);
+                        setMore(false);
+                        setPicking((p) => !p);
+                        bumpUi();
+                      }}
+                    />
+                    {!!next && !!onNext && (
+                      <Action icon="skip-forward" label="Next Episode" onPress={playNext} />
                     )}
                     <Action
-                      material="picture-in-picture-alt"
-                      label="Mini player"
-                      onPress={() => videoRef.current?.enterPip().catch(() => false)}
+                      icon="more-horizontal"
+                      label="More"
+                      on={more}
+                      onPress={() => {
+                        setPicking(false);
+                        setSearching(false);
+                        setMore((m) => !m);
+                        bumpUi();
+                      }}
                     />
-                    {fileIndex >= 0 && (
-                      <Action
-                        icon={wholeFile ? 'hard-drive' : 'clock'}
-                        label={wholeFile ? 'Whole file' : 'Next 5 min'}
-                        on={wholeFile}
-                        onPress={() => setWholeFile((on) => !on)}
-                      />
-                    )}
-                    <Action
-                      icon="moon"
-                      label={
-                        SLEEP[sleepIdx] === 0
-                          ? 'Sleep'
-                          : sleepAtEnd
-                            ? 'Ep. end'
-                            : `${Math.max(1, Math.ceil((sleepEnds - Date.now()) / 60_000))} min`
-                      }
-                      on={SLEEP[sleepIdx] !== 0}
-                      onPress={cycleSleep}
-                    />
-                    <Action
-                      icon="external-link"
-                      label="Open in"
-                      onPress={handOff}
-                    />
-                  </ScrollView>
+                  </View>
                 </View>
+            </View>
+          )}
+
+          {/* Everything that is not in the bottom row, one list, with the swarm
+              at the top — the numbers that used to crowd the top bar. */}
+          {more && showUi && !locked && (
+            <View style={[styles.moreSheet, { maxHeight: height - 88, right: insets.right + 16 }]}>
+              <ScrollView>
+                {fileIndex >= 0 && (
+                  <Text style={styles.moreSwarm}>
+                    {stats?.peers ?? 0} peers · {stats?.seeds ?? 0} seeds · {speed(stats?.speed ?? 0)}
+                  </Text>
+                )}
+                <MoreRow icon="maximize" label="Picture" value={SCALES[scaleIdx].label} onPress={cycleScale} />
+                <MoreRow
+                  icon="search"
+                  label="Find subtitles"
+                  onPress={() => {
+                    setMore(false);
+                    setSearching(true);
+                    const q = metaTitle || searchableName(title ?? '') || '';
+                    setSubQuery(q);
+                    setSubResults([]);
+                    if (q || imdb) searchSubs(q);
+                    bumpUi();
+                  }}
+                />
+                {!!showKey && (
+                  <MoreRow
+                    icon="scissors"
+                    label={introMark != null ? 'Intro ends here' : intro ? 'Re-mark intro' : 'Mark intro'}
+                    on={introMark != null}
+                    onPress={markIntro}
+                  />
+                )}
+                <MoreRow
+                  icon="moon"
+                  label="Sleep timer"
+                  value={
+                    SLEEP[sleepIdx] === 0
+                      ? 'Off'
+                      : sleepAtEnd
+                        ? 'End of episode'
+                        : `${Math.max(1, Math.ceil((sleepEnds - Date.now()) / 60_000))} min`
+                  }
+                  on={SLEEP[sleepIdx] !== 0}
+                  onPress={cycleSleep}
+                />
+                {fileIndex >= 0 && (
+                  <MoreRow
+                    icon={wholeFile ? 'hard-drive' : 'clock'}
+                    label="Download"
+                    value={wholeFile ? 'Whole file' : 'Next 5 min'}
+                    on={wholeFile}
+                    onPress={() => setWholeFile((on) => !on)}
+                  />
+                )}
+                {fileIndex >= 0 && <MoreRow icon="download" label="Save to phone" onPress={saveCopy} />}
+                <MoreRow
+                  material="picture-in-picture-alt"
+                  label="Mini player"
+                  onPress={() => {
+                    setMore(false);
+                    videoRef.current?.enterPip().catch(() => false);
+                  }}
+                />
+                <MoreRow icon="external-link" label="Open in another app" onPress={handOff} />
+                <MoreRow
+                  icon="info"
+                  label="Stats for nerds"
+                  value={showInfo ? 'On' : 'Off'}
+                  on={showInfo}
+                  onPress={() => {
+                    setShowInfo((v) => !v);
+                    bumpUi();
+                  }}
+                />
+              </ScrollView>
             </View>
           )}
 
@@ -1713,6 +1722,9 @@ export function PlayerScreen({
               ]}
             >
               <Text style={styles.sheetTitle}>Find subtitles</Text>
+              <Pressable onPress={() => setSearching(false)} hitSlop={10} style={styles.closeX}>
+                <Icon name="x" size={16} color="#fff" />
+              </Pressable>
               <View style={styles.searchRow}>
                 <TextInput
                   style={styles.searchInput}
@@ -1784,30 +1796,6 @@ export function PlayerScreen({
               `left` comes off the safe-area inset rather than being fixed: in
               landscape the punch hole sits inside that inset, and a fixed
               margin put these buttons underneath it. */}
-          {showUi && !locked && (
-            <View style={[styles.brightRail, { left: insets.left + 16 }]}>
-              <Pressable
-                onPress={() => stepBright(1)}
-                onLongPress={() => stepBright(10)}
-                hitSlop={10}
-                style={styles.brightBtn}
-              >
-                <Icon name="plus" size={18} color="#fff" />
-              </Pressable>
-              <View style={styles.brightValue}>
-                <Icon name="sun" size={13} color="#ffffffb0" />
-                <Text style={styles.brightText}>{brightPct}</Text>
-              </View>
-              <Pressable
-                onPress={() => stepBright(-1)}
-                onLongPress={() => stepBright(-10)}
-                hitSlop={10}
-                style={styles.brightBtn}
-              >
-                <Icon name="minus" size={18} color="#fff" />
-              </Pressable>
-            </View>
-          )}
 
           {/* Up for as long as the finger is: the transient readout below would
               vanish while the film is still running fast. */}
@@ -1868,6 +1856,37 @@ export function PlayerScreen({
               )}
             </View>
           )}
+          {/* What you are watching, where you are in it and how much is left —
+              the reason to glance at a paused screen. Touches go straight
+              through to the picture, so a tap still brings the controls back. */}
+          {pauseCard && (
+            <View
+              pointerEvents="none"
+              style={[styles.pauseCard, { paddingLeft: insets.left + 32, paddingRight: insets.right + 32 }]}
+            >
+              <Text style={styles.pauseLead}>You're watching</Text>
+              <TitleLogo imdb={imdb} name={metaTitle || searchableName(title ?? '') || title || ''} />
+              {!!episodeLine && <Text style={styles.preparingEpisode}>{episodeLine}</Text>}
+              {duration > 0 && (
+                <View style={styles.pauseProgress}>
+                  <View style={styles.track}>
+                    <View style={[styles.fill, { width: `${(position.current / duration) * 100}%` }]} />
+                  </View>
+                  <View style={styles.pauseTimes}>
+                    <Text style={styles.pauseTime}>
+                      {clock(position.current)} of {clock(duration)}
+                    </Text>
+                    <Text style={styles.pauseLeft}>{timeLeft(duration - position.current)}</Text>
+                  </View>
+                  <Text style={styles.pauseEnds}>
+                    Ends at {timeOfDay(Date.now() + ((duration - position.current) / rate) * 1000)} if you resume now
+                  </Text>
+                </View>
+              )}
+              <Text style={styles.pausedWord}>PAUSED</Text>
+            </View>
+          )}
+
           {/* Stays up with the controls hidden, like VLC's statistics window. */}
           {showInfo && (
             <View
@@ -1882,6 +1901,9 @@ export function PlayerScreen({
                 },
               ]}
             >
+              <Pressable onPress={() => setShowInfo(false)} hitSlop={10} style={[styles.closeX, { zIndex: 1 }]}>
+                <Icon name="x" size={16} color="#fff" />
+              </Pressable>
               <ScrollView contentContainerStyle={styles.infoBody}>
                 <View style={styles.infoColumn}>
                   <Text style={[styles.infoHeading, styles.infoHeadingFirst]} maxFontSizeMultiplier={1.15}>
@@ -1938,6 +1960,47 @@ export function PlayerScreen({
         </View>
       )}
 
+      {/* One loading screen, from the tap to the first frame: the title's own
+          backdrop, its logo, and a ring that fills. It used to give way the
+          moment the stream had a URL, and the player then showed a black
+          "Buffering" screen of its own until the picture came — two loading
+          screens back to back. It sits over the player now, which mounts and
+          buffers underneath it, and only lifts once frames are playing. */}
+      {!started && !pip && (
+        <View style={styles.preparing}>
+          {!!imdb && (
+            <Image
+              source={{ uri: `https://images.metahub.space/background/medium/${imdb}/img` }}
+              style={StyleSheet.absoluteFill}
+              resizeMode="cover"
+              blurRadius={6}
+            />
+          )}
+          <View style={styles.preparingVeil} />
+          <View style={[styles.preparingRow, { paddingLeft: insets.left + 32, paddingRight: insets.right + 32 }]}>
+            <View style={styles.preparingBody}>
+              <TitleLogo imdb={imdb} name={metaTitle || searchableName(title ?? '') || title || ''} />
+              {!!episodeLine && <Text style={styles.preparingEpisode}>{episodeLine}</Text>}
+              <View style={styles.preparingStatus}>
+                <View
+                  style={[
+                    styles.liveDot,
+                    { backgroundColor: (progress?.peers ?? 0) > 0 ? '#46d369' : '#ffffff55' },
+                  ]}
+                />
+                <Text style={styles.preparingText}>
+                  {url ? 'Starting playback' : progress ? stageLabel(progress.state) : 'Starting'}
+                  {!!progress && (progress.seeds > 0 || progress.peers > 0)
+                    ? `  ·  ${speed(progress.speed)}  ·  ${progress.peers} peers`
+                    : ''}
+                </Text>
+              </View>
+            </View>
+            <Ring percent={url ? 100 : progress?.state === 'DOWNLOADING' ? progress.buffer : 0} />
+          </View>
+        </View>
+      )}
+
       {/* Outside the overlay: the card is the one thing that has to be there
           whether or not the controls are up, same as every streaming app. */}
       {/* Same corner as up next, and for the same reason: it has to be there
@@ -1989,6 +2052,62 @@ export function PlayerScreen({
   );
 }
 
+/** The title's logo when MetaHub has one — the premium look — else its name set large. */
+function TitleLogo({ imdb, name }: { imdb?: string; name: string }) {
+  const [failed, setFailed] = useState(!imdb);
+  if (failed) {
+    return (
+      <Text style={styles.logoText} numberOfLines={2}>
+        {name}
+      </Text>
+    );
+  }
+  return (
+    <Image
+      source={{ uri: `https://images.metahub.space/logo/medium/${imdb}/img` }}
+      style={styles.logo}
+      resizeMode="contain"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+/** A ring that fills with the head buffer, the percentage inside it. */
+function Ring({ percent }: { percent: number }) {
+  const r = 26;
+  const c = 2 * Math.PI * r;
+  const p = Math.max(0, Math.min(100, percent));
+  return (
+    <View style={styles.ring}>
+      <Svg width={64} height={64} viewBox="0 0 64 64">
+        <Circle cx={32} cy={32} r={r} stroke="#ffffff22" strokeWidth={5} fill="none" />
+        <Circle
+          cx={32}
+          cy={32}
+          r={r}
+          stroke="#e50914"
+          strokeWidth={5}
+          fill="none"
+          strokeLinecap="round"
+          strokeDasharray={`${(c * p) / 100} ${c}`}
+          transform="rotate(-90 32 32)"
+        />
+      </Svg>
+      <Text style={styles.ringText}>{Math.round(p)}%</Text>
+    </View>
+  );
+}
+
+/** "9:42 PM" in the phone's own format. */
+const timeOfDay = (ms: number) =>
+  new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+/** Coarse "how much is left" — "1h 07m left", "23m left". */
+const timeLeft = (seconds: number) => {
+  const m = Math.max(0, Math.round(seconds / 60));
+  return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m left` : `${m}m left`;
+};
+
 const count = (n: number | undefined) => (n == null ? '—' : n.toLocaleString());
 const kbps = (n: number | undefined) =>
   n == null ? '—' : n >= 1000 ? `${(n / 1000).toFixed(1)} Mb/s` : `${Math.round(n)} kb/s`;
@@ -2030,11 +2149,11 @@ function SpeedGraph({ points }: { points: { down: number; rate: number }[] }) {
           <Line x1="0" y1={h / 2} x2={w} y2={h / 2} stroke="#ffffff26" strokeWidth="0.5" />
           {points.length >= 2 && (
             <>
-              <Path d={area} fill="#3b6fe040" />
+              <Path d={area} fill="#e5091440" />
               <Path
                 d={line((p) => p.down)}
                 fill="none"
-                stroke="#3b6fe0"
+                stroke="#e50914"
                 strokeWidth="1.5"
                 vectorEffect="non-scaling-stroke"
               />
@@ -2051,7 +2170,7 @@ function SpeedGraph({ points }: { points: { down: number; rate: number }[] }) {
         <Text style={styles.graphScale} maxFontSizeMultiplier={1.15}>{top.toFixed(1)} Mb/s</Text>
       </View>
       <View style={styles.graphLegend}>
-        <View style={[styles.legendSwatch, { backgroundColor: '#3b6fe0' }]} />
+        <View style={[styles.legendSwatch, { backgroundColor: '#e50914' }]} />
         <Text style={styles.legendText} maxFontSizeMultiplier={1.15}>Download {(last?.down ?? 0).toFixed(1)} Mb/s</Text>
         <View style={[styles.legendSwatch, { backgroundColor: '#fff', marginLeft: 12 }]} />
         <Text style={styles.legendText} maxFontSizeMultiplier={1.15}>Video {(last?.rate ?? 0).toFixed(1)} Mb/s</Text>
@@ -2078,7 +2197,7 @@ function Action({
   on?: boolean;
   onPress: () => void;
 }) {
-  const tint = on ? '#7aa2ff' : '#fff';
+  const tint = on ? '#ff5a63' : '#fff';
   return (
     <Pressable
       onPress={onPress}
@@ -2094,6 +2213,39 @@ function Action({
       <Text numberOfLines={1} style={[styles.actionLabel, on && styles.actionLabelOn]}>
         {label}
       </Text>
+    </Pressable>
+  );
+}
+
+/** One line of the More sheet: glyph, name, and the current setting on the right. */
+function MoreRow({
+  icon,
+  material,
+  label,
+  value,
+  on,
+  onPress,
+}: {
+  icon?: IconName;
+  material?: 'picture-in-picture-alt';
+  label: string;
+  value?: string;
+  on?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.moreRow, pressed && styles.moreRowPressed]}
+    >
+      <View style={styles.moreGlyph}>
+        {!!icon && <Icon name={icon} size={18} color={on ? '#ff5a63' : '#fff'} />}
+        {!!material && <MaterialIcons name={material} size={19} color="#fff" />}
+      </View>
+      <Text style={styles.moreLabel} numberOfLines={1}>
+        {label}
+      </Text>
+      {!!value && <Text style={[styles.moreValue, on && styles.moreValueOn]}>{value}</Text>}
     </Pressable>
   );
 }
@@ -2204,11 +2356,14 @@ function friendlySubName(
  */
 function SeekBar({
   value,
+  duration,
   spans,
   onScrub,
   onSeek,
 }: {
   value: number;
+  /** Seconds, for the time bubble that rides above the finger while dragging. */
+  duration: number;
   /** Downloaded stretches as fractions of the file's bytes, and the byte
    *  fraction the player is reading at (-1 when nothing is reading). */
   spans: { spans: [number, number][]; at: number };
@@ -2291,7 +2446,16 @@ function SeekBar({
         ))}
         <View style={[styles.fill, { width: `${pct * 100}%` }]} />
       </View>
-      <View style={[styles.knob, { left: `${pct * 100}%` }]} pointerEvents="none" />
+      <View
+        style={[styles.knob, dragging !== null && styles.knobHeld, { left: `${pct * 100}%` }]}
+        pointerEvents="none"
+      />
+      {/* Where the finger has got to, above it, while it is down. */}
+      {dragging !== null && duration > 0 && (
+        <View style={[styles.bubble, { left: `${pct * 100}%` }]} pointerEvents="none">
+          <Text style={styles.bubbleText}>{clock(pct * duration)}</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -2307,22 +2471,49 @@ const stageLabel = (state: string) =>
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#000' },
-  preparing: {
+  // Opaque: it sits over the player while that buffers underneath.
+  preparing: { ...StyleSheet.absoluteFill, justifyContent: 'center', backgroundColor: '#000' },
+  preparingVeil: {
     ...StyleSheet.absoluteFill,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
+    experimental_backgroundImage:
+      'linear-gradient(to right, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.6) 70%, rgba(0,0,0,0.45) 100%)',
   },
-  preparingTitle: {
-    ...type.title,
+  preparingRow: { flexDirection: 'row', alignItems: 'center', gap: space.xl },
+  preparingBody: { flex: 1, alignItems: 'flex-start' },
+  preparingEpisode: { ...type.label, color: '#fff', fontFamily: font.semibold, marginTop: space.sm },
+  preparingStatus: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: space.lg },
+  liveDot: { width: 8, height: 8, borderRadius: 4 },
+  preparingText: { ...type.meta, color: '#ffffffb0', flexShrink: 1 },
+  logo: { width: 240, height: 76 },
+  logoText: { ...type.title, fontFamily: font.bold, fontSize: 26, lineHeight: 32, color: '#fff' },
+  ring: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center' },
+  ringText: {
+    ...type.label,
+    position: 'absolute',
     color: '#fff',
-    textAlign: 'center',
-    marginBottom: space.sm,
-    maxWidth: '80%',
+    fontFamily: font.bold,
+    fontVariant: ['tabular-nums'],
   },
-  preparingText: { ...type.meta, color: '#ffffffb0' },
-  preparingMeta: { ...type.meta, color: '#ffffff70', fontSize: 11 },
-  dim: { backgroundColor: '#0006' },
+  pauseCard: {
+    ...StyleSheet.absoluteFill,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    experimental_backgroundImage:
+      'linear-gradient(to right, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.55) 60%, rgba(0,0,0,0.3) 100%)',
+  },
+  pauseLead: { ...type.label, color: '#ffffffa0', marginBottom: space.sm },
+  pauseProgress: { width: 320, maxWidth: '70%', marginTop: space.lg },
+  pauseTimes: { flexDirection: 'row', justifyContent: 'space-between', marginTop: space.sm },
+  pauseTime: { ...type.label, color: '#fff', fontFamily: font.semibold, fontVariant: ['tabular-nums'] },
+  pauseLeft: { ...type.label, color: '#ffffffa0' },
+  pauseEnds: { ...type.meta, color: '#ffffff80', fontSize: 11, marginTop: 2 },
+  pausedWord: { ...type.meta, color: '#ffffff90', letterSpacing: 2, marginTop: space.lg, fontFamily: font.semibold },
+  // Dark at the top and bottom where the controls are, the picture left clear in
+  // the middle — the TV player's scrim, not a flat grey wash over everything.
+  dim: {
+    experimental_backgroundImage:
+      'linear-gradient(to bottom, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.15) 30%, rgba(0,0,0,0.15) 60%, rgba(0,0,0,0.85) 100%)',
+  },
   overlay: { ...StyleSheet.absoluteFill, justifyContent: 'space-between' },
   sheet: {
     position: 'absolute',
@@ -2360,7 +2551,7 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     borderRadius: 8,
   },
-  optionOn: { backgroundColor: '#3b6fe0' },
+  optionOn: { backgroundColor: '#e50914' },
   optionOff: { opacity: 0.45 },
   optionText: { ...type.meta, color: '#fff', flex: 1 },
   optionNote: { ...type.meta, color: '#ffffff90', fontSize: 10 },
@@ -2379,12 +2570,30 @@ const styles = StyleSheet.create({
   },
   // flexShrink, not flex: the stats pill and the buttons keep their size and a
   // long release name gives way instead of pushing them off the edge.
+  // flexShrink: a long name gives way instead of pushing the buttons off the edge.
+  titleBlock: { flexShrink: 1, flexGrow: 1, marginHorizontal: space.md },
   title: {
-    ...type.label,
+    ...type.title,
+    fontFamily: font.bold,
+    fontSize: 18,
     color: '#fff',
-    flexShrink: 1,
-    marginRight: space.sm,
   },
+  episode: { ...type.meta, color: '#ffffffb0', marginTop: 1 },
+  topInfo: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginRight: space.sm },
+  clockBlock: { alignItems: 'flex-end' },
+  speedPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    height: 28,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    backgroundColor: '#0007',
+  },
+  // Fixed width, tabular figures: it changes every second and must not shove Cast around.
+  speedText: { ...type.meta, color: '#fff', fontSize: 12, fontFamily: font.medium, fontVariant: ['tabular-nums'], minWidth: 58 },
+  clockNow: { ...type.label, color: '#fff', fontFamily: font.bold, fontVariant: ['tabular-nums'] },
+  clockEnds: { ...type.meta, color: '#ffffffa0', fontSize: 11 },
   // Left edge, vertically centred: away from the transport it replaces, and out
   // of the way of the picture.
   lockDock: {
@@ -2402,12 +2611,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   bottomWrap: { paddingBottom: 8 },
+  // One short row, centred under the bar: icon beside its label, as Netflix lays it out.
   actions: {
-    flexGrow: 1,
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-around',
-    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+    columnGap: 22,
+    paddingHorizontal: 16,
     paddingTop: 2,
   },
   delayRow: {
@@ -2456,7 +2667,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: '#fff',
   },
-  action: { alignItems: 'center', gap: 3, minWidth: 62, paddingVertical: 4 },
+  action: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
   actionPressed: { opacity: 0.55 },
   // Fixed height so the "1.5x" label and the icons sit on the same baseline.
   actionGlyph: { height: 20, alignItems: 'center', justifyContent: 'center' },
@@ -2467,14 +2678,49 @@ const styles = StyleSheet.create({
     fontFamily: font.medium,
     fontVariant: ['tabular-nums'],
   },
-  actionLabel: { ...type.meta, color: '#ffffffa0', fontSize: 10, lineHeight: 13 },
-  actionLabelOn: { color: '#7aa2ff' },
+  actionLabel: { ...type.label, color: '#fff', fontSize: 14, fontFamily: font.medium },
+  actionLabelOn: { color: '#ff5a63' },
   /** Stats pill and the cast button, stacked at the right of the top bar. */
   topRight: { alignItems: 'flex-end', gap: 8 },
-  castOn: { backgroundColor: '#7aa2ff26' },
-  castOnText: { color: '#7aa2ff' },
+  castOn: { backgroundColor: '#e5091426' },
+  castOnText: { color: '#ff5a63' },
   /** Fills the pill, so the whole thing is the tap target. */
   castButton: { width: 24, height: 24 },
+  castWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  moreSheet: {
+    position: 'absolute',
+    bottom: 64,
+    width: 300,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: '#141414f2',
+  },
+  moreSwarm: {
+    ...type.meta,
+    color: '#ffffff90',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 6,
+    fontVariant: ['tabular-nums'],
+  },
+  moreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+  },
+  moreRowPressed: { backgroundColor: '#ffffff14' },
+  moreGlyph: { width: 22, alignItems: 'center' },
+  moreLabel: { ...type.label, color: '#fff', flex: 1 },
+  moreValue: { ...type.meta, color: '#ffffff90' },
+  moreValueOn: { color: '#ff5a63' },
   stats: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2525,13 +2771,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  iconBtnOn: { backgroundColor: '#3b6fe0' },
+  iconBtnOn: { backgroundColor: '#e50914' },
   info: {
     position: 'absolute',
     borderRadius: 12,
     backgroundColor: '#000c',
   },
-  infoBody: { flexDirection: 'row', padding: 12, gap: 20 },
+  // Room on the right for the close button, so it never sits on a value.
+  infoBody: { flexDirection: 'row', padding: 12, paddingRight: 40, gap: 20 },
+  closeX: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ffffff1f',
+  },
   // A fixed basis that shrinks: two columns side by side on any width that fits them.
   infoColumn: { flexBasis: 230, flexShrink: 1, minWidth: 140 },
   infoHeading: {
@@ -2588,24 +2846,45 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     minWidth: 48,
   },
-  scrub: { flex: 1, height: 40, justifyContent: 'center' },
+  timeLeft: { textAlign: 'right' },
+  scrub: { flex: 1, height: 44, justifyContent: 'center' },
   track: {
-    height: 3,
+    height: 4,
     borderRadius: 2,
     backgroundColor: '#ffffff40',
     overflow: 'hidden',
   },
-  fill: { height: 3, borderRadius: 2, backgroundColor: '#3b6fe0' },
+  fill: { height: 4, borderRadius: 2, backgroundColor: '#e50914' },
   /** Downloaded, not yet played: brighter than the empty track, under the fill. */
-  have: { position: 'absolute', top: 0, height: 3, backgroundColor: '#ffffff90' },
+  have: { position: 'absolute', top: 0, height: 4, backgroundColor: '#ffffff70' },
   knob: {
     position: 'absolute',
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginLeft: -6,
-    backgroundColor: '#3b6fe0',
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    marginLeft: -8,
+    backgroundColor: '#e50914',
   },
+  /** Held: bigger, with a soft red halo, the way the TV's knob swells. */
+  knobHeld: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    marginLeft: -11,
+    borderWidth: 4,
+    borderColor: '#e5091455',
+  },
+  bubble: {
+    position: 'absolute',
+    bottom: 34,
+    width: 72,
+    marginLeft: -36,
+    alignItems: 'center',
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#fff',
+  },
+  bubbleText: { ...type.label, color: '#000', fontFamily: font.bold, fontVariant: ['tabular-nums'] },
   // Bottom right, clear of the controls: the same corner every streaming app
   // puts it in, and the one place a thumb is not already resting.
   upNext: {
@@ -2745,7 +3024,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 8,
-    backgroundColor: '#3b6fe0',
+    backgroundColor: '#e50914',
     alignItems: 'center',
     justifyContent: 'center',
   },
