@@ -133,6 +133,25 @@ private const val SCRUB_COMMIT_MS = 700L
  */
 private const val STALL_MS = 1200L
 
+/**
+ * A seek that has not landed. libVLC goes on reporting the old time until it does, and
+ * each report dragged the bar back to where the viewer had just left.
+ */
+private class Seeking(val target: Double, val from: Double, val since: Long, val connections: Long)
+
+/** A seek with no new connection and the player still starved this long reopens the stream. */
+private const val SEEK_CHECK_MS = 2500L
+
+/** The bar stops holding a seek target this long after it, landed or not. */
+private const val SEEK_HOLD_MS = 45_000L
+
+/** Seeks further than this also aim the torrent at the target before libVLC asks for it. */
+private const val AIM_SECONDS = 30.0
+
+/** A stream that ends this far from its runtime gave up; reopen it, at most this many times. */
+private const val EARLY_END_SECONDS = 60.0
+private const val MAX_RECOVERIES = 3
+
 /** Held ‹ › walks up these: ten seconds for a tap, two minutes once hunting for a scene. */
 private fun stepFor(repeat: Int) = when {
     repeat < 3 -> 10
@@ -255,10 +274,31 @@ private fun Player(watch: Watch) {
         watch.playSibling(next)
     }
 
+    val seeking = remember { mutableStateOf<Seeking?>(null) }
+    val seekCheck = remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     fun seekTo(seconds: Double) {
         val target = seconds.coerceIn(0.0, if (duration > 0) duration - 1 else seconds)
+        val v = view.value ?: return
+        val from = at
         at = target
-        view.value?.seekTo((target * 1000).toLong())
+        val ms = (target * 1000).toLong()
+        if (duration > 0 && abs(target - from) > AIM_SECONDS) {
+            val ratio = target / duration
+            scope.launch(Dispatchers.IO) { engine.setPosition(ratio) }
+        }
+        // Starved, libVLC would act on the seek only once the piece it is blocked on
+        // arrives — seconds, or a minute in a thin swarm. Reopening there does not wait.
+        val reopen = engine.starved()
+        val s = Seeking(target, from, System.currentTimeMillis(), engine.connections())
+        seeking.value = s
+        if (reopen) v.reload(ms) else v.seekTo(ms)
+        seekCheck.value?.cancel()
+        if (reopen) return
+        // It can starve just after the check; if the seek has gone nowhere, reopen then.
+        seekCheck.value = scope.launch {
+            delay(SEEK_CHECK_MS)
+            if (seeking.value === s && engine.connections() == s.connections && engine.starved()) view.value?.reload(ms)
+        }
     }
 
     // Walk the playhead without moving it: seeking per press would re-aim the torrent a
@@ -423,17 +463,29 @@ private fun Player(watch: Watch) {
         AndroidView(
             factory = { context ->
                 VlcView(context).also { v ->
+                    var recoveries = 0
                     v.onLoaded = { ms ->
                         duration = ms / 1000.0
-                        loaded = true
-                        watch.saveDuration(duration)
-                        // Aim the engine at the resume point now the real runtime is known.
-                        if (startAt > 0 && duration > 0) {
-                            val ratio = minOf(0.99, startAt / duration)
-                            scope.launch(Dispatchers.IO) { engine.setPosition(ratio) }
+                        // Again after every reopen — only the first is the film starting.
+                        if (!loaded) {
+                            loaded = true
+                            watch.saveDuration(duration)
+                            // Aim the engine at the resume point now the real runtime is known.
+                            if (startAt > 0 && duration > 0) {
+                                val ratio = minOf(0.99, startAt / duration)
+                                scope.launch(Dispatchers.IO) { engine.setPosition(ratio) }
+                            }
                         }
                     }
-                    v.onTime = { ms -> at = ms / 1000.0 }
+                    v.onTime = { ms ->
+                        val t = ms / 1000.0
+                        val s = seeking.value
+                        // Landed once a report is nearer the target than the spot it left.
+                        if (s == null || abs(t - s.target) <= abs(t - s.from) || System.currentTimeMillis() - s.since > SEEK_HOLD_MS) {
+                            if (s != null) seeking.value = null
+                            at = t
+                        }
+                    }
                     v.onBuffering = { buffering = it }
                     v.onPlaying = { paused = !it }
                     v.onTracks = { t ->
@@ -449,7 +501,14 @@ private fun Player(watch: Watch) {
                             subtitle = t.spuId.takeIf { it >= 0 }
                         }
                     }
-                    v.onEnded = { if (next != null && !noNext) goNext() else watch.exit() }
+                    v.onEnded = {
+                        // A stream that gave up mid-film looks like the end to libVLC: reopen
+                        // where it stopped rather than leave the film or skip to the next one.
+                        if (duration > 0 && at < duration - EARLY_END_SECONDS && recoveries < MAX_RECOVERIES) {
+                            recoveries++
+                            v.reload((at * 1000).toLong())
+                        } else if (next != null && !noNext) goNext() else watch.exit()
+                    }
                     v.onFailed = { message ->
                         watch.notes.tryEmit(message)
                         watch.exit()

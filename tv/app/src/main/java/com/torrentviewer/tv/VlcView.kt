@@ -54,6 +54,8 @@ class VlcView(context: Context) : FrameLayout(context) {
 
     private val videoLayout = VLCVideoLayout(context)
     private var vlc: LibVLC? = null
+    /** The buffer [vlc] was made with — a reload at the same one keeps the instance. */
+    private var vlcCacheMs = -1
     private var player: MediaPlayer? = null
 
     private var source: String? = null
@@ -63,6 +65,9 @@ class VlcView(context: Context) : FrameLayout(context) {
     private var cacheMs = 3000
     /** Applied on load — tracks do not exist until the media is parsed. */
     private var wantedSpu: Int? = null
+    private var wantedAudio: Int? = null
+    /** Reopened while paused: libVLC only opens a file it is told to play, so play, then pause on arrival. */
+    private var pauseOnStart = false
     private var announced = false
     private var buffering = false
     private var subtitleFiles: List<String> = emptyList()
@@ -93,8 +98,14 @@ class VlcView(context: Context) : FrameLayout(context) {
         restart()
     }
 
-    /** Reopen at [ms] — recovery for a dropped connection that looked like the end. */
+    /**
+     * Reopen at [ms], keeping pause, speed, picture and tracks. libVLC acts on a seek only
+     * between reads, so with its read blocked on a piece that has not arrived a seek waits
+     * for that piece; reopening abandons the read. Also the recovery for a dropped
+     * connection that looked like the end.
+     */
     fun reload(ms: Long) {
+        if (source == null) return
         startMs = ms
         restart()
     }
@@ -111,6 +122,7 @@ class VlcView(context: Context) : FrameLayout(context) {
         // Paused is idle: let the screen saver have a still frame.
         keepScreenOn = !value
         if (value) dropAudioFocus() else takeAudioFocus()
+        if (!value) pauseOnStart = false
         // Unconditional: while buffering libVLC reports not-playing yet resumes on its own.
         runCatching { if (value) player?.pause() else player?.play() }
         onPlaying(!value)
@@ -130,6 +142,7 @@ class VlcView(context: Context) : FrameLayout(context) {
     }
 
     fun setAudioTrack(id: Int) {
+        wantedAudio = id
         player?.setAudioTrack(id)
     }
 
@@ -239,13 +252,20 @@ class VlcView(context: Context) : FrameLayout(context) {
     }
 
     private fun restart() {
-        release()
+        release(keepVlc = vlcCacheMs == cacheMs)
         val uri = source?.takeIf { it.isNotBlank() } ?: return
         try {
-            val instance = LibVLC(
+            val instance = vlc ?: LibVLC(
                 context,
-                arrayListOf("--network-caching=$cacheMs", "--file-caching=$cacheMs", "--no-video-title-show", "--audio-time-stretch"),
-            )
+                arrayListOf(
+                    "--network-caching=$cacheMs", "--file-caching=$cacheMs", "--no-video-title-show", "--audio-time-stretch",
+                    // The HTTP read-ahead runs in its own thread and stays parked on the first
+                    // missing piece; a seek waits for that read to return. 16MB by default sits
+                    // right on the download edge, so most seeks — and the jump to the index on
+                    // open — waited for a piece. From loopback, 4MB refills in milliseconds.
+                    "--prefetch-buffer-size=4096", "--prefetch-read-size=1048576",
+                ),
+            ).also { vlcCacheMs = cacheMs }
             val mediaPlayer = MediaPlayer(instance)
             mediaPlayer.attachViews(videoLayout, null, true, false)
             mediaPlayer.videoScale = scale
@@ -273,10 +293,9 @@ class VlcView(context: Context) : FrameLayout(context) {
             player = mediaPlayer
             announced = false
             mediaPlayer.rate = rate
-            if (!paused) {
-                takeAudioFocus()
-                mediaPlayer.play()
-            }
+            if (!paused) takeAudioFocus()
+            pauseOnStart = paused
+            mediaPlayer.play()
             mediaPlayer.setSpuTrack(wantedSpu ?: -1)
             attachPendingSubs()
         } catch (e: Throwable) {
@@ -290,7 +309,12 @@ class VlcView(context: Context) : FrameLayout(context) {
         when (event.type) {
             MediaPlayer.Event.Playing -> {
                 report(false)
-                onPlaying(true)
+                if (pauseOnStart) {
+                    pauseOnStart = false
+                    runCatching { p.pause() }
+                } else {
+                    onPlaying(true)
+                }
                 if (!announced) announceLoaded(p)
             }
             MediaPlayer.Event.Paused -> onPlaying(false)
@@ -319,6 +343,7 @@ class VlcView(context: Context) : FrameLayout(context) {
         // -1, not "leave it": with nothing chosen libVLC turns the first track on itself.
         p.setSpuTrack(wantedSpu ?: -1)
         if (defaultAudioId == null) p.audioTrack.takeIf { it >= 0 }?.let { defaultAudioId = it }
+        wantedAudio?.let { p.setAudioTrack(it) }
         onLoaded(length)
         sendTracks(p)
     }
@@ -372,7 +397,7 @@ class VlcView(context: Context) : FrameLayout(context) {
         holdingFocus = false
     }
 
-    fun release() {
+    fun release(keepVlc: Boolean = false) {
         dropAudioFocus()
         removeCallbacks(attachSubs)
         subRetries = 0
@@ -382,9 +407,12 @@ class VlcView(context: Context) : FrameLayout(context) {
             runCatching { p.detachViews() }
             runCatching { p.release() }
         }
-        runCatching { vlc?.release() }
+        if (!keepVlc) {
+            runCatching { vlc?.release() }
+            vlc = null
+            vlcCacheMs = -1
+        }
         player = null
-        vlc = null
         announced = false
         buffering = false
         defaultAudioId = null
