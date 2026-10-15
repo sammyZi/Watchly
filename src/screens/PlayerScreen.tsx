@@ -68,6 +68,8 @@ const RATES = [0.75, 1, 1.25, 1.5, 2];
 const HOLD_RATE = 2;
 /** Long enough that a slow tap is still a tap. */
 const HOLD_MS = 450;
+/** Brightness meter height — short enough that the rail clears both bars in landscape. */
+const BRIGHT_TRACK = 72;
 /** Sleep timer steps, in minutes; -1 is "at the end of this episode". */
 const SLEEP = [0, 15, 30, 60, -1];
 
@@ -1796,6 +1798,50 @@ export function PlayerScreen({
               `left` comes off the safe-area inset rather than being fixed: in
               landscape the punch hole sits inside that inset, and a fixed
               margin put these buttons underneath it. */}
+          {showUi && !locked && (
+            <View
+              pointerEvents="box-none"
+              style={[styles.brightRail, { left: insets.left + 16 }]}
+            >
+              <View style={styles.brightPill}>
+                <Pressable
+                  onPress={() => stepBright(1)}
+                  onLongPress={() => stepBright(10)}
+                  hitSlop={8}
+                  style={styles.brightBtn}
+                >
+                  <Icon name="plus" size={18} color="#fff" />
+                </Pressable>
+                {/* The meter is a target too: tap anywhere on it to jump there. */}
+                <Pressable
+                  onPress={(e) => {
+                    const level = setBright(1 - e.nativeEvent.locationY / BRIGHT_TRACK);
+                    showHud({ icon: 'sun', label: `${Math.round(level * 100)}%` });
+                    bumpUi();
+                  }}
+                  hitSlop={{ left: 14, right: 14 }}
+                  style={styles.brightTrack}
+                >
+                  <View
+                    pointerEvents="none"
+                    style={[styles.brightFill, { height: `${brightPct}%` }]}
+                  />
+                </Pressable>
+                <View style={styles.brightValue}>
+                  <Icon name="sun" size={14} color="#fff" />
+                  <Text style={styles.brightText}>{brightPct}</Text>
+                </View>
+                <Pressable
+                  onPress={() => stepBright(-1)}
+                  onLongPress={() => stepBright(-10)}
+                  hitSlop={8}
+                  style={styles.brightBtn}
+                >
+                  <Icon name="minus" size={18} color="#fff" />
+                </Pressable>
+              </View>
+            </View>
+          )}
 
           {/* Up for as long as the finger is: the transient readout below would
               vanish while the film is still running fast. */}
@@ -2917,21 +2963,43 @@ const styles = StyleSheet.create({
   upNextPlayText: { ...type.label, color: '#0b0e14', fontFamily: font.semibold },
   // Vertical, because brightness is a vertical gesture here and up should mean
   // more. Centred on the left edge, clear of the transport bar at the bottom.
+  // Full height and centred by flex, so the pill stays mid-edge whatever it measures.
   brightRail: {
     position: 'absolute',
     // `left` is set inline from the safe-area inset — see the note at the call.
-    top: '50%',
-    transform: [{ translateY: -78 }],
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+  },
+  brightPill: {
+    width: 48,
     alignItems: 'center',
-    borderRadius: 999,
     paddingVertical: 4,
-    backgroundColor: '#00000073',
+    borderRadius: 999,
+    backgroundColor: '#0b0e14b3',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ffffff2e',
   },
   // Finger-sized: this gets pressed repeatedly to walk a few points, so it has
   // to stay under the thumb without aiming.
-  brightBtn: { width: 44, height: 48, alignItems: 'center', justifyContent: 'center' },
-  brightValue: { alignItems: 'center', gap: 2, paddingVertical: 2 },
-  brightText: { ...type.meta, color: '#fff', fontFamily: font.semibold },
+  brightBtn: { width: 48, height: 44, alignItems: 'center', justifyContent: 'center' },
+  brightTrack: {
+    width: 6,
+    height: BRIGHT_TRACK,
+    marginVertical: 4,
+    borderRadius: 3,
+    overflow: 'hidden',
+    justifyContent: 'flex-end',
+    backgroundColor: '#ffffff33',
+  },
+  brightFill: { width: '100%', borderRadius: 3, backgroundColor: '#fff' },
+  brightValue: { alignItems: 'center', gap: 3, paddingTop: 8, paddingBottom: 2 },
+  brightText: {
+    ...type.meta,
+    color: '#fff',
+    fontFamily: font.semibold,
+    fontVariant: ['tabular-nums'],
+  },
   // Under the title rather than mid-screen: at 38% it landed straight on the
   // play button, which is the one thing that must never be covered.
   hud: {
