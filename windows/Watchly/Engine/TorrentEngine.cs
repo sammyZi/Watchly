@@ -826,10 +826,10 @@ public sealed class StreamSession : IAsyncDisposable
 /// </summary>
 public sealed class WindowedRequester : IStreamingPieceRequester
 {
-    /// <summary>The look-ahead StreamingPieceRequester keeps past the read position (LowPriorityCount).</summary>
-    const int ReadAhead = 30;
+    /// <summary>The look-ahead the inner requester keeps past the read position.</summary>
+    const int ReadAhead = FastStreamingRequester.LowPriorityCount;
 
-    readonly StreamingPieceRequester inner = new();
+    readonly FastStreamingRequester inner = new();
     IPieceRequesterData? data;
     BitField? outside;
     ReadOnlyBitField[] alreadyHave = Array.Empty<ReadOnlyBitField>();

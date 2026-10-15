@@ -11,7 +11,7 @@ This README is the phone app. The repo holds two more, each with its own README:
 | App | Where | Engine |
 |---|---|---|
 | Phone (Android) | `src/`, `android/`, `modules/` | libtorrent4j + libVLC |
-| Television (Android TV) | [`tv/`](tv/README.md) | libtorrent4j + libVLC, own copy of the modules |
+| Television (Android TV) | [`tv/`](tv/README.md) | native Kotlin + Compose; libtorrent4j + libVLC |
 | Windows desktop | [`windows/`](windows/README.md) | MonoTorrent + LibVLCSharp (.NET 8, WPF) |
 
 ## Run
