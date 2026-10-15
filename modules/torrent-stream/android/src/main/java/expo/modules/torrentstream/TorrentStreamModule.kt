@@ -1132,6 +1132,12 @@ class TorrentStreamModule : Module() {
       // app its own: a router forwards a port to one device, and the phone, the TV (6881) and
       // the Windows app (51413) can all be running on the same network at once.
       .setString(settings_pack.string_types.listen_interfaces.swigValue(), "0.0.0.0:6882,[::]:6882")
+      // Once the read-ahead has caught up, every wanted piece is done and libtorrent
+      // calls the torrent finished — and by default disconnects every seed as
+      // "redundant". Peers and speed then drop to zero, and the stream stalls the
+      // moment the zone moves on to pieces nobody is left to send. Seen on the TV
+      // build: 36 seeds at 6.9MB/s became 0 and 5kB/s inside fifteen seconds.
+      .setBoolean(settings_pack.bool_types.close_redundant_connections.swigValue(), false)
       .setString(settings_pack.string_types.dht_bootstrap_nodes.swigValue(), BOOTSTRAP)
       .setBoolean(settings_pack.bool_types.enable_dht.swigValue(), true)
       .setBoolean(settings_pack.bool_types.enable_lsd.swigValue(), true)
@@ -2250,10 +2256,12 @@ class TorrentStreamModule : Module() {
     val status = h.status()
 
     // Stuck-piece watchdog: the player is sitting on a piece that has not landed
-    // in STUCK_PIECE_MS while peers are connected. Pausing and resuming drops
-    // every outstanding request and re-dials the swarm from the peer cache, so
-    // the piece is asked for afresh from whoever answers first. The deadlines
-    // are set again next tick — the pause clears libtorrent's list of them.
+    // in STUCK_PIECE_MS while peers are connected. It used to pause and resume
+    // the torrent to drop that request — which also dropped the swarm: measured
+    // on the TV build, 71 peers at 6.3MB/s became 18 at 0.95MB/s, and peers and
+    // speed sat near zero for a minute. Now only that piece is re-armed, with a
+    // deadline already past, which is what makes libtorrent hand its outstanding
+    // blocks to other, faster peers as well.
     val blocked = if (announcedReady && !userPaused) {
       targets.first().takeIf { it in firstPiece..lastPiece && !h.havePiece(it) } ?: -1
     } else {
@@ -2272,13 +2280,12 @@ class TorrentStreamModule : Module() {
       log(
         "stuck: piece $blocked for ${(now - blockingSince) / 1000}s " +
           "(${pieceState(h, blocked)}, ${status.downloadRate() / 1024}kB/s, " +
-          "${status.numPeers()} peers) — re-asking the swarm"
+          "${status.numPeers()} peers) — re-asking for it"
       )
-      persistPeers()
-      runCatching { h.pause() }
-      runCatching { h.resume() }
-      runCatching { h.clearPieceDeadlines() }
-      deadlined.clear()
+      runCatching { h.resetPieceDeadline(blocked) }
+      runCatching { h.piecePriority(blocked, Priority.TOP_PRIORITY) }
+      runCatching { h.setPieceDeadline(blocked, 0) }
+      deadlined.add(blocked)
       blockingSince = now
     }
 
