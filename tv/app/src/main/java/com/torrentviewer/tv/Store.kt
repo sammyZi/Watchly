@@ -222,6 +222,8 @@ data class Item(
     /** Seconds, per file index. */
     val positions: Map<Int, Double> = emptyMap(),
     val durations: Map<Int, Double> = emptyMap(),
+    /** Where the player was reading at the resume point, 0–1 of the file's bytes. */
+    val byteAts: Map<Int, Double> = emptyMap(),
     val subtitles: Map<Int, List<SavedSub>> = emptyMap(),
     val imdb: String? = null,
     val kind: String? = null,
@@ -245,7 +247,9 @@ data class Item(
         val p = positions[index] ?: return 0.0
         val d = durations[index] ?: return 0.0
         if (p <= 0 || d <= 0) return 0.0
-        return (p / d).coerceIn(0.0, 0.99)
+        // Measured beats guessed: a 4K MKV resumed at 39% of its time was at 32%
+        // of its bytes, so the time guess pre-buffered the wrong spot for 44s.
+        return (byteAts[index] ?: (p / d)).coerceIn(0.0, 0.99)
     }
 
     fun toJson(): JSONObject = JSONObject()
@@ -257,6 +261,7 @@ data class Item(
         .put("lastFileIndex", lastFileIndex)
         .put("positions", positions.json())
         .put("durations", durations.json())
+        .put("byteAts", byteAts.json())
         .put("subtitles", JSONObject().also { o ->
             subtitles.forEach { (k, v) -> o.put(k.toString(), JSONArray(v.map { JSONObject().put("path", it.path).put("label", it.label) })) }
         })
@@ -274,6 +279,7 @@ data class Item(
             lastFileIndex = if (o.has("lastFileIndex") && !o.isNull("lastFileIndex")) o.optInt("lastFileIndex") else null,
             positions = o.numbers("positions"),
             durations = o.numbers("durations"),
+            byteAts = o.numbers("byteAts"),
             subtitles = o.optJSONObject("subtitles")?.let { s ->
                 s.keys().asSequence().mapNotNull { k ->
                     k.toIntOrNull()?.let { i -> i to (s.optJSONArray(k)?.objects()?.map { SavedSub(it.optString("path"), it.optString("label")) }.orEmpty()) }
@@ -335,8 +341,14 @@ object History {
     @Synchronized
     fun patch(uri: String, change: (Item) -> Item) = write(_items.value.map { if (it.uri == uri) change(it) else it })
 
-    fun setPosition(uri: String, index: Int, seconds: Double) =
-        patch(uri) { it.copy(lastFileIndex = index, positions = it.positions + (index to seconds)) }
+    /** `byteAt` < 0 (no open reader, e.g. on close) keeps the last one seen. */
+    fun setPosition(uri: String, index: Int, seconds: Double, byteAt: Double = -1.0) = patch(uri) {
+        it.copy(
+            lastFileIndex = index,
+            positions = it.positions + (index to seconds),
+            byteAts = if (byteAt >= 0) it.byteAts + (index to byteAt) else it.byteAts,
+        )
+    }
 
     fun setDuration(uri: String, index: Int, seconds: Double) = patch(uri) { it.copy(durations = it.durations + (index to seconds)) }
 
