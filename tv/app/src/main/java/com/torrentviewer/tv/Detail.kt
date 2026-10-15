@@ -240,7 +240,7 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
             }
             itemsIndexed(shown.take(MAX_SOURCES), key = { _, it -> "src-" + it.id }) { i, hit ->
                 // Arriving from above, the list starts at its heading rather than half in view.
-                Source(hit, Modifier.then(if (i == 0) Modifier.onFocusEnter { pin(sourcesAt) } else Modifier).padding(start = Safe.x + 12.dp, end = Safe.x, bottom = 8.dp)) {
+                Source(hit, Modifier.then(if (i == 0) Modifier.onFocusEnter { pin(sourcesAt) } else Modifier).padding(start = Safe.x + 12.dp, end = Safe.x, bottom = 8.dp), runtimeSeconds(title.runtime)) {
                     watch.stream(hit, title, episode?.let { episodeTag(it.season, it.episode) }, episode)
                 }
             }
@@ -281,10 +281,19 @@ private fun EpisodeCard(ep: Episode, fallback: String?, selected: Boolean, busy:
     }
 }
 
-/** One release: what it is, how big, and how well it will stream — in words, not a seed count. */
+/** Past this a release outruns most home connections — and a 100 Mb/s TV port outright. */
+private const val HEAVY_MBPS = 40.0
+private const val TOO_HEAVY_MBPS = 80.0
+
+/**
+ * One release: what it is, how big, and how well it will stream — in words, not a seed count.
+ * With [runtimeSeconds], a release too big to stream as it plays says what it needs.
+ */
 @Composable
-fun Source(hit: Hit, modifier: Modifier = Modifier, onClick: () -> Unit) {
+fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0, onClick: () -> Unit) {
     val grade = health(hit.seeders)
+    // A pack's size is many episodes; only a single file's size over the runtime is a bitrate.
+    val mbps = if (runtimeSeconds > 0 && hit.size > 0 && (hit.scope == Scope.EPISODE || hit.perFileSize)) hit.size * 8 / runtimeSeconds / 1_000_000 else 0.0
     val tint = when (grade) {
         Health.FAST, Health.GOOD -> Ink.good
         Health.WEAK -> Ink.warn
@@ -306,12 +315,21 @@ fun Source(hit: Hit, modifier: Modifier = Modifier, onClick: () -> Unit) {
             Column(Modifier.weight(1f)) {
                 Text(hit.name, style = Type.label.copy(color = if (focused) Color.Black else Ink.text), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    listOf(hit.scope.label, bytes(hit.size), "${hit.seeders} seeds").joinToString("   ·   "),
+                    // A film's scope is "Episode" only by default — it says nothing there.
+                    listOfNotNull(hit.scope.label.takeIf { hit.kind == "tv" || hit.scope != Scope.EPISODE }, bytes(hit.size), "${hit.seeders} seeds").joinToString("   ·   "),
                     style = Type.meta.copy(color = if (focused) Color.Black.copy(alpha = 0.6f) else Ink.faint),
                 )
             }
             Spacer(Modifier.width(14.dp))
-            Text(grade.label, style = Type.meta.copy(color = if (focused) Color.Black else tint, fontWeight = FontWeight.Bold))
+            Column(horizontalAlignment = Alignment.End) {
+                Text(grade.label, style = Type.meta.copy(color = if (focused) Color.Black else tint, fontWeight = FontWeight.Bold))
+                if (mbps >= HEAVY_MBPS) {
+                    Text(
+                        "Needs ${mbps.toInt()} Mb/s",
+                        style = Type.meta.copy(color = if (focused) Color.Black.copy(alpha = 0.7f) else if (mbps >= TOO_HEAVY_MBPS) Ink.danger else Ink.warn),
+                    )
+                }
+            }
         }
     }
 }

@@ -68,6 +68,18 @@ class LocalFileServer(
 
   fun reopen() { epoch++ }
 
+  /** Connection id → when it began waiting on a piece. Only readers parked right now. */
+  private val parked = java.util.concurrent.ConcurrentHashMap<Long, Long>()
+
+  /**
+   * True while any connection is blocked on a piece that has not arrived. libVLC is then
+   * stuck inside that read and acts on nothing else — a seek included — until it returns.
+   */
+  fun starved(): Boolean = parked.isNotEmpty()
+
+  /** Connections opened so far; a new one after a seek means libVLC has moved on. */
+  fun connections(): Long = generation.get()
+
   val port: Int get() = server.localPort
   private val path: String get() = "/$token/${file.name.urlEncoded()}"
 
@@ -155,21 +167,23 @@ class LocalFileServer(
       if (method.equals("HEAD", true)) return
 
       try {
-        stream(out, start, end, generationAtStart)
+        stream(socket, out, start, end, generationAtStart)
       } catch (e: Exception) {
         Log.i("TorrentStream", "http: client gone (${e.javaClass.simpleName})")
       } finally {
+        parked.remove(generationAtStart)
         release(generationAtStart)
       }
     }
   }
 
   /** Copies bytes out, waiting on the torrent whenever it runs past what has arrived. */
-  private fun stream(out: OutputStream, start: Long, end: Long, generationAtStart: Long) {
+  private fun stream(socket: Socket, out: OutputStream, start: Long, end: Long, generationAtStart: Long) {
     val buffer = ByteArray(64 * 1024)
     var position = start
     var seen = epoch
     var raf = RandomAccessFile(file, "r")
+    var lastCheck = 0L
 
     try {
       while (position <= end && running) {
@@ -182,9 +196,18 @@ class LocalFileServer(
           // Superseded and stalled — this reader is going nowhere; let go of its
           // window instead of competing with the connection that replaced it.
           if (generation.get() != generationAtStart) return
+          val now = System.currentTimeMillis()
+          parked.putIfAbsent(generationAtStart, now)
+          // A player that stopped or reopened hangs up without a newer connection
+          // following at once; parked, nothing is written, so a write never notices.
+          if (now - lastCheck >= 500) {
+            lastCheck = now
+            if (hungUp(socket)) return
+          }
           Thread.sleep(40)
           continue
         }
+        parked.remove(generationAtStart)
 
         // Data is back, but it may be in a different file — reopen before the
         // first read past a roll.
@@ -208,6 +231,24 @@ class LocalFileServer(
       out.flush()
     } finally {
       runCatching { raf.close() }
+    }
+  }
+
+  /**
+   * The client sends nothing after its request (`Connection: close`), so a read that
+   * ends the stream means it closed its side; one that times out means it is still there.
+   */
+  private fun hungUp(socket: Socket): Boolean {
+    val before = socket.soTimeout
+    return try {
+      socket.soTimeout = 1
+      socket.getInputStream().read() < 0
+    } catch (e: java.net.SocketTimeoutException) {
+      false
+    } catch (e: Exception) {
+      true
+    } finally {
+      runCatching { socket.soTimeout = before }
     }
   }
 
