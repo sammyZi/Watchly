@@ -23,7 +23,10 @@ export function resumeRatio(item: Item, fileIndex: number): number {
   const position = item.positions?.[fileIndex];
   const duration = item.durations?.[fileIndex];
   if (!position || !duration) return 0;
-  return Math.min(0.99, Math.max(0, position / duration));
+  // Measured beats guessed: a 4K MKV resumed at 39% of its time was at 32% of
+  // its bytes, so the time guess pre-buffered the wrong spot for 44s.
+  const ratio = item.byteAts?.[fileIndex] ?? position / duration;
+  return Math.min(0.99, Math.max(0, ratio));
 }
 
 /**
