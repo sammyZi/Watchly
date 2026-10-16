@@ -190,7 +190,7 @@ class Watch(val engine: TorrentStream) {
 
     val playingFile: TorrentFile? get() = meta?.files?.find { it.index == playingIndex }
 
-    fun savePosition(seconds: Double) = item?.let { History.setPosition(it.uri, playingIndex, seconds) }
+    fun savePosition(seconds: Double) = item?.let { History.setPosition(it.uri, playingIndex, seconds, engine.readRatio()) }
 
     fun saveDuration(seconds: Double) = item?.let { History.setDuration(it.uri, playingIndex, seconds) }
 

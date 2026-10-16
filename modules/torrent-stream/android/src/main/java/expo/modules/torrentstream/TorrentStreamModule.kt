@@ -368,6 +368,15 @@ class TorrentStreamModule : Module() {
    * yet on disk, as of the last applyZone. See the band in applyZone.
    */
   private var zoneFront = -1
+  /**
+   * One piece the last applyZone set to IGNORE, or -1. If it is wanted again,
+   * something rewrote the priorities under us — the file-priority update from a
+   * fresh add lands after the zone, and the whole file goes back to wanted.
+   * Seen on a cold start of a 4-file torrent: pieces 0–45 came in order at
+   * 5MB/s, every request slot full, and the last piece the ready check needs
+   * never got one. Checked each tick, so the zone is put back.
+   */
+  private var zoneIgnored = -1
 
   /** The piece the player is waiting on, and since when. See STUCK_PIECE_MS. */
   private var blockingPiece = -1
@@ -1653,6 +1662,7 @@ class TorrentStreamModule : Module() {
     zoneWidth = -1
     zoneRushedTail = false
     zoneFront = -1
+    zoneIgnored = -1
     lately.clear()
     blockingPiece = -1
     lastKickAt = 0L
@@ -2348,7 +2358,10 @@ class TorrentStreamModule : Module() {
       (banded && front > zoneFront + width / 2) ||
       zoneStarts.size != targets.size ||
       targets.any { t -> zoneStarts.none { t >= it - back && t <= it + width / 2 } }
-    if (stale) applyZone(h, targets, width, back, rushTail = announcedReady, front = front)
+    val clobbered = !stale && zoneIgnored >= 0 &&
+      runCatching { h.piecePriority(zoneIgnored) != Priority.IGNORE }.getOrDefault(false)
+    if (clobbered) log("zone: priorities were rewritten (piece $zoneIgnored wanted again) — re-applying")
+    if (stale || clobbered) applyZone(h, targets, width, back, rushTail = announcedReady, front = front)
 
     val keep = mutableSetOf<Int>()
     targets.forEachIndexed { rank, target ->
@@ -2533,6 +2546,10 @@ class TorrentStreamModule : Module() {
       }
     }
     runCatching { h.prioritizePieces(prios) }
+    zoneIgnored = (firstPiece..minOf(lastPiece, prios.size - 1)).firstOrNull { prios[it] == Priority.IGNORE } ?: -1
+    // Same reason as zoneIgnored: a rewrite can bring sequential back with it,
+    // and then in-order requests fill every slot ahead of the deadlines.
+    runCatching { h.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD) }
 
     // Deadlines set for the old zones are aimed at pieces nobody is waiting for.
     runCatching { h.clearPieceDeadlines() }
@@ -2720,6 +2737,7 @@ class TorrentStreamModule : Module() {
     zoneWidth = -1
     zoneRushedTail = false
     zoneFront = -1
+    zoneIgnored = -1
     blockingPiece = -1
     subtitleFiles = emptyList()
     wantedFiles = intArrayOf()
