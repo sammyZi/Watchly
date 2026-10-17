@@ -38,21 +38,21 @@ yarn-error.*
 *.tsbuildinfo
 
 # generated native folders
-/ios
+/mobile/ios
 
 # Android: the project is committed (it carries the native module and the
 # intent filters), its build output is not.
-/android/.gradle/
-/android/.idea/
-/android/build/
-/android/app/build/
-/android/app/.cxx/
-/android/local.properties
+/mobile/android/.gradle/
+/mobile/android/.idea/
+/mobile/android/build/
+/mobile/android/app/build/
+/mobile/android/app/.cxx/
+/mobile/android/local.properties
 *.iml
 # Same for the native module's own gradle output.
-modules/*/android/build/
-modules/*/android/.gradle/
-modules/*/android/.cxx/
+mobile/modules/*/android/build/
+mobile/modules/*/android/.gradle/
+mobile/modules/*/android/.cxx/
 
 # Windows app build output.
 windows/**/bin/
