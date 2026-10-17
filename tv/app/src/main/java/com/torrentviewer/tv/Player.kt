@@ -1182,7 +1182,9 @@ private fun StatsPanel(s: Stats?, progress: Progress?, file: TorrentFile?) {
             add("Player" to s.engine)
             add("Video" to listOfNotNull(s.videoCodec, if (s.width > 0) "${s.width}×${s.height}" else null, if (s.fps > 0) "%.3f fps".format(s.fps).replace(".000", "") else null).joinToString("  ·  ").ifEmpty { "—" })
             add("Audio" to listOfNotNull(s.audioCodec, if (s.channels > 0) "${s.channels} ch" else null, if (s.sampleRate > 0) "${s.sampleRate / 1000} kHz" else null, s.language).joinToString("  ·  ").ifEmpty { "—" })
-            add("Bitrate" to "${mbps(s.contentKbps)} video  ·  ${mbps(s.inputKbps)} arriving")
+            // "Arriving" is the swarm's rate: the player's own input is reads from the loopback
+            // server, which run far faster than the torrent and said nothing about it.
+            add("Bitrate" to "${mbps(s.contentKbps)} video" + (progress?.let { "  ·  ${mbps(it.speed * 8 / 1000.0)} arriving" } ?: ""))
             add("Frames" to "${s.displayed} shown  ·  ${s.lostFrames} dropped")
             add("Buffer" to "${s.cacheMs / 1000} s" + if (s.lostBuffers > 0) "  ·  ${s.lostBuffers} audio gaps" else "")
         }

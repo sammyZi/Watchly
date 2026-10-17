@@ -250,6 +250,23 @@ private fun Fullscreen() {
     }
 }
 
+/**
+ * One short buzz, from the motor itself: View haptics follow the system's touch-feedback
+ * setting, which some phones (this vivo) leave off — the hold for 2× went silent there.
+ */
+private fun buzz(context: Context) {
+    val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager)?.defaultVibrator
+    } else {
+        @Suppress("DEPRECATION")
+        context.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+    } ?: return
+    runCatching {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) vibrator.vibrate(android.os.VibrationEffect.createOneShot(35, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+        else @Suppress("DEPRECATION") vibrator.vibrate(35)
+    }
+}
+
 /** The window's brightness 0–1, starting from the system's own level. */
 private fun brightnessOf(activity: android.app.Activity): Float {
     val own = activity.window.attributes.screenBrightness
@@ -265,7 +282,6 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val activity = LocalActivity.current
-    val haptics = LocalHapticFeedback.current
     val ready by engine.ready.collectAsState()
     // A State, not a value: read where it is shown, so a tick does not recompose the player.
     val progressState = engine.progress.collectAsState()
@@ -706,7 +722,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                     // Double speed until the finger lifts.
                     boosting = true
                     view.value?.setRate(HOLD_RATE)
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    buzz(context)
                     do {
                         val e = awaitPointerEvent()
                     } while (e.changes.any { it.pressed })
@@ -966,7 +982,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
             }
         }
 
-        AnimatedVisibility(info && !waiting, Modifier.align(Alignment.TopStart).windowInsetsPadding(WindowInsets.safeDrawing).padding(start = 16.dp, top = if (controls) 64.dp else 16.dp), enter = fadeIn(), exit = fadeOut()) {
+        AnimatedVisibility(info && !waiting, Modifier.align(Alignment.TopStart).windowInsetsPadding(WindowInsets.safeDrawing).padding(start = if (controls) 64.dp else 16.dp, top = if (controls) 64.dp else 16.dp), enter = fadeIn(), exit = fadeOut()) {
             StatsPanel(stats, progressState.value, file)
         }
 
@@ -1252,61 +1268,42 @@ private fun SeekBar(at: () -> Double, playing: () -> Double, duration: Double, s
 }
 
 /**
- * A skip, felt: a badge on the side it went that spins its arrow, a ring pulsing out
- * behind it, and the running total — taps in a row add up.
+ * The double-tap as YouTube shows it, and as the Expo build did: half the picture darkened
+ * in a shape bulging in from the edge that was tapped, two overlapped chevrons, and the
+ * running total ("40 seconds" for four taps). Full strength while the taps keep coming,
+ * then it fades.
  */
 @Composable
 private fun SeekFlash(flash: Flash?) {
     var last by remember { mutableStateOf(flash) }
-    var visible by remember { mutableStateOf(false) }
-    val spin = remember { Animatable(0f) }
-    val pulse = remember { Animatable(0f) }
+    val strength = remember { Animatable(0f) }
     LaunchedEffect(flash?.id) {
         val f = flash ?: return@LaunchedEffect
         last = f
-        visible = true
-        launch { spin.animateTo(spin.value + if (f.seconds < 0) -360f else 360f, tween(520, easing = FastOutSlowInEasing)) }
-        launch {
-            pulse.snapTo(0f)
-            pulse.animateTo(1f, tween(650, easing = LinearOutSlowInEasing))
-        }
-        delay(950)
-        visible = false
+        strength.snapTo(1f)
+        delay(300)
+        strength.animateTo(0f, tween(350))
     }
     val f = last ?: return
+    if (strength.value <= 0f) return
     val forward = f.seconds >= 0
-    Box(Modifier.fillMaxSize().padding(horizontal = 72.dp), contentAlignment = if (forward) Alignment.CenterEnd else Alignment.CenterStart) {
-        AnimatedVisibility(
-            visible,
-            enter = fadeIn(tween(120)) + scaleIn(spring(dampingRatio = 0.55f, stiffness = 700f), 0.6f),
-            exit = fadeOut(tween(320)) + scaleOut(tween(320), 1.12f),
+    val chevron = if (forward) L.drawable.lucide_ic_chevron_right else L.drawable.lucide_ic_chevron_left
+    Box(Modifier.fillMaxSize().graphicsLayer { alpha = strength.value }) {
+        Column(
+            Modifier.align(if (forward) Alignment.CenterEnd else Alignment.CenterStart).fillMaxHeight().fillMaxWidth(0.5f)
+                // The outer edge flush with the screen, the inner one round.
+                .clip(if (forward) RoundedCornerShape(topStartPercent = 50, bottomStartPercent = 50) else RoundedCornerShape(topEndPercent = 50, bottomEndPercent = 50))
+                // Darkens rather than washes out: a white veil vanishes over a bright scene.
+                .background(Color(0x73000000)),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(Modifier.size(110.dp), contentAlignment = Alignment.Center) {
-                    Box(
-                        Modifier.size(80.dp).graphicsLayer {
-                            val s = 1f + 0.45f * pulse.value
-                            scaleX = s
-                            scaleY = s
-                            alpha = 0.55f * (1f - pulse.value)
-                        }.border(2.dp, Color.White, CircleShape),
-                    )
-                    Box(Modifier.size(80.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)), contentAlignment = Alignment.Center) {
-                        Lc(
-                            if (forward) L.drawable.lucide_ic_rotate_cw else L.drawable.lucide_ic_rotate_ccw,
-                            Modifier.graphicsLayer { rotationZ = spin.value },
-                            tint = Color.White,
-                            size = 44.dp,
-                        )
-                        Text("${abs(f.seconds)}", style = Type.meta.copy(color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp))
-                    }
-                }
-                Text(
-                    "${if (forward) "+" else "−"}${abs(f.seconds)} seconds",
-                    Modifier.clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)).padding(horizontal = 12.dp, vertical = 4.dp),
-                    style = Type.meta.copy(color = Color.White, fontWeight = FontWeight.SemiBold),
-                )
+            // Overlapped, so the two read as one arrowhead.
+            Row {
+                Lc(chevron, tint = Color.White, size = 22.dp)
+                Lc(chevron, Modifier.offset(x = (-10).dp), tint = Color.White, size = 22.dp)
             }
+            Text("${abs(f.seconds)} seconds", Modifier.padding(top = 2.dp), style = Type.meta.copy(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium))
         }
     }
 }
@@ -1560,7 +1557,9 @@ private fun StatsPanel(s: Stats?, progress: Progress?, file: TorrentFile?) {
             add("Player" to s.engine)
             add("Video" to listOfNotNull(s.videoCodec, if (s.width > 0) "${s.width}×${s.height}" else null, if (s.fps > 0) "%.3f fps".format(s.fps).replace(".000", "") else null).joinToString("  ·  ").ifEmpty { "—" })
             add("Audio" to listOfNotNull(s.audioCodec, if (s.channels > 0) "${s.channels} ch" else null, if (s.sampleRate > 0) "${s.sampleRate / 1000} kHz" else null, s.language).joinToString("  ·  ").ifEmpty { "—" })
-            add("Bitrate" to "${mbps(s.contentKbps)} video  ·  ${mbps(s.inputKbps)} arriving")
+            // "Arriving" is the swarm's rate: the player's own input is reads from the phone's
+            // loopback server, which run far faster than the torrent and said nothing about it.
+            add("Bitrate" to "${mbps(s.contentKbps)} video" + (progress?.let { "  ·  ${mbps(it.speed * 8 / 1000.0)} arriving" } ?: ""))
             add("Frames" to "${s.displayed} shown  ·  ${s.lostFrames} dropped")
             add("Buffer" to "${s.cacheMs / 1000} s" + if (s.lostBuffers > 0) "  ·  ${s.lostBuffers} audio gaps" else "")
         }
