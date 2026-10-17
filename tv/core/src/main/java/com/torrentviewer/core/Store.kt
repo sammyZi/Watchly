@@ -126,6 +126,8 @@ data class Settings(
     val playerScale: String = "Best fit",
     /** Stream by fetching the whole file rather than the next few minutes. */
     val wholeFile: Boolean = false,
+    /** "system", "light" or "dark" — the phone's page; the TV is always dark. */
+    val themeMode: String = "system",
 )
 
 /** Subtitle text; [size] is one of [SUB_SIZES]' keys. The Expo build's names and values. */
@@ -161,6 +163,7 @@ object SettingsStore {
         playbackRate = o.optDouble("playbackRate", 1.0).toFloat().takeIf { it in 0.25f..4f } ?: 1f,
         playerScale = o.optString("playerScale", "Best fit").ifBlank { "Best fit" },
         wholeFile = o.optBoolean("streamWholeFile", false),
+        themeMode = o.optString("themeMode").takeIf { it == "light" || it == "dark" } ?: "system",
     )
 
     /** Over what is stored, not instead of it: the TV and the phone each keep fields the other never reads. */
@@ -171,7 +174,7 @@ object SettingsStore {
             .put("cacheCapMb", next.cacheCapMb).put("genres", JSONArray(next.genres)).put("vlcPlayer", next.vlcPlayer)
             .put("subLang", next.subLang).put("audioLang", next.audioLang)
             .put("subSize", next.subtitles.size).put("subColor", if (next.subtitles.yellow) "yellow" else "white").put("subBackground", next.subtitles.box)
-            .put("playbackRate", next.playbackRate.toDouble()).put("playerScale", next.playerScale).put("streamWholeFile", next.wholeFile)
+            .put("playbackRate", next.playbackRate.toDouble()).put("playerScale", next.playerScale).put("streamWholeFile", next.wholeFile).put("themeMode", next.themeMode)
         Kv.setGlobal("settings", o.toString())
     }
 }

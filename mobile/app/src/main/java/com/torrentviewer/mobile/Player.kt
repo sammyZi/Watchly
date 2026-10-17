@@ -216,6 +216,12 @@ private fun delta(seconds: Double): String {
 @Composable
 fun PlayerScreen(watch: Watch) {
     Fullscreen()
+    // Over video the page is always dark, whatever the app's theme; it comes back on the way out.
+    DisposableEffect(Unit) {
+        val was = Ink.isDark
+        Ink.use(true)
+        onDispose { Ink.use(was) }
+    }
     // Survives the next episode starting: "pause in 30 minutes" means from when it was set.
     val sleep = remember { mutableIntStateOf(0) }
     val sleepEnds = remember { mutableLongStateOf(0L) }

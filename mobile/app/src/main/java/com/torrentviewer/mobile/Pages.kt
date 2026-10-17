@@ -461,6 +461,14 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
 
+        Section("Appearance", "Light or dark pages, or whichever the phone is set to. The player stays dark either way.") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("system" to "System", "light" to "Light", "dark" to "Dark").forEach { (mode, label) ->
+                    Chip(label, settings.themeMode == mode, onClick = { set(settings.copy(themeMode = mode)) })
+                }
+            }
+        }
+
         Section(
             "Storage for one film",
             "How much of a film may sit on this phone at once. When the cap is reached the stream restarts from where you are — a pause of a few seconds.",
@@ -727,7 +735,7 @@ private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, Strin
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             AVATARS.forEach { a ->
                 Tap({ icon = a }, Modifier.size(46.dp), CircleShape) {
-                    Box(Modifier.background(if (a == icon) Ink.accent else Ink.surface2), contentAlignment = Alignment.Center) { Lc(avatarIcon(a), tint = Color.White, size = 22.dp) }
+                    Box(Modifier.background(if (a == icon) Ink.accent else Ink.surface2), contentAlignment = Alignment.Center) { Lc(avatarIcon(a), tint = if (a == icon) Color.White else Ink.text, size = 22.dp) }
                 }
             }
         }

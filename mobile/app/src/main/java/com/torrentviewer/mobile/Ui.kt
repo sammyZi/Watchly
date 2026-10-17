@@ -127,20 +127,22 @@ fun Button(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, @D
         val bg by animateColorAsState(
             when {
                 primary -> if (pressed) Ink.accent.copy(alpha = 0.8f) else Ink.accent
-                else -> Color.White.copy(alpha = if (pressed) 0.24f else 0.14f)
+                // A tint of the text colour: grey on either page.
+                else -> Ink.text.copy(alpha = if (pressed) 0.22f else 0.12f)
             },
             Motion.effects(), label = "bg",
         )
+        val fg = if (primary) Color.White else Ink.text
         Row(
             Modifier.background(bg).height(46.dp).padding(horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
         ) {
             if (icon != null) {
-                Lc(icon, tint = Color.White, size = 18.dp)
+                Lc(icon, tint = fg, size = 18.dp)
                 Spacer(Modifier.width(10.dp))
             }
-            Text(label, style = Type.label.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(label, style = Type.label.copy(fontWeight = FontWeight.SemiBold, color = fg), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -151,8 +153,8 @@ fun Chip(label: String, on: Boolean, onClick: () -> Unit, modifier: Modifier = M
     Tap(onClick, modifier, CircleShape) { pressed ->
         val bg = when {
             on -> Ink.accent
-            pressed -> Color.White.copy(alpha = 0.2f)
-            else -> Color.White.copy(alpha = 0.1f)
+            pressed -> Ink.text.copy(alpha = 0.18f)
+            else -> Ink.text.copy(alpha = 0.08f)
         }
         val fg = if (on) Color.White else Ink.muted
         Row(Modifier.background(bg).height(36.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -204,9 +206,9 @@ fun Field(
     trailing: @Composable () -> Unit = {},
 ) {
     var focused by remember { mutableStateOf(false) }
-    val ring by animateColorAsState(if (focused) Color.White.copy(alpha = 0.7f) else Color.Transparent, Motion.effects(), label = "ring")
+    val ring by animateColorAsState(if (focused) Ink.text.copy(alpha = 0.7f) else Color.Transparent, Motion.effects(), label = "ring")
     Row(
-        modifier.height(50.dp).clip(RoundedCornerShape(8.dp)).background(Color.White.copy(alpha = if (focused) 0.14f else 0.09f)).border(1.5.dp, ring, RoundedCornerShape(8.dp)).padding(horizontal = 14.dp),
+        modifier.height(50.dp).clip(RoundedCornerShape(8.dp)).background(Ink.text.copy(alpha = if (focused) 0.12f else 0.07f)).border(1.5.dp, ring, RoundedCornerShape(8.dp)).padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         leading?.let {
@@ -253,7 +255,7 @@ fun <T> Sheet(
                     val on = option.value == selected
                     Tap({ onPick(option.value) }, Modifier.fillMaxWidth(), RoundedCornerShape(0.dp)) { pressed ->
                         Row(
-                            Modifier.background(if (pressed) Color.White.copy(alpha = 0.08f) else Color.Transparent).padding(horizontal = 20.dp, vertical = 13.dp),
+                            Modifier.background(if (pressed) Ink.text.copy(alpha = 0.08f) else Color.Transparent).padding(horizontal = 20.dp, vertical = 13.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Box(Modifier.size(22.dp)) { if (on) Lc(L.drawable.lucide_ic_check, tint = Ink.accent, size = 20.dp) }
@@ -330,8 +332,9 @@ fun LandscapeCard(art: String?, name: String, stamp: String? = null, progress: F
         Artwork(art, name, Modifier.fillMaxSize())
         Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().fillMaxHeight(0.6f).background(Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.8f))))
         Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = if (progress != null) 6.dp else 7.dp)) {
-            Text(name, style = Type.meta.copy(color = Ink.text, fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            stamp?.let { Text(it, style = Type.meta.copy(fontSize = 11.sp), maxLines = 1) }
+            // Over the artwork's dark fade: white on either page.
+            Text(name, style = Type.meta.copy(color = Color.White, fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            stamp?.let { Text(it, style = Type.meta.copy(fontSize = 11.sp, color = Color.White.copy(alpha = 0.75f)), maxLines = 1) }
             if (progress != null) {
                 Spacer(Modifier.height(5.dp))
                 ProgressLine(progress)
