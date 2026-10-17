@@ -61,6 +61,7 @@ import com.torrentviewer.core.Facts
 import com.torrentviewer.core.Health
 import com.torrentviewer.core.Hit
 import com.torrentviewer.core.History
+import com.torrentviewer.core.latestPerTitle
 import com.torrentviewer.core.Ink
 import com.torrentviewer.core.Lc
 import com.torrentviewer.core.Meta
@@ -233,7 +234,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                     Facts(title.copy(genres = title.genres.take(2)))
                     Spacer(Modifier.height(16.dp))
                     // Part-way through — whichever release or episode was last played — Resume leads, Start over under it.
-                    val last = remember(history, title.imdb) { history.filter { it.imdb == title.imdb }.maxByOrNull { it.at } }
+                    val last = remember(history, title.imdb) { latestPerTitle(history.filter { it.imdb == title.imdb }).firstOrNull() }
                     when {
                         last != null && last.ratio > 0.02 && last.ratio < 0.95 -> {
                             Button(

@@ -360,6 +360,22 @@ class LibTest {
         assertEquals(listOf("b", "d", "magnet:x"), latestPerTitle(items).map { it.uri })
     }
 
+    @Test fun anotherReleaseResumes() {
+        fun f(name: String) = listOf(StoredFile(0, name, 1, true, false, name))
+        val first = Item("a", "Film.720p", at = 1, imdb = "tt5", files = f("Film.720p.mkv"), lastFileIndex = 0, positions = mapOf(0 to 600.0), durations = mapOf(0 to 6000.0))
+        val second = Item("b", "Film.1080p", at = 2, imdb = "tt5")
+        // The newer release, opened and never started, does not hide the first.
+        assertEquals("a", latestPerTitle(listOf(first, second)).single().uri)
+        assertEquals(600.0 to 6000.0, carryOver(listOf(first, second), second, "Film.1080p.mkv"))
+        // A series carries only to the same episode.
+        val ep1 = Item("c", "Show.S01E01", at = 1, imdb = "tt6", files = f("Show.S01E01.mkv"), lastFileIndex = 0, positions = mapOf(0 to 300.0))
+        val pack = Item("d", "Show.S01", at = 2, imdb = "tt6")
+        assertEquals(300.0 to null, carryOver(listOf(ep1, pack), pack, "Show.S01E01.1080p.mkv"))
+        assertNull(carryOver(listOf(ep1, pack), pack, "Show.S01E02.mkv"))
+        // Watched through: start the new copy from the top.
+        assertNull(carryOver(listOf(first.copy(positions = mapOf(0 to 5900.0)), second), second, "Film.1080p.mkv"))
+    }
+
     @Test fun introWindow() {
         val intro = Intro(60.0, 150.0)
         assertFalse(intro.covers(57.0))

@@ -112,8 +112,20 @@ class Watch(val engine: TorrentStream) {
             return@launch
         }
         remember(fresh.uri, found, index)
+        val started = carried(fresh.uri, found, index)
         val size = found.files.find { it.index == index }?.size ?: 0
-        play(index, fresh.resumeRatio(index), bitrateOf(size, fresh.durations[index] ?: runtimeSeconds(from?.runtime)))
+        play(index, started.resumeRatio(index), bitrateOf(size, started.durations[index] ?: runtimeSeconds(from?.runtime)))
+    }
+
+    /** A release never played here takes the spot another release of the title was left at. */
+    private fun carried(uri: String, found: TorrentMeta, index: Int): Item {
+        val now = History.find(uri) ?: return item!!
+        if ((now.positions[index] ?: 0.0) > 0.0) return now
+        val name = found.files.find { it.index == index }?.name ?: return now
+        val (at, duration) = carryOver(History.items.value, now, name) ?: return now
+        History.setPosition(uri, index, at)
+        duration?.let { History.setDuration(uri, index, it) }
+        return (History.find(uri) ?: now).also { item = it }
     }
 
     /**
@@ -184,8 +196,9 @@ class Watch(val engine: TorrentStream) {
         item = target
         meta = found
         remember(target.uri, found, index)
+        val started = carried(target.uri, found, index)
         val size = found.files.find { it.index == index }?.size ?: 0
-        play(index, target.resumeRatio(index), bitrateOf(size, target.durations[index] ?: 0.0))
+        play(index, started.resumeRatio(index), bitrateOf(size, started.durations[index] ?: 0.0))
     }
 
     private fun play(index: Int, startRatio: Double, bitrate: Double) {
