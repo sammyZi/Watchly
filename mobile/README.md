@@ -30,8 +30,17 @@ Debug builds install beside the Expo app as **Watchly Next**
 Expo app's id and key, install over it and import its AsyncStorage once.
 Incoming peers on 6882, as before. Done so far: tabs (bottom bar upright, rail
 turned), Home hero and shelves, See all, search, title page (episodes, sources,
-My List, likes, trailer, reviews), library, settings, profiles, and a first
-player (Loading and "You're watching" screens, double-tap skip, resume).
+My List, likes, trailer, reviews), library, settings, profiles, and the
+player: the TV's Loading, "You're watching" and Up Next screens; audio and
+subtitle tracks with SubDL search; speed, picture fit, stats for nerds;
+double-tap skip, hold for 2×, brightness (left) and volume (right) swipes,
+lock; skip intro (marked once per show, the Expo build's `intros`); sleep
+timer; picture-in-picture (Mini player, and Home while playing); the next
+episode from the same torrent or, failing that, found online.
+
+Still to come: downloads, settings parity (Wi-Fi only, SD card, languages,
+subtitle style, backup), new-episode badges, Google Cast, open in another
+player, subtitle delay.
 
 ## Run (Expo)
 

@@ -418,6 +418,29 @@ object SavedStore {
     }
 }
 
+/* ---------------------------------------------------------------- intros */
+
+/** Where a show's opening titles sit, in seconds, marked once by the viewer. */
+data class Intro(val start: Double, val end: Double) {
+    /** Inside the intro, with a moment's lead so the button is up as it starts. */
+    fun covers(at: Double) = at >= start - 2 && at < end - 1
+}
+
+/**
+ * The Expo build's "intros" key: one window per show (imdb id, else its name).
+ * ponytail: a cold open that varies in length lands a little early or late; per-episode
+ * detection (audio fingerprinting) is the upgrade if that matters.
+ */
+object Intros {
+    private const val KEY = "intros"
+
+    private fun all(): JSONObject = runCatching { JSONObject(Kv.get(KEY) ?: "{}") }.getOrDefault(JSONObject())
+
+    fun get(show: String): Intro? = all().optJSONObject(show)?.let { Intro(it.optDouble("start"), it.optDouble("end")) }
+
+    fun set(show: String, intro: Intro) = Kv.set(KEY, all().put(show, JSONObject().put("start", intro.start).put("end", intro.end)).toString())
+}
+
 /* -------------------------------------------------------------- searches */
 
 object Searches {

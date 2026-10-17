@@ -298,4 +298,12 @@ class LibTest {
         assertEquals(listOf("tt2", "tt1", "tt3"), sortTitles(t, Sort.TITLE).map { it.imdb })
         assertEquals(t, sortTitles(t, Sort.POPULAR))
     }
+
+    @Test fun introWindow() {
+        val intro = Intro(60.0, 150.0)
+        assertFalse(intro.covers(57.0))
+        assertTrue(intro.covers(58.0))
+        assertTrue(intro.covers(148.9))
+        assertFalse(intro.covers(149.0))
+    }
 }
