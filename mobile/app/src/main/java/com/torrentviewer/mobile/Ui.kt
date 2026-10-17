@@ -17,7 +17,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.animation.core.animate
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.keyframes
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.Orientation
@@ -195,66 +196,33 @@ fun Action(
     on: Boolean? = null,
     onColor: Color = Ink.good,
 ) {
-    // Switched on: a disc of onColor springs in behind the icon, the icon turns white and
-    // spins up into place, and a ring of sparks flies out and fades. Switched off, the disc
-    // shrinks away and the icon settles back.
-    val disc = remember { Animatable(if (on == true) 1f else 0f) }
+    // Switched on: a disc of onColor springs in behind the icon, which dips and pops back
+    // white. Switched off, the disc shrinks away. Every value starts where the last frame
+    // left it — nothing snaps, so the first frame after a tap matches the one before.
+    val filled = on == true
+    val disc by animateFloatAsState(if (filled) 1f else 0f, if (filled) spring(dampingRatio = 0.55f, stiffness = 420f) else tween(180), label = "disc")
     val pop = remember { Animatable(1f) }
-    val spin = remember { Animatable(0f) }
-    val sparks = remember { Animatable(0f) }
     var seen by remember { mutableStateOf(on) }
     LaunchedEffect(on) {
-        // A title loading in sets the state too; only the viewer's own tap animates.
-        if (on == null || on == seen) {
-            if (on != null) disc.snapTo(if (on) 1f else 0f)
-            return@LaunchedEffect
-        }
+        // A title loading in sets the state too; only the viewer's own tap pops.
+        if (on == null || on == seen) return@LaunchedEffect
         seen = on
-        if (on) {
-            launch { disc.snapTo(0f); disc.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = 380f)) }
-            launch { pop.snapTo(0.4f); pop.animateTo(1f, spring(dampingRatio = 0.4f, stiffness = 420f)) }
-            launch { spin.snapTo(-120f); spin.animateTo(0f, spring(dampingRatio = 0.55f, stiffness = 300f)) }
-            launch { sparks.snapTo(0f); sparks.animateTo(1f, tween(620, easing = androidx.compose.animation.core.FastOutSlowInEasing)) }
-        } else {
-            launch { disc.animateTo(0f, tween(220)) }
-            launch { pop.snapTo(0.75f); pop.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = 500f)) }
-        }
+        pop.animateTo(1f, keyframes { durationMillis = 360; 0.72f at 100; 1.15f at 230; 1f at 360 })
     }
-    val filled = on == true
     Tap(onClick, modifier) {
         Column(Modifier.padding(vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
-                if (sparks.value in 0.001f..0.999f) {
-                    androidx.compose.foundation.Canvas(Modifier.size(64.dp)) {
-                        val t = sparks.value
-                        val r = size.minDimension / 2 * (0.35f + 0.65f * t)
-                        for (i in 0 until 8) {
-                            val a = Math.toRadians(i * 45.0 + 22.5).toFloat()
-                            val dot = (3.5f * (1f - t) + 1f).dp.toPx()
-                            drawCircle(
-                                if (i % 2 == 0) onColor else Ink.imdb,
-                                radius = dot,
-                                center = Offset(center.x + r * kotlin.math.cos(a), center.y + r * kotlin.math.sin(a)),
-                                alpha = 1f - t,
-                            )
-                        }
-                    }
-                }
-                // The disc: overshoots a little on the way in.
                 Box(
                     Modifier.size(36.dp).graphicsLayer {
-                        scaleX = disc.value
-                        scaleY = disc.value
-                        alpha = disc.value.coerceIn(0f, 1f)
+                        scaleX = disc
+                        scaleY = disc
+                        alpha = disc.coerceIn(0f, 1f)
                     }.clip(CircleShape).background(onColor),
                 )
-                Crossfade(icon, label = "icon") { shown ->
-                    Lc(shown, Modifier.graphicsLayer {
-                        scaleX = pop.value
-                        scaleY = pop.value
-                        rotationZ = spin.value
-                    }, tint = if (filled) Color.White else tint, size = 22.dp)
-                }
+                Lc(icon, Modifier.graphicsLayer {
+                    scaleX = pop.value
+                    scaleY = pop.value
+                }, tint = lerp(tint, Color.White, disc.coerceIn(0f, 1f)), size = 22.dp)
             }
             Text(label, Modifier.padding(top = 4.dp), style = Type.meta.copy(fontSize = 12.sp, color = if (filled) onColor else Ink.muted, fontWeight = if (filled) FontWeight.SemiBold else FontWeight.Medium), maxLines = 1)
         }
