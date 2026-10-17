@@ -229,6 +229,43 @@ fun toTitles(metas: JSONArray, kind: String, withEpisodes: Boolean = false): Lis
     }
 }
 
+/* ---------------------------------------------------------- cast, awards */
+
+private val photos = ConcurrentHashMap<String, String>()
+
+/**
+ * An actor's photo, by name. Cinemeta lists the cast without pictures; IMDb's public
+ * search suggestions carry one, keyless. Of everyone with the name, the best-known with a
+ * picture — "Simon Baker" the actor, not the camera operator. Null when there is none.
+ */
+suspend fun castPhoto(name: String): String? {
+    photos[name]?.let { return it.ifEmpty { null } }
+    val found = runCatching {
+        photoFrom(JSONObject(Net.get("https://v3.sg.media-imdb.com/suggestion/x/${enc(name.lowercase())}.json", quiet = true)))
+    }.getOrNull()
+    photos[name] = found.orEmpty()
+    return found
+}
+
+/** The most popular person (lowest rank) in a suggestion answer who has a picture, sized for a small avatar. */
+fun photoFrom(answer: JSONObject): String? = answer.optJSONArray("d")?.objects().orEmpty()
+    .filter { it.optString("id").startsWith("nm") && it.optJSONObject("i")?.str("imageUrl") != null }
+    .minByOrNull { it.optInt("rank", Int.MAX_VALUE) }
+    ?.optJSONObject("i")?.str("imageUrl")
+    // Amazon's image server scales on request: a 300px-tall copy, not the full-size original.
+    ?.replace(Regex("\\._V1_.*\\.jpg$"), "._V1_UY300_.jpg")
+
+/** "Won 2 Oscars. 120 wins & 200 nominations total" — the headline, and the two counts. */
+data class Awards(val headline: String?, val wins: Int?, val nominations: Int?)
+
+fun awardsOf(text: String): Awards {
+    val wins = Regex("(\\d+) wins?", RegexOption.IGNORE_CASE).find(text)?.groupValues?.get(1)?.toIntOrNull()
+    val noms = Regex("(\\d+) nominations?", RegexOption.IGNORE_CASE).find(text)?.groupValues?.get(1)?.toIntOrNull()
+    // The headline is the sentence about a named prize, not the tally.
+    val headline = text.split('.').map { it.trim() }.firstOrNull { it.isNotEmpty() && !Regex("^\\d+ (wins?|nominations?)", RegexOption.IGNORE_CASE).containsMatchIn(it) }
+    return Awards(headline, wins, noms)
+}
+
 /** Two shapes in the wild: `trailerStreams` on newer records, `trailers` (with clips mixed in) on older ones. */
 fun trailerOf(m: JSONObject): String? = m.str("trailer")
     ?: m.optJSONArray("trailerStreams")?.objects()?.firstNotNullOfOrNull { it.str("ytId") }

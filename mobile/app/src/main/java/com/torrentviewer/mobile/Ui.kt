@@ -16,6 +16,18 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.animation.core.animate
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Velocity
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -283,6 +295,38 @@ fun BottomSheet(title: String, onDismiss: () -> Unit, content: @Composable () ->
     var shown by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { shown = true }
     val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.8f).dp
+
+    // Pulled down — by the handle, or by a list already at its top — it follows the finger,
+    // and let go far enough down it closes; short of that it springs back.
+    val scope = rememberCoroutineScope()
+    var offset by remember { mutableFloatStateOf(0f) }
+    val closeAt = with(LocalDensity.current) { 110.dp.toPx() }
+    fun settle() {
+        if (offset > closeAt) onDismiss() else scope.launch { animate(offset, 0f) { v, _ -> offset = v } }
+    }
+    val pull = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (available.y >= 0 || offset <= 0f) return Offset.Zero
+                val used = maxOf(available.y, -offset)
+                offset += used
+                return Offset(0f, used)
+            }
+
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (available.y <= 0 || source != NestedScrollSource.UserInput) return Offset.Zero
+                offset += available.y
+                return Offset(0f, available.y)
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (offset <= 0f) return Velocity.Zero
+                settle()
+                return available
+            }
+        }
+    }
+
     Box(
         Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)).clickable(remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
         contentAlignment = Alignment.BottomCenter,
@@ -290,13 +334,23 @@ fun BottomSheet(title: String, onDismiss: () -> Unit, content: @Composable () ->
         AnimatedVisibility(shown, enter = slideInVertically(Motion.spatial()) { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
             Column(
                 Modifier.widthIn(max = 600.dp).fillMaxWidth().heightIn(max = maxHeight)
+                    .graphicsLayer { translationY = offset }
+                    .nestedScroll(pull)
                     .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)).background(Ink.surface)
                     // Taps on the sheet stay on the sheet.
                     .clickable(remember { MutableInteractionSource() }, indication = null) {}
                     .navigationBarsPadding().padding(bottom = 10.dp),
             ) {
-                Box(Modifier.align(Alignment.CenterHorizontally).padding(top = 10.dp).size(36.dp, 4.dp).clip(CircleShape).background(Ink.stroke))
-                Text(title, Modifier.padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 8.dp), style = Type.title.copy(fontWeight = FontWeight.Bold), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Column(
+                    Modifier.fillMaxWidth().draggable(
+                        rememberDraggableState { d -> offset = (offset + d).coerceAtLeast(0f) },
+                        Orientation.Vertical,
+                        onDragStopped = { settle() },
+                    ),
+                ) {
+                    Box(Modifier.align(Alignment.CenterHorizontally).padding(top = 10.dp).size(36.dp, 4.dp).clip(CircleShape).background(Ink.stroke))
+                    Text(title, Modifier.padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 8.dp), style = Type.title.copy(fontWeight = FontWeight.Bold), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
                 content()
             }
         }
