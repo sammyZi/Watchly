@@ -338,8 +338,33 @@ data class Item(
  */
 val Item.titleKey: String get() = imdb ?: titleName?.substringBefore(" · ")?.lowercase() ?: uri
 
-/** The most recent entry of each title, newest first — one card per film or show, wherever it was played from. */
-fun latestPerTitle(items: List<Item>): List<Item> = items.sortedByDescending { it.at }.distinctBy { it.titleKey }
+/**
+ * One entry per title, newest first — one card per film or show, wherever it was played from.
+ * Of a title's entries, the newest that was actually started: a second release opened and
+ * closed at once must not hide where the first one was left.
+ */
+fun latestPerTitle(items: List<Item>): List<Item> =
+    items.sortedByDescending { it.at }.groupBy { it.titleKey }.values
+        .map { group -> group.firstOrNull { it.ratio > 0.0 } ?: group.first() }
+        .sortedByDescending { it.at }
+
+/**
+ * Where to start [fileName] of [target] when this release has never been played: the spot
+ * another release of the same title (and, for a series, the same episode) was left, in
+ * seconds, with that release's duration. By time, not bytes — releases differ in size.
+ */
+fun carryOver(items: List<Item>, target: Item, fileName: String): Pair<Double, Double?>? {
+    val ep = parseEpisode(fileName)
+    val donor = items.filter { it.uri != target.uri && it.titleKey == target.titleKey }.sortedByDescending { it.at }.firstOrNull { d ->
+        val i = d.lastFileIndex ?: return@firstOrNull false
+        (d.positions[i] ?: 0.0) > 0.0 && d.files?.find { it.index == i }?.name?.let(::parseEpisode) == ep
+    } ?: return null
+    val i = donor.lastFileIndex!!
+    val duration = donor.durations[i]
+    // Watched through is not a place to start a new copy from.
+    if (duration != null && donor.positions[i]!! >= duration * 0.95) return null
+    return donor.positions[i]!! to duration
+}
 
 /** Prefer a real http(s) URL over a missing or local one. */
 fun remoteArt(vararg urls: String?): String? = urls.firstOrNull { it != null && Regex("^https?://", RegexOption.IGNORE_CASE).containsMatchIn(it) }
