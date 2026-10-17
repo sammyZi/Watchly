@@ -33,6 +33,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -45,7 +47,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.layout.size
+import com.torrentviewer.core.awardsOf
+import com.torrentviewer.core.castPhoto
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.torrentviewer.core.Artwork
@@ -83,6 +89,9 @@ import com.composables.icons.lucide.R as L
 
 /** The exact strings quality() returns, best first. */
 private val QUALITY_ORDER = listOf("4K", "1080p", "720p", "CAM")
+
+/** Episodes listed before "Show all". */
+private const val FIRST_EPISODES = 10
 
 /** Past this the list is noise; the best are at the top. */
 private const val MAX_SOURCES = 60
@@ -123,6 +132,8 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
     var sheet by remember { mutableStateOf(false) }
     var reviews by remember { mutableStateOf(false) }
     var expanded by remember(title.imdb) { mutableStateOf(false) }
+    var allEpisodes by remember(title.imdb, season) { mutableStateOf(false) }
+    val list = rememberLazyListState()
 
     fun findSources(ep: Episode?): Deferred<List<Hit>> {
         val mine = ++ticket
@@ -191,7 +202,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
     Box(Modifier.fillMaxSize()) {
         if (wide) Artwork(title.wide, title.title, Modifier.align(Alignment.TopEnd).fillMaxWidth(0.7f).fillMaxHeight(0.9f).heroScrims(), fill = false)
 
-        LazyColumn(state = rememberLazyListState(), contentPadding = PaddingValues(bottom = 32.dp), modifier = Modifier.fillMaxSize()) {
+        LazyColumn(state = list, contentPadding = PaddingValues(bottom = 32.dp), modifier = Modifier.fillMaxSize()) {
             item(key = "head") {
                 if (!wide) {
                     Box(Modifier.fillMaxWidth().aspectRatio(16f / 11f)) {
@@ -232,9 +243,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                             Text(plot,style = Type.body.copy(color = Ink.text.copy(alpha = 0.85f)), maxLines = if (expanded) Int.MAX_VALUE else 4, overflow = TextOverflow.Ellipsis)
                         }
                     }
-                    if (title.cast.isNotEmpty()) People("Starring", title.cast.take(4).joinToString(", "))
                     if (title.directors.isNotEmpty()) People(if (title.isSeries) "Creators" else "Director", title.directors.take(2).joinToString(", "))
-                    title.awards?.let { People("Awards", it) }
                     // However many actions there are, they share the width evenly.
                     Row(Modifier.fillMaxWidth().padding(top = 14.dp)) {
                         val share = Modifier.weight(1f)
@@ -246,6 +255,8 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                         title.trailer?.let { id -> Action(L.drawable.lucide_ic_film, "Trailer", { openUrl(context, "https://www.youtube.com/watch?v=$id") }, modifier = share) }
                         Action(L.drawable.lucide_ic_message_square_text, "Reviews", { reviews = true }, modifier = share)
                     }
+                    if (title.cast.isNotEmpty()) CastRow(title.cast)
+                    title.awards?.let { AwardsCard(it) }
                 }
             }
 
@@ -275,7 +286,8 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                         }
                     }
                 }
-                items(episodes, key = { "ep-" + it.id }) { ep ->
+                // Ten at a time: a long season is a wall of rows otherwise.
+                items(if (allEpisodes) episodes else episodes.take(FIRST_EPISODES), key = { "ep-" + it.id }) { ep ->
                     EpisodeRow(
                         ep,
                         fallback = title.wide,
@@ -290,11 +302,28 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                         onDownload = { downloadEpisode(ep) },
                     )
                 }
+                if (!allEpisodes && episodes.size > FIRST_EPISODES) item(key = "all-episodes") {
+                    Button(
+                        "Show all ${episodes.size} episodes",
+                        { allEpisodes = true },
+                        Modifier.padding(horizontal = EDGE, vertical = 8.dp).fillMaxWidth().widthIn(max = 720.dp),
+                        icon = L.drawable.lucide_ic_list_video,
+                    )
+                }
             } else {
                 sources(title, episode, hits, shown, busy, quality, { quality = it }, Modifier.widthIn(max = 720.dp), onDownload = { keep(it, null) }) { hit -> watch.stream(hit, title) }
             }
         }
-        BackButton(onBack)
+        // Over the art, a round back button; once the page scrolls under it, a solid bar with the name.
+        val scrolled by remember { derivedStateOf { list.firstVisibleItemIndex > 0 || list.firstVisibleItemScrollOffset > 420 } }
+        if (scrolled) {
+            Row(Modifier.fillMaxWidth().background(Ink.bg).statusBarsPadding().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                RoundIcon(L.drawable.lucide_ic_arrow_left, onBack)
+                Text(title.title, Modifier.padding(start = 12.dp), style = Type.title.copy(fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        } else {
+            BackButton(onBack)
+        }
     }
 
     // An episode's releases come up over the page, rather than at the foot of a long list.
@@ -375,6 +404,54 @@ private fun People(label: String, value: String) {
     }
 }
 
+/** The cast as faces: a round photo over each name, scrolled sideways. Photos arrive one by one; initials until they do. */
+@Composable
+private fun CastRow(names: List<String>) {
+    Column(Modifier.padding(top = 18.dp)) {
+        Text("Cast", Modifier.padding(bottom = 10.dp), style = Type.title.copy(fontSize = 16.sp, fontWeight = FontWeight.Bold))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            items(names.take(12)) { name ->
+                val photo by produceState<String?>(null, name) { value = castPhoto(name) }
+                Column(Modifier.width(72.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(Modifier.size(64.dp).clip(CircleShape).background(Ink.surface2), contentAlignment = Alignment.Center) {
+                        Text(name.split(' ').mapNotNull { it.firstOrNull()?.uppercase() }.take(2).joinToString(""), style = Type.label.copy(fontWeight = FontWeight.Bold, color = Ink.muted))
+                        photo?.let { Artwork(it, name, Modifier.fillMaxSize(), fill = false) }
+                    }
+                    Text(name, Modifier.padding(top = 6.dp), style = Type.meta.copy(fontSize = 12.sp, color = Ink.text, textAlign = TextAlign.Center), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+/** Awards as a card: a trophy, the headline prize, and the tally as two pills. */
+@Composable
+private fun AwardsCard(text: String) {
+    val a = remember(text) { awardsOf(text) }
+    Row(
+        Modifier.padding(top = 18.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Ink.surface).padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(42.dp).clip(CircleShape).background(Ink.imdb.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
+            Lc(L.drawable.lucide_ic_trophy, tint = Ink.imdb, size = 22.dp)
+        }
+        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+            Text(a.headline ?: if (a.wins == null && a.nominations == null) text else "Awards", style = Type.label.copy(fontWeight = FontWeight.SemiBold), maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (a.wins != null || a.nominations != null) {
+                Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    a.wins?.let { Pill("$it ${if (it == 1) "win" else "wins"}", Ink.imdb) }
+                    a.nominations?.let { Pill("$it ${if (it == 1) "nomination" else "nominations"}", Ink.muted) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Pill(text: String, tint: Color) {
+    Text(text, Modifier.clip(CircleShape).background(tint.copy(alpha = 0.14f)).padding(horizontal = 10.dp, vertical = 3.dp), style = Type.meta.copy(fontSize = 12.sp, color = tint, fontWeight = FontWeight.SemiBold))
+}
+
 /** Netflix's phone episode row: still on the left, number and name beside it, the synopsis under both. */
 @Composable
 private fun EpisodeRow(ep: Episode, fallback: String?, busy: Boolean, selected: Boolean, modifier: Modifier, onPlay: () -> Unit, onSources: () -> Unit, onDownload: () -> Unit) {
@@ -398,7 +475,7 @@ private fun EpisodeRow(ep: Episode, fallback: String?, busy: Boolean, selected: 
             Tap(onSources, shape = CircleShape) { Lc(L.drawable.lucide_ic_list_video, Modifier.padding(10.dp), tint = Ink.muted, size = 22.dp) }
             Tap(onDownload, shape = CircleShape) { Lc(L.drawable.lucide_ic_download, Modifier.padding(10.dp), tint = Ink.muted, size = 22.dp) }
         }
-        ep.overview?.let { Text(it, Modifier.padding(top = 8.dp), style = Type.meta.copy(color = Ink.faint), maxLines = 3, overflow = TextOverflow.Ellipsis) }
+        ep.overview?.let { Text(it, Modifier.padding(top = 6.dp), style = Type.meta.copy(color = Ink.faint, fontSize = 12.sp), maxLines = 2, overflow = TextOverflow.Ellipsis) }
     }
 }
 

@@ -335,6 +335,20 @@ class LibTest {
         assertFalse(isLocalVideo("magnet:?xt=urn:btih:abc&dn=a.mkv"))
     }
 
+    @Test fun castAndAwards() {
+        val answer = JSONObject(
+            """{"d":[{"i":{"imageUrl":"https://m.media-amazon.com/images/M/b._V1_.jpg"},"id":"nm2","rank":40626},
+               {"i":{"imageUrl":"https://m.media-amazon.com/images/M/a._V1_.jpg"},"id":"nm1","rank":208},
+               {"id":"nm3","rank":5},{"i":{"imageUrl":"https://x/t.jpg"},"id":"tt9","rank":1}]}""",
+        )
+        assertEquals("https://m.media-amazon.com/images/M/a._V1_UY300_.jpg", photoFrom(answer))
+        assertNull(photoFrom(JSONObject("""{"d":[{"id":"nm3","rank":5}]}""")))
+
+        assertEquals(Awards("Nominated for 1 Primetime Emmy", 4, 16), awardsOf("Nominated for 1 Primetime Emmy. 4 wins & 16 nominations total"))
+        assertEquals(Awards("Won 2 Oscars", 120, 200), awardsOf("Won 2 Oscars. 120 wins & 200 nominations total"))
+        assertEquals(Awards(null, 1, 3), awardsOf("1 win & 3 nominations"))
+    }
+
     @Test fun introWindow() {
         val intro = Intro(60.0, 150.0)
         assertFalse(intro.covers(57.0))
