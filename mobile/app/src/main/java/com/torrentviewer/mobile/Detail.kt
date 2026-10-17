@@ -278,8 +278,9 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                     // However many actions there are, they share the width evenly.
                     Row(Modifier.fillMaxWidth().padding(top = 14.dp)) {
                         val share = Modifier.weight(1f)
-                        Action(if (inList) L.drawable.lucide_ic_check else L.drawable.lucide_ic_plus, "My List", { SavedStore.toggle(title) }, modifier = share, on = inList)
-                        Action(L.drawable.lucide_ic_heart, if (liked) "Liked" else "Like", { SavedStore.toggle(title, "favorite") }, tint = if (liked) Ink.accent else Ink.text, modifier = share, on = liked)
+                        // Green tick for My List, red heart for Like — each fills its disc when on.
+                        Action(if (inList) L.drawable.lucide_ic_check else L.drawable.lucide_ic_plus, if (inList) "In My List" else "My List", { SavedStore.toggle(title) }, modifier = share, on = inList, onColor = Ink.good)
+                        Action(L.drawable.lucide_ic_heart, if (liked) "Liked" else "Like", { SavedStore.toggle(title, "favorite") }, modifier = share, on = liked, onColor = Ink.accent)
                         if (!title.isSeries) Action(L.drawable.lucide_ic_download, "Download", {
                             shown.firstOrNull()?.let { keep(it, null) } ?: watch.notes.tryEmit(if (busy) "Still finding sources…" else "No sources to download.")
                         }, modifier = share)
