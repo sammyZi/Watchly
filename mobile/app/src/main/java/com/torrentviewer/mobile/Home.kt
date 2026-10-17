@@ -184,6 +184,7 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
     val heroes = shelves.firstNotNullOfOrNull { state.loaded[it.key]?.takeIf { l -> l.isNotEmpty() } }.orEmpty().take(HEROES)
     SideEffect { state.heroCount = heroes.size }
     var menu by remember { mutableStateOf<Item?>(null) }
+    var releases by remember { mutableStateOf<List<Item>?>(null) }
     // A title shows once, in the first row it lands in: genre rows overlap, and the week's
     // big film otherwise led half the page. "See all" still lists a shelf in full.
     val seen = HashSet<String>()
@@ -200,7 +201,11 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
                 Rail("Continue Watching") {
                     LazyRow(state = state.row("resume"), contentPadding = PaddingValues(horizontal = EDGE), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         items(resumable, key = { it.uri }) { item ->
-                            Tap({ watch.resume(item) }, Modifier.width(posterWidth()).aspectRatio(2f / 3f), RoundedCornerShape(6.dp), onLongClick = { menu = item }) {
+                            Tap({
+                                // Played from more than one release: ask which, each resuming where it was left.
+                                val all = history.filter { it.titleKey == item.titleKey }.sortedByDescending { it.at }
+                                if (all.size > 1) releases = all else watch.resume(item)
+                            }, Modifier.width(posterWidth()).aspectRatio(2f / 3f), RoundedCornerShape(6.dp), onLongClick = { menu = item }) {
                                 LandscapeCard(remoteArt(item.poster) ?: item.art(), item.label, resumeStamp(item), item.ratio.toFloat())
                             }
                         }
@@ -265,6 +270,19 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
                 }
             },
             onDismiss = { menu = null },
+        )
+    }
+
+    releases?.let { all ->
+        Sheet(
+            title = all.first().label,
+            options = all.map { Option(it.uri, it.torrentName ?: it.title, resumeStamp(it) ?: "Not started") },
+            selected = latestPerTitle(all).first().uri,
+            onPick = { uri ->
+                releases = null
+                all.find { it.uri == uri }?.let { watch.resume(it) }
+            },
+            onDismiss = { releases = null },
         )
     }
 }
