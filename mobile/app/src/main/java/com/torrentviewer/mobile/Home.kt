@@ -71,6 +71,8 @@ import com.torrentviewer.core.Watch
 import com.torrentviewer.core.heroScrims
 import com.torrentviewer.core.kindOfGenre
 import com.torrentviewer.core.left
+import com.torrentviewer.core.latestPerTitle
+import com.torrentviewer.core.titleKey
 import com.torrentviewer.core.parseEpisode
 import com.torrentviewer.core.remoteArt
 import kotlinx.coroutines.delay
@@ -176,7 +178,8 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
         }
     }
 
-    val resumable = history.filter(::inProgress).take(10)
+    // One card per title — its latest episode or release — and only if that one is part-watched.
+    val resumable = latestPerTitle(history).filter(::inProgress).take(10)
     val watchlist = saved.filter { it.list == "later" }.map { it.asTitle() }
     val heroes = shelves.firstNotNullOfOrNull { state.loaded[it.key]?.takeIf { l -> l.isNotEmpty() } }.orEmpty().take(HEROES)
     SideEffect { state.heroCount = heroes.size }
@@ -258,7 +261,7 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
                 menu = null
                 when (it) {
                     "info" -> item.imdb?.let { id -> onOpen(Title(id, item.kind ?: "movie", item.titleName?.substringBefore(" · ") ?: item.title, poster = item.poster, backdrop = item.backdrop)) }
-                    "remove" -> History.drop(item.uri, watch.engine)
+                    "remove" -> History.dropTitle(item.titleKey, watch.engine)
                 }
             },
             onDismiss = { menu = null },

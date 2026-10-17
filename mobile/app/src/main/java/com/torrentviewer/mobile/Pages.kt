@@ -7,6 +7,13 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
 import com.torrentviewer.core.Backup
+import androidx.compose.ui.unit.sp
+import com.torrentviewer.core.Artwork
+import com.torrentviewer.core.ProgressLine
+import com.torrentviewer.core.latestPerTitle
+import com.torrentviewer.core.left
+import com.torrentviewer.core.remoteArt
+import com.torrentviewer.core.titleKey
 import com.torrentviewer.core.LANGS
 import com.torrentviewer.core.Phase
 import com.torrentviewer.core.SUB_SIZES
@@ -337,11 +344,13 @@ fun LibraryScreen(watch: Watch, onOpen: (Title) -> Unit) {
     var shelf by rememberSaveable { mutableStateOf(Shelfs.HISTORY) }
     var menu by remember { mutableStateOf<Item?>(null) }
     var clearing by remember { mutableStateOf(false) }
-    val items = history.sortedByDescending { it.at }
+    // One row per title, however many torrents it was played from: its latest one.
+    val items = latestPerTitle(history)
+    val sources = history.groupingBy { it.titleKey }.eachCount()
     val listed = saved.filter { it.list == if (shelf == Shelfs.FAVORITE) "favorite" else "later" }.map { it.asTitle() }
 
     LazyVerticalGrid(
-        if (shelf == Shelfs.HISTORY) GridCells.Adaptive(cardWidth()) else POSTER,
+        if (shelf == Shelfs.HISTORY) GridCells.Adaptive(340.dp) else POSTER,
         state = rememberLazyGridState(),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp),
@@ -362,16 +371,8 @@ fun LibraryScreen(watch: Watch, onOpen: (Title) -> Unit) {
         }
         if (shelf == Shelfs.HISTORY) {
             if (items.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) { Note("Nothing here yet. Anything you play turns up in this list.", Modifier.padding(top = 16.dp)) }
-            items(items, key = { it.uri }) { item ->
-                val ep = item.lastFileIndex?.let { i -> item.files?.find { it.index == i } }?.let { parseEpisode(it.name) }
-                Tap({ watch.resume(item) }, Modifier.fillMaxWidth().aspectRatio(16f / 9f), RoundedCornerShape(6.dp), onLongClick = { menu = item }) {
-                    LandscapeCard(
-                        item.art(),
-                        item.label,
-                        listOfNotNull(ep?.let { "S${it.season}:E${it.episode}" }, ago(item.at)).joinToString("  ·  "),
-                        item.ratio.toFloat().takeIf { it > 0f },
-                    )
-                }
+            items(items, key = { it.titleKey }) { item ->
+                HistoryRow(item, sources[item.titleKey] ?: 1, onPlay = { watch.resume(item) }, onMore = { menu = item })
             }
         } else {
             if (listed.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
@@ -382,13 +383,22 @@ fun LibraryScreen(watch: Watch, onOpen: (Title) -> Unit) {
     }
 
     menu?.let { item ->
+        val name = item.titleName?.substringBefore(" · ") ?: item.label
         Sheet(
-            title = item.label,
-            options = listOf(Option(true, "Remove from Library")),
+            title = name,
+            options = listOfNotNull(
+                Option("play", "Resume"),
+                item.imdb?.let { Option("info", "Details") },
+                Option("remove", "Remove from Library", if ((sources[item.titleKey] ?: 1) > 1) "With every release it was played from" else null),
+            ),
             selected = null,
             onPick = {
-                History.drop(item.uri, watch.engine)
                 menu = null
+                when (it) {
+                    "play" -> watch.resume(item)
+                    "info" -> item.imdb?.let { id -> onOpen(Title(id, item.kind ?: "movie", name, poster = item.poster, backdrop = item.backdrop)) }
+                    "remove" -> History.dropTitle(item.titleKey, watch.engine)
+                }
             },
             onDismiss = { menu = null },
         )
@@ -407,6 +417,46 @@ fun LibraryScreen(watch: Watch, onOpen: (Title) -> Unit) {
     }
 }
 
+/** Where a title was left: "S1:E3 · 23m left", "Watched", or nothing yet. */
+fun whereLeft(item: Item): String? {
+    val index = item.lastFileIndex
+    val ep = index?.let { i -> item.files?.find { it.index == i } }?.let { parseEpisode(it.name) }?.let { "S${it.season}:E${it.episode}" }
+    val r = item.ratio
+    val state = when {
+        r >= 0.95 -> "Watched"
+        r > 0.0 -> index?.let { i -> item.durations[i]?.let { d -> item.positions[i]?.let { left(d - it) } } }
+        else -> null
+    }
+    return listOfNotNull(ep, state).joinToString("  ·  ").ifEmpty { null }
+}
+
+/** One title in the Library: its poster with the progress along the foot, where it was left, when, and a menu. */
+@Composable
+private fun HistoryRow(item: Item, releases: Int, onPlay: () -> Unit, onMore: () -> Unit) {
+    Tap(onPlay, Modifier.fillMaxWidth(), RoundedCornerShape(10.dp), onLongClick = onMore) { pressed ->
+        Row(Modifier.background(if (pressed) Ink.surface2 else Ink.surface).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.width(64.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(6.dp))) {
+                Artwork(remoteArt(item.poster) ?: item.art(), item.label, Modifier.fillMaxSize())
+                if (item.ratio > 0) ProgressLine(item.ratio.toFloat(), Modifier.align(Alignment.BottomStart), height = 3.dp)
+            }
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text(item.titleName?.substringBefore(" · ") ?: item.label, style = Type.label.copy(fontWeight = FontWeight.SemiBold), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                whereLeft(item)?.let { Text(it, Modifier.padding(top = 3.dp), style = Type.meta.copy(color = if (item.ratio >= 0.95) Ink.good else Ink.text.copy(alpha = 0.8f)), maxLines = 1) }
+                Text(
+                    listOfNotNull(ago(item.at), if (releases > 1) "$releases releases" else null).joinToString("  ·  "),
+                    Modifier.padding(top = 2.dp),
+                    style = Type.meta.copy(fontSize = 12.sp, color = Ink.faint),
+                    maxLines = 1,
+                )
+            }
+            Box(Modifier.size(38.dp).clip(CircleShape).background(Ink.accent), contentAlignment = Alignment.Center) {
+                Lc(L.drawable.lucide_ic_play, tint = Color.White, size = 18.dp)
+            }
+            Tap(onMore, shape = CircleShape) { Lc(L.drawable.lucide_ic_ellipsis_vertical, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp) }
+        }
+    }
+}
+
 /* ------------------------------------------------------------- settings */
 
 @Composable
@@ -415,6 +465,8 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
     val profiles by Profiles.list.collectAsState()
     val me = profiles.find { it.id == who.id } ?: who
     var pin by remember { mutableStateOf("") }
+    /** The PIN as it stands, typed to change or remove it. */
+    var current by remember { mutableStateOf("") }
     /** "audio" or "subs" while that language list is up. */
     var picking by remember { mutableStateOf<String?>(null) }
     fun set(next: Settings) = SettingsStore.save(next)
@@ -444,19 +496,39 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
                 if (me.pin != null) "Asked for before this profile opens. Remove it to unlock."
                 else "Four digits, asked for before this profile opens. A lock for a shared phone — not a password.",
             ) {
+                // A lock that anyone holding the phone could lift is no lock: changing or removing it
+                // asks for the PIN there is now.
+                val locked = me.pin != null
+                val unlocked = !locked || current == me.pin
+                if (locked) {
+                    Text("Current PIN", Modifier.padding(bottom = 6.dp), style = Type.overline)
+                    Field(current, { current = it.filter(Char::isDigit).take(4) }, "• • • •", Modifier.widthIn(max = 200.dp).fillMaxWidth(), secret = true, digits = true)
+                    Text("New PIN", Modifier.padding(top = 14.dp, bottom = 6.dp), style = Type.overline)
+                }
                 // The digits and Set side by side; Remove on its own line, so nothing is cut short on a narrow phone.
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Field(pin, { pin = it.filter(Char::isDigit).take(4) }, if (me.pin != null) "• • • •" else "– – – –", Modifier.weight(1f).widthIn(max = 200.dp), secret = true, digits = true)
+                    Field(pin, { pin = it.filter(Char::isDigit).take(4) }, "– – – –", Modifier.weight(1f).widthIn(max = 200.dp), secret = true, digits = true)
                     Spacer(Modifier.width(10.dp))
-                    Button(if (me.pin != null) "Change PIN" else "Set PIN", {
-                        if (pin.length == 4) {
-                            Profiles.setPin(me.id, pin)
-                            pin = ""
-                            watch.notes.tryEmit("PIN set for ${me.name}")
-                        } else watch.notes.tryEmit("Enter four digits first")
+                    Button(if (locked) "Change PIN" else "Set PIN", {
+                        when {
+                            !unlocked -> watch.notes.tryEmit("Enter the current PIN first")
+                            pin.length != 4 -> watch.notes.tryEmit("Enter four digits for the new PIN")
+                            else -> {
+                                Profiles.setPin(me.id, pin)
+                                pin = ""
+                                current = ""
+                                watch.notes.tryEmit("PIN set for ${me.name}")
+                            }
+                        }
                     }, icon = L.drawable.lucide_ic_lock)
                 }
-                if (me.pin != null) Button("Remove PIN", { Profiles.setPin(me.id, "") }, Modifier.padding(top = 10.dp), icon = L.drawable.lucide_ic_lock_open)
+                if (locked) Button("Remove PIN", {
+                    if (unlocked) {
+                        Profiles.setPin(me.id, "")
+                        current = ""
+                        watch.notes.tryEmit("PIN removed")
+                    } else watch.notes.tryEmit(if (current.length < 4) "Enter the current PIN to remove it" else "That's not the PIN")
+                }, Modifier.padding(top = 10.dp), icon = L.drawable.lucide_ic_lock_open)
             }
         }
 

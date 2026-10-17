@@ -332,6 +332,15 @@ data class Item(
     }
 }
 
+/**
+ * What a history entry is *of*: the title (by IMDb id, else the name before " · S01E02"),
+ * so two releases of one film, or a show's episodes from several torrents, are one title.
+ */
+val Item.titleKey: String get() = imdb ?: titleName?.substringBefore(" · ")?.lowercase() ?: uri
+
+/** The most recent entry of each title, newest first — one card per film or show, wherever it was played from. */
+fun latestPerTitle(items: List<Item>): List<Item> = items.sortedByDescending { it.at }.distinctBy { it.titleKey }
+
 /** Prefer a real http(s) URL over a missing or local one. */
 fun remoteArt(vararg urls: String?): String? = urls.firstOrNull { it != null && Regex("^https?://", RegexOption.IGNORE_CASE).containsMatchIn(it) }
 
@@ -396,6 +405,9 @@ object History {
         find(uri)?.let { gone -> engine.deleteSubtitles(gone.subtitles.values.flatten().map { it.path }) }
         write(_items.value.filter { it.uri != uri })
     }
+
+    /** Every entry of one title — each torrent it was played from — with their subtitles. */
+    fun dropTitle(key: String, engine: TorrentStream) = _items.value.filter { it.titleKey == key }.forEach { drop(it.uri, engine) }
 
     fun clear(engine: TorrentStream) {
         engine.deleteSubtitles(_items.value.flatMap { it.subtitles.values.flatten() }.map { it.path })

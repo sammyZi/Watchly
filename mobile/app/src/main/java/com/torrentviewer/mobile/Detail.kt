@@ -59,6 +59,7 @@ import com.torrentviewer.core.Episode
 import com.torrentviewer.core.Facts
 import com.torrentviewer.core.Health
 import com.torrentviewer.core.Hit
+import com.torrentviewer.core.History
 import com.torrentviewer.core.Ink
 import com.torrentviewer.core.Lc
 import com.torrentviewer.core.Meta
@@ -114,6 +115,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
     var title by remember(initial.imdb) { mutableStateOf(initial) }
     LaunchedEffect(initial.imdb) { Meta.title(initial.imdb, initial.kind)?.let { title = it } }
     val saved by SavedStore.items.collectAsState()
+    val history by History.items.collectAsState()
     val inList = saved.any { it.imdb == title.imdb && it.list == "later" }
     val liked = saved.any { it.imdb == title.imdb && it.list == "favorite" }
 
@@ -229,7 +231,23 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                     if (wide) TitleMark(title, Modifier.widthIn(max = 320.dp).padding(bottom = 12.dp), maxHeight = 80.dp, style = Type.display)
                     Facts(title.copy(genres = title.genres.take(2)))
                     Spacer(Modifier.height(16.dp))
+                    // Part-way through — whichever release or episode was last played — Resume leads, Start over under it.
+                    val last = remember(history, title.imdb) { history.filter { it.imdb == title.imdb }.maxByOrNull { it.at } }
                     when {
+                        last != null && last.ratio > 0.02 && last.ratio < 0.95 -> {
+                            Button(
+                                "Resume" + (whereLeft(last)?.let { "  ·  $it" } ?: ""),
+                                { watch.resume(last) },
+                                Modifier.fillMaxWidth(),
+                                icon = L.drawable.lucide_ic_play,
+                                primary = true,
+                            )
+                            Button("Start over", {
+                                val i = last.lastFileIndex ?: 0
+                                History.setPosition(last.uri, i, 0.0)
+                                watch.resume(History.find(last.uri) ?: last)
+                            }, Modifier.fillMaxWidth().padding(top = 8.dp), icon = L.drawable.lucide_ic_rotate_ccw)
+                        }
                         !title.isSeries -> Button(
                             label = when {
                                 shown.isNotEmpty() -> "Play"
