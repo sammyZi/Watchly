@@ -269,6 +269,8 @@ data class Item(
     val backdrop: String? = null,
     /** "The Matrix", not "The.Matrix.1999.1080p.BluRay.x264-GRP". */
     val titleName: String? = null,
+    /** The swarm when this release was picked from search; null if opened another way. */
+    val seeders: Int? = null,
 ) {
     val label get() = titleName ?: title
 
@@ -304,6 +306,7 @@ data class Item(
             subtitles.forEach { (k, v) -> o.put(k.toString(), JSONArray(v.map { JSONObject().put("path", it.path).put("label", it.label) })) }
         })
         .put("imdb", imdb).put("kind", kind).put("poster", poster).put("backdrop", backdrop).put("titleName", titleName)
+        .put("seeders", seeders)
 
     companion object {
         fun from(o: JSONObject) = Item(
@@ -328,6 +331,7 @@ data class Item(
             poster = o.str("poster"),
             backdrop = o.str("backdrop"),
             titleName = o.str("titleName"),
+            seeders = if (o.has("seeders") && !o.isNull("seeders")) o.optInt("seeders") else null,
         )
     }
 }
@@ -405,6 +409,7 @@ object History {
             imdb = item.imdb ?: prev?.imdb ?: kin?.imdb,
             kind = item.kind ?: prev?.kind ?: kin?.kind,
             titleName = item.titleName ?: prev?.titleName ?: kin?.titleName,
+            seeders = item.seeders ?: prev?.seeders,
         )
         write(listOf(merged) + rest.filter { it.uri != item.uri })
         return merged

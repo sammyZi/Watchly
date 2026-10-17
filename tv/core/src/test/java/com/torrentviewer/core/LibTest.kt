@@ -277,7 +277,7 @@ class LibTest {
             uri = "magnet:?xt=urn:btih:abc", title = "Show.S01E02", at = 5, torrentName = "Show",
             files = listOf(StoredFile(0, "Show.S01E02.mkv", 100, true, false, "Show/Show.S01E02.mkv")),
             lastFileIndex = 0, positions = mapOf(0 to 30.0), durations = mapOf(0 to 60.0),
-            subtitles = mapOf(0 to listOf(SavedSub("/x.srt", "EN"))), imdb = "tt1", kind = "tv", titleName = "Show · S01E02",
+            subtitles = mapOf(0 to listOf(SavedSub("/x.srt", "EN"))), imdb = "tt1", kind = "tv", titleName = "Show · S01E02", seeders = 84,
         )
         val back = Item.from(JSONObject(item.toJson().toString()))
         assertEquals(item, back)
@@ -286,6 +286,7 @@ class LibTest {
         val legacy = Item.from(JSONObject("""{"uri":"u","title":"t","at":1,"positions":{"3":12.5},"durations":{"3":100}}"""))
         assertEquals(12.5, legacy.positions[3])
         assertNull(legacy.lastFileIndex)
+        assertNull(legacy.seeders)
     }
 
     @Test fun trailersAndSorting() {

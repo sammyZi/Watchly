@@ -101,6 +101,7 @@ class Watch(val engine: TorrentStream) {
                 poster = from?.poster,
                 backdrop = from?.backdrop,
                 titleName = if (episode != null && from != null) "${from.title} · ${episodeTag(episode.season, episode.episode)}" else from?.title,
+                seeders = hit.seeders,
             ),
         )
         val found = inspect(fresh) ?: return@launch
