@@ -79,7 +79,8 @@ object Ink {
     val text = Color(0xFFFFFFFF)
     val muted = Color(0xFFB3B3B3)
     val faint = Color(0xFF7A7A7A)
-    val accent = Color(0xFFE50914)
+    /** Netflix's red, lit for a TV across the room; an app may set its own before it composes (the phone's is deeper). */
+    var accent = Color(0xFFE50914)
     val good = Color(0xFF46D369)
     val warn = Color(0xFFFFB340)
     val danger = Color(0xFFFF5A4E)
