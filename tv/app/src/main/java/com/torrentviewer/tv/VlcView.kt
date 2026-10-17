@@ -37,21 +37,42 @@ data class Stats(
     val lostFrames: Int,
     val lostBuffers: Int,
     val cacheMs: Int,
+    /** Which backend, and for Media3 the decoders it picked. */
+    val engine: String = "VLC",
 )
 
-/**
- * A video surface backed by libVLC — chosen over Media3 because it carries its own
- * AC3/E-AC3/DTS decoders (most TVs ship none) and renders PGS/VOBSUB subtitles.
- */
-class VlcView(context: Context) : FrameLayout(context) {
+/** What the player screen drives: Media3 ([ExoView]) or libVLC ([VlcView]). */
+abstract class Video(context: Context) : FrameLayout(context) {
     var onLoaded: (durationMs: Long) -> Unit = {}
     var onTime: (ms: Long) -> Unit = {}
     var onBuffering: (Boolean) -> Unit = {}
     var onEnded: () -> Unit = {}
     var onFailed: (String) -> Unit = {}
+    /** This backend cannot play the file, though another might. */
+    var onUnsupported: (String) -> Unit = { onFailed(it) }
     var onTracks: (Tracks) -> Unit = {}
     var onPlaying: (Boolean) -> Unit = {}
 
+    abstract fun open(url: String, startAt: Long, cacheMs: Int, subtitles: List<String>)
+    abstract fun reload(ms: Long)
+    abstract val time: Long
+    abstract fun seekTo(ms: Long)
+    abstract fun setPaused(value: Boolean)
+    abstract val isPaused: Boolean
+    abstract fun setRate(value: Float)
+    abstract fun setSubtitleTrack(id: Int?)
+    abstract fun setAudioTrack(id: Int)
+    abstract fun setScale(type: MediaPlayer.ScaleType)
+    abstract fun addSubtitleFiles(paths: List<String>)
+    abstract fun stats(): Stats?
+}
+
+/**
+ * A video surface backed by libVLC — the fallback to [ExoView]: software decode for what
+ * the TV cannot, AVI, full ASS styling. It blends subtitles into the picture, which on a
+ * weak TV costs 4K frames each time a line changes.
+ */
+class VlcView(context: Context) : Video(context) {
     private val videoLayout = VLCVideoLayout(context)
     private var vlc: LibVLC? = null
     /** The buffer [vlc] was made with — a reload at the same one keeps the instance. */
@@ -90,7 +111,7 @@ class VlcView(context: Context) : FrameLayout(context) {
     }
 
     /** Load [url], starting at [startAt] ms. libVLC's buffer is [cacheMs] of stream. */
-    fun open(url: String, startAt: Long, cacheMs: Int, subtitles: List<String>) {
+    override fun open(url: String, startAt: Long, cacheMs: Int, subtitles: List<String>) {
         source = url
         startMs = startAt
         this.cacheMs = cacheMs.coerceIn(500, 8000)
@@ -104,20 +125,20 @@ class VlcView(context: Context) : FrameLayout(context) {
      * for that piece; reopening abandons the read. Also the recovery for a dropped
      * connection that looked like the end.
      */
-    fun reload(ms: Long) {
+    override fun reload(ms: Long) {
         if (source == null) return
         startMs = ms
         restart()
     }
 
-    val time: Long get() = player?.time ?: 0L
+    override val time: Long get() = player?.time ?: 0L
 
-    fun seekTo(ms: Long) {
+    override fun seekTo(ms: Long) {
         // Fast seek; a precise one over a torrent waits on data we may not have.
         player?.setTime(ms, true)
     }
 
-    fun setPaused(value: Boolean) {
+    override fun setPaused(value: Boolean) {
         paused = value
         // Paused is idle: let the screen saver have a still frame.
         keepScreenOn = !value
@@ -128,30 +149,30 @@ class VlcView(context: Context) : FrameLayout(context) {
         onPlaying(!value)
     }
 
-    val isPaused: Boolean get() = paused
+    override val isPaused: Boolean get() = paused
 
-    fun setRate(value: Float) {
+    override fun setRate(value: Float) {
         rate = value
         player?.rate = value
     }
 
     /** null turns subtitles off. libVLC uses -1 for "no track". */
-    fun setSubtitleTrack(id: Int?) {
+    override fun setSubtitleTrack(id: Int?) {
         wantedSpu = id
         player?.setSpuTrack(id ?: -1)
     }
 
-    fun setAudioTrack(id: Int) {
+    override fun setAudioTrack(id: Int) {
         wantedAudio = id
         player?.setAudioTrack(id)
     }
 
-    fun setScale(type: MediaPlayer.ScaleType) {
+    override fun setScale(type: MediaPlayer.ScaleType) {
         scale = type
         player?.videoScale = type
     }
 
-    fun addSubtitleFiles(paths: List<String>) {
+    override fun addSubtitleFiles(paths: List<String>) {
         subtitleFiles = (subtitleFiles + paths).distinct()
         subRetries = 0
         attachPendingSubs()
@@ -183,7 +204,7 @@ class VlcView(context: Context) : FrameLayout(context) {
         if (waiting && subRetries++ < 20) postDelayed(attachSubs, 1500)
     }
 
-    fun stats(): Stats? {
+    override fun stats(): Stats? {
         val p = player ?: return null
         val m = runCatching { p.media }.getOrNull() ?: return null
         try {
