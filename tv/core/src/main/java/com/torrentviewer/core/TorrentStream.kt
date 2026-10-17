@@ -139,6 +139,8 @@ private const val REACH_SECONDS = 16L
 
 /** Blocked on one piece this long with peers connected: re-ask the swarm (VLC gives up at ~40s). */
 private const val STUCK_PIECE_MS = 20_000L
+/** The same during pre-roll, once the piece waits only on blocks already out with peers. */
+private const val PREROLL_STUCK_MS = 4_000L
 /** Waiting this long on a piece narrows the fetch to the rushed pieces alone. */
 private const val STARVE_MS = 5_000L
 
@@ -1034,11 +1036,19 @@ class TorrentStream(
         // peer's last block stalls the start just as it stalls playback.
         val blocked = (if (announcedReady) targets.take(1) else targets)
             .firstOrNull { it in firstPiece..lastPiece && !h.havePiece(it) } ?: -1
+        // Pre-roll re-asks much sooner, but only once every block is done or out with a
+        // peer: on the phone piece 0 sat at 170 of 171 blocks for 20s of a 23s start
+        // while 60 peers ran at 3MB/s. A piece still handing out blocks is just downloading.
+        val stuckAfter = if (announcedReady) STUCK_PIECE_MS else PREROLL_STUCK_MS
         if (blocked != blockingPiece) {
             blockingPiece = blocked
             blockingSince = clock
             blockedFrom = clock
-        } else if (blocked >= 0 && status.numPeers() > 0 && clock - blockingSince > STUCK_PIECE_MS && clock - lastKickAt > STUCK_PIECE_MS) {
+        } else if (
+            blocked >= 0 && status.numPeers() > 0 &&
+            clock - blockingSince > stuckAfter && clock - lastKickAt > stuckAfter &&
+            (announcedReady || allRequested(h, blocked))
+        ) {
             lastKickAt = clock
             log("stuck: piece $blocked for ${(clock - blockingSince) / 1000}s (${pieceState(h, blocked)}) — re-asking for it")
             runCatching { h.resetPieceDeadline(blocked) }
@@ -1323,6 +1333,12 @@ class TorrentStream(
         val q = runCatching { h.downloadQueue }.getOrNull()?.firstOrNull { it.pieceIndex() == piece }
             ?: return "nothing requested yet"
         return "${q.finished()} done, ${q.writing()} writing, ${q.requested()} requested of ${q.blocksInPiece()} blocks"
+    }
+
+    /** No block of the piece is left to hand out: what remains waits on peers already asked. */
+    private fun allRequested(h: TorrentHandle, piece: Int): Boolean {
+        val q = runCatching { h.downloadQueue }.getOrNull()?.firstOrNull { it.pieceIndex() == piece } ?: return false
+        return q.finished() + q.writing() + q.requested() >= q.blocksInPiece()
     }
 
     /**
