@@ -86,6 +86,11 @@ public sealed class PlayerView : UserControl, IDisposable
     StreamSession? session;
     Media? media;
     bool disposed;
+    Core.Title? titleMeta;
+    /// <summary>The title's logo for the pause card; null (no logo) falls back to its name.</summary>
+    BitmapSource? logo;
+    /// <summary>When the pause card came up, so a re-render mid-fade carries the fade on.</summary>
+    DateTime? pauseCardAt;
     bool started;
     bool showUi = true;
     bool locked;
@@ -251,6 +256,21 @@ public sealed class PlayerView : UserControl, IDisposable
         tick.Start();
         Render();
         _ = Start();
+        _ = LoadTitleMeta();
+    }
+
+    /// <summary>The pause card's rating, facts and plot — Cinemeta's, cached, so usually already here.</summary>
+    async Task LoadTitleMeta()
+    {
+        if (request.Imdb is not { Length: > 0 } imdb) return;
+        var kind = request.Kind ?? (Search.ParseEpisode(request.Title) is not null ? "tv" : "movie");
+        try
+        {
+            titleMeta = await Meta.LoadTitle(imdb, kind);
+            logo = await ImageUrl.Fetch($"https://images.metahub.space/logo/medium/{imdb}/img");
+        }
+        catch { }
+        if (!disposed && PauseCard) Render();
     }
 
     /// <summary>The libVLC player, its events wired.</summary>
@@ -1484,6 +1504,7 @@ public sealed class PlayerView : UserControl, IDisposable
     // The phone's and the TV's red: the played part, what is on, what is selected.
     static readonly Brush Red = Frozen(Color.FromRgb(0xe5, 0x09, 0x14));
     static readonly Brush RedLight = Frozen(Color.FromRgb(0xff, 0x5a, 0x63));
+    static readonly Brush Imdb = Frozen(Color.FromRgb(0xf5, 0xc5, 0x18));
     static readonly Brush Green = Frozen(Color.FromRgb(0x46, 0xd3, 0x69));
     static readonly Brush Sheet = Frozen(Color.FromArgb(0xf2, 0x14, 0x14, 0x14));
     static Brush Frozen(Color color) { var b = new SolidColorBrush(color); b.Freeze(); return b; }
@@ -1830,7 +1851,12 @@ public sealed class PlayerView : UserControl, IDisposable
         if (picking) chrome.Children.Add(TrackSheet());
         if (more) chrome.Children.Add(MoreSheet());
         if (searchingSubs) chrome.Children.Add(SearchSheet());
-        if (PauseCard) chrome.Children.Add(PauseCardView());
+        if (PauseCard)
+        {
+            pauseCardAt ??= DateTime.UtcNow;
+            chrome.Children.Add(PauseCardView());
+        }
+        else pauseCardAt = null;
 
         if (waiting && !showUi)
         {
@@ -2025,15 +2051,55 @@ public sealed class PlayerView : UserControl, IDisposable
     {
         var body = new StackPanel { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(64, 0, 64, 0), MaxWidth = 640 };
         body.Children.Add(WText("You're watching", 14, White(0xa0)));
-        var name = WText(ShownTitle, 34, null, FontWeights.Bold);
-        name.TextWrapping = TextWrapping.Wrap;
-        name.Margin = new Thickness(0, 6, 0, 0);
-        body.Children.Add(name);
+        if (logo is not null)
+        {
+            // The title's own logo, as the TV draws it; its name only when there is none.
+            body.Children.Add(new Image { Source = logo, MaxHeight = 90, MaxWidth = 460, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 10, 0, 0) });
+        }
+        else
+        {
+            var name = WText(ShownTitle, 34, null, FontWeights.Bold);
+            name.TextWrapping = TextWrapping.Wrap;
+            name.Margin = new Thickness(0, 6, 0, 0);
+            body.Children.Add(name);
+        }
+        var at = Search.ParseEpisode(request.Title);
+        var ep = at is { } a ? titleMeta?.Episodes.FirstOrDefault(e => e.Season == a.Season && e.Number == a.Episode) : null;
         if (EpisodeLine is { } episode)
         {
-            var line = WText(episode, 15, null, FontWeights.SemiBold);
+            var line = WText(ep is { Name.Length: > 0 } ? $"{episode}  “{ep.Name}”" : episode, 15, null, FontWeights.SemiBold);
             line.Margin = new Thickness(0, 6, 0, 0);
             body.Children.Add(line);
+        }
+        if (titleMeta is { } t)
+        {
+            // The TV's facts row: the IMDb badge, then year • runtime • genres.
+            var facts = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
+            if (t.Rating is { Length: > 0 } rating)
+            {
+                facts.Children.Add(new Border
+                {
+                    CornerRadius = new CornerRadius(3),
+                    Background = Imdb,
+                    Padding = new Thickness(5, 0, 5, 1),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Child = WText("IMDb", 11, Brushes.Black, FontWeights.Black),
+                });
+                facts.Children.Add(Pad(WText(rating, 13, null, FontWeights.SemiBold), 6, 14));
+            }
+            var rest = new[] { t.Year is { Length: > 9 } y ? y[..9] : t.Year, t.Runtime }.Concat(t.Genres.Take(3)).Where(s => !string.IsNullOrEmpty(s));
+            facts.Children.Add(WText(string.Join("  •  ", rest), 13, White(0xd8)));
+            body.Children.Add(facts);
+        }
+        if ((ep?.Overview ?? titleMeta?.Plot) is { Length: > 0 } plot)
+        {
+            var text = WText(plot, 14, White(0xcc));
+            text.TextWrapping = TextWrapping.Wrap;
+            text.MaxWidth = 560;
+            text.MaxHeight = 14 * 1.4 * 4;
+            text.HorizontalAlignment = HorizontalAlignment.Left;
+            text.Margin = new Thickness(0, 10, 0, 0);
+            body.Children.Add(text);
         }
         if (duration > 0)
         {
@@ -2064,7 +2130,11 @@ public sealed class PlayerView : UserControl, IDisposable
         var paused = WText("PAUSED", 12, White(0x90), FontWeights.SemiBold);
         paused.Margin = new Thickness(0, 22, 0, 0);
         body.Children.Add(paused);
-        return new Grid { Background = PauseVeil, IsHitTestVisible = false, Children = { body } };
+        var card = new Grid { Background = PauseVeil, IsHitTestVisible = false, Children = { body } };
+        // Fades up over 700ms, as the TV's does; Render() rebuilds the card, so pick up where the fade is.
+        var shown = (DateTime.UtcNow - (pauseCardAt ?? DateTime.UtcNow)).TotalMilliseconds;
+        if (shown < 700) card.BeginAnimation(OpacityProperty, new DoubleAnimation(shown / 700, 1, TimeSpan.FromMilliseconds(700 - shown)));
+        return card;
     }
 
     /// <summary>Coarse "how much is left" — "1h 07m left", "23m left".</summary>
