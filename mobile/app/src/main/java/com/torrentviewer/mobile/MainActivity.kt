@@ -15,7 +15,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
 import com.torrentviewer.core.AppScope
+import com.torrentviewer.core.Ink
 import com.torrentviewer.core.Kv
 import com.torrentviewer.core.Profiles
 import com.torrentviewer.core.SettingsStore
@@ -64,6 +66,8 @@ class MainActivity : FragmentActivity() {
         enableEdgeToEdge(SystemBarStyle.dark(android.graphics.Color.TRANSPARENT), SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
         Services.init(applicationContext)
+        // The TV's red glares at arm's length on a phone screen: a deeper one.
+        Ink.accent = Color(0xFFB81D24)
         incoming.value = intent?.data
         setContent { App(Services.watch, incoming) }
     }

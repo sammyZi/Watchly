@@ -32,6 +32,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -131,9 +132,9 @@ private fun resumeStamp(item: Item): String? {
 
 fun Item.art() = backdrop ?: imdb?.let { "https://images.metahub.space/background/medium/$it/img" } ?: remoteArt(poster)
 
-/** 16:9 cards: a little over two to a phone's width, so the row says it scrolls. */
+/** 16:9 cards: under two to a phone's width, the next one peeking so the row says it scrolls. */
 @Composable
-fun cardWidth() = if (isWide()) 210.dp else 168.dp
+fun cardWidth() = if (isWide()) 260.dp else 220.dp
 
 @Composable
 fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> Unit, onShelf: (Shelf) -> Unit, onProfile: () -> Unit) {
@@ -216,9 +217,12 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
             }
         }
 
-        // The wordmark and who is watching, over the hero.
+        // The wordmark and who is watching: a fade over the hero, a solid bar once the rows scroll under it.
+        val scrolled by remember { derivedStateOf { state.list.firstVisibleItemIndex > 0 || state.list.firstVisibleItemScrollOffset > 240 } }
         Row(
-            Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent))).statusBarsPadding().padding(horizontal = EDGE, vertical = 10.dp),
+            Modifier.fillMaxWidth()
+                .background(if (scrolled) Brush.verticalGradient(listOf(Ink.bg, Ink.bg.copy(alpha = 0.94f))) else Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)))
+                .statusBarsPadding().padding(horizontal = EDGE, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("WATCHLY", Modifier.weight(1f), style = Type.title.copy(color = Ink.accent, fontWeight = FontWeight.Black, letterSpacing = 2.sp))
