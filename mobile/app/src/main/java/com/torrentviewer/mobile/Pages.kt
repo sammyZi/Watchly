@@ -444,20 +444,19 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
                 if (me.pin != null) "Asked for before this profile opens. Remove it to unlock."
                 else "Four digits, asked for before this profile opens. A lock for a shared phone — not a password.",
             ) {
+                // The digits and Set side by side; Remove on its own line, so nothing is cut short on a narrow phone.
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Field(pin, { pin = it.filter(Char::isDigit).take(4) }, if (me.pin != null) "••••" else "– – – –", Modifier.width(140.dp), secret = true, digits = true)
+                    Field(pin, { pin = it.filter(Char::isDigit).take(4) }, if (me.pin != null) "• • • •" else "– – – –", Modifier.weight(1f).widthIn(max = 200.dp), secret = true, digits = true)
                     Spacer(Modifier.width(10.dp))
-                    Button(if (pin.length == 4) "Set PIN" else "4 digits", {
+                    Button(if (me.pin != null) "Change PIN" else "Set PIN", {
                         if (pin.length == 4) {
                             Profiles.setPin(me.id, pin)
                             pin = ""
-                        }
+                            watch.notes.tryEmit("PIN set for ${me.name}")
+                        } else watch.notes.tryEmit("Enter four digits first")
                     }, icon = L.drawable.lucide_ic_lock)
-                    if (me.pin != null) {
-                        Spacer(Modifier.width(8.dp))
-                        Button("Remove", { Profiles.setPin(me.id, "") })
-                    }
                 }
+                if (me.pin != null) Button("Remove PIN", { Profiles.setPin(me.id, "") }, Modifier.padding(top = 10.dp), icon = L.drawable.lucide_ic_lock_open)
             }
         }
 

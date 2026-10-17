@@ -68,6 +68,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -215,13 +216,15 @@ fun Field(
             Lc(it, tint = if (focused) Ink.text else Ink.faint, size = 20.dp)
             Spacer(Modifier.width(12.dp))
         }
-        Box(Modifier.weight(1f)) {
-            if (value.isEmpty()) Text(placeholder, style = Type.label.copy(color = Ink.faint, fontSize = 16.sp), maxLines = 1)
+        // A PIN sits in the middle of its box, placeholder and dots alike.
+        val align = if (digits) TextAlign.Center else TextAlign.Start
+        Box(Modifier.weight(1f), contentAlignment = if (digits) Alignment.Center else Alignment.CenterStart) {
+            if (value.isEmpty()) Text(placeholder, style = Type.label.copy(color = Ink.faint, fontSize = 16.sp, textAlign = align), maxLines = 1)
             BasicTextField(
                 value = value,
                 onValueChange = onValue,
                 singleLine = true,
-                textStyle = Type.label.copy(fontSize = 16.sp, letterSpacing = if (secret) 8.sp else 0.sp),
+                textStyle = Type.label.copy(fontSize = 16.sp, letterSpacing = if (secret) 8.sp else 0.sp, textAlign = align),
                 cursorBrush = SolidColor(Ink.accent),
                 visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
                 keyboardOptions = KeyboardOptions(keyboardType = if (digits) KeyboardType.NumberPassword else KeyboardType.Text, imeAction = if (digits) ImeAction.Done else ImeAction.Search),
