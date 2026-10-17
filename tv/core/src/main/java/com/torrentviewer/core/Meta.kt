@@ -35,6 +35,8 @@ data class Title(
     val backdrop: String? = null,
     val logo: String? = null,
     val runtime: String? = null,
+    /** YouTube video id, from /meta only. */
+    val trailer: String? = null,
     /** Series only, and only from /meta — a catalog row carries no episode list. */
     val episodes: List<Episode> = emptyList(),
 ) {
@@ -69,7 +71,7 @@ object Meta {
     /** A day: charts move slowly and ratings slower. */
     private const val TTL = 24 * 60 * 60 * 1000L
     /** Bumped whenever Title gains a field, so old snapshots are never read back. */
-    private const val STORE = "meta:tv4:"
+    private const val STORE = "meta:tv5:"
 
     private val memory = ConcurrentHashMap<String, Any>()
 
@@ -149,6 +151,18 @@ object Meta {
     }
 }
 
+enum class Sort(val label: String) { POPULAR("Popular"), RATING("Top rated"), YEAR("Newest"), TITLE("A–Z") }
+
+/** A title missing the field goes last, not as zero — unrated is unknown, not bad — in the catalogue's own order. */
+fun sortTitles(titles: List<Title>, sort: Sort): List<Title> {
+    fun key(t: Title) = (if (sort == Sort.RATING) t.rating else t.year?.take(4))?.toDoubleOrNull()
+    return when (sort) {
+        Sort.POPULAR -> titles
+        Sort.TITLE -> titles.sortedBy { it.title.lowercase() }
+        else -> titles.sortedWith(compareBy(nullsLast(reverseOrder())) { t: Title -> key(t) })
+    }
+}
+
 /** Every genre counts; ties keep input order. Each carries the kind it was mostly seen as. */
 fun topGenres(titles: List<Title>, limit: Int = 3): List<Pair<String, String>> {
     val tally = LinkedHashMap<String, IntArray>()
@@ -209,9 +223,26 @@ fun toTitles(metas: JSONArray, kind: String, withEpisodes: Boolean = false): Lis
             backdrop = m.str("background"),
             logo = m.str("logo"),
             runtime = m.str("runtime"),
+            trailer = trailerOf(m),
             episodes = if (withEpisodes) toEpisodes(m.optJSONArray("videos")) else emptyList(),
         )
     }
+}
+
+/** Two shapes in the wild: `trailerStreams` on newer records, `trailers` (with clips mixed in) on older ones. */
+fun trailerOf(m: JSONObject): String? = m.str("trailer")
+    ?: m.optJSONArray("trailerStreams")?.objects()?.firstNotNullOfOrNull { it.str("ytId") }
+    ?: m.optJSONArray("trailers")?.objects()?.firstOrNull { it.optString("type") == "Trailer" }?.str("source")
+
+/** Where to read what other people thought: IMDb by id, the rest by search, since a guessed slug is worse than a search page. */
+fun reviewLinks(title: Title): List<Pair<String, String>> {
+    val q = enc("${title.title} ${title.year?.take(4).orEmpty()}".trim())
+    return listOf(
+        "IMDb" to "https://www.imdb.com/title/${title.imdb}/reviews",
+        "Rotten Tomatoes" to "https://www.rottentomatoes.com/search?search=$q",
+        "Metacritic" to "https://www.metacritic.com/search/$q/",
+        "Letterboxd" to "https://letterboxd.com/search/$q/",
+    )
 }
 
 /** Broadcast order. Season 0 (specials) keeps its own group. */
@@ -236,7 +267,7 @@ private fun titlesJson(list: List<Title>): String = JSONArray(list.map { t ->
     JSONObject().put("imdb_id", t.imdb).put("kind", t.kind).put("name", t.title).put("year", t.year).put("imdbRating", t.rating)
         .put("genre", JSONArray(t.genres)).put("poster", t.poster).put("description", t.plot).put("cast", JSONArray(t.cast))
         .put("director", JSONArray(t.directors)).put("awards", t.awards).put("background", t.backdrop).put("logo", t.logo)
-        .put("runtime", t.runtime)
+        .put("runtime", t.runtime).put("trailer", t.trailer)
         .put("videos", JSONArray(t.episodes.map { e ->
             JSONObject().put("id", e.id).put("season", e.season).put("episode", e.episode).put("name", e.name)
                 .put("overview", e.overview).put("thumbnail", e.thumbnail).put("released", e.released)

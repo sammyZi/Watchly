@@ -14,7 +14,26 @@ This README is the phone app (`mobile/`). The repo holds two more, each with its
 | Television (Android TV) | [`tv/`](../tv/README.md) | native Kotlin + Compose; libtorrent4j + libVLC |
 | Windows desktop | [`windows/`](../windows/README.md) | MonoTorrent + LibVLCSharp (.NET 8, WPF) |
 
-## Run
+## Kotlin rewrite (in progress)
+
+`mobile/app/` is the phone app again in native Kotlin + Compose, with the TV
+app's look, built against the TV's shared module (`../tv/core`: engine,
+players, indexers, metadata, store, theme). It lives beside the Expo project
+until it reaches parity, then replaces it.
+
+```bash
+cd mobile && ./gradlew compileDebugKotlin
+```
+
+Debug builds install beside the Expo app as **Watchly Next**
+(`com.torrentviewer.app.next`, so a fresh library); release builds take the
+Expo app's id and key, install over it and import its AsyncStorage once.
+Incoming peers on 6882, as before. Done so far: tabs (bottom bar upright, rail
+turned), Home hero and shelves, See all, search, title page (episodes, sources,
+My List, likes, trailer, reviews), library, settings, profiles, and a first
+player (Loading and "You're watching" screens, double-tap skip, resume).
+
+## Run (Expo)
 
 From `mobile/`:
 

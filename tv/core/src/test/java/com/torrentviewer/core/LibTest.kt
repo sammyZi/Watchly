@@ -287,4 +287,15 @@ class LibTest {
         assertEquals(12.5, legacy.positions[3])
         assertNull(legacy.lastFileIndex)
     }
+
+    @Test fun trailersAndSorting() {
+        assertEquals("abc", trailerOf(JSONObject("""{"trailerStreams":[{"ytId":"abc"}],"trailers":[{"type":"Trailer","source":"old"}]}""")))
+        assertEquals("old", trailerOf(JSONObject("""{"trailers":[{"type":"Clip","source":"clip"},{"type":"Trailer","source":"old"}]}""")))
+        assertNull(trailerOf(JSONObject("{}")))
+        val t = listOf(Title("tt1", "movie", "b", year = "2001", rating = "7.1"), Title("tt2", "movie", "a"), Title("tt3", "movie", "C", year = "2020–2022", rating = "8"))
+        assertEquals(listOf("tt3", "tt1", "tt2"), sortTitles(t, Sort.RATING).map { it.imdb })
+        assertEquals(listOf("tt3", "tt1", "tt2"), sortTitles(t, Sort.YEAR).map { it.imdb })
+        assertEquals(listOf("tt2", "tt1", "tt3"), sortTitles(t, Sort.TITLE).map { it.imdb })
+        assertEquals(t, sortTitles(t, Sort.POPULAR))
+    }
 }
