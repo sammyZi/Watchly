@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Where downloads are kept, for handing a finished file to another player. -->
+<paths>
+    <external-path name="shared" path="." />
+    <external-files-path name="own" path="." />
+    <files-path name="internal" path="." />
+    <root-path name="card" path="." />
+</paths>

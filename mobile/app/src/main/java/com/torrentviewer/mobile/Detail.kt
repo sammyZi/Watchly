@@ -74,6 +74,8 @@ import com.torrentviewer.core.quickest
 import com.torrentviewer.core.reviewLinks
 import com.torrentviewer.core.runtimeSeconds
 import com.torrentviewer.core.searchEpisode
+import com.torrentviewer.core.parseEpisode
+import com.torrentviewer.core.seasonsIn
 import com.torrentviewer.core.searchTorrents
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.launch
@@ -150,6 +152,24 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
     fun downloadEpisode(ep: Episode) = scope.launch {
         val ready = if (episode?.id == ep.id && shown.isNotEmpty()) shown else findSources(ep).await()
         ready.firstOrNull()?.let { keep(it, ep) } ?: watch.notes.tryEmit("No sources found for ${episodeTag(ep.season, ep.episode)}.")
+    }
+
+    /**
+     * A whole season in one go: the best pack that is that season, else a complete-series
+     * pack — the download then takes only that season's episodes out of it.
+     */
+    fun downloadSeason(s: Int) = scope.launch {
+        watch.notes.tryEmit("Looking for a season $s pack…")
+        val first = title.episodes.firstOrNull { it.season == s }?.episode ?: 1
+        val hits = runCatching { searchEpisode(title.title, s, first, title.imdb) }.getOrDefault(emptyList())
+        val pack = hits.firstOrNull { it.scope == Scope.SEASON && parseEpisode(it.name) == null && s in seasonsIn(it.name) }
+            ?: hits.firstOrNull { it.scope == Scope.COMPLETE }
+        if (pack == null) {
+            watch.notes.tryEmit("No season $s pack found — download the episodes one by one.")
+            return@launch
+        }
+        Downloads.add(downloadJob(pack, title).copy(season = s))
+        watch.notes.tryEmit("Downloading season $s of ${title.title} — see Downloads")
     }
 
     // Opening a series' page is seeing what is out: its new-episode count starts again from here.
@@ -241,6 +261,14 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                                     hits = null
                                     episode = null
                                 })
+                            }
+                        }
+                        season?.let { s ->
+                            Tap({ downloadSeason(s) }, Modifier.padding(start = EDGE - 4.dp, top = 8.dp), RoundedCornerShape(6.dp)) {
+                                Row(Modifier.padding(horizontal = 4.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Lc(L.drawable.lucide_ic_download, tint = Ink.muted, size = 16.dp)
+                                    Text("  Download season $s", style = Type.meta.copy(fontWeight = FontWeight.SemiBold))
+                                }
                             }
                         }
                     }

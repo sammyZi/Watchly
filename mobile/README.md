@@ -48,8 +48,18 @@ and subtitle languages (picked automatically, and used for SubDL), subtitle
 size, colour and box, speed and picture remembered between videos, backup and
 restore in the Expo build's file format. Home has a New Episodes shelf.
 
-Still to come: Google Cast, open in another player, subtitle delay, downloading
-a whole season in one go, subtitle style from inside the player.
+Google Cast (`Cast.kt`): the Cast button in the player; the stream is served to
+the network as well as loopback (the phone's engine runs with `lan = true`; a
+finished download gets a server of its own while cast), the default media
+receiver plays it, and the player becomes a remote — play, pause, skip, seek,
+stop — picking up locally from the TV's position when the session ends.
+"Open in…" hands the stream or file to VLC, MX Player or any video app, at the
+current position. Subtitle delay, a tenth of a second a tap (Media3 can only
+hold subtitles back, so bringing them earlier switches to VLC in place).
+"Download season" fetches a season pack and keeps that season's episodes.
+
+Still to come: subtitle style from inside the player, then removing the Expo
+project.
 
 ## Run (Expo)
 

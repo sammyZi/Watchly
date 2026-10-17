@@ -8,7 +8,7 @@ import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -37,7 +37,8 @@ object Services {
         SettingsStore.load()
         Profiles.load()
         // 6882: the TV (6881) and the Windows app (51413) may share the router.
-        engine = TorrentStream(context.applicationContext, port = 6882)
+        // lan: the stream is also served to the network, for a Cast receiver to fetch.
+        engine = TorrentStream(context.applicationContext, port = 6882, lan = true)
         watch = Watch(engine)
         Downloads.init(context)
     }
@@ -53,7 +54,8 @@ object Pip {
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && context.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
 }
 
-class MainActivity : ComponentActivity() {
+/** A FragmentActivity because the Cast button's device chooser is a dialog fragment. */
+class MainActivity : FragmentActivity() {
     /** A magnet or .torrent handed to us by another app. */
     private val incoming = mutableStateOf<Uri?>(null)
 
