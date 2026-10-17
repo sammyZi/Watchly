@@ -1,5 +1,6 @@
 package com.torrentviewer.tv
 
+import com.torrentviewer.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box

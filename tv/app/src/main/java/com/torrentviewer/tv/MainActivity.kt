@@ -1,5 +1,6 @@
 package com.torrentviewer.tv
 
+import com.torrentviewer.core.*
 import android.content.Context
 import android.content.Intent
 import android.net.Uri

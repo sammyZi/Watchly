@@ -1,4 +1,4 @@
-package com.torrentviewer.tv
+package com.torrentviewer.core
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

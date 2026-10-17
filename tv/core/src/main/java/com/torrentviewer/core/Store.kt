@@ -1,4 +1,4 @@
-package com.torrentviewer.tv
+package com.torrentviewer.core
 
 import android.content.Context
 import android.content.SharedPreferences

@@ -1,6 +1,7 @@
 @file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 
 package com.torrentviewer.tv
+import com.torrentviewer.core.*
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn

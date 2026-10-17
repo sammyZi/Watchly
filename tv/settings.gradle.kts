@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "WatchlyTV"
-include(":app")
+include(":app", ":core")

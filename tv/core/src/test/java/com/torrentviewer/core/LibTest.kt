@@ -1,4 +1,4 @@
-package com.torrentviewer.tv
+package com.torrentviewer.core
 
 import org.json.JSONArray
 import org.json.JSONObject
