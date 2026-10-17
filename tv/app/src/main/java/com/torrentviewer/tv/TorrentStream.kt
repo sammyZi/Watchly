@@ -139,6 +139,8 @@ private const val REACH_SECONDS = 16L
 
 /** Blocked on one piece this long with peers connected: re-ask the swarm (VLC gives up at ~40s). */
 private const val STUCK_PIECE_MS = 20_000L
+/** Waiting this long on a piece narrows the fetch to the rushed pieces alone. */
+private const val STARVE_MS = 5_000L
 
 private const val REMOVE_WAIT_MS = 4_000
 
@@ -256,6 +258,8 @@ class TorrentStream(private val context: Context) {
 
     private var blockingPiece = -1
     private var blockingSince = 0L
+    /** Unlike blockingSince, not reset by the stuck-piece kick. */
+    private var blockedFrom = 0L
     private var lastKickAt = 0L
 
     /** Last metadata, valid only while its torrent is still in the session (see forgetMeta). */
@@ -813,12 +817,17 @@ class TorrentStream(private val context: Context) {
         log("play: ${files.fileName(index)} (${files.fileSize(index)} bytes), ${subHits.size} subtitle file(s)")
 
         // Adopt the torrent inspect() left running — re-adding drops every peer.
-        val onDisk = File(saveDir, files.filePath(index)).parentFile?.exists() == true
+        val fileDir = File(saveDir, files.filePath(index)).parentFile
+        val onDisk = fileDir?.exists() == true
+        // libtorrent moving pieces out of the part file into a missing folder is ENOENT,
+        // which errors the torrent and stalls it at "finding peers".
+        runCatching { fileDir?.mkdirs() }
         val running = session.find(ti.infoHash())?.takeIf { it.isValid && sameFiles(it, files.numFiles()) }
         val h = if (running != null) {
             log("play: reusing running torrent (${running.status().numPeers()} peer(s))")
-            // Files wiped from under it: libtorrent still believes it has the pieces.
-            if (!onDisk) runCatching { running.forceRecheck() }
+            // Files wiped from under it: libtorrent still believes it has the pieces. A fresh
+            // magnet has nothing on disk yet either, and a recheck would drop its warm peers.
+            if (!onDisk && running.status().totalDone() > 0) runCatching { running.forceRecheck() }
             running.prioritizeFiles(priorities)
             running
         } else {
@@ -974,6 +983,12 @@ class TorrentStream(private val context: Context) {
 
         val status = h.status()
 
+        // A file error pauses the torrent for good; it would sit at 0kB/s until the stall timeout.
+        if (ticks % 10 == 0) status.errorCode().takeIf { it.isError }?.let {
+            log("error: ${it.message} — clearing and resuming")
+            runCatching { h.swig().clear_error() }
+        }
+
         // Stuck-piece watchdog. The piece the player waits on is nearly always whole but
         // for a block or two held by one slow peer. It used to pause and resume the torrent
         // to drop that request — which also dropped the swarm: on the TV, 71 peers at
@@ -984,6 +999,7 @@ class TorrentStream(private val context: Context) {
         if (blocked != blockingPiece) {
             blockingPiece = blocked
             blockingSince = clock
+            blockedFrom = clock
         } else if (blocked >= 0 && status.numPeers() > 0 && clock - blockingSince > STUCK_PIECE_MS && clock - lastKickAt > STUCK_PIECE_MS) {
             lastKickAt = clock
             log("stuck: piece $blocked for ${(clock - blockingSince) / 1000}s (${pieceState(h, blocked)}) — re-asking for it")
@@ -1019,8 +1035,14 @@ class TorrentStream(private val context: Context) {
             val affordable = (status.downloadRate().toLong() * REACH_SECONDS / pieceLen).toInt()
             affordable.coerceIn(2, maxOf(2, windowPieces))
         }
-        val width = maxOf(2, (readaheadBytes / pieceLen).toInt())
-        val back = maxOf(8, (REWIND_BYTES / pieceLen).toInt())
+        // A thin swarm spread over the whole readahead starves the piece the player waits
+        // on: on the TV, 500kB/s over 17 8MB pieces gave piece 204 ~45kB/s for over a
+        // minute, and pre-roll took 72s at 2MB/s for two pieces. Until it lands, fetch
+        // only what is rushed; the readahead comes back with the next tick after.
+        val waitingFrom = if (!announcedReady) readyAt else if (blocked >= 0) blockedFrom else clock
+        val starving = clock - waitingFrom > STARVE_MS
+        val width = if (starving) maxOf(2, reach) else maxOf(2, (readaheadBytes / pieceLen).toInt())
+        val back = if (starving) 0 else maxOf(8, (REWIND_BYTES / pieceLen).toInt())
 
         // Re-aim with hysteresis: a rewind inside the band already covered is not a new zone.
         val stale = zoneWidth != width ||
