@@ -136,6 +136,10 @@ fun Item.art() = backdrop ?: imdb?.let { "https://images.metahub.space/backgroun
 @Composable
 fun cardWidth() = if (isWide()) 260.dp else 220.dp
 
+/** Home's rows are tall posters: a little over three across a phone held upright. */
+@Composable
+fun posterWidth() = if (isWide()) 140.dp else 116.dp
+
 @Composable
 fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> Unit, onShelf: (Shelf) -> Unit, onProfile: () -> Unit) {
     val history by History.items.collectAsState()
@@ -193,8 +197,8 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
                 Rail("Continue Watching") {
                     LazyRow(state = state.row("resume"), contentPadding = PaddingValues(horizontal = EDGE), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         items(resumable, key = { it.uri }) { item ->
-                            Tap({ watch.resume(item) }, Modifier.width(cardWidth()).aspectRatio(16f / 9f), RoundedCornerShape(6.dp), onLongClick = { menu = item }) {
-                                LandscapeCard(item.art(), item.label, resumeStamp(item), item.ratio.toFloat())
+                            Tap({ watch.resume(item) }, Modifier.width(posterWidth()).aspectRatio(2f / 3f), RoundedCornerShape(6.dp), onLongClick = { menu = item }) {
+                                LandscapeCard(remoteArt(item.poster) ?: item.art(), item.label, resumeStamp(item), item.ratio.toFloat())
                             }
                         }
                     }
@@ -204,8 +208,8 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
                 Rail("New Episodes") {
                     LazyRow(state = state.row("fresh"), contentPadding = PaddingValues(horizontal = EDGE), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         items(state.fresh, key = { it.title.imdb }) { f ->
-                            Tap({ onOpen(f.title) }, Modifier.width(cardWidth()).aspectRatio(16f / 9f), RoundedCornerShape(6.dp)) {
-                                LandscapeCard(f.title.wide, f.title.title, if (f.count == 1) "1 new episode" else "${f.count} new episodes")
+                            Tap({ onOpen(f.title) }, Modifier.width(posterWidth()).aspectRatio(2f / 3f), RoundedCornerShape(6.dp)) {
+                                LandscapeCard(f.title.poster ?: f.title.wide, f.title.title, if (f.count == 1) "1 new episode" else "${f.count} new episodes")
                             }
                         }
                     }
@@ -281,7 +285,7 @@ private fun Rail(heading: String, onMore: (() -> Unit)? = null, content: @Compos
 @Composable
 private fun Placeholders() {
     Row(Modifier.padding(start = EDGE), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        repeat(3) { Box(Modifier.width(cardWidth()).aspectRatio(16f / 9f).background(Ink.surface, RoundedCornerShape(6.dp))) }
+        repeat(4) { Box(Modifier.width(posterWidth()).aspectRatio(2f / 3f).background(Ink.surface, RoundedCornerShape(6.dp))) }
     }
 }
 
@@ -289,8 +293,8 @@ private fun Placeholders() {
 private fun TitleRow(state: LazyListState, titles: List<Title>, onOpen: (Title) -> Unit) {
     LazyRow(state = state, contentPadding = PaddingValues(horizontal = EDGE), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         items(titles, key = { it.imdb }) { t ->
-            Tap({ onOpen(t) }, Modifier.width(cardWidth()).aspectRatio(16f / 9f), RoundedCornerShape(6.dp)) {
-                LandscapeCard(t.wide, t.title)
+            Tap({ onOpen(t) }, Modifier.width(posterWidth()).aspectRatio(2f / 3f), RoundedCornerShape(6.dp)) {
+                Artwork(t.poster ?: t.wide, t.title, Modifier.fillMaxSize())
             }
         }
     }
