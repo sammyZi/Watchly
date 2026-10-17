@@ -167,8 +167,8 @@ fun Chip(label: String, on: Boolean, onClick: () -> Unit, modifier: Modifier = M
 
 /** Netflix's phone actions under the Play button: an icon over a word. */
 @Composable
-fun Action(@DrawableRes icon: Int, label: String, onClick: () -> Unit, tint: Color = Ink.text) {
-    Tap(onClick, Modifier.width(84.dp)) {
+fun Action(@DrawableRes icon: Int, label: String, onClick: () -> Unit, tint: Color = Ink.text, modifier: Modifier = Modifier.width(84.dp)) {
+    Tap(onClick, modifier) {
         Column(Modifier.padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Lc(icon, tint = tint, size = 24.dp)
             Text(label, Modifier.padding(top = 6.dp), style = Type.meta.copy(fontSize = 12.sp), maxLines = 1)

@@ -91,6 +91,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -314,7 +316,10 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     var pendingSub by remember { mutableStateOf(false) }
     var advanced by remember { mutableStateOf(false) }
     var locked by remember { mutableStateOf(false) }
-    var unlockAt by remember { mutableLongStateOf(0L) }
+    /** Fetch the whole file, or only the next few minutes past the playhead; remembered for the next video. */
+    var wholeFile by remember { mutableStateOf(SettingsStore.value.value.wholeFile.also { engine.wholeFile = it }) }
+    /** Locked, with the lock icon up in its corner. */
+    var lockShown by remember { mutableStateOf(false) }
     var boosting by remember { mutableStateOf(false) }
     var intro by remember { mutableStateOf(show?.let(Intros::get)) }
     /** Where the viewer said the intro starts, until they say where it ends. */
@@ -566,10 +571,10 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
             hud = null
         }
     }
-    LaunchedEffect(unlockAt) {
-        if (unlockAt > 0) {
-            delay(3000)
-            unlockAt = 0
+    LaunchedEffect(lockShown) {
+        if (lockShown) {
+            delay(4000)
+            lockShown = false
         }
     }
     // Restarted by every new time; only an absence of them fires it.
@@ -625,7 +630,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     BackHandler {
         when {
             panel != null -> panel = null
-            locked -> unlockAt = System.currentTimeMillis()
+            locked -> lockShown = true
             else -> leave()
         }
     }
@@ -633,8 +638,9 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     // Tap toggles the controls and a double tap skips, so a single tap waits out the double-tap window.
     val pendingTap = remember { mutableStateOf<Job?>(null) }
     fun tapped(x: Float, width: Float) {
+        // Locked: a tap shows the lock in its corner, the next one hides it again.
         if (locked) {
-            unlockAt = System.currentTimeMillis()
+            lockShown = !lockShown
             return
         }
         val waitingTap = pendingTap.value
@@ -845,7 +851,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                         onLock = {
                             locked = true
                             controls = false
-                            say("Locked — tap to unlock", L.drawable.lucide_ic_lock)
+                            lockShown = true
                         },
                     )
                     BrightnessRail(brightness, ::setBrightness, Modifier.align(Alignment.CenterStart))
@@ -869,7 +875,8 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                                 scrub = null
                             },
                         )
-                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        // Icons alone, spread across the bar.
+                        Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
                             BarButton(L.drawable.lucide_ic_captions, "Audio & subtitles", on = subtitle != null) { panel = Panel.TRACKS }
                             BarButton(L.drawable.lucide_ic_gauge, "Speed (${rateLabel(rate)})", on = rate != 1f) { panel = Panel.SPEED }
                             BarButton(L.drawable.lucide_ic_ratio, SCALES[scale].second, on = scale != 0) { panel = Panel.ASPECT }
@@ -884,6 +891,12 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                                 onClick = ::cycleSleep,
                             )
                             if (show != null) BarButton(L.drawable.lucide_ic_flag, if (introMark != null) "Intro ends here" else if (intro != null) "Re-mark intro" else "Mark intro", on = introMark != null, onClick = ::markIntro)
+                            BarButton(if (wholeFile) L.drawable.lucide_ic_hard_drive else L.drawable.lucide_ic_clock, if (wholeFile) "Whole file" else "Next 5 minutes", on = wholeFile) {
+                                wholeFile = !wholeFile
+                                engine.wholeFile = wholeFile
+                                SettingsStore.save(SettingsStore.value.value.copy(wholeFile = wholeFile))
+                                say(if (wholeFile) "Downloading the whole file" else "Downloading the next 5 minutes", if (wholeFile) L.drawable.lucide_ic_hard_drive else L.drawable.lucide_ic_clock)
+                            }
                             BarButton(L.drawable.lucide_ic_external_link, "Open in…") {
                                 val r = ready ?: return@BarButton
                                 if (openExternally(context, r.url, r.name, at)) {
@@ -919,18 +932,13 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
             }
         }
 
-        // Locked: a touch only shows the way out.
-        AnimatedVisibility(locked && unlockAt > 0, Modifier.align(Alignment.Center), enter = fadeIn(), exit = fadeOut()) {
-            Tap({
+        // Locked: just the lock, in the corner; tapping it unlocks.
+        AnimatedVisibility(locked && lockShown, Modifier.align(Alignment.TopStart).windowInsetsPadding(WindowInsets.safeDrawing).padding(12.dp), enter = fadeIn(), exit = fadeOut()) {
+            RoundIcon(L.drawable.lucide_ic_lock, {
                 locked = false
-                unlockAt = 0
+                lockShown = false
                 show()
-            }, shape = CircleShape) {
-                Row(Modifier.background(Color.Black.copy(alpha = 0.7f)).padding(horizontal = 22.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Lc(L.drawable.lucide_ic_lock_open, tint = Color.White, size = 20.dp)
-                    Text("  Tap to unlock", style = Type.label.copy(fontWeight = FontWeight.SemiBold))
-                }
-            }
+            }, size = 48.dp)
         }
 
         // A short word for anything that happened without the bar: "Added EN", "60%".
@@ -1168,16 +1176,13 @@ private fun BrightnessRail(level: Float, onChange: (Float) -> Unit, modifier: Mo
     }
 }
 
-/** Netflix's phone bar buttons: an icon and its name side by side, a red dot when on. */
+/** A bar button: the icon alone, a red dot when on; [label] is what a screen reader says. */
 @Composable
 private fun BarButton(@DrawableRes icon: Int, label: String, on: Boolean = false, onClick: () -> Unit) {
-    Tap(onClick, shape = RoundedCornerShape(6.dp)) {
-        Row(Modifier.padding(horizontal = 10.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box {
-                Lc(icon, tint = Color.White, size = 20.dp)
-                if (on) Box(Modifier.align(Alignment.TopEnd).offset(x = 3.dp, y = (-2).dp).size(6.dp).clip(CircleShape).background(Ink.accent))
-            }
-            Text(label, Modifier.padding(start = 8.dp), style = Type.meta.copy(color = Color.White, fontWeight = FontWeight.SemiBold), maxLines = 1)
+    Tap(onClick, Modifier.semantics { contentDescription = label }, CircleShape) {
+        Box(Modifier.padding(12.dp)) {
+            Lc(icon, tint = Color.White, size = 22.dp)
+            if (on) Box(Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-3).dp).size(6.dp).clip(CircleShape).background(Ink.accent))
         }
     }
 }

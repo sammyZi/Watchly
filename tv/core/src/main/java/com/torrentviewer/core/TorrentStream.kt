@@ -239,6 +239,19 @@ class TorrentStream(
      */
     private var zoneIgnored = -1
     private var zoneWidth = -1
+
+    /**
+     * Fetch the whole file, not just the minutes past the reader: everything outside the
+     * readers' zones is wanted at low priority instead of ignored, and the cache stops
+     * rolling (unless the disk runs low). For a thin swarm, or watching on to the end offline.
+     */
+    @Volatile
+    var wholeFile = false
+        set(value) {
+            field = value
+            // The mode lives in the piece priorities: the next tick rewrites them.
+            zoneWidth = -1
+        }
     private var zoneRushedTail = false
     private var windowPieces = 4
     private var prepareBytes = 3L * 1024 * 1024
@@ -1137,7 +1150,7 @@ class TorrentStream(
         val status = runCatching { h.status() }.getOrNull() ?: return false
         val onDisk = status.totalDone()
         val low = saveDir.usableSpace < FREE_SPACE_MIN * 3
-        if (!low && (cacheCapBytes <= 0L || onDisk < cacheCapBytes)) return false
+        if (!low && (wholeFile || cacheCapBytes <= 0L || onDisk < cacheCapBytes)) return false
 
         val at = readers.values.minOrNull() ?: lastReaderAt.takeIf { it > 0 } ?: return false
         lastRollTick = ticks
@@ -1238,6 +1251,7 @@ class TorrentStream(
             prios[p] = when {
                 p in tailPiece..tailEnd || zones.any { p in it } -> Priority.DEFAULT
                 spare.any { p in it } || behind.any { p in it } -> Priority.LOW
+                wholeFile -> Priority.LOW
                 else -> Priority.IGNORE
             }
         }
