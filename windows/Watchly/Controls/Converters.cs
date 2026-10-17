@@ -108,6 +108,9 @@ public sealed class ImageUrl : IValueConverter
             ? url.Replace("/poster/small/", "/poster/medium/", StringComparison.OrdinalIgnoreCase)
             : url;
 
+    /// <summary>The picture itself, or null when there is none — for a caller with a fallback to show instead.</summary>
+    public static Task<BitmapSource?> Fetch(string url, int width = 0) => Decode(Decodable(url), width);
+
     static async Task<BitmapSource?> Decode(string url, int width)
     {
         var file = System.IO.Path.Combine(DiskCache, System.Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(url))));
