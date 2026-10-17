@@ -39,6 +39,17 @@ public sealed record HistoryItem
 
     [System.Text.Json.Serialization.JsonIgnore]
     public string DisplayName => TitleName ?? TorrentName ?? Title;
+
+    /// <summary>
+    /// What this entry is *of*: the title (IMDb id, else the name), so two releases of one film,
+    /// or a show's episodes from several torrents, are one title. Same rule as the Kotlin apps.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string TitleKey => Imdb ?? TitleName?.Split(" · ")[0].ToLowerInvariant() ?? Uri;
+
+    /// <summary>0-1 through the last file played.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public double Ratio => LastFileIndex is int i && DurationOf(i) is > 0 and var d && PositionOf(i) is double p ? p / d : 0;
 }
 
 /// <summary>Watch history: every mutation is read-modify-write under one lock.</summary>
@@ -140,6 +151,44 @@ public static class History
             var items = Load();
             WipeSubs(items.Where(x => x.Uri == uri));
             return Write(items.Where(x => x.Uri != uri).ToList());
+        }
+    }
+
+    /// <summary>
+    /// One entry per title, newest first: of a title's entries the newest that was started, so a
+    /// second release opened and closed at once does not hide where the first was left.
+    /// </summary>
+    public static List<HistoryItem> LatestPerTitle(IEnumerable<HistoryItem> items) =>
+        items.OrderByDescending(x => x.At).GroupBy(x => x.TitleKey)
+            .Select(g => g.FirstOrDefault(x => x.LastFileIndex is int i && x.PositionOf(i) is > 0) ?? g.First())
+            .OrderByDescending(x => x.At).ToList();
+
+    /// <summary>
+    /// Where to start <paramref name="fileName"/> of <paramref name="target"/> when this release was
+    /// never played: the spot another release of the title (for a series, the same episode) was
+    /// left, in seconds, with its duration. By time — releases differ in bytes. Null when there is
+    /// none, or it was watched through.
+    /// </summary>
+    public static (double At, double? Duration)? CarryOver(IEnumerable<HistoryItem> items, HistoryItem target, string fileName)
+    {
+        var ep = Search.ParseEpisode(fileName);
+        var donor = items.Where(x => x.Uri != target.Uri && x.TitleKey == target.TitleKey).OrderByDescending(x => x.At)
+            .FirstOrDefault(d => d.LastFileIndex is int i && d.PositionOf(i) is > 0 &&
+                                 Search.ParseEpisode(d.Files?.FirstOrDefault(f => f.Index == i)?.Name) == ep);
+        if (donor?.LastFileIndex is not int at || donor.PositionOf(at) is not double position) return null;
+        var duration = donor.DurationOf(at);
+        if (duration is > 0 && position >= duration.Value * 0.95) return null;
+        return (position, duration);
+    }
+
+    /// <summary>Every entry of one title — each release it was played from.</summary>
+    public static List<HistoryItem> DropTitle(string key)
+    {
+        lock (Gate)
+        {
+            var items = Load();
+            WipeSubs(items.Where(x => x.TitleKey == key));
+            return Write(items.Where(x => x.TitleKey != key).ToList());
         }
     }
 

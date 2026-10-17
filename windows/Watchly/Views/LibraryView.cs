@@ -124,7 +124,8 @@ public sealed class LibraryView : UserControl
             return;
         }
 
-        var history = shell.HistoryList;
+        // One row per title — its newest started release — however many it was played from.
+        var history = History.LatestPerTitle(shell.HistoryList);
         var q = query?.Text.Trim().ToLowerInvariant() ?? "";
         var shown = q.Length == 0 ? history : history.Where(h => Haystack(h).Contains(q)).ToList();
         if (shown.Count == 0)

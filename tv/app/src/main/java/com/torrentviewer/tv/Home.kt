@@ -177,7 +177,8 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit) {
         }
     }
 
-    val resumable = history.filter(::inProgress).take(8)
+    // One card per title — its newest started episode or release — while that one is part-watched.
+    val resumable = latestPerTitle(history).filter(::inProgress).take(8)
     val watchlist = saved.filter { it.list == "later" }.map { it.asTitle() }
     val fallback = { shelves.firstNotNullOfOrNull { state.loaded[it.key]?.firstOrNull() } ?: watchlist.firstOrNull() }
     // Focus lands on the first card the first time only; afterwards it goes back to the opened one.

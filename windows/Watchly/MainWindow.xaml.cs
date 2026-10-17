@@ -523,13 +523,17 @@ public partial class MainWindow : Window
         var detail = CurrentDetail;
         var file = meta.Files[index];
         var ratio = stored.ResumeRatio(index);
+        // A release never played here starts where another release of the title was left.
+        var resumeAt = startOver ? 0
+            : ratio > 0 ? stored.PositionOf(index) ?? 0
+            : History.CarryOver(HistoryList, stored with { Imdb = detail?.Imdb ?? stored.Imdb, TitleName = stored.TitleName ?? detail?.Name }, file.Name)?.At ?? 0;
         var request = new PlaybackRequest
         {
             Title = file.Name,
             MetaTitle = detail?.Name ?? stored.TitleName,
             Imdb = detail?.Imdb ?? stored.Imdb,
             Kind = detail?.Kind ?? stored.Kind,
-            ResumeAt = startOver || ratio <= 0 ? 0 : stored.PositionOf(index) ?? 0,
+            ResumeAt = resumeAt,
             Torrent = torrent,
             FileIndex = index,
             HistoryUri = uri,
@@ -699,11 +703,16 @@ public partial class MainWindow : Window
         "Clear all",
         () => HistoryList = History.Clear());
 
-    public void AskRemove(HistoryItem item) => Confirm(
-        "Remove from history?",
-        item.TorrentName ?? item.Title,
-        "Remove",
-        () => HistoryList = History.Drop(item.Uri));
+    /// <summary>A library row is a title: removing it takes every release it was played from.</summary>
+    public void AskRemove(HistoryItem item)
+    {
+        var releases = HistoryList.Count(h => h.TitleKey == item.TitleKey);
+        Confirm(
+            "Remove from history?",
+            releases > 1 ? $"{item.DisplayName} — and the {releases} releases it was played from" : item.TorrentName ?? item.Title,
+            "Remove",
+            () => HistoryList = History.DropTitle(item.TitleKey));
+    }
 
     // ── Shutdown ────────────────────────────────────────────────────────────
 

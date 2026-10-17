@@ -243,7 +243,8 @@ public sealed class HomeView : UserControl
     void BuildPersonal()
     {
         personal.Children.Clear();
-        var resumable = shell.HistoryList.Where(InProgress).Select(item =>
+        // One card per title: its newest started release or episode, while part-watched.
+        var resumable = History.LatestPerTitle(shell.HistoryList).Where(InProgress).Select(item =>
         {
             var index = item.LastFileIndex!.Value;
             var duration = item.DurationOf(index);
