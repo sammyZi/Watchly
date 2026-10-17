@@ -396,15 +396,17 @@ object Downloads {
         return runCatching { cm.isActiveNetworkMetered }.getOrDefault(false)
     }
 
-    private fun poll() = synchronized(lock) {
-        if (poller?.isActive == true) return
-        poller = scope.launch {
-            while (isActive) {
-                tick()
-                if (synchronized(lock) { handles.isEmpty() } && _live.value.none { it.state == DlState.RESOLVING }) break
-                delay(2000)
+    private fun poll() {
+        synchronized(lock) {
+            if (poller?.isActive == true) return
+            poller = scope.launch {
+                while (isActive) {
+                    tick()
+                    if (synchronized(lock) { handles.isEmpty() } && _live.value.none { it.state == DlState.RESOLVING }) break
+                    delay(2000)
+                }
+                settle()
             }
-            settle()
         }
     }
 
