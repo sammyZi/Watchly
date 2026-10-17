@@ -278,8 +278,8 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                     // However many actions there are, they share the width evenly.
                     Row(Modifier.fillMaxWidth().padding(top = 14.dp)) {
                         val share = Modifier.weight(1f)
-                        Action(if (inList) L.drawable.lucide_ic_check else L.drawable.lucide_ic_plus, "My List", { SavedStore.toggle(title) }, modifier = share)
-                        Action(L.drawable.lucide_ic_heart, if (liked) "Liked" else "Like", { SavedStore.toggle(title, "favorite") }, tint = if (liked) Ink.accent else Ink.text, modifier = share)
+                        Action(if (inList) L.drawable.lucide_ic_check else L.drawable.lucide_ic_plus, "My List", { SavedStore.toggle(title) }, modifier = share, on = inList)
+                        Action(L.drawable.lucide_ic_heart, if (liked) "Liked" else "Like", { SavedStore.toggle(title, "favorite") }, tint = if (liked) Ink.accent else Ink.text, modifier = share, on = liked)
                         if (!title.isSeries) Action(L.drawable.lucide_ic_download, "Download", {
                             shown.firstOrNull()?.let { keep(it, null) } ?: watch.notes.tryEmit(if (busy) "Still finding sources…" else "No sources to download.")
                         }, modifier = share)
@@ -394,7 +394,8 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
         val links = reviewLinks(title)
         Sheet(
             title = "Reviews of ${title.title}",
-            options = links.map { (label, url) -> Option(url, label) },
+            // Each site's own logo, by its domain, from Google's favicon service (PNG, one size for all).
+            options = links.map { (label, url) -> Option(url, label, image = "https://www.google.com/s2/favicons?sz=64&domain=${android.net.Uri.parse(url).host}") },
             selected = null,
             onPick = {
                 reviews = false
