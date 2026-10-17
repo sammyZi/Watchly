@@ -351,6 +351,16 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
 
+        Section(
+            "Player",
+            "Media3 keeps 4K smooth with subtitles on, and hands a file it can't play to VLC by itself. VLC from the start plays the most formats and full ASS styling, but a weak TV can drop frames each time a subtitle changes.",
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Chip("Media3", !settings.vlcPlayer, onClick = { set(settings.copy(vlcPlayer = false)) })
+                Chip("VLC", settings.vlcPlayer, onClick = { set(settings.copy(vlcPlayer = true)) })
+            }
+        }
+
         Section("Extra trackers", "Attach public trackers to bare magnet links so they resolve faster.") {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Chip("On", settings.addTrackers, onClick = { set(settings.copy(addTrackers = true)) })

@@ -113,6 +113,8 @@ data class Settings(
     val cacheCapMb: Int = 4096,
     /** Genres to lead the home page with, in Cinemeta's spelling. */
     val genres: List<String> = emptyList(),
+    /** libVLC from the start instead of Media3, which falls back to it on its own anyway. */
+    val vlcPlayer: Boolean = false,
 )
 
 val CACHE_CAPS = listOf(2048, 4096, 8192, 16384)
@@ -128,6 +130,7 @@ object SettingsStore {
             addTrackers = o.optBoolean("addTrackers", true),
             cacheCapMb = o.optInt("cacheCapMb", 4096).takeIf { it > 0 } ?: 4096,
             genres = o.strings("genres"),
+            vlcPlayer = o.optBoolean("vlcPlayer", false),
         )
     }
 
@@ -136,7 +139,7 @@ object SettingsStore {
         Kv.setGlobal(
             "settings",
             JSONObject().put("prepareMb", next.prepareMb).put("addTrackers", next.addTrackers)
-                .put("cacheCapMb", next.cacheCapMb).put("genres", JSONArray(next.genres)).toString(),
+                .put("cacheCapMb", next.cacheCapMb).put("genres", JSONArray(next.genres)).put("vlcPlayer", next.vlcPlayer).toString(),
         )
     }
 }

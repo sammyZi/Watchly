@@ -7,3 +7,6 @@
 -keep class org.videolan.** { *; }
 -keep interface org.videolan.** { *; }
 -dontwarn org.videolan.**
+
+# DefaultRenderersFactory finds the FFmpeg audio renderer by reflection; its JNI by name.
+-keep class androidx.media3.decoder.ffmpeg.** { *; }

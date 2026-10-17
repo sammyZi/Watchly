@@ -1,6 +1,7 @@
 package com.torrentviewer.tv
 
 import android.os.Build
+import android.util.Log
 import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.annotation.DrawableRes
@@ -194,7 +195,9 @@ private fun Player(watch: Watch) {
     val startAt = remember { watch.startAt() }
     val bitrate = remember { file?.size?.let { size -> watch.item?.durations?.get(watch.playingIndex)?.takeIf { it > 0 }?.let { size / it } } ?: 0.0 }
 
-    val view = remember { mutableStateOf<VlcView?>(null) }
+    val view = remember { mutableStateOf<Video?>(null) }
+    /** Media3 unless the setting asks for VLC, or Media3 has already given up on this file. */
+    var vlc by remember { mutableStateOf(SettingsStore.value.value.vlcPlayer) }
     var paused by remember { mutableStateOf(false) }
     var at by remember { mutableDoubleStateOf(startAt) }
     var duration by remember { mutableDoubleStateOf(0.0) }
@@ -321,11 +324,12 @@ private fun Player(watch: Watch) {
 
     /* ------------------------------------------------------------ effects */
 
-    // The stream arrives: hand it to libVLC, with the torrent's own subtitle files.
+    // The stream arrives: hand it to the player, with the torrent's own subtitle files.
+    // From where it is, not startAt: a fallback to VLC picks up mid-film.
     LaunchedEffect(ready, view.value) {
         val r = ready ?: return@LaunchedEffect
         val v = view.value ?: return@LaunchedEffect
-        v.open(r.url, (startAt * 1000).toLong(), cacheMsFor(bitrate), r.subtitleFiles + external.map { it.path })
+        v.open(r.url, (at * 1000).toLong(), cacheMsFor(bitrate), r.subtitleFiles + external.map { it.path })
     }
 
     // The bar comes up with the first frame, focus on Play, then steps aside.
@@ -461,9 +465,20 @@ private fun Player(watch: Watch) {
             .focusRequester(root)
             .focusable(),
     ) {
-        AndroidView(
+        key(vlc) { AndroidView(
             factory = { context ->
-                VlcView(context).also { v ->
+                (if (vlc) VlcView(context) else ExoView(context)).also { v ->
+                    // A fallback keeps the viewer's speed and picture.
+                    v.setRate(rate)
+                    v.setScale(SCALES[scale].first)
+                    if (!vlc) v.onUnsupported = { message ->
+                        Log.w("Player", "Media3 gave up ($message), falling back to VLC")
+                        // Track ids are the backend's own.
+                        tracks = null
+                        subtitle = null
+                        audio = null
+                        vlc = true
+                    }
                     var recoveries = 0
                     v.onLoaded = { ms ->
                         duration = ms / 1000.0
@@ -518,7 +533,7 @@ private fun Player(watch: Watch) {
                 }
             },
             modifier = Modifier.fillMaxSize(),
-        )
+        ) }
 
         // Debounced: libVLC flickers "buffering" on a torrent stream, and every flicker
         // started the spinner's fade — UI frames composited over the 4K video, which is
@@ -1147,6 +1162,7 @@ private fun StatsPanel(s: Stats?, progress: Progress?, file: TorrentFile?) {
     val rows = buildList {
         if (s == null) add("Player" to "Reading…")
         else {
+            add("Player" to s.engine)
             add("Video" to listOfNotNull(s.videoCodec, if (s.width > 0) "${s.width}×${s.height}" else null, if (s.fps > 0) "%.3f fps".format(s.fps).replace(".000", "") else null).joinToString("  ·  ").ifEmpty { "—" })
             add("Audio" to listOfNotNull(s.audioCodec, if (s.channels > 0) "${s.channels} ch" else null, if (s.sampleRate > 0) "${s.sampleRate / 1000} kHz" else null, s.language).joinToString("  ·  ").ifEmpty { "—" })
             add("Bitrate" to "${mbps(s.contentKbps)} video  ·  ${mbps(s.inputKbps)} arriving")

@@ -77,6 +77,11 @@ dependencies {
     implementation("org.libtorrent4j:libtorrent4j-android-arm64:$lt")
     implementation("org.libtorrent4j:libtorrent4j-android-x86:$lt")
     implementation("org.videolan.android:libvlc-all:3.6.3")
+    // 1.9.x: Jellyfin's prebuilt FFmpeg audio decoder (AC3/E-AC3/DTS/TrueHD) is built against 1.9.0.
+    val media3 = "1.9.4"
+    implementation("androidx.media3:media3-exoplayer:$media3")
+    implementation("androidx.media3:media3-ui:$media3")
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.9.0+1")
 
     implementation(platform("androidx.compose:compose-bom:2026.06.01"))
     implementation("androidx.compose.ui:ui")
