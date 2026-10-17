@@ -318,8 +318,8 @@ fun Field(
     }
 }
 
-/** [image]: a picture to lead the row with — a site's logo — in place of the tick column. */
-data class Option<T>(val value: T, val label: String, val hint: String? = null, val image: String? = null)
+/** [image]: a picture to lead the row with — a site's logo — in place of the tick column. [tag]: a badge before the label, "4K". */
+data class Option<T>(val value: T, val label: String, val hint: String? = null, val image: String? = null, val tag: String? = null)
 
 /** A choice, up from the bottom edge over a dimmed page; a tap outside or Back closes it. */
 @Composable
@@ -350,6 +350,14 @@ fun <T> Sheet(
                                 Box(Modifier.size(22.dp)) { if (on) Lc(L.drawable.lucide_ic_check, tint = Ink.accent, size = 20.dp) }
                             }
                             Spacer(Modifier.width(12.dp))
+                            option.tag?.let {
+                                Text(
+                                    it,
+                                    Modifier.background(Ink.text.copy(alpha = 0.1f), RoundedCornerShape(4.dp)).padding(horizontal = 7.dp, vertical = 3.dp),
+                                    style = Type.overline.copy(color = Ink.text, letterSpacing = 0.5.sp),
+                                )
+                                Spacer(Modifier.width(12.dp))
+                            }
                             Column(Modifier.weight(1f)) {
                                 Text(option.label, style = Type.label.copy(color = if (on) Ink.text else Ink.muted, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium), maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 option.hint?.let { Text(it, style = Type.meta.copy(color = Ink.faint), maxLines = 1, overflow = TextOverflow.Ellipsis) }

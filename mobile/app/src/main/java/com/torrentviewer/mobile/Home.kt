@@ -74,6 +74,7 @@ import com.torrentviewer.core.left
 import com.torrentviewer.core.latestPerTitle
 import com.torrentviewer.core.titleKey
 import com.torrentviewer.core.parseEpisode
+import com.torrentviewer.core.quality
 import com.torrentviewer.core.remoteArt
 import kotlinx.coroutines.delay
 import com.composables.icons.lucide.R as L
@@ -276,7 +277,10 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
     releases?.let { all ->
         Sheet(
             title = all.first().label,
-            options = all.map { Option(it.uri, it.torrentName ?: it.title, resumeStamp(it) ?: "Not started") },
+            options = all.map {
+                val name = it.torrentName ?: it.title
+                Option(it.uri, name, listOfNotNull(it.seeders?.let { s -> "$s seeds" }, resumeStamp(it) ?: "Not started").joinToString("  ·  "), tag = quality(name))
+            },
             selected = latestPerTitle(all).first().uri,
             onPick = { uri ->
                 releases = null
