@@ -3,7 +3,6 @@ package com.torrentviewer.mobile
 import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.pm.ActivityInfo
-import android.media.AudioManager
 import android.os.Build
 import android.provider.Settings as SystemSettings
 import android.util.Log
@@ -651,7 +650,15 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         }
     }
 
-    val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+    /** The window's brightness 0–1, shown on the rail and moved by it or a left-edge swipe. */
+    var brightness by remember { mutableFloatStateOf(activity?.let(::brightnessOf) ?: 0.5f) }
+    fun setBrightness(level: Float) {
+        val b = level.coerceIn(0.01f, 1f)
+        brightness = b
+        activity?.window?.let { win -> win.attributes = win.attributes.apply { screenBrightness = b } }
+        lastTouch = System.currentTimeMillis()
+    }
+
     val gestures = Modifier.pointerInput(Unit) {
         awaitEachGesture {
             val down = awaitFirstDown()
@@ -675,7 +682,6 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                         return@withTimeoutOrNull when {
                             locked -> "none"
                             x0 < w * 0.4f -> "bright"
-                            x0 > w * 0.6f -> "volume"
                             else -> "none"
                         }
                     }
@@ -695,24 +701,15 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                     view.value?.setRate(rate)
                     boosting = false
                 }
-                "bright", "volume" -> {
-                    val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                    val from = if (kind == "bright") activity?.let(::brightnessOf) ?: 0.5f else audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) / max.toFloat()
+                "bright" -> {
+                    val from = brightness
                     while (true) {
                         val c = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
                         if (!c.pressed) break
                         c.consume()
                         // The full sweep is most of the screen's height, as VLC has it.
-                        val level = (from - (c.position.y - y0) / (h * 0.7f)).coerceIn(0f, 1f)
-                        if (kind == "bright") {
-                            val b = level.coerceAtLeast(0.01f)
-                            activity?.window?.let { win -> win.attributes = win.attributes.apply { screenBrightness = b } }
-                            say("${(b * 100).roundToInt()}%", L.drawable.lucide_ic_sun)
-                        } else {
-                            val v = (level * max).roundToInt()
-                            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, v, 0)
-                            say("${(level * 100).roundToInt()}%", if (v == 0) L.drawable.lucide_ic_volume_x else L.drawable.lucide_ic_volume_2)
-                        }
+                        setBrightness(from - (c.position.y - y0) / (h * 0.7f))
+                        say("${(brightness * 100).roundToInt()}%", L.drawable.lucide_ic_sun)
                     }
                 }
                 else -> do {
@@ -851,6 +848,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                             say("Locked — tap to unlock", L.drawable.lucide_ic_lock)
                         },
                     )
+                    BrightnessRail(brightness, ::setBrightness, Modifier.align(Alignment.CenterStart))
                     Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(44.dp)) {
                         RoundIcon(L.drawable.lucide_ic_rotate_ccw, { skip(-SKIP); show() }, size = 52.dp)
                         RoundIcon(if (paused) L.drawable.lucide_ic_play else L.drawable.lucide_ic_pause, ::togglePause, size = 72.dp)
@@ -1134,6 +1132,39 @@ private fun TopBar(
         if (canCast) AndroidView(factory = ::castButton, modifier = Modifier.size(42.dp))
         Tap(onStats, shape = CircleShape) { Lc(L.drawable.lucide_ic_info, Modifier.padding(9.dp), tint = if (info) Ink.accent else Color.White, size = 22.dp) }
         Tap(onLock, shape = CircleShape) { Lc(L.drawable.lucide_ic_lock, Modifier.padding(9.dp), tint = Color.White, size = 22.dp) }
+    }
+}
+
+/** Brightness, in sight with the controls: drag along it or tap a point on it. Short, so it clears both bars turned. */
+@Composable
+private fun BrightnessRail(level: Float, onChange: (Float) -> Unit, modifier: Modifier) {
+    Column(modifier.padding(start = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Lc(L.drawable.lucide_ic_sun, tint = Color.White, size = 18.dp)
+        Canvas(
+            Modifier.padding(vertical = 8.dp).size(width = 36.dp, height = 120.dp).pointerInput(Unit) {
+                fun levelAt(y: Float) = 1f - (y / size.height).coerceIn(0f, 1f)
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    // Taken, or the picture under it would read it as a tap too.
+                    down.consume()
+                    onChange(levelAt(down.position.y))
+                    while (true) {
+                        val c = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                        if (!c.pressed) break
+                        c.consume()
+                        onChange(levelAt(c.position.y))
+                    }
+                }
+            },
+        ) {
+            val w = 4.dp.toPx()
+            val x = (size.width - w) / 2
+            val filled = size.height * level
+            drawRoundRect(Color.White.copy(alpha = 0.28f), Offset(x, 0f), Size(w, size.height), CornerRadius(w / 2))
+            drawRoundRect(Color.White, Offset(x, size.height - filled), Size(w, filled), CornerRadius(w / 2))
+            drawCircle(Color.White, 7.dp.toPx(), Offset(size.width / 2, size.height - filled))
+        }
+        Text("${(level * 100).roundToInt()}%", style = Type.meta.copy(color = Color.White, fontSize = 11.sp))
     }
 }
 

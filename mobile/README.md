@@ -74,8 +74,9 @@ Profiles, with PINs — asked for only when the phone cannot tell who is watchin
 **The player.** The TV's loading screen (backdrop, logo, a ring that fills) and
 its "You're watching" card when paused; Up Next over the last 30 seconds, with
 the next file in the pack or the show's next episode found online. Double-tap
-the sides to skip (taps add up), hold for 2×, swipe the left edge for
-brightness and the right for volume, lock the screen. Audio and subtitle tracks
+the sides to skip (taps add up), hold for 2×, brightness from the slider on the
+left of the controls or a swipe down the left edge (volume stays with the
+phone's own keys), lock the screen. Audio and subtitle tracks
 side by side, SubDL search, subtitle delay; speed and picture fit, remembered
 between videos; stats for nerds; skip intro (marked once per show); sleep timer
 (15/30/60 minutes or the end of the episode); picture-in-picture from the Mini
