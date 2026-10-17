@@ -191,7 +191,11 @@ class PlayOptions(
  * once enough of the head (and the resume point) is in. Blocking calls — run them
  * off the main thread.
  */
-class TorrentStream(private val context: Context) {
+class TorrentStream(
+    private val context: Context,
+    /** Incoming peers: the TV takes 6881, the phone 6882, Windows 51413 — a router forwards a port to one device. */
+    private val port: Int = 6881,
+) {
     val progress = MutableStateFlow<Progress?>(null)
     val ready = MutableStateFlow<Ready?>(null)
     val errors = MutableSharedFlow<String>(extraBufferCapacity = 4)
@@ -457,7 +461,7 @@ class TorrentStream(private val context: Context) {
                 AlertType.TRACKER_WARNING,
                 AlertType.METADATA_RECEIVED,
                 AlertType.TORRENT_ERROR,
-                // Whether UPnP / NAT-PMP actually opened 6881 on the router — incoming peers depend on it.
+                // Whether UPnP / NAT-PMP actually opened the port on the router — incoming peers depend on it.
                 AlertType.PORTMAP,
                 AlertType.PORTMAP_ERROR,
                 AlertType.FILE_ERROR,
@@ -509,8 +513,7 @@ class TorrentStream(private val context: Context) {
             // libtorrent calls the torrent finished and drops its seeds as "redundant": on
             // the TV, 36 seeds at 6.9MB/s became 0 and 5kB/s just as the zone moved on.
             .setBoolean(settings_pack.bool_types.close_redundant_connections.swigValue(), false)
-            // 6881: the phone (6882) and Windows app (51413) may share the router.
-            .setString(settings_pack.string_types.listen_interfaces.swigValue(), "0.0.0.0:6881,[::]:6881")
+            .setString(settings_pack.string_types.listen_interfaces.swigValue(), "0.0.0.0:$port,[::]:$port")
             .setString(settings_pack.string_types.dht_bootstrap_nodes.swigValue(), BOOTSTRAP)
             .setBoolean(settings_pack.bool_types.enable_dht.swigValue(), true)
             .setBoolean(settings_pack.bool_types.enable_lsd.swigValue(), true)

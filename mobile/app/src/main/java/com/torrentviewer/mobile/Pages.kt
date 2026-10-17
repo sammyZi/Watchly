@@ -1,0 +1,584 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
+package com.torrentviewer.mobile
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.torrentviewer.core.AVATARS
+import com.torrentviewer.core.Avatar
+import com.torrentviewer.core.CACHE_CAPS
+import com.torrentviewer.core.COLOURS
+import com.torrentviewer.core.GENRES
+import com.torrentviewer.core.GUEST
+import com.torrentviewer.core.Hit
+import com.torrentviewer.core.History
+import com.torrentviewer.core.Ink
+import com.torrentviewer.core.Item
+import com.torrentviewer.core.Lc
+import com.torrentviewer.core.Meta
+import com.torrentviewer.core.Note
+import com.torrentviewer.core.Profile
+import com.torrentviewer.core.Profiles
+import com.torrentviewer.core.SavedStore
+import com.torrentviewer.core.Searches
+import com.torrentviewer.core.Settings
+import com.torrentviewer.core.SettingsStore
+import com.torrentviewer.core.Sort
+import com.torrentviewer.core.Spinner
+import com.torrentviewer.core.Title
+import com.torrentviewer.core.Type
+import com.torrentviewer.core.Watch
+import com.torrentviewer.core.ago
+import com.torrentviewer.core.avatarIcon
+import com.torrentviewer.core.colorOf
+import com.torrentviewer.core.parseEpisode
+import com.torrentviewer.core.searchTorrents
+import com.torrentviewer.core.sortTitles
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import com.composables.icons.lucide.R as L
+
+/** Poster columns: three across a phone held upright. */
+private val POSTER = GridCells.Adaptive(104.dp)
+
+private fun subOf(t: Title) = listOfNotNull(if (t.isSeries) "Series" else "Film", t.year?.take(4)).joinToString("  ·  ")
+
+/* -------------------------------------------------------------- catalog */
+
+/** A whole shelf as a grid, with the phone's four orders. */
+@Composable
+fun CatalogScreen(shelf: Shelf, onOpen: (Title) -> Unit, onBack: () -> Unit) {
+    var titles by remember { mutableStateOf(Meta.peekCatalog(shelf.kind, shelf.genre)) }
+    LaunchedEffect(shelf.key) { if (titles.isNullOrEmpty()) titles = Meta.catalog(shelf.kind, shelf.genre) }
+    var sort by rememberSaveable { mutableStateOf(Sort.POPULAR) }
+    val shown = remember(titles, sort) { sortTitles(titles.orEmpty(), sort) }
+    Box(Modifier.fillMaxSize()) {
+        LazyVerticalGrid(
+            POSTER,
+            state = rememberLazyGridState(),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Column {
+                    Heading(shelf.title, Modifier.padding(start = 48.dp))
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Sort.entries.forEach { s -> Chip(s.label, s == sort, onClick = { sort = s }) }
+                    }
+                }
+            }
+            if (titles == null) item(span = { GridItemSpan(maxLineSpan) }) { Box(Modifier.padding(top = 40.dp), contentAlignment = Alignment.Center) { Spinner(size = 36.dp) } }
+            else if (shown.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) { Note("Nothing on this shelf right now.") }
+            items(shown, key = { it.imdb }) { t -> PosterCard(t, { onOpen(t) }, sub = subOf(t)) }
+        }
+        BackButton(onBack)
+    }
+}
+
+/* --------------------------------------------------------------- search */
+
+/** How well a title answers what was typed; lower is better. */
+private fun relevance(title: String, query: String): Int {
+    val a = title.trim().lowercase()
+    val q = query.trim().lowercase()
+    return when {
+        a == q -> 0
+        a.startsWith(q) -> 1
+        q in a -> 2
+        else -> 3
+    }
+}
+
+/** Results arrive as the letters do; the Torrents switch searches release names instead. */
+@Composable
+fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
+    var query by rememberSaveable { mutableStateOf("") }
+    var torrents by rememberSaveable { mutableStateOf(false) }
+    var results by remember { mutableStateOf<List<Title>?>(null) }
+    var hits by remember { mutableStateOf<List<Hit>?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var recents by remember { mutableStateOf(Searches.load()) }
+
+    LaunchedEffect(query, torrents) {
+        val q = query.trim()
+        if (q.length < 2) {
+            results = null
+            hits = null
+            busy = false
+            return@LaunchedEffect
+        }
+        delay(400)
+        busy = true
+        if (torrents) {
+            hits = searchTorrents(q) { hits = it }
+        } else {
+            results = coroutineScope {
+                val films = async { Meta.search(q, "movie") }
+                val series = async { Meta.search(q, "tv") }
+                (films.await() + series.await()).distinctBy { it.imdb }.sortedBy { relevance(it.title, q) }
+            }
+        }
+        busy = false
+    }
+
+    LazyVerticalGrid(
+        POSTER,
+        state = rememberLazyGridState(),
+        modifier = Modifier.fillMaxSize().imePadding(),
+        contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Column {
+                Heading("Search")
+                Field(
+                    query,
+                    { query = it },
+                    if (torrents) "Release or torrent name" else "Movies, shows, anime",
+                    Modifier.fillMaxWidth(),
+                    leading = L.drawable.lucide_ic_search,
+                    onSubmit = { recents = Searches.remember(query) },
+                    trailing = {
+                        when {
+                            busy -> Spinner(size = 20.dp)
+                            query.isNotEmpty() -> Tap({ query = "" }, shape = CircleShape) { Lc(L.drawable.lucide_ic_x, Modifier.padding(4.dp), tint = Ink.muted, size = 18.dp) }
+                        }
+                    },
+                )
+                Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Chip("Titles", !torrents, onClick = { torrents = false; hits = null })
+                    Chip("Torrents", torrents, onClick = { torrents = true; results = null }, icon = L.drawable.lucide_ic_layers)
+                }
+                if (recents.isNotEmpty() && results == null && hits == null) {
+                    Row(Modifier.padding(top = 26.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Recent searches", Modifier.weight(1f), style = Type.title.copy(fontWeight = FontWeight.Bold))
+                        Tap({ recents = Searches.clear() }, shape = CircleShape) { Text("Clear", Modifier.padding(horizontal = 10.dp, vertical = 6.dp), style = Type.meta) }
+                    }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        recents.forEach { r -> Chip(r, false, onClick = { query = r }, icon = L.drawable.lucide_ic_history) }
+                    }
+                }
+                val q = query.trim()
+                val heading = when {
+                    torrents && hits != null -> if (hits!!.isEmpty()) if (busy) "Searching…" else "No releases for “$q”" else "${hits!!.size} releases" + if (busy) "  ·  finding more…" else ""
+                    !torrents && results != null -> if (results!!.isEmpty()) "Nothing found for “$q”" else "Top results"
+                    else -> null
+                }
+                heading?.let { Text(it, Modifier.padding(top = 24.dp), style = Type.title.copy(fontWeight = FontWeight.Bold)) }
+            }
+        }
+        if (torrents) {
+            items(hits.orEmpty(), key = { it.id }, span = { GridItemSpan(maxLineSpan) }) { hit ->
+                Source(hit) {
+                    recents = Searches.remember(query)
+                    watch.stream(hit, null)
+                }
+            }
+        } else {
+            items(results.orEmpty(), key = { it.imdb }) { t ->
+                PosterCard(t, {
+                    recents = Searches.remember(query)
+                    onOpen(t)
+                }, sub = subOf(t))
+            }
+        }
+    }
+}
+
+/* -------------------------------------------------------------- library */
+
+private enum class Shelfs(val label: String) { HISTORY("History"), LATER("My List"), FAVORITE("Favourites") }
+
+/** Everything played (the only way back to a magnet watched once), and the two saved lists. */
+@Composable
+fun LibraryScreen(watch: Watch, onOpen: (Title) -> Unit) {
+    val history by History.items.collectAsState()
+    val saved by SavedStore.items.collectAsState()
+    var shelf by rememberSaveable { mutableStateOf(Shelfs.HISTORY) }
+    var menu by remember { mutableStateOf<Item?>(null) }
+    var clearing by remember { mutableStateOf(false) }
+    val items = history.sortedByDescending { it.at }
+    val listed = saved.filter { it.list == if (shelf == Shelfs.FAVORITE) "favorite" else "later" }.map { it.asTitle() }
+
+    LazyVerticalGrid(
+        if (shelf == Shelfs.HISTORY) GridCells.Adaptive(cardWidth()) else POSTER,
+        state = rememberLazyGridState(),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Column {
+                Heading("Library") {
+                    if (shelf == Shelfs.HISTORY && items.isNotEmpty()) Tap({ clearing = true }, shape = CircleShape) {
+                        Lc(L.drawable.lucide_ic_trash_2, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp)
+                    }
+                }
+                Row(Modifier.padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Shelfs.entries.forEach { s -> Chip(s.label, s == shelf, onClick = { shelf = s }) }
+                }
+            }
+        }
+        if (shelf == Shelfs.HISTORY) {
+            if (items.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) { Note("Nothing here yet. Anything you play turns up in this list.", Modifier.padding(top = 16.dp)) }
+            items(items, key = { it.uri }) { item ->
+                val ep = item.lastFileIndex?.let { i -> item.files?.find { it.index == i } }?.let { parseEpisode(it.name) }
+                Tap({ watch.resume(item) }, Modifier.fillMaxWidth().aspectRatio(16f / 9f), RoundedCornerShape(6.dp), onLongClick = { menu = item }) {
+                    LandscapeCard(
+                        item.art(),
+                        item.label,
+                        listOfNotNull(ep?.let { "S${it.season}:E${it.episode}" }, ago(item.at)).joinToString("  ·  "),
+                        item.ratio.toFloat().takeIf { it > 0f },
+                    )
+                }
+            }
+        } else {
+            if (listed.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+                Note(if (shelf == Shelfs.LATER) "Titles you add to My List wait here." else "Titles you like collect here.", Modifier.padding(top = 16.dp))
+            }
+            items(listed, key = { it.imdb }) { t -> PosterCard(t, { onOpen(t) }, sub = subOf(t)) }
+        }
+    }
+
+    menu?.let { item ->
+        Sheet(
+            title = item.label,
+            options = listOf(Option(true, "Remove from Library")),
+            selected = null,
+            onPick = {
+                History.drop(item.uri, watch.engine)
+                menu = null
+            },
+            onDismiss = { menu = null },
+        )
+    }
+    if (clearing) {
+        Sheet(
+            title = "Clear everything you have played?",
+            options = listOf(Option(true, "Clear all", "Resume points and downloaded subtitles go too"), Option(false, "Cancel")),
+            selected = null,
+            onPick = {
+                if (it) History.clear(watch.engine)
+                clearing = false
+            },
+            onDismiss = { clearing = false },
+        )
+    }
+}
+
+/* ------------------------------------------------------------- settings */
+
+@Composable
+fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
+    val settings by SettingsStore.value.collectAsState()
+    val profiles by Profiles.list.collectAsState()
+    val me = profiles.find { it.id == who.id } ?: who
+    var pin by remember { mutableStateOf("") }
+    fun set(next: Settings) = SettingsStore.save(next)
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = EDGE).padding(bottom = 32.dp)) {
+        Heading("Settings")
+
+        Section(
+            "Profile",
+            when {
+                me.isGuest -> "Guest keeps nothing — history and My List go when the app closes."
+                profiles.isEmpty() -> "One library on this phone. Add profiles to keep a library, My List and resume points each."
+                else -> "Library, My List and resume points belong to this profile."
+            },
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Avatar(me, 44.dp)
+                Spacer(Modifier.width(14.dp))
+                Button(if (profiles.isEmpty()) "Add profiles" else "Switch profile", onSwitchProfile, icon = L.drawable.lucide_ic_users)
+            }
+        }
+
+        // Only a saved profile can carry a lock; the phone's owner before profiles has nowhere to keep one.
+        if (!me.isGuest && profiles.any { it.id == me.id }) {
+            Section(
+                "Profile PIN",
+                if (me.pin != null) "Asked for before this profile opens. Remove it to unlock."
+                else "Four digits, asked for before this profile opens. A lock for a shared phone — not a password.",
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Field(pin, { pin = it.filter(Char::isDigit).take(4) }, if (me.pin != null) "••••" else "– – – –", Modifier.width(140.dp), secret = true, digits = true)
+                    Spacer(Modifier.width(10.dp))
+                    Button(if (pin.length == 4) "Set PIN" else "4 digits", {
+                        if (pin.length == 4) {
+                            Profiles.setPin(me.id, pin)
+                            pin = ""
+                        }
+                    }, icon = L.drawable.lucide_ic_lock)
+                    if (me.pin != null) {
+                        Spacer(Modifier.width(8.dp))
+                        Button("Remove", { Profiles.setPin(me.id, "") })
+                    }
+                }
+            }
+        }
+
+        Section(
+            "Storage for one film",
+            "How much of a film may sit on this phone at once. When the cap is reached the stream restarts from where you are — a pause of a few seconds.",
+        ) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                CACHE_CAPS.forEach { mb -> Chip("${mb / 1024} GB", settings.cacheCapMb == mb, onClick = { set(settings.copy(cacheCapMb = mb)) }) }
+            }
+        }
+
+        Section("Buffer before playing", "Larger starts slower but is steadier on a weak swarm.") {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(1, 4, 8, 16).forEach { mb -> Chip("$mb MB", settings.prepareMb == mb, onClick = { set(settings.copy(prepareMb = mb)) }) }
+            }
+        }
+
+        Section("Player", "Media3 hands a file it can't play to VLC by itself. VLC from the start plays the most formats and full ASS subtitle styling.") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Chip("Media3", !settings.vlcPlayer, onClick = { set(settings.copy(vlcPlayer = false)) })
+                Chip("VLC", settings.vlcPlayer, onClick = { set(settings.copy(vlcPlayer = true)) })
+            }
+        }
+
+        Section("Extra trackers", "Attach public trackers to bare magnet links so they resolve faster.") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Chip("On", settings.addTrackers, onClick = { set(settings.copy(addTrackers = true)) })
+                Chip("Off", !settings.addTrackers, onClick = { set(settings.copy(addTrackers = false)) })
+            }
+        }
+
+        Section("Genres on the home screen", "Leave all off to build the home screen from what you have watched.") {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                GENRES.forEach { g ->
+                    val on = g in settings.genres
+                    Chip(g, on, icon = if (on) L.drawable.lucide_ic_check else null, onClick = {
+                        set(settings.copy(genres = if (on) settings.genres - g else settings.genres + g))
+                    })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Section(title: String, hint: String, content: @Composable () -> Unit) {
+    Column(Modifier.padding(bottom = 28.dp)) {
+        Text(title, style = Type.title.copy(fontWeight = FontWeight.Bold))
+        Text(hint, Modifier.padding(top = 4.dp, bottom = 12.dp), style = Type.meta.copy(color = Ink.faint))
+        content()
+    }
+}
+
+/* ------------------------------------------------------------- profiles */
+
+private sealed interface ProfilesMode {
+    data object Pick : ProfilesMode
+    data object Manage : ProfilesMode
+    data class Edit(val profile: Profile?) : ProfilesMode
+    data class Pin(val profile: Profile) : ProfilesMode
+}
+
+/** Who's watching — asked only when the phone can't tell: several profiles, or a locked one. */
+@Composable
+fun ProfilesScreen(profiles: List<Profile>, onPick: (Profile) -> Unit, onCancel: (() -> Unit)?, onRemoved: (Profile) -> Unit) {
+    var mode by remember { mutableStateOf<ProfilesMode>(if (profiles.isEmpty()) ProfilesMode.Edit(null) else ProfilesMode.Pick) }
+    BackHandler(mode != ProfilesMode.Pick || onCancel != null) {
+        when {
+            mode != ProfilesMode.Pick && profiles.isNotEmpty() -> mode = ProfilesMode.Pick
+            onCancel != null -> onCancel()
+        }
+    }
+    Box(Modifier.fillMaxSize().statusBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = EDGE, vertical = 24.dp), contentAlignment = Alignment.Center) {
+        when (val m = mode) {
+            ProfilesMode.Pick, ProfilesMode.Manage -> Picker(
+                profiles, m == ProfilesMode.Manage, onCancel,
+                open = { p ->
+                    when {
+                        m == ProfilesMode.Manage -> mode = ProfilesMode.Edit(p)
+                        p.pin != null -> mode = ProfilesMode.Pin(p)
+                        else -> onPick(p)
+                    }
+                },
+                onAdd = { mode = ProfilesMode.Edit(null) },
+                onManage = { mode = if (m == ProfilesMode.Manage) ProfilesMode.Pick else ProfilesMode.Manage },
+                onGuest = { onPick(GUEST) },
+            )
+            is ProfilesMode.Edit -> Editor(
+                m.profile,
+                canCancel = profiles.isNotEmpty() || onCancel != null,
+                onSave = { name, icon, colour ->
+                    if (m.profile == null) onPick(Profiles.add(name, icon, colour))
+                    else {
+                        Profiles.edit(m.profile.id, name, icon, colour)
+                        mode = ProfilesMode.Pick
+                    }
+                },
+                onDelete = {
+                    m.profile?.let {
+                        Profiles.remove(it.id)
+                        onRemoved(it)
+                    }
+                    mode = ProfilesMode.Pick
+                },
+                onCancel = { if (profiles.isEmpty()) onCancel?.invoke() else mode = ProfilesMode.Pick },
+            )
+            is ProfilesMode.Pin -> PinPad(m.profile, onOk = { onPick(m.profile) }, onBack = { mode = ProfilesMode.Pick })
+        }
+    }
+}
+
+@Composable
+private fun Picker(
+    profiles: List<Profile>,
+    managing: Boolean,
+    onCancel: (() -> Unit)?,
+    open: (Profile) -> Unit,
+    onAdd: () -> Unit,
+    onManage: () -> Unit,
+    onGuest: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(if (managing) "Manage profiles" else "Who's watching?", style = Type.display, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(32.dp))
+        FlowRow(Modifier.widthIn(max = 520.dp), horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+            profiles.forEach { p ->
+                Tile(p.name, { open(p) }) {
+                    Avatar(p, 96.dp)
+                    if (managing || p.pin != null) Badge(if (managing) L.drawable.lucide_ic_pencil else L.drawable.lucide_ic_lock)
+                }
+            }
+            if (!managing) Tile("Guest", onGuest) { Avatar(GUEST, 96.dp) }
+            if (!managing && profiles.size < 6) Tile("Add profile", onAdd) {
+                Box(Modifier.size(96.dp).background(Ink.surface, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { Lc(L.drawable.lucide_ic_plus, tint = Ink.muted, size = 36.dp) }
+            }
+        }
+        Spacer(Modifier.height(36.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (profiles.isNotEmpty()) Button(if (managing) "Done" else "Manage", onManage, icon = if (managing) L.drawable.lucide_ic_check else L.drawable.lucide_ic_pencil)
+            if (onCancel != null && !managing) Button("Back", onCancel)
+        }
+    }
+}
+
+@Composable
+private fun androidx.compose.foundation.layout.BoxScope.Badge(icon: Int) {
+    Box(Modifier.align(Alignment.BottomEnd).padding(6.dp).size(26.dp).clip(RoundedCornerShape(7.dp)).background(Color.Black.copy(alpha = 0.6f)), contentAlignment = Alignment.Center) {
+        Lc(icon, tint = Color.White, size = 14.dp)
+    }
+}
+
+@Composable
+private fun Tile(name: String, onClick: () -> Unit, face: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(100.dp)) {
+        Tap(onClick, shape = RoundedCornerShape(12.dp)) { Box { face() } }
+        Text(name, Modifier.padding(top = 10.dp), style = Type.label.copy(color = Ink.muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, String, String) -> Unit, onDelete: () -> Unit, onCancel: () -> Unit) {
+    var name by remember { mutableStateOf(profile?.name.orEmpty()) }
+    var icon by remember { mutableStateOf(profile?.icon ?: AVATARS[0]) }
+    var colour by remember { mutableStateOf(profile?.colour ?: COLOURS[0]) }
+    Column(Modifier.widthIn(max = 480.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Avatar(Profile("preview", name.ifBlank { "?" }, colour, icon), 110.dp)
+        Text(if (profile == null) "Add a profile" else "Edit profile", Modifier.padding(top = 18.dp), style = Type.display)
+        Text(if (profile == null) "Its own library, My List and resume points." else "Change the name, the face or the colour.", Modifier.padding(top = 4.dp, bottom = 18.dp), style = Type.meta, textAlign = TextAlign.Center)
+        Field(name, { name = it.take(20) }, "Name", Modifier.fillMaxWidth())
+        Text("ICON", Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 10.dp), style = Type.overline)
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            AVATARS.forEach { a ->
+                Tap({ icon = a }, Modifier.size(46.dp), CircleShape) {
+                    Box(Modifier.background(if (a == icon) Ink.accent else Ink.surface2), contentAlignment = Alignment.Center) { Lc(avatarIcon(a), tint = Color.White, size = 22.dp) }
+                }
+            }
+        }
+        Text("COLOUR", Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 10.dp), style = Type.overline)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            COLOURS.forEach { c ->
+                Tap({ colour = c }, Modifier.size(40.dp), CircleShape) {
+                    Box(Modifier.background(colorOf(c)), contentAlignment = Alignment.Center) { if (c == colour) Lc(L.drawable.lucide_ic_check, tint = Color.White, size = 18.dp) }
+                }
+            }
+        }
+        Button("Save", { onSave(name, icon, colour) }, Modifier.fillMaxWidth().padding(top = 28.dp), icon = L.drawable.lucide_ic_check, primary = true)
+        Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (canCancel) Button("Cancel", onCancel)
+            if (profile != null) Button("Delete profile", onDelete, icon = L.drawable.lucide_ic_trash_2)
+        }
+    }
+}
+
+@Composable
+private fun PinPad(profile: Profile, onOk: () -> Unit, onBack: () -> Unit) {
+    var pin by remember { mutableStateOf("") }
+    var wrong by remember { mutableStateOf(false) }
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Avatar(profile, 96.dp)
+        Text(profile.name, Modifier.padding(top = 14.dp), style = Type.display)
+        Text(if (wrong) "That's not the PIN. Try again." else "Enter your PIN to open this profile.", Modifier.padding(top = 6.dp, bottom = 20.dp), style = Type.body.copy(color = if (wrong) Ink.danger else Ink.muted), textAlign = TextAlign.Center)
+        Field(pin, { v ->
+            val digits = v.filter(Char::isDigit).take(4)
+            pin = digits
+            wrong = false
+            // Opens on the fourth digit — nobody wants to reach for OK after a PIN.
+            if (digits.length == 4) {
+                if (digits == profile.pin) onOk() else {
+                    wrong = true
+                    pin = ""
+                }
+            }
+        }, "• • • •", Modifier.width(200.dp), secret = true, digits = true)
+        Spacer(Modifier.height(20.dp))
+        Button("Back", onBack)
+    }
+}
