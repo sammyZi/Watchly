@@ -56,6 +56,7 @@ import com.torrentviewer.core.Hit
 import com.torrentviewer.core.Ink
 import com.torrentviewer.core.Lc
 import com.torrentviewer.core.Meta
+import com.torrentviewer.core.NewEpisodes
 import com.torrentviewer.core.Note
 import com.torrentviewer.core.OnHits
 import com.torrentviewer.core.SavedStore
@@ -140,6 +141,20 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
         }
     }
 
+    /** Keep a release on the phone, in the Downloads tab. */
+    fun keep(hit: Hit, ep: Episode?) {
+        Downloads.add(downloadJob(hit, title, ep))
+        watch.notes.tryEmit("Downloading ${ep?.let { "${title.title} · ${episodeTag(it.season, it.episode)}" } ?: title.title} — see Downloads")
+    }
+
+    fun downloadEpisode(ep: Episode) = scope.launch {
+        val ready = if (episode?.id == ep.id && shown.isNotEmpty()) shown else findSources(ep).await()
+        ready.firstOrNull()?.let { keep(it, ep) } ?: watch.notes.tryEmit("No sources found for ${episodeTag(ep.season, ep.episode)}.")
+    }
+
+    // Opening a series' page is seeing what is out: its new-episode count starts again from here.
+    LaunchedEffect(title.imdb, title.episodes.size) { NewEpisodes.markSeen(title) }
+
     // A film has one thing to look for: look on arrival.
     LaunchedEffect(title.imdb, title.kind) { if (!title.isSeries) findSources(null) }
 
@@ -203,6 +218,9 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                     Row(Modifier.padding(top = 14.dp)) {
                         Action(if (inList) L.drawable.lucide_ic_check else L.drawable.lucide_ic_plus, "My List", { SavedStore.toggle(title) })
                         Action(L.drawable.lucide_ic_heart, if (liked) "Liked" else "Like", { SavedStore.toggle(title, "favorite") }, tint = if (liked) Ink.accent else Ink.text)
+                        if (!title.isSeries) Action(L.drawable.lucide_ic_download, "Download", {
+                            shown.firstOrNull()?.let { keep(it, null) } ?: watch.notes.tryEmit(if (busy) "Still finding sources…" else "No sources to download.")
+                        })
                         title.trailer?.let { id -> Action(L.drawable.lucide_ic_film, "Trailer", { openUrl(context, "https://www.youtube.com/watch?v=$id") }) }
                         Action(L.drawable.lucide_ic_message_square_text, "Reviews", { reviews = true })
                     }
@@ -239,10 +257,11 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                             if (episode?.id != ep.id || hits == null) findSources(ep)
                             sheet = true
                         },
+                        onDownload = { downloadEpisode(ep) },
                     )
                 }
             } else {
-                sources(title, episode, hits, shown, busy, quality, { quality = it }, Modifier.widthIn(max = 720.dp)) { hit -> watch.stream(hit, title) }
+                sources(title, episode, hits, shown, busy, quality, { quality = it }, Modifier.widthIn(max = 720.dp), onDownload = { keep(it, null) }) { hit -> watch.stream(hit, title) }
             }
         }
         BackButton(onBack)
@@ -253,7 +272,10 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
         val ep = episode
         BottomSheet(ep?.let { "S${it.season}:E${it.episode} · ${it.name}" } ?: "Sources", onDismiss = { sheet = false }) {
             LazyColumn {
-                sources(title, ep, hits, shown, busy, quality, { quality = it }, Modifier, heading = false) { hit ->
+                sources(title, ep, hits, shown, busy, quality, { quality = it }, Modifier, heading = false, onDownload = { hit ->
+                    sheet = false
+                    keep(hit, ep)
+                }) { hit ->
                     sheet = false
                     watch.stream(hit, title, ep?.let { episodeTag(it.season, it.episode) }, ep)
                 }
@@ -286,6 +308,7 @@ private fun LazyListScope.sources(
     onQuality: (String?) -> Unit,
     modifier: Modifier,
     heading: Boolean = true,
+    onDownload: (Hit) -> Unit,
     onPlay: (Hit) -> Unit,
 ) {
     val qualities = hits.orEmpty().mapNotNull { it.quality }.distinct().sortedBy { QUALITY_ORDER.indexOf(it).let { i -> if (i < 0) 9 else i } }
@@ -310,7 +333,7 @@ private fun LazyListScope.sources(
         }
     }
     items(shown.take(MAX_SOURCES), key = { "src-" + it.id }) { hit ->
-        Source(hit, modifier.padding(start = EDGE, end = EDGE, bottom = 8.dp), runtimeSeconds(title.runtime)) { onPlay(hit) }
+        Source(hit, modifier.padding(start = EDGE, end = EDGE, bottom = 8.dp), runtimeSeconds(title.runtime), onDownload = { onDownload(hit) }) { onPlay(hit) }
     }
 }
 
@@ -324,7 +347,7 @@ private fun People(label: String, value: String) {
 
 /** Netflix's phone episode row: still on the left, number and name beside it, the synopsis under both. */
 @Composable
-private fun EpisodeRow(ep: Episode, fallback: String?, busy: Boolean, selected: Boolean, modifier: Modifier, onPlay: () -> Unit, onSources: () -> Unit) {
+private fun EpisodeRow(ep: Episode, fallback: String?, busy: Boolean, selected: Boolean, modifier: Modifier, onPlay: () -> Unit, onSources: () -> Unit, onDownload: () -> Unit) {
     Column(modifier.padding(horizontal = EDGE, vertical = 10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Tap(onPlay, Modifier.width(132.dp).aspectRatio(16f / 9f), RoundedCornerShape(6.dp)) {
@@ -343,6 +366,7 @@ private fun EpisodeRow(ep: Episode, fallback: String?, busy: Boolean, selected: 
             }
             // Every release for this episode, to pick one by hand.
             Tap(onSources, shape = CircleShape) { Lc(L.drawable.lucide_ic_list_video, Modifier.padding(10.dp), tint = Ink.muted, size = 22.dp) }
+            Tap(onDownload, shape = CircleShape) { Lc(L.drawable.lucide_ic_download, Modifier.padding(10.dp), tint = Ink.muted, size = 22.dp) }
         }
         ep.overview?.let { Text(it, Modifier.padding(top = 8.dp), style = Type.meta.copy(color = Ink.faint), maxLines = 3, overflow = TextOverflow.Ellipsis) }
     }
@@ -357,7 +381,7 @@ private const val TOO_HEAVY_MBPS = 80.0
  * With [runtimeSeconds], a release too big to stream as it plays says what it needs.
  */
 @Composable
-fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0, onClick: () -> Unit) {
+fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0, onDownload: (() -> Unit)? = null, onClick: () -> Unit) {
     val grade = health(hit.seeders)
     // A pack's size is many episodes; only a single file's size over the runtime is a bitrate.
     val mbps = if (runtimeSeconds > 0 && hit.size > 0 && (hit.scope == Scope.EPISODE || hit.perFileSize)) hit.size * 8 / runtimeSeconds / 1_000_000 else 0.0
@@ -393,6 +417,7 @@ fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0
                 Text(grade.label, style = Type.meta.copy(color = tint, fontWeight = FontWeight.Bold))
                 if (mbps >= HEAVY_MBPS) Text("Needs ${mbps.toInt()} Mb/s", style = Type.meta.copy(fontSize = 11.sp, color = if (mbps >= TOO_HEAVY_MBPS) Ink.danger else Ink.warn))
             }
+            if (onDownload != null) Tap(onDownload, Modifier.padding(start = 4.dp), CircleShape) { Lc(L.drawable.lucide_ic_download, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp) }
         }
     }
 }

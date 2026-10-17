@@ -59,6 +59,7 @@ import com.torrentviewer.core.Item
 import com.torrentviewer.core.Lc
 import com.torrentviewer.core.Meta
 import com.torrentviewer.core.Net
+import com.torrentviewer.core.NewEpisodes
 import com.torrentviewer.core.Profile
 import com.torrentviewer.core.SavedStore
 import com.torrentviewer.core.SettingsStore
@@ -109,6 +110,7 @@ class HomeState {
     var heroCount by mutableIntStateOf(0)
     val hero = PagerState { heroCount }
     var picks by mutableStateOf<List<Shelf>>(emptyList())
+    var fresh by mutableStateOf<List<NewEpisodes.Fresh>>(emptyList())
 
     fun row(key: String) = rows.getOrPut(key) { LazyListState() }
 }
@@ -147,6 +149,11 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
             Shelf(if (i == 0) "Because you watched ${genre.lowercase()}" else "More ${genre.lowercase()}", kind, genre)
         }
     }
+    // Followed series — watched or saved — with episodes out since their page was last opened.
+    LaunchedEffect(history.size, saved.size, online) {
+        val shows = history.filter { it.kind == "tv" }.mapNotNull { it.imdb } + saved.filter { it.kind == "tv" }.map { it.imdb }
+        state.fresh = runCatching { NewEpisodes.fresh(shows) }.getOrDefault(state.fresh)
+    }
     val chosen = settings.genres.map { Shelf(if (it == ANIME_GENRE) "Anime" else it, kindOfGenre(it), it) }
     val shelves = remember(chosen, state.picks) {
         val taken = chosen.map { it.key }.toMutableSet()
@@ -182,6 +189,17 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
                         items(resumable, key = { it.uri }) { item ->
                             Tap({ watch.resume(item) }, Modifier.width(cardWidth()).aspectRatio(16f / 9f), RoundedCornerShape(6.dp), onLongClick = { menu = item }) {
                                 LandscapeCard(item.art(), item.label, resumeStamp(item), item.ratio.toFloat())
+                            }
+                        }
+                    }
+                }
+            }
+            if (state.fresh.isNotEmpty()) item(key = "fresh") {
+                Rail("New Episodes") {
+                    LazyRow(state = state.row("fresh"), contentPadding = PaddingValues(horizontal = EDGE), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        items(state.fresh, key = { it.title.imdb }) { f ->
+                            Tap({ onOpen(f.title) }, Modifier.width(cardWidth()).aspectRatio(16f / 9f), RoundedCornerShape(6.dp)) {
+                                LandscapeCard(f.title.wide, f.title.title, if (f.count == 1) "1 new episode" else "${f.count} new episodes")
                             }
                         }
                     }

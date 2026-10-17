@@ -60,6 +60,28 @@ class ExoView(context: Context) : Video(context) {
     private var source: String? = null
     private var startMs = 0L
     private var cacheMs = 3000
+
+    /** Media3 draws the cues itself, so a change shows on the next line. Sizes match libVLC's: 1/n of the height. */
+    override var subtitleStyle: SubtitleStyle? = null
+        set(value) {
+            field = value
+            if (value == null) {
+                subtitleView.setUserDefaultStyle()
+                subtitleView.setUserDefaultTextSize()
+                return
+            }
+            subtitleView.setStyle(
+                androidx.media3.ui.CaptionStyleCompat(
+                    if (value.yellow) android.graphics.Color.YELLOW else android.graphics.Color.WHITE,
+                    if (value.box) 0xA0000000.toInt() else android.graphics.Color.TRANSPARENT,
+                    android.graphics.Color.TRANSPARENT,
+                    if (value.box) androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_NONE else androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+                    android.graphics.Color.BLACK,
+                    null,
+                ),
+            )
+            subtitleView.setFractionalTextSize(1f / (SUB_SIZES[value.size] ?: 16))
+        }
     private var paused = false
     private var rate = 1f
     private var scale = ScaleType.SURFACE_BEST_FIT

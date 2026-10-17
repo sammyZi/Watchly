@@ -299,6 +299,42 @@ class LibTest {
         assertEquals(t, sortTitles(t, Sort.POPULAR))
     }
 
+    @Test fun languages() {
+        val tracks = listOf(Track(1, "Track 1 - [Japanese]"), Track(2, "English (Forced)"), Track(3, "English - SDH"), Track(4, "Director's commentary - it is"))
+        assertEquals(3, trackForLang(tracks, "EN")?.id)
+        assertEquals(1, trackForLang(tracks, "JA")?.id)
+        assertNull(trackForLang(tracks, "IT"))
+        assertEquals(2, trackForLang(listOf(Track(2, "eng forced")), "EN")?.id)
+        assertEquals("Portuguese (Brazil)", langName("BR_PT"))
+    }
+
+    @Test fun backupFiles() {
+        val good = """{"app":"watchly","version":1,"data":{"saved":"[]","settings":"{\"prepareMb\":4}","intros":"not json","bogus":"[]"}}"""
+        assertEquals(listOf("saved" to "[]", "settings" to "{\"prepareMb\":4}"), Backup.parse(good))
+        for (bad in listOf("nope", """{"app":"other","data":{}}""", """{"app":"watchly","data":{"intros":"x"}}""")) {
+            assertTrue(runCatching { Backup.parse(bad) }.isFailure)
+        }
+    }
+
+    @Test fun newEpisodeCounts() {
+        fun ep(s: Int, e: Int, released: String?) = Episode("$s:$e", s, e, "E$e", null, null, released)
+        val now = java.text.SimpleDateFormat("yyyy-MM-dd").parse("2026-06-01")!!.time
+        val show = Title("tt9", "tv", "Show", episodes = listOf(ep(0, 1, "2020-01-01"), ep(1, 1, "2026-01-01"), ep(1, 2, "2026-05-01"), ep(1, 3, "2026-09-01"), ep(1, 4, null)))
+        assertEquals(2, NewEpisodes.airedCount(show, now))
+        val (first, base) = NewEpisodes.compare(listOf(show), emptyMap(), now)
+        assertTrue(first.isEmpty())
+        assertEquals(2, base["tt9"])
+        val (later, _) = NewEpisodes.compare(listOf(show), mapOf("tt9" to 1), now)
+        assertEquals(1, later.single().count)
+    }
+
+    @Test fun localVideos() {
+        assertTrue(isLocalVideo("/storage/emulated/0/Movies/Watchly/Show/a.mkv"))
+        assertTrue(isLocalVideo("file:///storage/x.MP4"))
+        assertFalse(isLocalVideo("/data/user/0/app/files/imported/a.torrent"))
+        assertFalse(isLocalVideo("magnet:?xt=urn:btih:abc&dn=a.mkv"))
+    }
+
     @Test fun introWindow() {
         val intro = Intro(60.0, 150.0)
         assertFalse(intro.covers(57.0))

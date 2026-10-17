@@ -38,9 +38,18 @@ lock; skip intro (marked once per show, the Expo build's `intros`); sleep
 timer; picture-in-picture (Mini player, and Home while playing); the next
 episode from the same torrent or, failing that, found online.
 
-Still to come: downloads, settings parity (Wi-Fi only, SD card, languages,
-subtitle style, backup), new-episode badges, Google Cast, open in another
-player, subtitle delay.
+Downloads (`Downloads.kt`): a Download button on films, episodes and every
+release; its own libtorrent session beside the streaming engine; a foreground
+service with a progress notification; Wi-Fi only (a waiting download can be
+let through on mobile data) and the SD card's app folder, under the Expo
+build's preference names; finished videos copied to Movies/Watchly and played
+from the Downloads tab, resuming like anything else. Settings: preferred audio
+and subtitle languages (picked automatically, and used for SubDL), subtitle
+size, colour and box, speed and picture remembered between videos, backup and
+restore in the Expo build's file format. Home has a New Episodes shelf.
+
+Still to come: Google Cast, open in another player, subtitle delay, downloading
+a whole season in one go, subtitle style from inside the player.
 
 ## Run (Expo)
 

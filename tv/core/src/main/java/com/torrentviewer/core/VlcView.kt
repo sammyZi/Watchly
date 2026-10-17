@@ -52,6 +52,8 @@ abstract class Video(context: Context) : FrameLayout(context) {
     var onUnsupported: (String) -> Unit = { onFailed(it) }
     var onTracks: (Tracks) -> Unit = {}
     var onPlaying: (Boolean) -> Unit = {}
+    /** Subtitle text; null is the player's own default. Set before [open] — libVLC reads it only when it starts. */
+    open var subtitleStyle: SubtitleStyle? = null
 
     abstract fun open(url: String, startAt: Long, cacheMs: Int, subtitles: List<String>)
     abstract fun reload(ms: Long)
@@ -278,14 +280,21 @@ class VlcView(context: Context) : Video(context) {
         try {
             val instance = vlc ?: LibVLC(
                 context,
-                arrayListOf(
+                ArrayList(listOf(
                     "--network-caching=$cacheMs", "--file-caching=$cacheMs", "--no-video-title-show", "--audio-time-stretch",
                     // The HTTP read-ahead runs in its own thread and stays parked on the first
                     // missing piece; a seek waits for that read to return. 16MB by default sits
                     // right on the download edge, so most seeks — and the jump to the index on
                     // open — waited for a piece. From loopback, 4MB refills in milliseconds.
                     "--prefetch-buffer-size=4096", "--prefetch-read-size=1048576",
-                ),
+                ) + subtitleStyle?.let { s ->
+                    listOf(
+                        "--freetype-rel-fontsize=${SUB_SIZES[s.size] ?: 16}",
+                        "--freetype-color=${if (s.yellow) 0xFFFF00 else 0xFFFFFF}",
+                        "--freetype-background-color=0",
+                        "--freetype-background-opacity=${if (s.box) 160 else 0}",
+                    )
+                }.orEmpty()),
             ).also { vlcCacheMs = cacheMs }
             val mediaPlayer = MediaPlayer(instance)
             mediaPlayer.attachViews(videoLayout, null, true, false)

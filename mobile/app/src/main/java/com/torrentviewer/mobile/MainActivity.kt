@@ -39,6 +39,7 @@ object Services {
         // 6882: the TV (6881) and the Windows app (51413) may share the router.
         engine = TorrentStream(context.applicationContext, port = 6882)
         watch = Watch(engine)
+        Downloads.init(context)
     }
 }
 

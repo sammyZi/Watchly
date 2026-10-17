@@ -136,6 +136,7 @@ import com.torrentviewer.core.left
 import com.torrentviewer.core.parseEpisode
 import com.torrentviewer.core.searchEpisode
 import com.torrentviewer.core.searchableName
+import com.torrentviewer.core.trackForLang
 import com.torrentviewer.core.speed
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -288,8 +289,11 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     var tracks by remember { mutableStateOf<Tracks?>(null) }
     var subtitle by remember { mutableStateOf<Int?>(null) }
     var audio by remember { mutableStateOf<Int?>(null) }
-    var rate by remember { mutableFloatStateOf(1f) }
-    var scale by remember { mutableIntStateOf(0) }
+    // Speed and picture carry from one video to the next.
+    var rate by remember { mutableFloatStateOf(SettingsStore.value.value.playbackRate) }
+    var scale by remember { mutableIntStateOf(SCALES.indexOfFirst { it.second == SettingsStore.value.value.playerScale }.coerceAtLeast(0)) }
+    /** Audio, subtitles: the preferred language already tried, or the viewer already chose. */
+    val langDone = remember { booleanArrayOf(false, false) }
     var noNext by remember { mutableStateOf(false) }
     var scrub by remember { mutableStateOf<Double?>(null) }
     var hud by remember { mutableStateOf<Hud?>(null) }
@@ -650,6 +654,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                     (if (vlc) VlcView(ctx) else ExoView(ctx)).also { v ->
                         // A fallback keeps the viewer's speed and picture.
                         v.setRate(rate)
+                        v.subtitleStyle = SettingsStore.value.value.subtitles
                         v.setScale(SCALES[scale].first)
                         if (!vlc) v.onUnsupported = { message ->
                             Log.w("Player", "Media3 gave up ($message), falling back to VLC")
@@ -657,6 +662,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                             tracks = null
                             subtitle = null
                             audio = null
+                            langDone.fill(false)
                             vlc = true
                         }
                         var recoveries = 0
@@ -690,6 +696,22 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                                 pendingSub = false
                             } else {
                                 subtitle = t.spuId.takeIf { it >= 0 }
+                            }
+                            // The preferred languages, once each, the first time the file lists any.
+                            val prefs = SettingsStore.value.value
+                            if (!langDone[0] && t.audio.isNotEmpty()) {
+                                langDone[0] = true
+                                trackForLang(t.audio, prefs.audioLang)?.let { a ->
+                                    audio = a.id
+                                    v.setAudioTrack(a.id)
+                                }
+                            }
+                            if (!langDone[1] && t.subtitles.isNotEmpty()) {
+                                langDone[1] = true
+                                if (prefs.subLang.isNotEmpty()) trackForLang(t.subtitles, prefs.subLang)?.let { s ->
+                                    subtitle = s.id
+                                    v.setSubtitleTrack(s.id)
+                                }
                             }
                         }
                         v.onEnded = {
@@ -870,11 +892,14 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                 tracks = tracks,
                 subtitle = subtitle,
                 audio = audio ?: tracks?.defaultAudio,
+                // Picking one yourself wins over the preferred language.
                 onSubtitle = {
+                    langDone[1] = true
                     subtitle = it
                     view.value?.setSubtitleTrack(it)
                 },
                 onAudio = {
+                    langDone[0] = true
                     audio = it
                     view.value?.setAudioTrack(it)
                 },
@@ -894,6 +919,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                                 season = ep?.season,
                                 episode = ep?.episode,
                                 type = if (ep != null || title?.isSeries == true) "tv" else "movie",
+                                language = SettingsStore.value.value.subLang,
                             ).take(25)
                         }.getOrElse {
                             watch.notes.tryEmit(it.message ?: "Subtitle search failed")
@@ -911,6 +937,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                 onPick = {
                     rate = it
                     view.value?.setRate(it)
+                    SettingsStore.save(SettingsStore.value.value.copy(playbackRate = it))
                     panel = null
                 },
                 onDismiss = { panel = null },
@@ -922,6 +949,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                 onPick = {
                     scale = it
                     view.value?.setScale(SCALES[it].first)
+                    SettingsStore.save(SettingsStore.value.value.copy(playerScale = SCALES[it].second))
                     panel = null
                 },
                 onDismiss = { panel = null },
