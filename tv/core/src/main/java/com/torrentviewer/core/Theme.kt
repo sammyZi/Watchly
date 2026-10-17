@@ -70,20 +70,44 @@ import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.composables.icons.lucide.R as L
 
-/** Near-black page, one red, white focus. The artwork carries the colour. */
+/**
+ * Near-black page, one red, white focus. The artwork carries the colour. The phone may
+ * switch to a light page ([use]); the colours are snapshot state, so what reads them
+ * redraws with the switch. The TV never leaves dark.
+ */
 object Ink {
-    val bg = Color(0xFF0A0A0A)
-    val surface = Color(0xFF181818)
-    val surface2 = Color(0xFF262626)
-    val stroke = Color(0xFF333333)
-    val text = Color(0xFFFFFFFF)
-    val muted = Color(0xFFB3B3B3)
-    val faint = Color(0xFF7A7A7A)
+    private class Palette(
+        val bg: Color, val surface: Color, val surface2: Color, val stroke: Color,
+        val text: Color, val muted: Color, val faint: Color, val good: Color, val warn: Color, val danger: Color,
+    )
+
+    private val DARK = Palette(
+        Color(0xFF0A0A0A), Color(0xFF181818), Color(0xFF262626), Color(0xFF333333),
+        Color(0xFFFFFFFF), Color(0xFFB3B3B3), Color(0xFF7A7A7A), Color(0xFF46D369), Color(0xFFFFB340), Color(0xFFFF5A4E),
+    )
+    private val LIGHT = Palette(
+        Color(0xFFFFFFFF), Color(0xFFF1F1F1), Color(0xFFE4E4E4), Color(0xFFD0D0D0),
+        Color(0xFF141414), Color(0xFF575757), Color(0xFF8A8A8A), Color(0xFF1E8E3E), Color(0xFFB26A00), Color(0xFFD32F2F),
+    )
+    private var p by mutableStateOf(DARK)
+
+    val isDark get() = p === DARK
+    fun use(dark: Boolean) {
+        p = if (dark) DARK else LIGHT
+    }
+
+    val bg get() = p.bg
+    val surface get() = p.surface
+    val surface2 get() = p.surface2
+    val stroke get() = p.stroke
+    val text get() = p.text
+    val muted get() = p.muted
+    val faint get() = p.faint
+    val good get() = p.good
+    val warn get() = p.warn
+    val danger get() = p.danger
     /** Netflix's red, lit for a TV across the room; an app may set its own before it composes (the phone's is deeper). */
-    var accent = Color(0xFFE50914)
-    val good = Color(0xFF46D369)
-    val warn = Color(0xFFFFB340)
-    val danger = Color(0xFFFF5A4E)
+    var accent by mutableStateOf(Color(0xFFE50914))
     val imdb = Color(0xFFF5C518)
     val focus = Color.White
 }
@@ -97,15 +121,18 @@ private fun flex(weight: Int) = Font(
 
 val Sans = FontFamily(flex(400), flex(500), flex(600), flex(700), flex(800))
 
-/** Sized for the 960×540dp canvas a television reports, nudged up for ten feet. */
+/**
+ * Sized for the 960×540dp canvas a television reports, nudged up for ten feet. Getters,
+ * not values, so each style picks up the palette in use when it is read.
+ */
 object Type {
-    val hero = TextStyle(fontFamily = Sans, fontWeight = FontWeight.ExtraBold, fontSize = 40.sp, lineHeight = 44.sp, letterSpacing = (-1).sp, color = Ink.text)
-    val display = TextStyle(fontFamily = Sans, fontWeight = FontWeight.Bold, fontSize = 28.sp, lineHeight = 34.sp, letterSpacing = (-0.5).sp, color = Ink.text)
-    val title = TextStyle(fontFamily = Sans, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, lineHeight = 24.sp, color = Ink.text)
-    val body = TextStyle(fontFamily = Sans, fontWeight = FontWeight.Normal, fontSize = 15.sp, lineHeight = 22.sp, color = Ink.muted)
-    val label = TextStyle(fontFamily = Sans, fontWeight = FontWeight.Medium, fontSize = 15.sp, lineHeight = 20.sp, color = Ink.text)
-    val meta = TextStyle(fontFamily = Sans, fontWeight = FontWeight.Medium, fontSize = 13.sp, lineHeight = 18.sp, color = Ink.muted)
-    val overline = TextStyle(fontFamily = Sans, fontWeight = FontWeight.Bold, fontSize = 11.sp, lineHeight = 14.sp, letterSpacing = 1.4.sp, color = Ink.faint)
+    val hero get() = TextStyle(fontFamily = Sans, fontWeight = FontWeight.ExtraBold, fontSize = 40.sp, lineHeight = 44.sp, letterSpacing = (-1).sp, color = Ink.text)
+    val display get() = TextStyle(fontFamily = Sans, fontWeight = FontWeight.Bold, fontSize = 28.sp, lineHeight = 34.sp, letterSpacing = (-0.5).sp, color = Ink.text)
+    val title get() = TextStyle(fontFamily = Sans, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, lineHeight = 24.sp, color = Ink.text)
+    val body get() = TextStyle(fontFamily = Sans, fontWeight = FontWeight.Normal, fontSize = 15.sp, lineHeight = 22.sp, color = Ink.muted)
+    val label get() = TextStyle(fontFamily = Sans, fontWeight = FontWeight.Medium, fontSize = 15.sp, lineHeight = 20.sp, color = Ink.text)
+    val meta get() = TextStyle(fontFamily = Sans, fontWeight = FontWeight.Medium, fontSize = 13.sp, lineHeight = 18.sp, color = Ink.muted)
+    val overline get() = TextStyle(fontFamily = Sans, fontWeight = FontWeight.Bold, fontSize = 11.sp, lineHeight = 14.sp, letterSpacing = 1.4.sp, color = Ink.faint)
 }
 
 object Motion {
@@ -138,7 +165,8 @@ fun Artwork(url: String?, name: String, modifier: Modifier = Modifier, scale: Co
             Text(
                 name,
                 Modifier.align(Alignment.BottomStart).padding(10.dp),
-                style = Type.label.copy(fontWeight = FontWeight.Bold),
+                // On the dark tint, whatever the page's palette.
+                style = Type.label.copy(fontWeight = FontWeight.Bold, color = Color.White),
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )

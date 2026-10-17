@@ -41,6 +41,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.compose.LocalActivity
+import androidx.activity.enableEdgeToEdge
+import com.torrentviewer.core.SettingsStore
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
@@ -127,9 +134,28 @@ private fun startProfile(list: List<Profile>): Profile? {
     return (list.find { it.id == last } ?: list.singleOrNull())?.takeIf { it.pin == null }
 }
 
+fun darkFor(mode: String, systemDark: Boolean) = when (mode) {
+    "light" -> false
+    "dark" -> true
+    else -> systemDark
+}
+
+/** The page's palette, and status and navigation bar icons that read on it. */
+fun ComponentActivity.applyTheme(dark: Boolean) {
+    Ink.use(dark)
+    val bars = if (dark) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT) else SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+    enableEdgeToEdge(bars, bars)
+}
+
 @Composable
 fun App(watch: Watch, incoming: MutableState<Uri?>) {
-    MaterialTheme(colorScheme = darkColorScheme(primary = Ink.accent, background = Ink.bg, surface = Ink.surface)) {
+    val settings by SettingsStore.value.collectAsState()
+    val dark = darkFor(settings.themeMode, isSystemInDarkTheme())
+    val activity = LocalActivity.current as? ComponentActivity
+    // Live, for the setting and the system's own switch; the player keeps its dark while it is up.
+    LaunchedEffect(dark) { if (watch.phase != Phase.PLAYING) activity?.applyTheme(dark) }
+    val scheme = if (dark) darkColorScheme(primary = Ink.accent, background = Ink.bg, surface = Ink.surface) else lightColorScheme(primary = Ink.accent, background = Ink.bg, surface = Ink.surface)
+    MaterialTheme(colorScheme = scheme) {
         Box(Modifier.fillMaxSize().background(Ink.bg)) {
             Shell(watch, incoming)
             Toast(watch)
@@ -320,8 +346,9 @@ private fun Opening(watch: Watch) {
         Column(Modifier.align(Alignment.Center).padding(horizontal = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             if (title != null) TitleMark(title, Modifier.widthIn(max = 320.dp).padding(bottom = 28.dp), maxHeight = 80.dp)
             Spinner()
-            Text("Opening…", Modifier.padding(top = 18.dp), style = Type.title)
-            Text("Finding peers and reading the file list", Modifier.padding(top = 4.dp), style = Type.meta, textAlign = TextAlign.Center)
+            // White on the blacked-out art, whatever the page's palette.
+            Text("Opening…", Modifier.padding(top = 18.dp), style = Type.title.copy(color = Color.White))
+            Text("Finding peers and reading the file list", Modifier.padding(top = 4.dp), style = Type.meta.copy(color = Color.White.copy(alpha = 0.7f)), textAlign = TextAlign.Center)
         }
         BackButton { watch.cancel() }
     }

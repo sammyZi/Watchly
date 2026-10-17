@@ -428,8 +428,8 @@ fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0
             hit.quality?.let {
                 Text(
                     it,
-                    Modifier.background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(4.dp)).padding(horizontal = 7.dp, vertical = 3.dp),
-                    style = Type.overline.copy(color = Color.White, letterSpacing = 0.5.sp),
+                    Modifier.background(Ink.text.copy(alpha = 0.1f), RoundedCornerShape(4.dp)).padding(horizontal = 7.dp, vertical = 3.dp),
+                    style = Type.overline.copy(color = Ink.text, letterSpacing = 0.5.sp),
                 )
                 Spacer(Modifier.width(12.dp))
             }
