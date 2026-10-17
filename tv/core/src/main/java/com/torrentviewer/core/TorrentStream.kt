@@ -488,6 +488,14 @@ class TorrentStream(
         }
     }
 
+    /**
+     * Start the session — DHT bootstrap, port mapping — ahead of the first play, so a cold
+     * magnet is not also waiting on an empty routing table. Blocking; call it off the main thread.
+     */
+    fun warmUp() = runCatching { ensureSession() }
+
+    // Synchronized: a warm-up and a first play may both arrive here at once.
+    @Synchronized
     private fun ensureSession() {
         if (session.isRunning) return
 
@@ -1415,7 +1423,19 @@ class TorrentStream(
     /** libtorrent takes magnet:/http: URLs or a bare path, not file:// */
     private fun normalize(uri: String) = if (uri.startsWith("file://")) Uri.parse(uri).path ?: uri else uri
 
+    /** Also written here, timestamped, when set: some phones (vivo) keep app logs out of logcat. Restarts past 1 MB. */
+    @Volatile
+    var logFile: File? = null
+    private val stamp = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US)
+
     private fun log(message: String) {
         Log.i(TAG, message)
+        val f = logFile ?: return
+        synchronized(stamp) {
+            runCatching {
+                if (f.length() > 1_000_000) f.writeText("")
+                f.appendText("${stamp.format(java.util.Date())} $message\n")
+            }
+        }
     }
 }

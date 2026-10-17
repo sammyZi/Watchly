@@ -41,6 +41,10 @@ object Services {
         // 6882: the TV (6881) and the Windows app (51413) may share the router.
         // lan: the stream is also served to the network, for a Cast receiver to fetch.
         engine = TorrentStream(context.applicationContext, port = 6882, lan = true)
+        // Readable over adb (Android/data/<app>/files/engine.log): this phone keeps app logs out of logcat.
+        engine.logFile = context.getExternalFilesDir(null)?.let { java.io.File(it, "engine.log") }
+        // DHT bootstrapped while the viewer browses, not after they press Play.
+        AppScope.launch(Dispatchers.IO) { engine.warmUp() }
         watch = Watch(engine)
         Downloads.init(context)
     }
