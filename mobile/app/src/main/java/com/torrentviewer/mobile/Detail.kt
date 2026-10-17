@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -558,7 +559,13 @@ fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0
                 Spacer(Modifier.width(12.dp))
             }
             Column(Modifier.weight(1f)) {
-                Text(hit.name, style = Type.label.copy(fontSize = 14.sp), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                // The whole release name, on one line that scrolls through it — the codec and group at the end are what tell releases apart.
+                Text(
+                    hit.name,
+                    Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1500, repeatDelayMillis = 2000, velocity = 40.dp),
+                    style = Type.label.copy(fontSize = 14.sp),
+                    maxLines = 1,
+                )
                 Text(
                     // A film's scope is "Episode" only by default — it says nothing there.
                     listOfNotNull(hit.scope.label.takeIf { hit.kind == "tv" || hit.scope != Scope.EPISODE }, bytes(hit.size), "${hit.seeders} seeds").joinToString("  ·  "),
