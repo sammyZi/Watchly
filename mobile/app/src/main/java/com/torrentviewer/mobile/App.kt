@@ -10,7 +10,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.annotation.DrawableRes
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -242,16 +247,32 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     val openTitle: (Title) -> Unit = { pages.add(Page.Detail(it)) }
     val body: @Composable () -> Unit = {
         val top = pages.lastOrNull()
-        holder.SaveableStateProvider(top?.let { keyOf(pages.lastIndex, it) } ?: tab.name) {
-            when (top) {
-                is Page.Detail -> DetailScreen(top.title, watch, onBack = ::pop)
-                is Page.Catalog -> CatalogScreen(top.shelf, onOpen = openTitle, onBack = ::pop)
-                null -> when (tab) {
-                    Tab.HOME -> HomeScreen(home, watch, me, onOpen = openTitle, onShelf = { pages.add(Page.Catalog(it)) }, onProfile = { switching = true })
-                    Tab.SEARCH -> SearchScreen(watch, onOpen = openTitle)
-                    Tab.LIBRARY -> LibraryScreen(watch, onOpen = openTitle)
-                    Tab.DOWNLOADS -> DownloadsScreen(watch)
-                    Tab.SETTINGS -> SettingsScreen(watch, me, onSwitchProfile = { switching = true })
+        if (top != null) {
+            holder.SaveableStateProvider(keyOf(pages.lastIndex, top)) {
+                when (top) {
+                    is Page.Detail -> DetailScreen(top.title, watch, onBack = ::pop)
+                    is Page.Catalog -> CatalogScreen(top.shelf, onOpen = openTitle, onBack = ::pop)
+                }
+            }
+        } else {
+            // Tabs slide in from the side they sit on: Settings from the right of Home, Home from the left of it.
+            AnimatedContent(
+                tab,
+                transitionSpec = {
+                    val dir = if (targetState.ordinal > initialState.ordinal) 1 else -1
+                    (slideInHorizontally(tween(280)) { it * dir } + fadeIn(tween(280))) togetherWith
+                        (slideOutHorizontally(tween(280)) { -it * dir / 3 } + fadeOut(tween(200)))
+                },
+                label = "tabs",
+            ) { t ->
+                holder.SaveableStateProvider(t.name) {
+                    when (t) {
+                        Tab.HOME -> HomeScreen(home, watch, me, onOpen = openTitle, onShelf = { pages.add(Page.Catalog(it)) }, onProfile = { switching = true })
+                        Tab.SEARCH -> SearchScreen(watch, onOpen = openTitle)
+                        Tab.LIBRARY -> LibraryScreen(watch, onOpen = openTitle)
+                        Tab.DOWNLOADS -> DownloadsScreen(watch)
+                        Tab.SETTINGS -> SettingsScreen(watch, me, onSwitchProfile = { switching = true })
+                    }
                 }
             }
         }

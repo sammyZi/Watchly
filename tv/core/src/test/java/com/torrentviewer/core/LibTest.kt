@@ -349,6 +349,17 @@ class LibTest {
         assertEquals(Awards(null, 1, 3), awardsOf("1 win & 3 nominations"))
     }
 
+    @Test fun onePerTitle() {
+        val items = listOf(
+            Item("a", "Show.S01E01.720p", at = 1, imdb = "tt1", titleName = "Show · S01E01"),
+            Item("b", "Show.S01E02.1080p", at = 5, imdb = "tt1", titleName = "Show · S01E02"),
+            Item("c", "Film.2020", at = 3, titleName = "Film"),
+            Item("d", "Film.2020.REPACK", at = 4, titleName = "film"),
+            Item("magnet:x", "Unknown", at = 2),
+        )
+        assertEquals(listOf("b", "d", "magnet:x"), latestPerTitle(items).map { it.uri })
+    }
+
     @Test fun introWindow() {
         val intro = Intro(60.0, 150.0)
         assertFalse(intro.covers(57.0))

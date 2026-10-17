@@ -402,7 +402,13 @@ object Downloads {
 
     /** Skip an episode of a pack, or put it back. A saved one stays saved either way. */
     fun setWanted(uri: String, index: Int, on: Boolean) {
-        update(uri) { it.copy(job = it.job.copy(files = if (on) (it.job.files + index).distinct() else it.job.files - index)) }
+        // The tick shows at once; the next poll would otherwise be up to two seconds away.
+        update(uri) {
+            it.copy(
+                job = it.job.copy(files = if (on) (it.job.files + index).distinct() else it.job.files - index),
+                files = it.files.map { f -> if (f.index == index) f.copy(wanted = on) else f },
+            )
+        }
         val h = synchronized(lock) { handles[uri] } ?: return
         scope.launch {
             val job = _live.value.find { it.job.uri == uri }?.job ?: return@launch
