@@ -1,10 +1,12 @@
 # Watchly TV
 
 The television build: a native Kotlin app (Jetpack Compose, libtorrent4j,
-libVLC). Separate from the phone app in `../` — nothing is shared at build time.
+Media3 with a libVLC fallback). Two modules: `app` is the TV shell and its
+D-pad UI; `core` is everything the Kotlin phone app in `../mobile` will share
+(engine, players, indexers, metadata, store, the look).
 
 ```bash
-cd tv && ./gradlew :app:compileDebugKotlin :app:testDebugUnitTest
+cd tv && ./gradlew compileDebugKotlin testDebugUnitTest
 ```
 
 `applicationId` is `com.torrentviewer.tv`, signed with the same debug keystore
@@ -17,6 +19,8 @@ it is read into `BuildConfig.SUBDL_KEY` at build time and never committed.
 
 ## Layout
 
+`core/` (package `com.torrentviewer.core`):
+
 | File | What |
 | --- | --- |
 | `TorrentStream.kt` | The streaming engine: one libtorrent session, piece deadlines aimed at each reader, the rolling cache. Ported from the Expo build's `TorrentStreamModule` minus downloads/notifications/casting. |
@@ -25,8 +29,16 @@ it is read into `BuildConfig.SUBDL_KEY` at build time and never committed.
 | `Watch.kt` | One stream at a time: resolve, pick the file, play, next/previous episode. |
 | `Search.kt` / `Meta.kt` | Indexers (apibay, torrents-csv, Knaben, Nyaa, YTS, EZTV, Torrentio), Cinemeta metadata, SubDL. |
 | `Store.kt` | SharedPreferences with the Expo build's keys and JSON; per-profile namespaces; guest in memory only. |
+| `ExoView.kt` | Media3 surface with the FFmpeg audio decoders; `VlcView` takes over when it cannot play a file. |
+| `Theme.kt` | Ink palette, type, artwork, title logos, facts row, progress line, hero scrims, avatars. |
+
+`app/` (package `com.torrentviewer.tv`):
+
+| File | What |
+| --- | --- |
 | `Player.kt` | The player. |
-| `App.kt`, `Home.kt`, `Detail.kt`, `Pages.kt`, `Theme.kt` | Shell, nav rail, screens, focus primitives. |
+| `App.kt`, `Home.kt`, `Detail.kt`, `Pages.kt` | Shell, nav rail, screens. |
+| `Focus.kt` | Focus rings, TV buttons and chips, D-pad scrolling, the TV-safe gutters. |
 
 ## The player
 

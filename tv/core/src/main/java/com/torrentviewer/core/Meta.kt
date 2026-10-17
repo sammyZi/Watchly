@@ -1,4 +1,4 @@
-package com.torrentviewer.tv
+package com.torrentviewer.core
 
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll

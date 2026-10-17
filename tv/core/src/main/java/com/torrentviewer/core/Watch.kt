@@ -1,4 +1,4 @@
-package com.torrentviewer.tv
+package com.torrentviewer.core
 
 import android.util.Log
 import androidx.compose.runtime.getValue
