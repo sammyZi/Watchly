@@ -152,6 +152,10 @@ private fun ActiveRow(row: LiveDownload, onPause: () -> Unit, onResume: () -> Un
     val wanted = row.files.filter { it.wanted }
     val savedCount = wanted.count { it.saved }
     var open by rememberSaveable(row.job.uri) { mutableStateOf(false) }
+    /** Seasons unfolded in a multi-season pack; the one downloading now starts open. */
+    var openSeasons by remember(row.job.uri) {
+        mutableStateOf(setOf(row.files.firstOrNull { it.wanted && !it.saved }?.let { parseEpisode(it.name)?.season }))
+    }
     Column(Modifier.fillMaxWidth().widthIn(max = 720.dp).padding(bottom = 12.dp).clip(RoundedCornerShape(12.dp)).background(Ink.surface).padding(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Artwork(row.job.poster, row.job.label, Modifier.width(52.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(6.dp)))
@@ -201,9 +205,66 @@ private fun ActiveRow(row: LiveDownload, onPause: () -> Unit, onResume: () -> Un
                     Chip("None", wanted.none { !it.saved }, onClick = { row.files.filter { it.wanted && !it.saved }.forEach { onWanted(it.index, false) } })
                 }
                 val next = wanted.firstOrNull { !it.saved }?.index
-                row.files.forEach { f -> EpisodeLine(f, isNext = f.index == next && row.state == DlState.DOWNLOADING) { onWanted(f.index, !f.wanted) } }
+                // Seasons as their own groups: a complete-series pack is a hundred lines otherwise.
+                val seasons = row.files.groupBy { parseEpisode(it.name)?.season }
+                if (seasons.size <= 1) {
+                    row.files.forEach { f -> EpisodeLine(f, isNext = f.index == next && row.state == DlState.DOWNLOADING) { onWanted(f.index, !f.wanted) } }
+                } else {
+                    seasons.forEach { (season, files) ->
+                        SeasonGroup(
+                            season,
+                            files,
+                            expanded = season in openSeasons,
+                            onExpand = { openSeasons = if (season in openSeasons) openSeasons - season else openSeasons + season },
+                            onWanted = onWanted,
+                        ) { f -> EpisodeLine(f, isNext = f.index == next && row.state == DlState.DOWNLOADING) { onWanted(f.index, !f.wanted) } }
+                    }
+                }
             }
         }
+    }
+}
+
+/**
+ * One season of a pack: a circle that keeps or skips the whole season, its name, how many
+ * of its chosen episodes are saved, and a fold to show or hide them.
+ */
+@Composable
+private fun SeasonGroup(
+    season: Int?,
+    files: List<DlFile>,
+    expanded: Boolean,
+    onExpand: () -> Unit,
+    onWanted: (Int, Boolean) -> Unit,
+    episode: @Composable (DlFile) -> Unit,
+) {
+    val chosen = files.filter { it.wanted }
+    val all = chosen.size == files.size
+    val saved = chosen.count { it.saved }
+    Column(Modifier.padding(top = 4.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            // All on → skip what is not saved yet; anything off → take the whole season.
+            Tap({ files.filter { if (all) !it.saved else !it.wanted }.forEach { onWanted(it.index, !all) } }, shape = CircleShape) {
+                Lc(
+                    if (chosen.isEmpty()) L.drawable.lucide_ic_circle else if (all) L.drawable.lucide_ic_circle_check else L.drawable.lucide_ic_circle_dashed,
+                    Modifier.padding(6.dp),
+                    tint = if (chosen.isEmpty()) Ink.faint else Ink.accent,
+                    size = 20.dp,
+                )
+            }
+            Tap(onExpand, Modifier.weight(1f), RoundedCornerShape(6.dp)) {
+                Row(Modifier.padding(vertical = 8.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(season?.let { if (it == 0) "Specials" else "Season $it" } ?: "Other files", Modifier.weight(1f), style = Type.label.copy(fontWeight = FontWeight.SemiBold))
+                    Text(
+                        if (chosen.isEmpty()) "Skipped" else "$saved of ${chosen.size} saved",
+                        Modifier.padding(end = 6.dp),
+                        style = Type.meta.copy(fontSize = 12.sp, color = if (chosen.isNotEmpty() && saved == chosen.size) Ink.good else Ink.faint),
+                    )
+                    Lc(if (expanded) L.drawable.lucide_ic_chevron_up else L.drawable.lucide_ic_chevron_down, tint = Ink.muted, size = 18.dp)
+                }
+            }
+        }
+        if (expanded) Column(Modifier.padding(start = 12.dp)) { files.forEach { episode(it) } }
     }
 }
 

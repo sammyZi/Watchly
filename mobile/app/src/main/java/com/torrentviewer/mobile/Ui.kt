@@ -17,6 +17,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.animation.core.animate
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -182,10 +185,52 @@ fun Chip(label: String, on: Boolean, onClick: () -> Unit, modifier: Modifier = M
 
 /** Netflix's phone actions under the Play button: an icon over a word. */
 @Composable
-fun Action(@DrawableRes icon: Int, label: String, onClick: () -> Unit, tint: Color = Ink.text, modifier: Modifier = Modifier.width(84.dp)) {
+fun Action(
+    @DrawableRes icon: Int,
+    label: String,
+    onClick: () -> Unit,
+    tint: Color = Ink.text,
+    modifier: Modifier = Modifier.width(84.dp),
+    /** A toggle (My List, Like): its icon pops when switched, and a ring bursts out when switched on. */
+    on: Boolean? = null,
+) {
+    val pop = remember { Animatable(1f) }
+    val ring = remember { Animatable(0f) }
+    var seen by remember { mutableStateOf(on) }
+    LaunchedEffect(on) {
+        // Only a change the viewer made, not the first frame or a title loading in.
+        if (on == null || on == seen) return@LaunchedEffect
+        seen = on
+        launch {
+            pop.snapTo(0.7f)
+            pop.animateTo(1f, spring(dampingRatio = 0.35f, stiffness = 500f))
+        }
+        if (on) {
+            ring.snapTo(0f)
+            ring.animateTo(1f, tween(450))
+        }
+    }
     Tap(onClick, modifier) {
         Column(Modifier.padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Lc(icon, tint = tint, size = 24.dp)
+            Box(contentAlignment = Alignment.Center) {
+                // The burst: a ring that grows and fades behind the icon.
+                if (ring.value in 0.01f..0.99f) {
+                    Box(
+                        Modifier.size(24.dp).graphicsLayer {
+                            val s = 1f + ring.value * 1.2f
+                            scaleX = s
+                            scaleY = s
+                            alpha = 1f - ring.value
+                        }.border(2.dp, tint, CircleShape),
+                    )
+                }
+                Crossfade(icon, label = "icon") { shown ->
+                    Lc(shown, Modifier.graphicsLayer {
+                        scaleX = pop.value
+                        scaleY = pop.value
+                    }, tint = tint, size = 24.dp)
+                }
+            }
             Text(label, Modifier.padding(top = 6.dp), style = Type.meta.copy(fontSize = 12.sp), maxLines = 1)
         }
     }
@@ -248,7 +293,8 @@ fun Field(
     }
 }
 
-data class Option<T>(val value: T, val label: String, val hint: String? = null)
+/** [image]: a picture to lead the row with — a site's logo — in place of the tick column. */
+data class Option<T>(val value: T, val label: String, val hint: String? = null, val image: String? = null)
 
 /** A choice, up from the bottom edge over a dimmed page; a tap outside or Back closes it. */
 @Composable
@@ -273,7 +319,11 @@ fun <T> Sheet(
                             Modifier.background(if (pressed) Ink.text.copy(alpha = 0.08f) else Color.Transparent).padding(horizontal = 20.dp, vertical = 13.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Box(Modifier.size(22.dp)) { if (on) Lc(L.drawable.lucide_ic_check, tint = Ink.accent, size = 20.dp) }
+                            if (option.image != null) {
+                                coil3.compose.AsyncImage(option.image, option.label, Modifier.size(24.dp).clip(RoundedCornerShape(5.dp)))
+                            } else {
+                                Box(Modifier.size(22.dp)) { if (on) Lc(L.drawable.lucide_ic_check, tint = Ink.accent, size = 20.dp) }
+                            }
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(option.label, style = Type.label.copy(color = if (on) Ink.text else Ink.muted, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium), maxLines = 2, overflow = TextOverflow.Ellipsis)
