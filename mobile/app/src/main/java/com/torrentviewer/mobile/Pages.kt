@@ -144,7 +144,22 @@ private fun relevance(title: String, query: String): Int {
     }
 }
 
-/** Results arrive as the letters do; the Torrents switch searches release names instead. */
+/** "2020s"… and before 1990 one bucket; the year a title's releaseInfo starts with. */
+private val DECADES = listOf(2020 to "2020s", 2010 to "2010s", 2000 to "2000s", 1990 to "1990s", 0 to "Before 1990")
+
+private fun decadeOf(t: Title) = t.year?.take(4)?.toIntOrNull()?.let { if (it < 1990) 0 else it / 10 * 10 }
+
+/** Which filter's list is up. */
+private enum class Picking { KIND, GENRE, DECADE, SORT, QUALITY, ORDER }
+
+/** How releases are ordered: the ranking (seeds, then fit), or by size. */
+private enum class HitOrder(val label: String) { BEST("Best match"), BIGGEST("Biggest"), SMALLEST("Smallest") }
+
+/**
+ * Results arrive as the letters do; the Torrents switch searches release names instead.
+ * Filters narrow either list — film or series, genre, decade and order for titles; quality
+ * and size for releases. A genre with nothing typed browses that genre's shelf.
+ */
 @Composable
 fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
@@ -153,12 +168,28 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
     var hits by remember { mutableStateOf<List<Hit>?>(null) }
     var busy by remember { mutableStateOf(false) }
     var recents by remember { mutableStateOf(Searches.load()) }
+    // Filters: null is "any".
+    var kind by rememberSaveable { mutableStateOf<String?>(null) }
+    var genre by rememberSaveable { mutableStateOf<String?>(null) }
+    var decade by rememberSaveable { mutableStateOf<Int?>(null) }
+    var sort by rememberSaveable { mutableStateOf(Sort.POPULAR) }
+    var quality by rememberSaveable { mutableStateOf<String?>(null) }
+    var order by rememberSaveable { mutableStateOf(HitOrder.BEST) }
+    var picking by remember { mutableStateOf<Picking?>(null) }
+    val filtered = !torrents && (kind != null || genre != null || decade != null || sort != Sort.POPULAR) || torrents && (quality != null || order != HitOrder.BEST)
 
-    LaunchedEffect(query, torrents) {
+    LaunchedEffect(query, torrents, genre, kind) {
         val q = query.trim()
         if (q.length < 2) {
-            results = null
             hits = null
+            // Nothing typed, a genre picked: that genre's shelf, films and series together unless one is chosen.
+            val g = genre
+            results = if (!torrents && g != null) {
+                busy = true
+                coroutineScope {
+                    listOf("movie", "tv").filter { kind == null || it == kind }.map { k -> async { Meta.catalog(k, g) } }.flatMap { it.await() }.distinctBy { it.imdb }
+                }
+            } else null
             busy = false
             return@LaunchedEffect
         }
@@ -174,6 +205,25 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
             }
         }
         busy = false
+    }
+    val browsing = query.trim().length < 2
+    val titles = results?.let { list ->
+        sortTitles(
+            list.filter { t ->
+                (kind == null || t.kind == kind) && (decade == null || decadeOf(t) == decade) &&
+                    // A genre's own shelf is that genre already; a search result says so in its genres.
+                    (genre == null || browsing || genre in t.genres)
+            },
+            sort,
+        )
+    }
+    val releases = hits?.let { list ->
+        val q = list.filter { quality == null || it.quality == quality }
+        when (order) {
+            HitOrder.BEST -> q
+            HitOrder.BIGGEST -> q.sortedByDescending { it.size }
+            HitOrder.SMALLEST -> q.sortedBy { it.size }
+        }
     }
 
     LazyVerticalGrid(
@@ -205,6 +255,21 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
                     Chip("Titles", !torrents, onClick = { torrents = false; hits = null })
                     Chip("Torrents", torrents, onClick = { torrents = true; results = null }, icon = L.drawable.lucide_ic_layers)
                 }
+                // One chip per filter, red while it narrows anything.
+                Row(Modifier.padding(top = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (!torrents) {
+                        Chip(when (kind) { "movie" -> "Films"; "tv" -> "Series"; else -> "Films & series" }, kind != null, onClick = { picking = Picking.KIND })
+                        Chip(genre ?: "Any genre", genre != null, onClick = { picking = Picking.GENRE })
+                        Chip(DECADES.find { it.first == decade }?.second ?: "Any year", decade != null, onClick = { picking = Picking.DECADE })
+                        Chip(if (sort == Sort.POPULAR) "Best match" else sort.label, sort != Sort.POPULAR, onClick = { picking = Picking.SORT })
+                    } else {
+                        Chip(quality ?: "Any quality", quality != null, onClick = { picking = Picking.QUALITY })
+                        Chip(order.label, order != HitOrder.BEST, onClick = { picking = Picking.ORDER })
+                    }
+                    if (filtered) Chip("Clear", false, icon = L.drawable.lucide_ic_x, onClick = {
+                        kind = null; genre = null; decade = null; sort = Sort.POPULAR; quality = null; order = HitOrder.BEST
+                    })
+                }
                 if (recents.isNotEmpty() && results == null && hits == null) {
                     Row(Modifier.padding(top = 26.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("Recent searches", Modifier.weight(1f), style = Type.title.copy(fontWeight = FontWeight.Bold))
@@ -216,15 +281,19 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
                 }
                 val q = query.trim()
                 val heading = when {
-                    torrents && hits != null -> if (hits!!.isEmpty()) if (busy) "Searching…" else "No releases for “$q”" else "${hits!!.size} releases" + if (busy) "  ·  finding more…" else ""
-                    !torrents && results != null -> if (results!!.isEmpty()) "Nothing found for “$q”" else "Top results"
+                    torrents && releases != null -> if (releases.isEmpty()) if (busy) "Searching…" else if (hits!!.isNotEmpty()) "No releases match the filters" else "No releases for “$q”" else "${releases.size} releases" + if (busy) "  ·  finding more…" else ""
+                    !torrents && titles != null -> when {
+                        titles.isNotEmpty() -> if (browsing) genre ?: "Top results" else "Top results"
+                        results!!.isNotEmpty() -> "Nothing matches the filters"
+                        else -> "Nothing found for “$q”"
+                    }
                     else -> null
                 }
                 heading?.let { Text(it, Modifier.padding(top = 24.dp), style = Type.title.copy(fontWeight = FontWeight.Bold)) }
             }
         }
         if (torrents) {
-            items(hits.orEmpty(), key = { it.id }, span = { GridItemSpan(maxLineSpan) }) { hit ->
+            items(releases.orEmpty(), key = { it.id }, span = { GridItemSpan(maxLineSpan) }) { hit ->
                 Source(hit, onDownload = {
                     Downloads.add(downloadJob(hit, null))
                     watch.notes.tryEmit("Downloading ${hit.name} — see Downloads")
@@ -234,12 +303,24 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
                 }
             }
         } else {
-            items(results.orEmpty(), key = { it.imdb }) { t ->
+            items(titles.orEmpty(), key = { it.imdb }) { t ->
                 PosterCard(t, {
-                    recents = Searches.remember(query)
+                    if (!browsing) recents = Searches.remember(query)
                     onOpen(t)
                 }, sub = subOf(t))
             }
+        }
+    }
+
+    picking?.let { which ->
+        val close = { picking = null }
+        when (which) {
+            Picking.KIND -> Sheet("Show", listOf(Option<String?>(null, "Films & series"), Option("movie", "Films"), Option("tv", "Series")), kind, { kind = it; close() }, close)
+            Picking.GENRE -> Sheet("Genre", listOf(Option<String?>(null, "Any genre")) + GENRES.map { Option<String?>(it, it) }, genre, { genre = it; close() }, close)
+            Picking.DECADE -> Sheet("Year", listOf(Option<Int?>(null, "Any year")) + DECADES.map { (y, label) -> Option<Int?>(y, label) }, decade, { decade = it; close() }, close)
+            Picking.SORT -> Sheet("Order", Sort.entries.map { Option(it, if (it == Sort.POPULAR) "Best match" else it.label) }, sort, { sort = it; close() }, close)
+            Picking.QUALITY -> Sheet("Quality", listOf(Option<String?>(null, "Any quality")) + listOf("4K", "1080p", "720p").map { Option<String?>(it, it) }, quality, { quality = it; close() }, close)
+            Picking.ORDER -> Sheet("Order", HitOrder.entries.map { Option(it, it.label) }, order, { order = it; close() }, close)
         }
     }
 }
