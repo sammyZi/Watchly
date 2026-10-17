@@ -61,6 +61,18 @@ class ExoView(context: Context) : Video(context) {
     private var startMs = 0L
     private var cacheMs = 3000
 
+    private var subDelayMs = 0L
+
+    /**
+     * Media3 has no subtitle offset, but the cues pass through here: later is holding each
+     * one back. Earlier would need cues before they are due, which only libVLC can do.
+     */
+    override fun setSubtitleDelay(ms: Long): Boolean {
+        if (ms < 0) return false
+        subDelayMs = ms
+        return true
+    }
+
     /** Media3 draws the cues itself, so a change shows on the next line. Sizes match libVLC's: 1/n of the height. */
     override var subtitleStyle: SubtitleStyle? = null
         set(value) {
@@ -419,7 +431,8 @@ class ExoView(context: Context) : Video(context) {
         }
 
         override fun onCues(cueGroup: CueGroup) {
-            subtitleView.setCues(cueGroup.cues)
+            val cues = cueGroup.cues
+            if (subDelayMs > 0) subtitleView.postDelayed({ subtitleView.setCues(cues) }, subDelayMs) else subtitleView.setCues(cues)
         }
 
         override fun onVideoSizeChanged(size: VideoSize) {

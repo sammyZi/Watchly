@@ -170,7 +170,8 @@ data class Progress(
     val state: String,
 )
 
-data class Ready(val url: String, val name: String, val subtitleFiles: List<String>)
+/** [lanUrl]: the stream addressed for a Cast receiver, when the engine serves the network. */
+data class Ready(val url: String, val name: String, val subtitleFiles: List<String>, val lanUrl: String? = null)
 
 class PlayOptions(
     /** MB of the head buffered before the player gets the URL; the server blocks past it anyway. */
@@ -195,6 +196,8 @@ class TorrentStream(
     private val context: Context,
     /** Incoming peers: the TV takes 6881, the phone 6882, Windows 51413 — a router forwards a port to one device. */
     private val port: Int = 6881,
+    /** Serve the stream to the network too, so a Cast receiver can fetch it. The phone casts; the TV is the screen. */
+    private val lan: Boolean = false,
 ) {
     val progress = MutableStateFlow<Progress?>(null)
     val ready = MutableStateFlow<Ready?>(null)
@@ -1110,11 +1113,12 @@ class TorrentStream(
                     lastReaderAt = offset
                 },
                 release = { id -> readers.remove(id)?.let { at -> lately[id] = at to System.currentTimeMillis() } },
+                lan = lan,
             )
             srv.start()
             server = srv
             log("ready in ${(System.currentTimeMillis() - readyAt) / 1000}s at ${status.downloadRate() / 1024}kB/s -> ${srv.url}")
-            ready.value = Ready(srv.url, ti.files().fileName(fileIndex), subtitleFiles)
+            ready.value = Ready(srv.url, ti.files().fileName(fileIndex), subtitleFiles, srv.lanUrl)
         }
     }
 

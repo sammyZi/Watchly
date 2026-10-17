@@ -66,6 +66,8 @@ abstract class Video(context: Context) : FrameLayout(context) {
     abstract fun setAudioTrack(id: Int)
     abstract fun setScale(type: MediaPlayer.ScaleType)
     abstract fun addSubtitleFiles(paths: List<String>)
+    /** Positive shows subtitles later. False when this backend cannot shift them that way. */
+    open fun setSubtitleDelay(ms: Long): Boolean = ms == 0L
     abstract fun stats(): Stats?
 }
 
@@ -156,6 +158,15 @@ class VlcView(context: Context) : Video(context) {
     override fun setRate(value: Float) {
         rate = value
         player?.rate = value
+    }
+
+    private var spuDelayMs = 0L
+
+    /** Either way: libVLC shifts the subtitle clock itself (in microseconds). */
+    override fun setSubtitleDelay(ms: Long): Boolean {
+        spuDelayMs = ms
+        runCatching { player?.spuDelay = ms * 1000 }
+        return true
     }
 
     /** null turns subtitles off. libVLC uses -1 for "no track". */
@@ -327,6 +338,7 @@ class VlcView(context: Context) : Video(context) {
             pauseOnStart = paused
             mediaPlayer.play()
             mediaPlayer.setSpuTrack(wantedSpu ?: -1)
+            if (spuDelayMs != 0L) runCatching { mediaPlayer.spuDelay = spuDelayMs * 1000 }
             attachPendingSubs()
         } catch (e: Throwable) {
             Log.e(TAG, "could not start playback", e)

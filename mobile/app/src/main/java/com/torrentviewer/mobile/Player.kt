@@ -111,6 +111,12 @@ import com.torrentviewer.core.Ink
 import com.torrentviewer.core.Intro
 import com.torrentviewer.core.Intros
 import com.torrentviewer.core.Lc
+import com.torrentviewer.core.LocalFileServer
+import com.google.android.gms.cast.MediaSeekOptions
+import com.google.android.gms.cast.framework.CastSession
+import com.google.android.gms.cast.framework.SessionManagerListener
+import android.net.Uri
+import java.io.File
 import com.torrentviewer.core.Motion
 import com.torrentviewer.core.Note
 import com.torrentviewer.core.Progress
@@ -294,6 +300,11 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     var scale by remember { mutableIntStateOf(SCALES.indexOfFirst { it.second == SettingsStore.value.value.playerScale }.coerceAtLeast(0)) }
     /** Audio, subtitles: the preferred language already tried, or the viewer already chose. */
     val langDone = remember { booleanArrayOf(false, false) }
+    /** Subtitle offset in ms; positive shows them later. */
+    var subDelay by remember { mutableLongStateOf(0L) }
+    val cast = remember { castContext(context) }
+    var castSession by remember { mutableStateOf(cast?.sessionManager?.currentCastSession?.takeIf { it.isConnected }) }
+    var castPaused by remember { mutableStateOf(false) }
     var noNext by remember { mutableStateOf(false) }
     var scrub by remember { mutableStateOf<Double?>(null) }
     var hud by remember { mutableStateOf<Hud?>(null) }
@@ -326,6 +337,12 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         v.setPaused(!v.isPaused)
         paused = v.isPaused
         show()
+    }
+
+    /** Out of the player — and off the TV, whose stream stops with us. */
+    fun leave() {
+        if (castSession != null) runCatching { cast?.sessionManager?.endCurrentSession(true) }
+        watch.exit()
     }
 
     fun goNext() {
@@ -464,6 +481,66 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         v.open(r.url, (at * 1000).toLong(), cacheMsFor(bitrate), r.subtitleFiles + external.map { it.path })
     }
 
+    /* ------------------------------------------------------------ cast */
+
+    DisposableEffect(cast) {
+        val manager = cast?.sessionManager
+        val listener = object : SessionManagerListener<CastSession> {
+            override fun onSessionStarted(session: CastSession, sessionId: String) { castSession = session }
+            override fun onSessionResumed(session: CastSession, wasSuspended: Boolean) { castSession = session }
+            override fun onSessionEnded(session: CastSession, error: Int) { castSession = null }
+            override fun onSessionStartFailed(session: CastSession, error: Int) { watch.notes.tryEmit("Couldn't connect to that device.") }
+            override fun onSessionStarting(session: CastSession) {}
+            override fun onSessionEnding(session: CastSession) {}
+            override fun onSessionResuming(session: CastSession, sessionId: String) {}
+            override fun onSessionResumeFailed(session: CastSession, error: Int) {}
+            override fun onSessionSuspended(session: CastSession, reason: Int) {}
+        }
+        manager?.addSessionManagerListener(listener, CastSession::class.java)
+        onDispose { manager?.removeSessionManagerListener(listener, CastSession::class.java) }
+    }
+    // A finished download has no network address: serve it while it is on the TV.
+    val fileServer = remember { mutableStateOf<LocalFileServer?>(null) }
+    DisposableEffect(Unit) { onDispose { fileServer.value?.stop() } }
+    var casted by remember { mutableStateOf(false) }
+    LaunchedEffect(castSession, ready) {
+        val s = castSession ?: return@LaunchedEffect
+        val r = ready ?: return@LaunchedEffect
+        val url = r.lanUrl ?: if (r.url.startsWith("file:")) {
+            val f = File(Uri.parse(r.url).path ?: return@LaunchedEffect)
+            (fileServer.value ?: LocalFileServer(f, f.length(), { true }, { _, _ -> }, {}, lan = true).also {
+                it.start()
+                fileServer.value = it
+            }).lanUrl
+        } else null
+        if (url == null) {
+            watch.notes.tryEmit("Casting needs Wi-Fi — there is no address to hand the TV.")
+            return@LaunchedEffect
+        }
+        val client = s.remoteMediaClient ?: return@LaunchedEffect
+        // Two copies playing at once is the one thing nobody wants.
+        view.value?.setPaused(true)
+        paused = true
+        controls = false
+        client.load(castRequest(url, r.name, title?.title ?: watch.item?.label.orEmpty(), title?.art, at))
+        casted = true
+        // The receiver's clock is the one that counts now; kept in `at`, so it is saved and local playback picks up from it.
+        while (true) {
+            delay(500)
+            client.approximateStreamPosition.takeIf { it > 0 }?.let { at = it / 1000.0 }
+            client.streamDuration.takeIf { it > 0 }?.let { duration = it / 1000.0 }
+            castPaused = client.isPaused
+        }
+    }
+    // The session ended: carry on here from where the TV got to.
+    LaunchedEffect(castSession) {
+        if (castSession != null || !casted) return@LaunchedEffect
+        casted = false
+        seekTo(at)
+        view.value?.setPaused(false)
+        paused = false
+    }
+
     // Home without PiP, the lock button, or closing the PiP window: stop, and keep the spot.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
@@ -550,7 +627,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         when {
             panel != null -> panel = null
             locked -> unlockAt = System.currentTimeMillis()
-            else -> watch.exit()
+            else -> leave()
         }
     }
 
@@ -655,6 +732,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                         // A fallback keeps the viewer's speed and picture.
                         v.setRate(rate)
                         v.subtitleStyle = SettingsStore.value.value.subtitles
+                        v.setSubtitleDelay(subDelay)
                         v.setScale(SCALES[scale].first)
                         if (!vlc) v.onUnsupported = { message ->
                             Log.w("Player", "Media3 gave up ($message), falling back to VLC")
@@ -764,7 +842,8 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                 Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(horizontal = 12.dp, vertical = 6.dp)) {
                     TopBar(
                         title, episode, file, progressState.value, duration, { at }, rate, info,
-                        onBack = { watch.exit() },
+                        canCast = cast != null,
+                        onBack = ::leave,
                         onStats = { info = !info },
                         onLock = {
                             locked = true
@@ -807,6 +886,13 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                                 onClick = ::cycleSleep,
                             )
                             if (show != null) BarButton(L.drawable.lucide_ic_flag, if (introMark != null) "Intro ends here" else if (intro != null) "Re-mark intro" else "Mark intro", on = introMark != null, onClick = ::markIntro)
+                            BarButton(L.drawable.lucide_ic_external_link, "Open in…") {
+                                val r = ready ?: return@BarButton
+                                if (openExternally(context, r.url, r.name, at)) {
+                                    view.value?.setPaused(true)
+                                    paused = true
+                                } else watch.notes.tryEmit("No other player on this phone can open it.")
+                            }
                             if (canPip) BarButton(L.drawable.lucide_ic_picture_in_picture_2, "Mini player") {
                                 pipParams()?.let { p -> runCatching { activity?.enterPictureInPictureMode(p) } }
                             }
@@ -884,13 +970,41 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         }
 
         AnimatedVisibility(waiting, enter = fadeIn(), exit = fadeOut(tween(500))) {
-            Loading(title, episode, file, ready != null, progressState.value, onBack = { watch.exit() })
+            Loading(title, episode, file, ready != null, progressState.value, onBack = ::leave)
+        }
+
+        // On the TV now: this screen becomes its remote.
+        castSession?.let { s ->
+            CastingCard(
+                device = s.castDevice?.friendlyName ?: "TV",
+                title = title,
+                episode = episode,
+                label = watch.item?.label.orEmpty(),
+                at = at,
+                duration = duration,
+                paused = castPaused,
+                onToggle = { s.remoteMediaClient?.let { c -> if (c.isPaused) c.play() else c.pause() } },
+                onSeek = { to -> s.remoteMediaClient?.seek(MediaSeekOptions.Builder().setPosition((to.coerceAtLeast(0.0) * 1000).toLong()).build()) },
+                onStop = { runCatching { cast?.sessionManager?.endCurrentSession(true) } },
+                onBack = ::leave,
+            )
         }
 
         when (panel) {
             Panel.TRACKS -> TracksPanel(
                 tracks = tracks,
                 subtitle = subtitle,
+                delay = subDelay,
+                onDelay = { ms ->
+                    subDelay = ms
+                    // Media3 can only hold subtitles back; earlier is VLC's, picked up where the film is.
+                    if (view.value?.setSubtitleDelay(ms) == false) {
+                        say("Switching to VLC to bring subtitles earlier", L.drawable.lucide_ic_captions)
+                        tracks = null
+                        langDone.fill(false)
+                        vlc = true
+                    }
+                },
                 audio = audio ?: tracks?.defaultAudio,
                 // Picking one yourself wins over the preferred language.
                 onSubtitle = {
@@ -995,6 +1109,7 @@ private fun TopBar(
     at: () -> Double,
     rate: Float,
     info: Boolean,
+    canCast: Boolean,
     onBack: () -> Unit,
     onStats: () -> Unit,
     onLock: () -> Unit,
@@ -1016,6 +1131,7 @@ private fun TopBar(
                 Text(" ${it.peers}", style = Type.meta.copy(color = Color.White))
             }
         }
+        if (canCast) AndroidView(factory = ::castButton, modifier = Modifier.size(42.dp))
         Tap(onStats, shape = CircleShape) { Lc(L.drawable.lucide_ic_info, Modifier.padding(9.dp), tint = if (info) Ink.accent else Color.White, size = 22.dp) }
         Tap(onLock, shape = CircleShape) { Lc(L.drawable.lucide_ic_lock, Modifier.padding(9.dp), tint = Color.White, size = 22.dp) }
     }
@@ -1273,11 +1389,62 @@ private fun UpNext(name: String, still: String?, seconds: () -> Int, onPlay: () 
     }
 }
 
+/** Playing on a TV: the title over its blurred art, and this screen as the remote. */
+@Composable
+private fun CastingCard(
+    device: String,
+    title: Title?,
+    episode: Episode?,
+    label: String,
+    at: Double,
+    duration: Double,
+    paused: Boolean,
+    onToggle: () -> Unit,
+    onSeek: (Double) -> Unit,
+    onStop: () -> Unit,
+    onBack: () -> Unit,
+) {
+    var scrub by remember { mutableStateOf<Double?>(null) }
+    Box(Modifier.fillMaxSize().background(Color.Black).pointerInput(Unit) { awaitEachGesture { awaitFirstDown().consume() } }) {
+        (episode?.thumbnail ?: title?.art)?.let {
+            Artwork(it, label, Modifier.fillMaxSize().then(if (Build.VERSION.SDK_INT >= 31) Modifier.blur(16.dp) else Modifier))
+        }
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.7f)))
+        Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RoundIcon(L.drawable.lucide_ic_arrow_left, onBack)
+                Lc(L.drawable.lucide_ic_cast, Modifier.padding(start = 14.dp), tint = Ink.accent, size = 20.dp)
+                Text("  Playing on $device", style = Type.label.copy(fontWeight = FontWeight.SemiBold))
+            }
+            Column(Modifier.align(Alignment.Center).padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                if (title != null) TitleMark(title, Modifier.widthIn(max = 340.dp), maxHeight = 70.dp, style = Type.display) else Text(label, style = Type.display, maxLines = 2)
+                episode?.let { Text("S${it.season}:E${it.episode}  ${it.name}", Modifier.padding(top = 8.dp), style = Type.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                Row(Modifier.padding(top = 22.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(36.dp)) {
+                    RoundIcon(L.drawable.lucide_ic_rotate_ccw, { onSeek(at - SKIP) }, size = 50.dp)
+                    RoundIcon(if (paused) L.drawable.lucide_ic_play else L.drawable.lucide_ic_pause, onToggle, size = 66.dp)
+                    RoundIcon(L.drawable.lucide_ic_rotate_cw, { onSeek(at + SKIP) }, size = 50.dp)
+                }
+            }
+            Column(Modifier.align(Alignment.BottomStart).fillMaxWidth()) {
+                SeekBar(at = { scrub ?: at }, playing = { at }, duration = duration, scrubbing = scrub != null, onScrub = { scrub = it }, onCommit = {
+                    scrub?.let(onSeek)
+                    scrub = null
+                })
+                Tap(onStop, Modifier.align(Alignment.End).padding(top = 4.dp), RoundedCornerShape(6.dp)) {
+                    Text("Stop casting", Modifier.background(Color.White.copy(alpha = 0.14f)).padding(horizontal = 14.dp, vertical = 8.dp), style = Type.label.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold))
+                }
+            }
+        }
+    }
+}
+
 /** Audio and subtitles side by side, as Netflix lays them out, with the online search at the end. */
 @Composable
 private fun TracksPanel(
     tracks: Tracks?,
     subtitle: Int?,
+    delay: Long,
+    onDelay: (Long) -> Unit,
     audio: Int?,
     onSubtitle: (Int?) -> Unit,
     onAudio: (Int) -> Unit,
@@ -1294,6 +1461,17 @@ private fun TracksPanel(
             }
             Spacer(Modifier.width(32.dp))
             TrackColumn("Subtitles", Modifier.weight(1f)) {
+                // Out of sync: a tenth of a second a tap; the value resets it.
+                item {
+                    Row(Modifier.padding(start = 14.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Delay", Modifier.width(56.dp), style = Type.meta)
+                        Tap({ onDelay(delay - 100) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_minus, Modifier.padding(8.dp), tint = Color.White, size = 18.dp) }
+                        Tap({ onDelay(0) }, shape = RoundedCornerShape(6.dp)) {
+                            Text("%+.1f s".format(delay / 1000.0), Modifier.padding(horizontal = 10.dp, vertical = 6.dp), style = Type.label.copy(fontWeight = FontWeight.SemiBold, color = if (delay != 0L) Ink.accent else Color.White))
+                        }
+                        Tap({ onDelay(delay + 100) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_plus, Modifier.padding(8.dp), tint = Color.White, size = 18.dp) }
+                    }
+                }
                 item { TrackRow("Off", subtitle == null) { onSubtitle(null) } }
                 itemsIndexed(tracks?.subtitles.orEmpty()) { _, t -> TrackRow(t.name, t.id == subtitle) { onSubtitle(t.id) } }
                 item {

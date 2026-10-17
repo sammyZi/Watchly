@@ -77,4 +77,8 @@ dependencies {
     implementation(project(":core"))
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
+    // Google Cast: the Expo build's version, with MediaRouter's device chooser.
+    implementation("com.google.android.gms:play-services-cast-framework:21.5.0")
+    // Only for the AppCompat theme that chooser dialog insists on.
+    implementation("androidx.appcompat:appcompat:1.7.1")
 }

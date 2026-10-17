@@ -30,14 +30,17 @@ class LocalFileServer(
   private val fileSize: Long,
   private val available: (Long) -> Boolean,
   private val request: (Long, Long) -> Unit,
-  private val release: (Long) -> Unit
+  private val release: (Long) -> Unit,
+  /** Reachable from the network, for a Cast receiver that fetches the video itself. */
+  private val lan: Boolean = false,
 ) {
   /**
-   * Loopback only: the television is the receiver, nothing else needs to reach it.
-   * Not getLoopbackAddress(), which is ::1 on Android while libVLC dials 127.0.0.1.
-   * The path still carries a random token, so other apps on the box cannot guess it.
+   * Loopback unless [lan]: the television is the receiver and nothing else needs to reach
+   * it. Not getLoopbackAddress(), which is ::1 on Android while libVLC dials 127.0.0.1.
+   * On the network or not, the path carries a random token, so the stream cannot be found
+   * by anyone who was not handed the URL — not authentication, but not guessable either.
    */
-  private val server = ServerSocket(0, 4, InetAddress.getByName("127.0.0.1"))
+  private val server = if (lan) ServerSocket(0, 4) else ServerSocket(0, 4, InetAddress.getByName("127.0.0.1"))
   private val token = java.util.UUID.randomUUID().toString().take(12)
   @Volatile private var running = true
 
@@ -84,6 +87,16 @@ class LocalFileServer(
   private val path: String get() = "/$token/${file.name.urlEncoded()}"
 
   val url: String get() = "http://127.0.0.1:$port$path"
+
+  /** The same stream addressed for another device: the first IPv4 address, as Cast receivers are IPv4 in practice. Null with no network or not [lan]. */
+  val lanUrl: String?
+    get() = if (!lan) null else runCatching {
+      java.net.NetworkInterface.getNetworkInterfaces().toList()
+        .filter { it.isUp && !it.isLoopback }
+        .flatMap { it.inetAddresses.toList() }
+        .firstOrNull { !it.isLoopbackAddress && it is java.net.Inet4Address }
+        ?.hostAddress
+    }.getOrNull()?.let { "http://$it:$port$path" }
 
   fun start() {
     thread(name = "torrent-http") {
