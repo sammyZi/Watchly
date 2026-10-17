@@ -36,7 +36,7 @@ Publish doesn't clear old files, so delete `windows/dist` before re-publishing,
 and close the app first — a running `Watchly.exe` can't be overwritten.
 Wrap it with Inno Setup or similar for a single installer.
 
-The SubDL key is read from the repo's `.env` (`EXPO_PUBLIC_SUBDL_KEY`) at build
+The SubDL key is read from `mobile/.env` (`SUBDL_KEY` or `EXPO_PUBLIC_SUBDL_KEY`) at build
 time, like the phone app; without it online subtitle search is off.
 
 ### Self-check

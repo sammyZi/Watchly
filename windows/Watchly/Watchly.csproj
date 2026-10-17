@@ -9,7 +9,7 @@
     <LangVersion>latest</LangVersion>
     <RootNamespace>Watchly</RootNamespace>
     <AssemblyName>Watchly</AssemblyName>
-    <Version>1.0.0</Version>
+    <Version>2.0.0</Version>
     <Product>Watchly</Product>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- assets/icon.png, the phone's launcher icon, at every size Windows asks for. -->
@@ -47,12 +47,17 @@
   </ItemGroup>
 
   <!--
-    The SubDL key the phone app ships with (EXPO_PUBLIC_SUBDL_KEY in the repo's
-    .env), baked in at build time the same way Expo inlines it — nothing to type,
-    nothing stored. Missing .env just means online subtitle search is off.
+    The SubDL key the phone app ships with (mobile/.env, since the phone moved into
+    mobile/; a repo-root .env from before still works), baked in at build time the
+    same way Expo inlines it — nothing to type, nothing stored. Missing .env just
+    means online subtitle search is off. Either SUBDL_KEY or EXPO_PUBLIC_SUBDL_KEY.
   -->
-  <PropertyGroup Condition="Exists('..\..\.env')">
-    <SubdlKey>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)\..\..\.env')), 'EXPO_PUBLIC_SUBDL_KEY=(\S+)').Groups[1].Value)</SubdlKey>
+  <PropertyGroup>
+    <SubdlEnv Condition="Exists('..\..\mobile\.env')">$(MSBuildProjectDirectory)\..\..\mobile\.env</SubdlEnv>
+    <SubdlEnv Condition="'$(SubdlEnv)' == '' And Exists('..\..\.env')">$(MSBuildProjectDirectory)\..\..\.env</SubdlEnv>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(SubdlEnv)' != ''">
+    <SubdlKey>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(SubdlEnv)')), '(?:EXPO_PUBLIC_)?SUBDL_KEY=(\S+)').Groups[1].Value)</SubdlKey>
   </PropertyGroup>
   <ItemGroup>
     <AssemblyMetadata Include="SubdlKey" Value="$(SubdlKey)" />
