@@ -520,7 +520,11 @@ class TorrentStream(
             // Dial everything at once instead of 30 peers a second.
             .setInteger(settings_pack.int_types.torrent_connect_boost.swigValue(), peers)
             .setInteger(settings_pack.int_types.connection_speed.swigValue(), peers)
-            .setInteger(settings_pack.int_types.peer_connect_timeout.swigValue(), 10)
+            // Dials in flight count against the connections limit, and most tracker peers
+            // are dead: at 10s the phone tried ~200 a cycle and sat at 6-16 peers for 30s
+            // with 400 in hand. A live peer answers within 5s even after two lost SYNs, so
+            // this doubles the dial rate without raising the RAM bracket above.
+            .setInteger(settings_pack.int_types.peer_connect_timeout.swigValue(), 5)
             // Slow peers must not book a whole piece the player is about to block on.
             .setInteger(settings_pack.int_types.whole_pieces_threshold.swigValue(), 10)
             // Re-request an unanswered block after 20s, not 60.
@@ -991,8 +995,12 @@ class TorrentStream(
 
         val pieceLen = ti.pieceLength().toLong().coerceAtLeast(1L)
         val prerollPieces = maxOf(1, Math.ceil(prepareBytes.toDouble() / pieceLen).toInt())
-        // Before the player attaches: the header at byte 0 and the resume point.
-        val preroll = if (startPiece - firstPiece <= prerollPieces) listOf(firstPiece) else listOf(firstPiece, startPiece)
+        // Before the player attaches: exactly the pieces isReady counts — the head piece and
+        // the prepare window from the resume point — each its own one-piece zone. Zones of
+        // `reach + 1` pieces per target plus spare fetched 9 pieces (72MB) for 3 needed on
+        // the phone; with 8MB pieces and ~50 peers that spread kept piece 0 unfinished for 70s.
+        val preroll = (listOf(firstPiece) + (startPiece until startPiece + prerollPieces))
+            .filter { it <= lastPiece }.distinct()
 
         // A reader parked in the tail is the player reading the container index, not
         // playback. Lingering closed readers only add zones, never lead. The newest
@@ -1022,7 +1030,10 @@ class TorrentStream(
         // 6.3MB/s became 18 at 0.95MB/s, and the second time the player ran dry. Now only
         // that piece is re-armed with a deadline already past, which is what makes
         // libtorrent hand its outstanding blocks to other, faster peers as well.
-        val blocked = if (announcedReady) targets.first().takeIf { it in firstPiece..lastPiece && !h.havePiece(it) } ?: -1 else -1
+        // During pre-roll the first missing pre-roll piece: a head piece held by one slow
+        // peer's last block stalls the start just as it stalls playback.
+        val blocked = (if (announcedReady) targets.take(1) else targets)
+            .firstOrNull { it in firstPiece..lastPiece && !h.havePiece(it) } ?: -1
         if (blocked != blockingPiece) {
             blockingPiece = blocked
             blockingSince = clock
@@ -1056,8 +1067,9 @@ class TorrentStream(
         }
 
         // `reach` is what the swarm is told to rush; `width` is what it may fetch at all.
+        // Pre-roll targets are already every piece it needs, so nothing past them is rushed.
         val reach = if (!announcedReady) {
-            prerollPieces
+            0
         } else {
             val affordable = (status.downloadRate().toLong() * REACH_SECONDS / pieceLen).toInt()
             affordable.coerceIn(2, maxOf(2, windowPieces))
@@ -1066,10 +1078,15 @@ class TorrentStream(
         // on: on the TV, 500kB/s over 17 8MB pieces gave piece 204 ~45kB/s for over a
         // minute, and pre-roll took 72s at 2MB/s for two pieces. Until it lands, fetch
         // only what is rushed; the readahead comes back with the next tick after.
-        val waitingFrom = if (!announcedReady) readyAt else if (blocked >= 0) blockedFrom else clock
-        val starving = clock - waitingFrom > STARVE_MS
-        val width = if (starving) maxOf(2, reach) else maxOf(2, (readaheadBytes / pieceLen).toInt())
-        val back = if (starving) 0 else maxOf(8, (REWIND_BYTES / pieceLen).toInt())
+        // Pre-roll is always that narrow, from the first tick: its first 5s used to go to
+        // the whole readahead (32-128 pieces) while nothing could play.
+        val starving = blocked >= 0 && clock - blockedFrom > STARVE_MS
+        val width = when {
+            !announcedReady -> 0
+            starving -> maxOf(2, reach)
+            else -> maxOf(2, (readaheadBytes / pieceLen).toInt())
+        }
+        val back = if (!announcedReady || starving) 0 else maxOf(8, (REWIND_BYTES / pieceLen).toInt())
 
         // Re-aim with hysteresis: a rewind inside the band already covered is not a new zone.
         val stale = zoneWidth != width ||
@@ -1088,8 +1105,9 @@ class TorrentStream(
                 keep.add(p)
                 if (h.havePiece(p) || !deadlined.add(p)) continue
                 h.piecePriority(p, Priority.TOP_PRIORITY)
-                // Absolute once set, so set once: the stagger keeps its order.
-                h.setPieceDeadline(p, rank * 3000 + (p - target) * 300)
+                // Absolute once set, so set once: the stagger keeps its order. Pre-roll
+                // pieces are one window the player needs whole, so they sit 300ms apart.
+                h.setPieceDeadline(p, if (announcedReady) rank * 3000 + (p - target) * 300 else rank * 300)
             }
         }
         // During pre-roll only the first ~2MB of the index; after, the whole tail at a distant deadline.
@@ -1251,7 +1269,8 @@ class TorrentStream(
         val zones = targets.map { it..minOf(it + width, lastPiece) }
         val behind = targets.mapNotNull { if (it > firstPiece) maxOf(firstPiece, it - back)..(it - 1) else null }
         // Spare work keeps the wanted set from ever completing — a "finished" torrent drops its seeds.
-        val spare = targets.map { (it + width + 1)..minOf(it + width + width / 2, lastPiece) }
+        // At least one piece, so pre-roll's one-piece zones keep it too.
+        val spare = targets.map { (it + width + 1)..minOf(it + width + maxOf(1, width / 2), lastPiece) }
         val pieceLen = (info?.pieceLength() ?: 1).toLong().coerceAtLeast(1L)
         val tailEnd = if (rushTail) lastPiece else minOf(lastPiece, tailPiece + maxOf(0, (2L * 1024 * 1024 / pieceLen).toInt() - 1))
         for (p in firstPiece..lastPiece) {
