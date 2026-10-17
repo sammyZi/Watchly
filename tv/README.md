@@ -2,7 +2,7 @@
 
 The television build: a native Kotlin app (Jetpack Compose, libtorrent4j,
 Media3 with a libVLC fallback). Two modules: `app` is the TV shell and its
-D-pad UI; `core` is everything the Kotlin phone app in `../mobile` will share
+D-pad UI; `core` is everything the Kotlin phone app in `../mobile` shares with it
 (engine, players, indexers, metadata, store, the look).
 
 ```bash
