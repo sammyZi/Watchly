@@ -133,6 +133,8 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
     var reviews by remember { mutableStateOf(false) }
     var expanded by remember(title.imdb) { mutableStateOf(false) }
     var allEpisodes by remember(title.imdb, season) { mutableStateOf(false) }
+    /** "Download season" open: the season, and its packs (null while still looking). */
+    var seasonPacks by remember(title.imdb) { mutableStateOf<Pair<Int, List<Hit>?>?>(null) }
     val list = rememberLazyListState()
 
     fun findSources(ep: Episode?): Deferred<List<Hit>> {
@@ -169,17 +171,26 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
      * A whole season in one go: the best pack that is that season, else a complete-series
      * pack — the download then takes only that season's episodes out of it.
      */
-    fun downloadSeason(s: Int) = scope.launch {
-        watch.notes.tryEmit("Looking for a season $s pack…")
-        val first = title.episodes.firstOrNull { it.season == s }?.episode ?: 1
-        val hits = runCatching { searchEpisode(title.title, s, first, title.imdb) }.getOrDefault(emptyList())
-        val pack = hits.firstOrNull { it.scope == Scope.SEASON && parseEpisode(it.name) == null && s in seasonsIn(it.name) }
-            ?: hits.firstOrNull { it.scope == Scope.COMPLETE }
-        if (pack == null) {
-            watch.notes.tryEmit("No season $s pack found — download the episodes one by one.")
-            return@launch
+    /** A season pack is this season alone, or a complete series that holds it; the download takes only this season's episodes. */
+    fun packsOf(hits: List<Hit>, s: Int) = hits.filter {
+        (it.scope == Scope.SEASON && parseEpisode(it.name) == null && s in seasonsIn(it.name)) || it.scope == Scope.COMPLETE
+    }
+
+    /** The season's packs, listed to pick one from, as they arrive. */
+    fun downloadSeason(s: Int) {
+        seasonPacks = s to null
+        scope.launch {
+            val first = title.episodes.firstOrNull { it.season == s }?.episode ?: 1
+            val all = runCatching {
+                searchEpisode(title.title, s, first, title.imdb) { partial -> if (seasonPacks?.first == s) seasonPacks = s to packsOf(partial, s) }
+            }.getOrDefault(emptyList())
+            if (seasonPacks?.first == s) seasonPacks = s to packsOf(all, s)
         }
-        Downloads.add(downloadJob(pack, title).copy(season = s))
+    }
+
+    fun keepSeason(hit: Hit, s: Int) {
+        seasonPacks = null
+        Downloads.add(downloadJob(hit, title).copy(season = s))
         watch.notes.tryEmit("Downloading season $s of ${title.title} — see Downloads")
     }
 
@@ -341,6 +352,24 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
             }
         }
     }
+    // "Download season": the packs to choose from, best first; a tap keeps that one.
+    seasonPacks?.let { (s, packs) ->
+        BottomSheet("Season $s packs", onDismiss = { seasonPacks = null }) {
+            when {
+                packs == null -> Row(Modifier.padding(horizontal = 20.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Spinner(size = 24.dp)
+                    Text("   Asking every index…", style = Type.body)
+                }
+                packs.isEmpty() -> Note("No season $s pack found yet — download the episodes one by one.", Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+                else -> LazyColumn {
+                    items(packs.take(MAX_SOURCES), key = { "pack-" + it.id }) { hit ->
+                        Source(hit, Modifier.padding(start = EDGE, end = EDGE, bottom = 8.dp), onDownload = { keepSeason(hit, s) }) { keepSeason(hit, s) }
+                    }
+                }
+            }
+        }
+    }
+
     if (reviews) {
         val links = reviewLinks(title)
         Sheet(
