@@ -107,7 +107,8 @@ data class DownloadJob(
 
 enum class DlState(val label: String) { RESOLVING("Finding peers"), DOWNLOADING("Downloading"), PAUSED("Paused"), WIFI("Waiting for Wi-Fi"), FAILED("Failed") }
 
-data class DlFile(val index: Int, val name: String, val size: Long, val done: Long, val saved: Boolean)
+/** One file of a download; in a pack, [wanted] false is an episode the viewer skipped. */
+data class DlFile(val index: Int, val name: String, val size: Long, val done: Long, val saved: Boolean, val wanted: Boolean = true)
 
 data class LiveDownload(
     val job: DownloadJob,
@@ -117,8 +118,9 @@ data class LiveDownload(
     val peers: Int = 0,
     val error: String? = null,
 ) {
-    val total get() = files.sumOf { it.size }
-    val done get() = files.sumOf { if (it.saved) it.size else it.done }
+    // Skipped episodes count for nothing.
+    val total get() = files.filter { it.wanted }.sumOf { it.size }
+    val done get() = files.filter { it.wanted }.sumOf { if (it.saved) it.size else it.done }
     val ratio get() = if (total > 0) done.toFloat() / total else 0f
 }
 
@@ -373,20 +375,55 @@ object Downloads {
         }
     }
 
+    /** Episode order — S01E02 before S01E10 — whatever order the torrent lists its files in; anything else after, as listed. */
+    private fun ord(name: String, index: Int): Long = parseEpisode(name)?.let { it.season * 10_000L + it.episode } ?: (100_000_000L + index)
+
+    /** A season's videos, for the pack's full list — skipped ones included, so they can be put back. */
+    private fun seasonVideos(job: DownloadJob, files: List<TorrentFile>): List<Int> =
+        job.season?.let { s -> files.filter { it.isVideo && (parseEpisode(it.name)?.season == s || s in seasonsIn(it.path)) }.map { it.index } }.orEmpty()
+
+    /**
+     * Episodes arrive in order: the next one unsaved at the top priority, the two after it
+     * a step down each, the rest of the wanted at the default; skipped and saved are ignored.
+     */
+    private fun prioritize(h: TorrentHandle, job: DownloadJob, files: List<TorrentFile>) {
+        val order = job.files.filter { it !in job.saved && it in files.indices }.sortedBy { ord(files[it].name, it) }
+        val prios = Array(files.size) { Priority.IGNORE }
+        order.forEachIndexed { rank, i ->
+            prios[i] = when (rank) {
+                0 -> Priority.TOP_PRIORITY
+                1 -> Priority.SIX
+                2 -> Priority.FIVE
+                else -> Priority.DEFAULT
+            }
+        }
+        runCatching { h.prioritizeFiles(prios) }
+    }
+
+    /** Skip an episode of a pack, or put it back. A saved one stays saved either way. */
+    fun setWanted(uri: String, index: Int, on: Boolean) {
+        update(uri) { it.copy(job = it.job.copy(files = if (on) (it.job.files + index).distinct() else it.job.files - index)) }
+        val h = synchronized(lock) { handles[uri] } ?: return
+        scope.launch {
+            val job = _live.value.find { it.job.uri == uri }?.job ?: return@launch
+            val ti = runCatching { h.torrentFile() }.getOrNull() ?: return@launch
+            prioritize(h, job, filesOf(ti))
+        }
+    }
+
     /** Which files this job wants, now the torrent has said what it holds. */
     private fun choose(uri: String, h: TorrentHandle) {
         val ti = runCatching { h.torrentFile() }.getOrNull() ?: return
         val job = _live.value.find { it.job.uri == uri }?.job ?: return
         val files = filesOf(ti)
-        val season = job.season?.let { s -> files.filter { it.isVideo && (parseEpisode(it.name)?.season == s || s in seasonsIn(it.path)) }.map { it.index } }.orEmpty()
+        val season = seasonVideos(job, files)
         val tagged = job.tags.mapNotNull { pickFile(files, it) }
         val wanted = (job.files + season + tagged).distinct().ifEmpty { listOfNotNull(pickFile(files)) }
         if (wanted.isEmpty()) {
             update(uri) { it.copy(state = DlState.FAILED, error = "No video in this torrent") }
             return
         }
-        val priorities = Array(files.size) { if (it in wanted && it !in job.saved) Priority.DEFAULT else Priority.IGNORE }
-        runCatching { h.prioritizeFiles(priorities) }
+        prioritize(h, job.copy(files = wanted), files)
         if (job.paused) runCatching { h.pause() } else runCatching { h.resume() }
         update(uri) { it.copy(job = it.job.copy(files = wanted), state = if (job.paused) DlState.PAUSED else DlState.DOWNLOADING) }
     }
@@ -440,12 +477,16 @@ object Downloads {
                     saved = saved + i
                     val label = if (job.files.size > 1) parseEpisode(fs.fileName(i))?.let { e -> "${job.titleName?.substringBefore(" · ") ?: ti.name()} · S%02dE%02d".format(e.season, e.episode) } ?: fs.fileName(i) else job.label
                     writeFinished(listOf(Finished(fs.fileName(i), size, System.currentTimeMillis(), dest.path, job.poster, label, job.imdb, job.kind)) + _finished.value.filter { it.path != dest.path })
-                    runCatching { h.filePriority(i, Priority.IGNORE) }
                 } catch (e: Exception) {
                     Log.w(TAG, "copy failed: ${e.message}")
                 }
             }
-            val files = job.files.map { i -> DlFile(i, fs.fileName(i), fs.fileSize(i), progress?.getOrNull(i) ?: 0, i in saved) }
+            val all = filesOf(ti)
+            // One saved: the next episode moves up to the top priority.
+            if (saved != job.saved) prioritize(h, job.copy(saved = saved), all)
+            // The pack in episode order, skipped episodes included so they can be put back.
+            val files = (job.files + seasonVideos(job, all)).distinct().filter { it in all.indices }.sortedBy { ord(all[it].name, it) }
+                .map { i -> DlFile(i, fs.fileName(i), fs.fileSize(i), progress?.getOrNull(i) ?: 0, i in saved, i in job.files) }
             val state = when {
                 job.paused -> DlState.PAUSED
                 hold -> DlState.WIFI

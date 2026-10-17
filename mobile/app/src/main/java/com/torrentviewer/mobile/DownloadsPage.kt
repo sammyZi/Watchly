@@ -1,5 +1,9 @@
 package com.torrentviewer.mobile
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -74,7 +78,13 @@ fun DownloadsScreen(watch: Watch) {
         }
         if (live.isNotEmpty()) item { Label("Downloading") }
         items(live, key = { "live-" + it.job.uri }) { row ->
-            ActiveRow(row, onPause = { Downloads.pause(row.job.uri) }, onResume = { Downloads.resume(row.job.uri) }, onCancel = { cancelling = row })
+            ActiveRow(
+                row,
+                onPause = { Downloads.pause(row.job.uri) },
+                onResume = { Downloads.resume(row.job.uri) },
+                onCancel = { cancelling = row },
+                onWanted = { index, on -> Downloads.setWanted(row.job.uri, index, on) },
+            )
         }
         if (finished.isNotEmpty()) item { Label("On this phone  ·  ${bytes(finished.sumOf { it.size })}") }
         items(finished, key = { "done-" + it.path }) { f ->
@@ -131,18 +141,26 @@ private fun Label(text: String) {
     Text(text, Modifier.padding(top = 6.dp, bottom = 10.dp), style = Type.overline.copy(fontSize = 12.sp))
 }
 
+/**
+ * One download as a card. A pack folds its episodes away under a count; opened, they are
+ * listed in episode order, each with its own progress and a circle to skip it or put it back.
+ */
 @Composable
-private fun ActiveRow(row: LiveDownload, onPause: () -> Unit, onResume: () -> Unit, onCancel: () -> Unit) {
+private fun ActiveRow(row: LiveDownload, onPause: () -> Unit, onResume: () -> Unit, onCancel: () -> Unit, onWanted: (Int, Boolean) -> Unit) {
     val pct = (row.ratio * 100).toInt()
-    Column(Modifier.fillMaxWidth().widthIn(max = 720.dp).padding(bottom = 16.dp)) {
+    val pack = row.files.size > 1
+    val wanted = row.files.filter { it.wanted }
+    val savedCount = wanted.count { it.saved }
+    var open by rememberSaveable(row.job.uri) { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().widthIn(max = 720.dp).padding(bottom = 12.dp).clip(RoundedCornerShape(12.dp)).background(Ink.surface).padding(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Artwork(row.job.poster, row.job.label, Modifier.width(48.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(4.dp)))
+            Artwork(row.job.poster, row.job.label, Modifier.width(52.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(6.dp)))
             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                 Text(row.job.label, style = Type.label.copy(fontWeight = FontWeight.SemiBold), maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(
                     when (row.state) {
                         DlState.RESOLVING -> "Finding peers…"
-                        DlState.DOWNLOADING -> listOf("$pct%", speed(row.speed), "${row.peers} peers", "${bytes(row.done)} of ${bytes(row.total)}").joinToString("  ·  ")
+                        DlState.DOWNLOADING -> listOfNotNull("$pct%", speed(row.speed), "${row.peers} peers").joinToString("  ·  ")
                         DlState.PAUSED -> "Paused  ·  $pct%"
                         DlState.WIFI -> "Waiting for Wi-Fi  ·  $pct%"
                         DlState.FAILED -> row.error ?: "Failed"
@@ -150,6 +168,11 @@ private fun ActiveRow(row: LiveDownload, onPause: () -> Unit, onResume: () -> Un
                     Modifier.padding(top = 2.dp),
                     style = Type.meta.copy(fontSize = 12.sp, color = if (row.state == DlState.FAILED) Ink.danger else Ink.muted),
                     maxLines = 2,
+                )
+                if (row.total > 0) Text(
+                    listOfNotNull(if (pack) "$savedCount of ${wanted.size} episodes saved" else null, "${bytes(row.done)} of ${bytes(row.total)}").joinToString("  ·  "),
+                    style = Type.meta.copy(fontSize = 12.sp, color = Ink.faint),
+                    maxLines = 1,
                 )
             }
             when (row.state) {
@@ -159,23 +182,68 @@ private fun ActiveRow(row: LiveDownload, onPause: () -> Unit, onResume: () -> Un
             }
             Tap(onCancel, shape = CircleShape) { Lc(L.drawable.lucide_ic_x, Modifier.padding(10.dp), tint = Ink.muted, size = 20.dp) }
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(10.dp))
         ProgressLine(row.ratio, height = 3.dp)
         // Waiting is a choice the viewer can overrule for this one download.
         if (row.state == DlState.WIFI) Chip("Use mobile data", false, onClick = onResume, Modifier.padding(top = 10.dp))
-        // A pack: each episode and how far it has got.
-        if (row.files.size > 1) {
-            Column(Modifier.padding(start = 60.dp, top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                row.files.forEach { f ->
-                    val ep = parseEpisode(f.name)?.let { "S${it.season}:E${it.episode}" } ?: f.name
-                    Text(
-                        "$ep  ·  " + if (f.saved) "Saved" else "${if (f.size > 0) f.done * 100 / f.size else 0}%",
-                        style = Type.meta.copy(fontSize = 12.sp, color = if (f.saved) Ink.good else Ink.faint),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+
+        if (pack) {
+            Tap({ open = !open }, Modifier.fillMaxWidth().padding(top = 6.dp), RoundedCornerShape(6.dp)) {
+                Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Episodes  ·  ${wanted.size} of ${row.files.size} chosen", Modifier.weight(1f), style = Type.meta.copy(color = Ink.text, fontWeight = FontWeight.SemiBold))
+                    Lc(if (open) L.drawable.lucide_ic_chevron_up else L.drawable.lucide_ic_chevron_down, tint = Ink.muted, size = 18.dp)
                 }
             }
+            if (open) {
+                Row(Modifier.padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Chip("All", wanted.size == row.files.size, onClick = { row.files.filter { !it.wanted }.forEach { onWanted(it.index, true) } })
+                    // Skips everything not on the phone yet; what is saved stays.
+                    Chip("None", wanted.none { !it.saved }, onClick = { row.files.filter { it.wanted && !it.saved }.forEach { onWanted(it.index, false) } })
+                }
+                val next = wanted.firstOrNull { !it.saved }?.index
+                row.files.forEach { f -> EpisodeLine(f, isNext = f.index == next && row.state == DlState.DOWNLOADING) { onWanted(f.index, !f.wanted) } }
+            }
         }
+    }
+}
+
+/** An episode in a pack: a circle to keep or skip it, its tag, a thin bar, and where it stands. */
+@Composable
+private fun EpisodeLine(f: DlFile, isNext: Boolean, onToggle: () -> Unit) {
+    val ep = parseEpisode(f.name)?.let { "S${it.season}:E${it.episode}" } ?: f.name
+    val pct = if (f.size > 0) (f.done * 100 / f.size).toInt() else 0
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        // A saved episode is on the phone already; there is nothing to skip.
+        Tap({ if (!f.saved) onToggle() }, shape = CircleShape) {
+            Lc(
+                when {
+                    f.saved -> L.drawable.lucide_ic_circle_check
+                    f.wanted -> L.drawable.lucide_ic_circle_check
+                    else -> L.drawable.lucide_ic_circle
+                },
+                Modifier.padding(6.dp),
+                tint = when {
+                    f.saved -> Ink.good
+                    f.wanted -> Ink.accent
+                    else -> Ink.faint
+                },
+                size = 20.dp,
+            )
+        }
+        Text(ep, Modifier.width(64.dp).padding(start = 4.dp), style = Type.meta.copy(color = if (f.wanted) Ink.text else Ink.faint, fontWeight = FontWeight.SemiBold), maxLines = 1)
+        Box(Modifier.weight(1f).padding(horizontal = 8.dp)) {
+            if (f.wanted && !f.saved) ProgressLine(pct / 100f, height = 3.dp)
+        }
+        Text(
+            when {
+                f.saved -> "Saved"
+                !f.wanted -> "Skipped"
+                isNext -> "$pct%  ·  next"
+                else -> "$pct%"
+            },
+            Modifier.width(84.dp),
+            style = Type.meta.copy(fontSize = 12.sp, color = if (f.saved) Ink.good else Ink.faint, textAlign = TextAlign.End),
+            maxLines = 1,
+        )
     }
 }
