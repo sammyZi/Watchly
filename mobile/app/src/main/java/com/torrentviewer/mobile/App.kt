@@ -1,8 +1,14 @@
 package com.torrentviewer.mobile
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -85,6 +91,7 @@ enum class Tab(val label: String, @DrawableRes val icon: Int) {
     HOME("Home", L.drawable.lucide_ic_house),
     SEARCH("Search", L.drawable.lucide_ic_search),
     LIBRARY("Library", L.drawable.lucide_ic_library),
+    DOWNLOADS("Downloads", L.drawable.lucide_ic_download),
     SETTINGS("Settings", L.drawable.lucide_ic_settings),
 }
 
@@ -159,6 +166,16 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         tab = Tab.HOME
     }
 
+    // A download's progress lives in a notification; Android 13+ asks before showing one.
+    val context = LocalContext.current
+    val askNotify = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    val downloading by Downloads.live.collectAsState()
+    LaunchedEffect(downloading.isNotEmpty()) {
+        if (downloading.isNotEmpty() && Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
     // Engine failures would otherwise be invisible: the player just goes away.
     LaunchedEffect(Unit) { watch.engine.errors.collect { watch.fail(it) } }
 
@@ -207,7 +224,8 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
                     Tab.HOME -> HomeScreen(home, watch, me, onOpen = openTitle, onShelf = { pages.add(Page.Catalog(it)) }, onProfile = { switching = true })
                     Tab.SEARCH -> SearchScreen(watch, onOpen = openTitle)
                     Tab.LIBRARY -> LibraryScreen(watch, onOpen = openTitle)
-                    Tab.SETTINGS -> SettingsScreen(me, onSwitchProfile = { switching = true })
+                    Tab.DOWNLOADS -> DownloadsScreen(watch)
+                    Tab.SETTINGS -> SettingsScreen(watch, me, onSwitchProfile = { switching = true })
                 }
             }
         }

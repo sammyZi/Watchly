@@ -614,8 +614,8 @@ object SubDl {
         )
     }
 
-    suspend fun search(query: String, key: String, imdb: String?, season: Int?, episode: Int?, type: String?): List<Sub> {
-        val params = mutableListOf("api_key" to key, "languages" to "EN", "subs_per_page" to "30")
+    suspend fun search(query: String, key: String, imdb: String?, season: Int?, episode: Int?, type: String?, language: String = "EN"): List<Sub> {
+        val params = mutableListOf("api_key" to key, "languages" to language.ifBlank { "EN" }, "subs_per_page" to "30")
         when {
             imdb != null -> params += "imdb_id" to imdb
             query.isNotBlank() -> params += "film_name" to query

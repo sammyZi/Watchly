@@ -16,6 +16,10 @@ enum class Phase { IDLE, INSPECTING, PLAYING }
 fun runtimeSeconds(runtime: String?): Double =
     Regex("(\\d+)\\s*min", RegexOption.IGNORE_CASE).find(runtime.orEmpty())?.groupValues?.get(1)?.toDouble()?.times(60) ?: 0.0
 
+/** A path to a video on disk — a finished download — rather than a magnet, URL or .torrent. */
+fun isLocalVideo(uri: String) =
+    (uri.startsWith("/") || uri.startsWith("file://")) && uri.substringAfterLast('.', "").lowercase() in setOf("mkv", "mp4", "avi", "mov", "m4v", "webm", "ts", "wmv", "flv", "mpg", "mpeg")
+
 private fun bitrateOf(bytes: Long, seconds: Double) = if (bytes > 0 && seconds > 0) bytes / seconds else 0.0
 
 /**
@@ -112,8 +116,41 @@ class Watch(val engine: TorrentStream) {
         play(index, fresh.resumeRatio(index), bitrateOf(size, fresh.durations[index] ?: runtimeSeconds(from?.runtime)))
     }
 
+    /**
+     * A finished download: a file on disk and no torrent. It goes into History like any
+     * other, so it resumes from Continue Watching too; the player is handed its path as
+     * though the engine had just announced it.
+     */
+    fun playFile(path: String, label: String, from: Title? = null, poster: String? = null) = AppScope.launch {
+        val file = java.io.File(path.removePrefix("file://"))
+        if (!file.exists()) return@launch fail("That file is gone — it may have been deleted or the card removed.")
+        gen++
+        source = null
+        val stored = StoredFile(0, file.name, file.length(), true, false, file.path)
+        val target = History.put(
+            Item(
+                uri = file.path, title = label, at = System.currentTimeMillis(), torrentName = label, files = listOf(stored),
+                lastFileIndex = 0, imdb = from?.imdb, kind = from?.kind, poster = poster ?: from?.poster, backdrop = from?.backdrop, titleName = label,
+            ),
+        )
+        title = from
+        item = target
+        // The full entry — logo, episodes — whatever the caller had to hand.
+        target.imdb?.let { id -> launch { Meta.title(id, target.kind ?: "movie")?.let { if (item?.uri == target.uri) title = it } } }
+        meta = TorrentMeta(label, listOf(TorrentFile(0, file.path, file.name, file.length(), true, false)))
+        playingIndex = 0
+        engine.progress.value = null
+        engine.ready.value = Ready(android.net.Uri.fromFile(file).toString(), file.name, emptyList())
+        playId++
+        phase = Phase.PLAYING
+    }
+
     /** Continue watching: the stored file list goes straight to the engine. */
     fun resume(target: Item) = AppScope.launch {
+        if (isLocalVideo(target.uri)) {
+            playFile(target.uri, target.label, poster = target.poster)
+            return@launch
+        }
         // Art and synopsis for the player, without holding up the stream.
         title = null
         item = target

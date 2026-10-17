@@ -3,6 +3,14 @@
 package com.torrentviewer.mobile
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import com.torrentviewer.core.Backup
+import com.torrentviewer.core.LANGS
+import com.torrentviewer.core.Phase
+import com.torrentviewer.core.SUB_SIZES
+import com.torrentviewer.core.langName
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -217,7 +225,10 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
         }
         if (torrents) {
             items(hits.orEmpty(), key = { it.id }, span = { GridItemSpan(maxLineSpan) }) { hit ->
-                Source(hit) {
+                Source(hit, onDownload = {
+                    Downloads.add(downloadJob(hit, null))
+                    watch.notes.tryEmit("Downloading ${hit.name} — see Downloads")
+                }) {
                     recents = Searches.remember(query)
                     watch.stream(hit, null)
                 }
@@ -318,11 +329,13 @@ fun LibraryScreen(watch: Watch, onOpen: (Title) -> Unit) {
 /* ------------------------------------------------------------- settings */
 
 @Composable
-fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
+fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
     val settings by SettingsStore.value.collectAsState()
     val profiles by Profiles.list.collectAsState()
     val me = profiles.find { it.id == who.id } ?: who
     var pin by remember { mutableStateOf("") }
+    /** "audio" or "subs" while that language list is up. */
+    var picking by remember { mutableStateOf<String?>(null) }
     fun set(next: Settings) = SettingsStore.save(next)
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = EDGE).padding(bottom = 32.dp)) {
@@ -396,6 +409,75 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
 
+        Section("Languages", "A matching track comes on by itself when a video opens; picking one yourself wins. Online subtitle search looks in the subtitle language.") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Chip("Audio: " + if (settings.audioLang.isEmpty()) "file's default" else langName(settings.audioLang), settings.audioLang.isNotEmpty(), onClick = { picking = "audio" })
+                Chip("Subtitles: " + if (settings.subLang.isEmpty()) "off" else langName(settings.subLang), settings.subLang.isNotEmpty(), onClick = { picking = "subs" })
+            }
+        }
+
+        Section("Subtitle style", "Size, colour and a box behind the words. Media3 shows a change on the next line; VLC from the next video.") {
+            val style = settings.subtitles
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SUB_SIZES.keys.forEach { s -> Chip(s.replaceFirstChar(Char::uppercase), style.size == s, onClick = { set(settings.copy(subtitles = style.copy(size = s))) }) }
+            }
+            Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Chip("White", !style.yellow, onClick = { set(settings.copy(subtitles = style.copy(yellow = false))) })
+                Chip("Yellow", style.yellow, onClick = { set(settings.copy(subtitles = style.copy(yellow = true))) })
+                Chip("Box behind", style.box, onClick = { set(settings.copy(subtitles = style.copy(box = !style.box))) })
+            }
+        }
+
+        Section("Downloads", "Wi-Fi only holds a download on mobile data — it waits, and carries on when Wi-Fi is back. Use mobile data on a waiting download to let that one through.") {
+            var wifiOnly by remember { mutableStateOf(Downloads.wifiOnly) }
+            var sdCard by remember { mutableStateOf(Downloads.sdCard) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Chip("Wi-Fi only", wifiOnly, onClick = { wifiOnly = true; Downloads.wifiOnly = true })
+                Chip("Any network", !wifiOnly, onClick = { wifiOnly = false; Downloads.wifiOnly = false })
+            }
+            if (Downloads.hasCard) {
+                Text(
+                    "Save to the SD card's app folder instead of the phone. Files there go if the app is uninstalled." +
+                        if (Downloads.busy || watch.phase != Phase.IDLE) " Switchable once nothing is downloading or playing." else "",
+                    Modifier.padding(top = 14.dp, bottom = 8.dp), style = Type.meta.copy(color = Ink.faint),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(false to "Phone", true to "SD card").forEach { (card, label) ->
+                        Chip(label, sdCard == card, onClick = {
+                            if (Downloads.busy || watch.phase != Phase.IDLE) watch.notes.tryEmit("Finish or stop downloads and playback first.")
+                            else {
+                                sdCard = card
+                                Downloads.sdCard = card
+                            }
+                        })
+                    }
+                }
+            }
+        }
+
+        Section("Backup", "History, resume points, lists, settings, searches and intro marks as one file. Downloads are not in it — they are files on this phone.") {
+            val context = LocalContext.current
+            val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+                uri ?: return@rememberLauncherForActivityResult
+                runCatching { context.contentResolver.openOutputStream(uri)?.use { it.write(Backup.export().toByteArray()) } }
+                    .onSuccess { watch.notes.tryEmit("Backup saved") }
+                    .onFailure { watch.notes.tryEmit("Couldn't write the backup: ${it.message}") }
+            }
+            val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                uri ?: return@rememberLauncherForActivityResult
+                runCatching {
+                    // A backup is kilobytes; anything far larger is not one.
+                    val text = context.contentResolver.openInputStream(uri)?.use { String(it.readNBytesCompat(8 shl 20)) } ?: error("Couldn't read that file")
+                    Backup.restore(text)
+                }.onSuccess { watch.notes.tryEmit("Restored $it parts of the library") }
+                    .onFailure { watch.notes.tryEmit(it.message ?: "Couldn't restore that backup") }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button("Back up", { save.launch("watchly-backup-${java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())}.json") }, icon = L.drawable.lucide_ic_download)
+                Button("Restore", { open.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }, icon = L.drawable.lucide_ic_history)
+            }
+        }
+
         Section("Genres on the home screen", "Leave all off to build the home screen from what you have watched.") {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 GENRES.forEach { g ->
@@ -407,6 +489,32 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
     }
+
+    picking?.let { which ->
+        val audio = which == "audio"
+        Sheet(
+            title = if (audio) "Audio language" else "Subtitle language",
+            options = listOf(Option("", if (audio) "The file's default" else "Off")) + LANGS.map { Option(it.code, it.name) },
+            selected = if (audio) settings.audioLang else settings.subLang,
+            onPick = {
+                set(if (audio) settings.copy(audioLang = it) else settings.copy(subLang = it))
+                picking = null
+            },
+            onDismiss = { picking = null },
+        )
+    }
+}
+
+/** InputStream.readNBytes is API 33; a cap keeps a wrong pick from filling memory. */
+private fun java.io.InputStream.readNBytesCompat(limit: Int): ByteArray {
+    val out = java.io.ByteArrayOutputStream()
+    val buf = ByteArray(64 * 1024)
+    while (out.size() < limit) {
+        val n = read(buf, 0, minOf(buf.size, limit - out.size()))
+        if (n < 0) break
+        out.write(buf, 0, n)
+    }
+    return out.toByteArray()
 }
 
 @Composable

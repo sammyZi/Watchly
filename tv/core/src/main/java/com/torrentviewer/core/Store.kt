@@ -115,7 +115,22 @@ data class Settings(
     val genres: List<String> = emptyList(),
     /** libVLC from the start instead of Media3, which falls back to it on its own anyway. */
     val vlcPlayer: Boolean = false,
+    /** SubDL language code ("EN"): searched online, and a matching built-in track comes on by itself. Empty: off, English search. */
+    val subLang: String = "",
+    /** Audio track to prefer when a release carries several; empty is the file's default. */
+    val audioLang: String = "",
+    val subtitles: SubtitleStyle = SubtitleStyle(),
+    /** Carried from one video to the next. */
+    val playbackRate: Float = 1f,
+    /** The player's picture mode, by label ("Best fit"…). */
+    val playerScale: String = "Best fit",
 )
+
+/** Subtitle text; [size] is one of [SUB_SIZES]' keys. The Expo build's names and values. */
+data class SubtitleStyle(val size: String = "normal", val yellow: Boolean = false, val box: Boolean = false)
+
+/** libVLC's relative font size: the screen height divided by this, so smaller is bigger. */
+val SUB_SIZES = linkedMapOf("small" to 20, "normal" to 16, "large" to 12, "huge" to 9)
 
 val CACHE_CAPS = listOf(2048, 4096, 8192, 16384)
 
@@ -124,23 +139,37 @@ object SettingsStore {
     val value: StateFlow<Settings> = _value
 
     fun load() {
-        val o = runCatching { JSONObject(Kv.global("settings") ?: "{}") }.getOrDefault(JSONObject())
-        _value.value = Settings(
-            prepareMb = o.optInt("prepareMb", 1).coerceAtLeast(1),
-            addTrackers = o.optBoolean("addTrackers", true),
-            cacheCapMb = o.optInt("cacheCapMb", 4096).takeIf { it > 0 } ?: 4096,
-            genres = o.strings("genres"),
-            vlcPlayer = o.optBoolean("vlcPlayer", false),
-        )
+        _value.value = fromJson(runCatching { JSONObject(Kv.global("settings") ?: "{}") }.getOrDefault(JSONObject()))
     }
 
+    /** Also what a backup restores, so nothing in it is trusted to be in range. */
+    fun fromJson(o: JSONObject) = Settings(
+        prepareMb = o.optInt("prepareMb", 1).coerceAtLeast(1),
+        addTrackers = o.optBoolean("addTrackers", true),
+        cacheCapMb = o.optInt("cacheCapMb", 4096).takeIf { it > 0 } ?: 4096,
+        genres = o.strings("genres"),
+        vlcPlayer = o.optBoolean("vlcPlayer", false),
+        subLang = o.optString("subLang", ""),
+        audioLang = o.optString("audioLang", ""),
+        subtitles = SubtitleStyle(
+            size = o.optString("subSize").takeIf { it in SUB_SIZES } ?: "normal",
+            yellow = o.optString("subColor") == "yellow",
+            box = o.optBoolean("subBackground", false),
+        ),
+        playbackRate = o.optDouble("playbackRate", 1.0).toFloat().takeIf { it in 0.25f..4f } ?: 1f,
+        playerScale = o.optString("playerScale", "Best fit").ifBlank { "Best fit" },
+    )
+
+    /** Over what is stored, not instead of it: the TV and the phone each keep fields the other never reads. */
     fun save(next: Settings) {
         _value.value = next
-        Kv.setGlobal(
-            "settings",
-            JSONObject().put("prepareMb", next.prepareMb).put("addTrackers", next.addTrackers)
-                .put("cacheCapMb", next.cacheCapMb).put("genres", JSONArray(next.genres)).put("vlcPlayer", next.vlcPlayer).toString(),
-        )
+        val o = runCatching { JSONObject(Kv.global("settings") ?: "{}") }.getOrDefault(JSONObject())
+        o.put("prepareMb", next.prepareMb).put("addTrackers", next.addTrackers)
+            .put("cacheCapMb", next.cacheCapMb).put("genres", JSONArray(next.genres)).put("vlcPlayer", next.vlcPlayer)
+            .put("subLang", next.subLang).put("audioLang", next.audioLang)
+            .put("subSize", next.subtitles.size).put("subColor", if (next.subtitles.yellow) "yellow" else "white").put("subBackground", next.subtitles.box)
+            .put("playbackRate", next.playbackRate.toDouble()).put("playerScale", next.playerScale)
+        Kv.setGlobal("settings", o.toString())
     }
 }
 
