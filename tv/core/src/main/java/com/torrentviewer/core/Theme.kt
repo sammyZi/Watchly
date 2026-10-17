@@ -178,17 +178,25 @@ fun ImdbBadge(rating: String) {
     }
 }
 
-/** Year · runtime · genres, dot-separated, with the rating badge first. */
+/**
+ * Year · runtime · genres, dot-separated, with the rating badge first. Too long for the
+ * width, it carries whole facts onto the next line — never half a word.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun Facts(title: Title, modifier: Modifier = Modifier) {
-    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+    androidx.compose.foundation.layout.FlowRow(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         title.rating?.let {
-            ImdbBadge(it)
-            Spacer(Modifier.width(14.dp))
+            Row(Modifier.align(Alignment.CenterVertically).padding(end = 14.dp)) { ImdbBadge(it) }
         }
         title.facts().forEachIndexed { i, fact ->
-            if (i > 0) Text("  •  ", style = Type.meta.copy(color = Ink.faint))
-            Text(fact, style = Type.meta.copy(color = Ink.text.copy(alpha = 0.85f)))
+            Text(
+                (if (i > 0) "  •  " else "") + fact,
+                Modifier.align(Alignment.CenterVertically),
+                style = Type.meta.copy(color = Ink.text.copy(alpha = 0.85f)),
+                maxLines = 1,
+                softWrap = false,
+            )
         }
     }
 }

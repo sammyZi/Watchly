@@ -235,14 +235,16 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                     if (title.cast.isNotEmpty()) People("Starring", title.cast.take(4).joinToString(", "))
                     if (title.directors.isNotEmpty()) People(if (title.isSeries) "Creators" else "Director", title.directors.take(2).joinToString(", "))
                     title.awards?.let { People("Awards", it) }
-                    Row(Modifier.padding(top = 14.dp)) {
-                        Action(if (inList) L.drawable.lucide_ic_check else L.drawable.lucide_ic_plus, "My List", { SavedStore.toggle(title) })
-                        Action(L.drawable.lucide_ic_heart, if (liked) "Liked" else "Like", { SavedStore.toggle(title, "favorite") }, tint = if (liked) Ink.accent else Ink.text)
+                    // However many actions there are, they share the width evenly.
+                    Row(Modifier.fillMaxWidth().padding(top = 14.dp)) {
+                        val share = Modifier.weight(1f)
+                        Action(if (inList) L.drawable.lucide_ic_check else L.drawable.lucide_ic_plus, "My List", { SavedStore.toggle(title) }, modifier = share)
+                        Action(L.drawable.lucide_ic_heart, if (liked) "Liked" else "Like", { SavedStore.toggle(title, "favorite") }, tint = if (liked) Ink.accent else Ink.text, modifier = share)
                         if (!title.isSeries) Action(L.drawable.lucide_ic_download, "Download", {
                             shown.firstOrNull()?.let { keep(it, null) } ?: watch.notes.tryEmit(if (busy) "Still finding sources…" else "No sources to download.")
-                        })
-                        title.trailer?.let { id -> Action(L.drawable.lucide_ic_film, "Trailer", { openUrl(context, "https://www.youtube.com/watch?v=$id") }) }
-                        Action(L.drawable.lucide_ic_message_square_text, "Reviews", { reviews = true })
+                        }, modifier = share)
+                        title.trailer?.let { id -> Action(L.drawable.lucide_ic_film, "Trailer", { openUrl(context, "https://www.youtube.com/watch?v=$id") }, modifier = share) }
+                        Action(L.drawable.lucide_ic_message_square_text, "Reviews", { reviews = true }, modifier = share)
                     }
                 }
             }

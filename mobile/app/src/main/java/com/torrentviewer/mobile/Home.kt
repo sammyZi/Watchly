@@ -177,6 +177,11 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
     val heroes = shelves.firstNotNullOfOrNull { state.loaded[it.key]?.takeIf { l -> l.isNotEmpty() } }.orEmpty().take(HEROES)
     SideEffect { state.heroCount = heroes.size }
     var menu by remember { mutableStateOf<Item?>(null) }
+    // A title shows once, in the first row it lands in: genre rows overlap, and the week's
+    // big film otherwise led half the page. "See all" still lists a shelf in full.
+    val seen = HashSet<String>()
+    val rows = shelves.associate { s -> s.key to state.loaded[s.key].orEmpty().filter { seen.add(it.imdb) } }
+    val visible = shelves.filter { state.loaded[it.key].isNullOrEmpty() || rows[it.key].orEmpty().isNotEmpty() }
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(state = state.list, contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
@@ -209,8 +214,8 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
             if (watchlist.isNotEmpty()) item(key = "list") {
                 Rail("My List") { TitleRow(state.row("list"), watchlist, onOpen) }
             }
-            itemsIndexed(shelves, key = { _, s -> s.key }) { _, shelf ->
-                val titles = state.loaded[shelf.key].orEmpty()
+            itemsIndexed(visible, key = { _, s -> s.key }) { _, shelf ->
+                val titles = rows[shelf.key].orEmpty()
                 Rail(shelf.title, onMore = { onShelf(shelf) }) {
                     if (titles.isEmpty()) Placeholders() else TitleRow(state.row(shelf.key), titles, onOpen)
                 }
