@@ -231,7 +231,8 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
 @Composable
 fun LibraryScreen(watch: Watch) {
     val history by History.items.collectAsState()
-    val items = history.sortedByDescending { it.at }
+    // One card per title, however many releases it was played from.
+    val items = latestPerTitle(history)
     var focusedUri by remember { mutableStateOf<String?>(null) }
     val first = remember { FocusRequester() }
 
@@ -279,7 +280,7 @@ fun LibraryScreen(watch: Watch) {
                 }
                 // Only under the card the remote is on: forty remove buttons is forty stops.
                 if (focusedUri == item.uri) {
-                    Chip("Remove", false, onClick = { History.drop(item.uri, watch.engine) }, modifier = Modifier.padding(top = 10.dp), icon = L.drawable.lucide_ic_trash_2)
+                    Chip("Remove", false, onClick = { History.dropTitle(item.titleKey, watch.engine) }, modifier = Modifier.padding(top = 10.dp), icon = L.drawable.lucide_ic_trash_2)
                 }
             }
         }
