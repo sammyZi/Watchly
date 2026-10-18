@@ -106,11 +106,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.torrentviewer.core.Artwork
+import com.torrentviewer.core.Ep
 import com.torrentviewer.core.Episode
 import com.torrentviewer.core.ExoView
 import com.torrentviewer.core.Facts
 import com.torrentviewer.core.Ink
-import com.torrentviewer.core.Intro
+import com.torrentviewer.core.IntroDb
 import com.torrentviewer.core.Intros
 import com.torrentviewer.core.Lc
 import com.torrentviewer.core.LocalFileServer
@@ -344,9 +345,8 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     /** Locked, with the lock icon up in its corner. */
     var lockShown by remember { mutableStateOf(false) }
     var boosting by remember { mutableStateOf(false) }
+    /** IntroDB's window for this episode once it answers; until then, one marked on this phone before. */
     var intro by remember { mutableStateOf(show?.let(Intros::get)) }
-    /** Where the viewer said the intro starts, until they say where it ends. */
-    var introMark by remember { mutableStateOf<Double?>(null) }
     val pip = Pip.active
     val waiting = ready == null || !loaded
 
@@ -445,22 +445,6 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         seekTo(at + seconds)
     }
 
-    fun markIntro() {
-        val key = show ?: return
-        val start = introMark
-        if (start == null) {
-            introMark = at
-            say("Intro start marked — tap again where it ends", L.drawable.lucide_ic_flag)
-            return
-        }
-        introMark = null
-        if (at < start + 5) return say("Too short for an intro — marking cancelled")
-        val marked = Intro(start.roundToInt().toDouble(), at.roundToInt().toDouble())
-        intro = marked
-        Intros.set(key, marked)
-        say("Intro saved — other episodes will offer to skip it", L.drawable.lucide_ic_flag)
-    }
-
     fun cycleSleep() {
         val i = (sleep + 1) % SLEEP.size
         sleep = i
@@ -550,6 +534,14 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     }
 
     /* ------------------------------------------------------------ effects */
+
+    // This episode's intro, from IntroDB.
+    val imdb = title?.imdb ?: watch.item?.imdb
+    val introEp = remember(episode, file) { episode?.let { Ep(it.season, it.episode) } ?: parseEpisode(file?.name.orEmpty()) }
+    LaunchedEffect(imdb, introEp) {
+        if (show == null || imdb == null || introEp == null) return@LaunchedEffect
+        IntroDb.intro(imdb, introEp.season, introEp.episode)?.let { intro = it }
+    }
 
     // The stream arrives: hand it to the player, with the torrent's own subtitle files.
     // From where it is, not startAt: a fallback to VLC picks up mid-film.
@@ -697,7 +689,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         snapshotFlow { duration - at }.first { it <= 0.5 }
         goNext()
     }
-    val skipIntro by remember { derivedStateOf { intro?.covers(at) == true && introMark == null && loaded } }
+    val skipIntro by remember { derivedStateOf { intro?.covers(at) == true && loaded } }
 
     /* ------------------------------------------------------------ input */
 
@@ -964,7 +956,6 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                                 on = SLEEP[sleep] != 0,
                                 onClick = ::cycleSleep,
                             )
-                            if (show != null) BarButton(L.drawable.lucide_ic_flag, if (introMark != null) "Intro ends here" else if (intro != null) "Re-mark intro" else "Mark intro", on = introMark != null, onClick = ::markIntro)
                             BarButton(if (wholeFile) L.drawable.lucide_ic_hard_drive else L.drawable.lucide_ic_clock, if (wholeFile) "Whole file" else "Next 5 minutes", on = wholeFile) {
                                 wholeFile = !wholeFile
                                 engine.wholeFile = wholeFile

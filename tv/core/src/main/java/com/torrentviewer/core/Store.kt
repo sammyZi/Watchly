@@ -497,7 +497,7 @@ object SavedStore {
 
 /* ---------------------------------------------------------------- intros */
 
-/** Where a show's opening titles sit, in seconds, marked once by the viewer. */
+/** Where an episode's opening titles sit, in seconds: from IntroDB, or marked on this phone before. */
 data class Intro(val start: Double, val end: Double) {
     /** Inside the intro, with a moment's lead so the button is up as it starts. */
     fun covers(at: Double) = at >= start - 2 && at < end - 1
@@ -516,6 +516,44 @@ object Intros {
     fun get(show: String): Intro? = all().optJSONObject(show)?.let { Intro(it.optDouble("start"), it.optDouble("end")) }
 
     fun set(show: String, intro: Intro) = Kv.set(KEY, all().put(show, JSONObject().put("start", intro.start).put("end", intro.end)).toString())
+}
+
+/**
+ * IntroDB (introdb.app): community-submitted intro windows per episode, by IMDb id.
+ * Reads need no key; an episode nobody has timed answers 404, which is cached like a hit.
+ */
+object IntroDb {
+    private const val BASE = "https://api.introdb.app"
+    private val cache = HashMap<String, Intro?>()
+
+    suspend fun intro(imdb: String, season: Int, episode: Int): Intro? {
+        if (!imdb.startsWith("tt")) return null
+        val key = "$imdb:$season:$episode"
+        synchronized(cache) { if (key in cache) return cache[key] }
+        val found = try {
+            parseIntroDb(Net.get("$BASE/segments?imdb_id=${enc(imdb)}&season=$season&episode=$episode", timeoutMs = 8000, quiet = true))
+        } catch (e: HttpException) {
+            if (e.code != 404) return null
+            null
+        } catch (e: Exception) {
+            return null
+        }
+        synchronized(cache) { cache[key] = found }
+        return found
+    }
+}
+
+/** The "intro" segment of a /segments answer, in seconds (start_sec, else start_ms). */
+fun parseIntroDb(json: String): Intro? {
+    val seg = runCatching { JSONObject(json).optJSONObject("intro") }.getOrNull() ?: return null
+    fun seconds(name: String): Double? = when {
+        seg.has("${name}_sec") && !seg.isNull("${name}_sec") -> seg.optDouble("${name}_sec")
+        seg.has("${name}_ms") && !seg.isNull("${name}_ms") -> seg.optDouble("${name}_ms") / 1000
+        else -> null
+    }?.takeIf { it.isFinite() }
+    val start = seconds("start") ?: return null
+    val end = seconds("end") ?: return null
+    return if (start >= 0 && end > start) Intro(start, end) else null
 }
 
 /* -------------------------------------------------------------- searches */

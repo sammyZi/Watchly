@@ -384,4 +384,14 @@ class LibTest {
         assertTrue(intro.covers(148.9))
         assertFalse(intro.covers(149.0))
     }
+
+    @Test fun introDbAnswer() {
+        assertEquals(Intro(445.0, 466.5), parseIntroDb("""{"imdb_id":"tt1","season":1,"episode":2,"intro":{"start_sec":445,"end_sec":466.5},"recap":{"start_sec":0,"end_sec":79}}"""))
+        // Milliseconds only.
+        assertEquals(Intro(60.0, 90.0), parseIntroDb("""{"intro":{"start_sec":null,"start_ms":60000,"end_ms":90000}}"""))
+        // A recap but no intro, an empty window, junk.
+        assertNull(parseIntroDb("""{"recap":{"start_sec":0,"end_sec":79}}"""))
+        assertNull(parseIntroDb("""{"intro":{"start_sec":90,"end_sec":90}}"""))
+        assertNull(parseIntroDb("not json"))
+    }
 }

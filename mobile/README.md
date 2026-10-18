@@ -79,7 +79,7 @@ the sides to skip (taps add up), hold for 2×, brightness from the slider on the
 left of the controls or a swipe down the left edge (volume stays with the
 phone's own keys), lock the screen. Audio and subtitle tracks
 side by side, SubDL search, subtitle delay; speed and picture fit, remembered
-between videos; stats for nerds; skip intro (marked once per show); sleep timer
+between videos; stats for nerds; skip intro (timings from IntroDB, per episode); sleep timer
 (15/30/60 minutes or the end of the episode); picture-in-picture from the Mini
 player button or Home; "Open in…" any other video app at the same position;
 a playback card in the notification shade and on the lock screen (play/pause,
