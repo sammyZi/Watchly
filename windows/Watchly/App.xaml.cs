@@ -34,8 +34,6 @@ public partial class App : Application
         }
 
         Log.Info("app", "Watchly starting up...");
-        Views.PlayerView.Warm();
-        _ = Task.Run(RemoveOldBuilds);
         Theme.Apply(AppSettings.Load().ThemeMode);
 
         DispatcherUnhandledException += (_, args) =>
@@ -53,6 +51,13 @@ public partial class App : Application
 
         var window = new MainWindow(e.Args.FirstOrDefault(TitleText.IsTorrentSource));
         MainWindow = window;
+        // Neither is needed for the first frame, and on a cold disk after boot both compete
+        // with the window for it: libVLC loads, and old builds are cleared, once it is up.
+        window.ContentRendered += (_, _) =>
+        {
+            Views.PlayerView.Warm();
+            _ = Task.Run(RemoveOldBuilds);
+        };
         window.Show();
     }
 

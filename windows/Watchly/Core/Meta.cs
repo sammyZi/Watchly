@@ -32,6 +32,8 @@ public sealed record Title
     public List<string> Directors { get; init; } = new();
     public string? Awards { get; init; }
     public string? Backdrop { get; init; }
+    /// <summary>The title's logo, set over its art in place of the name when there is one.</summary>
+    public string? Logo { get; init; }
     public string? Runtime { get; init; }
     public List<Episode> Episodes { get; init; } = new();
 }
@@ -324,6 +326,7 @@ public static class Meta
                 Directors = (m["director"] as JsonArray)?.Select(c => S(c) ?? "").Where(c => c.Length > 0).ToList() ?? new(),
                 Awards = S(m["awards"]),
                 Backdrop = S(m["background"]),
+                Logo = S(m["logo"]),
                 Runtime = S(m["runtime"]),
                 Episodes = withEpisodes ? ToEpisodes(m["videos"] as JsonArray) : new(),
             });

@@ -15,26 +15,28 @@
   </Window.CommandBindings>
 
   <Grid x:Name="Root">
-    <!-- Tabs: built on first visit, then kept and only hidden (App.tsx's TabPage). -->
-    <Grid x:Name="Tabs" />
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="Auto" />
+      <ColumnDefinition />
+    </Grid.ColumnDefinitions>
 
-    <!-- src/components/TabBar.tsx: a floating capsule over a fade. -->
-    <Grid x:Name="TabDock" VerticalAlignment="Bottom" Height="110" IsHitTestVisible="True">
-      <Border Background="{DynamicResource FadeUp}" IsHitTestVisible="False" />
-      <Border x:Name="TabCapsule" Height="62" CornerRadius="31" Background="{DynamicResource TabBar}" VerticalAlignment="Bottom"
-              HorizontalAlignment="Center" Width="520" Margin="0,0,0,16" Padding="8,0">
-        <UniformGrid x:Name="TabButtons" Rows="1" />
-      </Border>
-    </Grid>
+    <!-- The phone's NavRail on a wide screen (the TV's collapsed rail): the tabs down the
+         left, the one you are on white with a red tick. -->
+    <Border x:Name="TabDock" Width="76" Background="{DynamicResource TabBar}">
+      <StackPanel x:Name="TabButtons" VerticalAlignment="Center" Margin="0,0,0,40" />
+    </Border>
+
+    <!-- Tabs: built on first visit, then kept and only hidden (App.tsx's TabPage). -->
+    <Grid x:Name="Tabs" Grid.Column="1" />
 
     <!-- Pages drawn over the tabs: shelf grid, title page, file list. Last child is on top. -->
-    <Grid x:Name="Layers" />
+    <Grid x:Name="Layers" Grid.Column="1" />
 
-    <ContentControl x:Name="PlayerHost" Focusable="False" Background="Black" Panel.ZIndex="100" Visibility="Collapsed" />
+    <ContentControl x:Name="PlayerHost" Grid.ColumnSpan="2" Focusable="False" Background="Black" Panel.ZIndex="100" Visibility="Collapsed" />
 
     <!-- A torrent being read — the swarm has to answer before anything can play. -->
-    <Border x:Name="BusyCard" Visibility="Collapsed" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,96"
-            CornerRadius="18" Background="{DynamicResource SurfaceAlt}" Padding="16,10">
+    <Border x:Name="BusyCard" Grid.Column="1" Visibility="Collapsed" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,32"
+            CornerRadius="10" Background="{DynamicResource SurfaceAlt}" Padding="16,10">
       <StackPanel Orientation="Horizontal">
         <ContentControl Style="{StaticResource Spinner}" Width="18" Height="18" />
         <TextBlock x:Name="BusyText" Text="Reading torrent…" Style="{StaticResource Label}" Margin="12,0,16,0" VerticalAlignment="Center" />
@@ -44,23 +46,27 @@
       </StackPanel>
     </Border>
 
-    <!-- src/components/Offline.tsx -->
-    <Border x:Name="Offline" Visibility="Collapsed" VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,12,0,0"
-            CornerRadius="16" Background="{DynamicResource DangerSoft}" Padding="12,7" IsHitTestVisible="False">
+    <!-- Home's offline note (mobile Home.kt). -->
+    <Border x:Name="Offline" Grid.Column="1" Visibility="Collapsed" VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,56,0,0"
+            CornerRadius="8" Background="{DynamicResource SurfaceAlt}" Padding="14,8" IsHitTestVisible="False">
       <StackPanel Orientation="Horizontal">
-        <c:Icon Kind="wifi-off" Size="13" Foreground="{DynamicResource Danger}" />
-        <TextBlock Text="Offline — retrying when you're back" Foreground="{DynamicResource Danger}" FontSize="12" FontWeight="Medium" Margin="8,0,0,0" />
+        <c:Icon Kind="wifi-off" Size="14" Foreground="{DynamicResource Muted}" />
+        <TextBlock Text="You're offline — showing what was saved" Foreground="{DynamicResource Text}" FontSize="13" FontWeight="Medium" Margin="8,0,0,0" />
       </StackPanel>
     </Border>
 
-    <Border x:Name="ToastBar" Visibility="Collapsed" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="24,0,24,150"
-            CornerRadius="18" Background="#e60b0e14" Padding="16,9" MaxWidth="640" IsHitTestVisible="False">
-      <TextBlock x:Name="ToastText" Foreground="White" FontSize="13" TextWrapping="Wrap" />
+    <!-- mobile App.kt Toast: a raised card at the foot, an alert mark in the accent. -->
+    <Border x:Name="ToastBar" Grid.Column="1" Visibility="Collapsed" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="24,0,24,40"
+            CornerRadius="10" Background="{DynamicResource SurfaceAlt}" Padding="16,12" MaxWidth="520" IsHitTestVisible="False">
+      <DockPanel>
+        <c:Icon x:Name="ToastIcon" DockPanel.Dock="Left" Kind="info" Size="20" Foreground="{DynamicResource Accent}" Margin="0,0,12,0" VerticalAlignment="Top" />
+        <TextBlock x:Name="ToastText" Foreground="{DynamicResource Text}" FontSize="15" FontWeight="Medium" TextWrapping="Wrap" />
+      </DockPanel>
     </Border>
 
     <!-- src/components/ConfirmModal.tsx -->
-    <Grid x:Name="ConfirmLayer" Visibility="Collapsed" Background="{DynamicResource Scrim}" MouseDown="OnConfirmBackdrop">
-      <Border Width="360" CornerRadius="18" Background="{DynamicResource Control}" Padding="24" VerticalAlignment="Center" HorizontalAlignment="Center"
+    <Grid x:Name="ConfirmLayer" Grid.ColumnSpan="2" Visibility="Collapsed" Background="{DynamicResource Scrim}" MouseDown="OnConfirmBackdrop">
+      <Border Width="360" CornerRadius="12" Background="{DynamicResource Surface}" Padding="24" VerticalAlignment="Center" HorizontalAlignment="Center"
               MouseDown="OnSwallow">
         <Border.Effect>
           <DropShadowEffect BlurRadius="24" ShadowDepth="8" Opacity="0.25" Color="#0b1020" />

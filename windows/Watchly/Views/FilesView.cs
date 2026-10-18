@@ -16,7 +16,7 @@ public sealed class FilesView : UserControl
         var others = meta.Files.Count - videos.Count;
 
         var header = new DockPanel { Margin = new Thickness(24, 20, 24, 12) };
-        var backButton = Ui.Round("chevron-left", back, "Accent", "AccentSoft", 40, 18, "Back");
+        var backButton = Ui.Round("arrow-left", back, "Text", "Tint", 40, 20, "Back");
         DockPanel.SetDock(backButton, Dock.Left);
         header.Children.Add(backButton);
         if (videos.Count > 1)

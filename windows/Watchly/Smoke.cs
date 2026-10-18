@@ -337,7 +337,7 @@ static class Smoke
         // Item templates only build when there is an item, so hand them one each.
         var sample = new Title { Imdb = "tt0133093", Kind = "tv", Name = "The Matrix", Year = "1999", Rating = "8.7", Poster = "https://example.invalid/p.jpg" };
         var item = new HistoryItem { Uri = "magnet:?xt=urn:btih:c39fe3eefbdb62da9c27eb6398ff4a7d2e26e7ab", Title = "The.Matrix.1999", LastFileIndex = 0 };
-        foreach (var (key, content) in new (string, object)[] { ("PosterCard", sample), ("ResumeCard", new ResumeTile(sample, item, 0, 40, "S1 E2  ·  12:00")) })
+        foreach (var (key, content) in new (string, object)[] { ("PosterCard", sample), ("RailCard", sample), ("ResumeCard", new ResumeTile(sample, item, 0, 40, "S1 E2  ·  12:00")) })
         {
             try
             {

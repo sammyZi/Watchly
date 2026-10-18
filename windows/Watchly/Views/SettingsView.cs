@@ -12,13 +12,13 @@ namespace Watchly.Views;
 public sealed class SettingsView : UserControl
 {
     readonly MainWindow shell = MainWindow.Shell;
-    readonly StackPanel page = new() { Margin = new Thickness(24, 8, 24, 120), MaxWidth = 760, HorizontalAlignment = HorizontalAlignment.Left };
+    readonly StackPanel page = new() { Margin = new Thickness(24, 8, 24, 32), MaxWidth = 760, HorizontalAlignment = HorizontalAlignment.Left };
 
     static readonly (int Kbps, string Label)[] Limits = { (0, "Unlimited"), (1024, "1 MB/s"), (5 * 1024, "5 MB/s"), (10 * 1024, "10 MB/s") };
 
     public SettingsView()
     {
-        var (root, _, body) = Ui.Screen("Settings", "sliders");
+        var (root, _, body) = Ui.Screen("Settings");
         body.Content = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = page };
         Content = root;
         shell.SettingsChanged += Render;
@@ -36,14 +36,14 @@ public sealed class SettingsView : UserControl
         page.Children.Clear();
 
         page.Children.Add(Group("Appearance",
-            ChoiceRow("sun", "Theme", "Match Windows, or lock light or dark",
+            ChoiceRow("Theme", "Match Windows, or lock light or dark",
                 new[] { ("system", "System"), ("light", "Light"), ("dark", "Dark") }, S.ThemeMode, v => Set(S with { ThemeMode = v }))));
 
-        page.Children.Add(Note("hard-drive", "How storage works here",
+        page.Children.Add(Note("How storage works here",
             "A stream keeps the pieces you watch in a cache and clears it when you stop, unless you turn that off below. " +
             "Downloads go to your downloads folder, resume where they left off after a restart, and play in VLC's engine — every format and audio track is supported."));
 
-        var genres = new WrapPanel { Margin = new Thickness(16, 0, 16, 16) };
+        var genres = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
         foreach (var g in Meta.Genres)
         {
             var on = S.Genres.Contains(g);
@@ -55,13 +55,13 @@ public sealed class SettingsView : UserControl
         {
             Children =
             {
-                Row("heart", "Favourite genres", S.Genres.Count > 0 ? $"{S.Genres.Count} chosen — these lead the home page" : "Pick a few and the home page opens with them"),
+                Row("Favourite genres", S.Genres.Count > 0 ? $"{S.Genres.Count} chosen — these lead the home page" : "Pick a few and the home page opens with them"),
                 genres,
             },
         }));
 
         page.Children.Add(Group("Startup speed",
-            Row("radio", "Add public trackers", "Bare magnet links resolve much faster than over DHT alone",
+            Row("Add public trackers", "Bare magnet links resolve much faster than over DHT alone",
                 Toggle(S.AddTrackers, v => Set(S with { AddTrackers = v })))));
 
         var folder = Ui.Button(Ui.Text("Change", "Label", "Accent", 13, FontWeights.SemiBold), () =>
@@ -79,30 +79,30 @@ public sealed class SettingsView : UserControl
         {
             Children =
             {
-                Row("folder", "Download folder", S.DownloadDir, new StackPanel { Orientation = Orientation.Horizontal, Children = { openFolder, folder } }),
+                Row("Download folder", S.DownloadDir, new StackPanel { Orientation = Orientation.Horizontal, Children = { openFolder, folder } }),
                 Divider(),
-                ChoiceRow("download", "Download speed limit", "Leave room for everything else on the connection",
+                ChoiceRow("Download speed limit", "Leave room for everything else on the connection",
                     Limits.Select(l => (l.Kbps.ToString(), l.Label)).ToArray(), S.MaxDownloadKbps.ToString(), v => Set(S with { MaxDownloadKbps = int.Parse(v) })),
                 Divider(),
-                ChoiceRow("upload", "Upload speed limit", "What the swarm gets back while you download",
+                ChoiceRow("Upload speed limit", "What the swarm gets back while you download",
                     Limits.Select(l => (l.Kbps.ToString(), l.Label)).ToArray(), S.MaxUploadKbps.ToString(), v => Set(S with { MaxUploadKbps = int.Parse(v) })),
                 Divider(),
-                Row("upload", "Keep seeding when done", "Share a finished download until you stop it on the Downloads tab",
+                Row("Keep seeding when done", "Share a finished download until you stop it on the Downloads tab",
                     Toggle(S.SeedAfterDownload, v => Set(S with { SeedAfterDownload = v }))),
             },
         }));
 
-        var clear = Ui.Button(Row("rotate-ccw", "Clear watch history", shell.HistoryList.Count > 0 ? $"{shell.HistoryList.Count} item(s) stored" : "Nothing stored",
+        var clear = Ui.Button(Row("Clear watch history", shell.HistoryList.Count > 0 ? $"{shell.HistoryList.Count} item(s) stored" : "Nothing stored",
             Ui.Glyph("chevron-right", 18, "Faint"), danger: shell.HistoryList.Count > 0), shell.AskClearHistory);
         clear.IsEnabled = shell.HistoryList.Count > 0;
-        var clearMeta = Ui.Button(Row("layers", "Clear artwork and title cache", "Posters, plots and shelves load fresh next time",
+        var clearMeta = Ui.Button(Row("Clear artwork and title cache", "Posters, plots and shelves load fresh next time",
             Ui.Glyph("chevron-right", 18, "Faint")), () =>
         {
             Meta.ClearCache();
             shell.Toast("Title cache cleared");
         });
         var (savedTorrents, savedBytes) = Engine.TorrentEngine.SavedFileListsSize();
-        var clearTorrents = Ui.Button(Row("file", "Clear saved torrent info",
+        var clearTorrents = Ui.Button(Row("Clear saved torrent info",
             savedTorrents > 0
                 ? $"{savedTorrents} torrent file list{(savedTorrents == 1 ? "" : "s")} saved ({Format.Bytes(savedBytes)}) — they open without waiting on the swarm"
                 : "Nothing saved — torrents you open are remembered here so they open faster next time",
@@ -122,7 +122,7 @@ public sealed class SettingsView : UserControl
         {
             Children =
             {
-                Row("trash", "Delete files after stopping", "Keep the cache small; turn off to re-watch without re-downloading",
+                Row("Delete files after stopping", "Keep the cache small; turn off to re-watch without re-downloading",
                     Toggle(S.RemoveFilesAfterStop, v => Set(S with { RemoveFilesAfterStop = v }))),
                 Divider(),
                 clearTorrents,
@@ -136,51 +136,40 @@ public sealed class SettingsView : UserControl
         var footer = Ui.Text("Watchly · movies and series, ready when you are. You are responsible for what you watch and download.", "Meta", "Faint", 12);
         footer.TextWrapping = TextWrapping.Wrap;
         footer.TextAlignment = TextAlignment.Center;
-        footer.Margin = new Thickness(16, 8, 16, 0);
+        footer.Margin = new Thickness(0, 8, 0, 0);
         page.Children.Add(footer);
     }
 
+    /// <summary>A section as the phone sets one (mobile Pages.kt Section): a bold title, then its rows — no card.</summary>
     static FrameworkElement Group(string title, UIElement content)
     {
-        var heading = Ui.Text(title.ToUpperInvariant(), "Overline");
-        heading.Margin = new Thickness(0, 0, 0, 12);
-        var card = Ui.Card(content, "Surface", 18, new Thickness(16, 0, 16, 0));
-        return new StackPanel { Margin = new Thickness(0, 0, 0, 24), Children = { heading, card } };
+        var heading = Ui.Text(title, "TitleText", "Text", 18, FontWeights.Bold);
+        heading.Margin = new Thickness(0, 0, 0, 4);
+        return new StackPanel { Margin = new Thickness(0, 0, 0, 28), Children = { heading, content } };
     }
 
-    static FrameworkElement Note(string icon, string title, string text)
+    static FrameworkElement Note(string title, string text)
     {
-        var mark = Ui.Brushed(new Border { Width = 30, Height = 30, CornerRadius = new CornerRadius(8), Child = new Grid { Children = { Ui.Glyph(icon, 15, "Accent") } }, Margin = new Thickness(0, 0, 12, 0) }, "AccentSoft");
-        var body = Ui.Text(text, "Meta", "Muted", 12);
+        var body = Ui.Text(text, "Meta", "Faint", 13);
         body.TextWrapping = TextWrapping.Wrap;
-        body.LineHeight = 18;
-        body.Margin = new Thickness(0, 8, 0, 0);
-        var card = Ui.Card(new StackPanel
-        {
-            Children =
-            {
-                new StackPanel { Orientation = Orientation.Horizontal, Children = { mark, Ui.Text(title, "Label", "Text", 14, FontWeights.SemiBold) } },
-                body,
-            },
-        }, "Surface", 18, new Thickness(16));
-        ((FrameworkElement)((StackPanel)((StackPanel)card.Child).Children[0]).Children[1]).VerticalAlignment = VerticalAlignment.Center;
-        card.Margin = new Thickness(0, 0, 0, 24);
+        body.LineHeight = 19;
+        body.Margin = new Thickness(0, 6, 0, 0);
+        var card = Ui.Card(new StackPanel { Children = { Ui.Text(title, "Label", "Text", 15, FontWeights.SemiBold), body } }, "Surface", 10, new Thickness(16, 14, 16, 14));
+        card.Margin = new Thickness(0, 0, 0, 28);
         return card;
     }
 
-    static FrameworkElement Row(string icon, string title, string? subtitle, UIElement? trailing = null, bool danger = false)
+    static FrameworkElement Row(string title, string? subtitle, UIElement? trailing = null, bool danger = false)
     {
-        var mark = Ui.Brushed(new Border { Width = 34, Height = 34, CornerRadius = new CornerRadius(12), Child = new Grid { Children = { Ui.Glyph(icon, 16, danger ? "Danger" : "Accent") } }, Margin = new Thickness(0, 0, 12, 0) }, danger ? "DangerSoft" : "AccentSoft");
-        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { Ui.Text(title, "TitleText", danger ? "Danger" : "Text") } };
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { Ui.Text(title, "Label", danger ? "Danger" : "Text", 15, FontWeights.SemiBold) } };
         if (subtitle is not null)
         {
-            var sub = Ui.Text(subtitle, "Meta");
+            var sub = Ui.Text(subtitle, "Meta", "Faint", 13);
             sub.TextWrapping = TextWrapping.Wrap;
+            sub.Margin = new Thickness(0, 3, 0, 0);
             text.Children.Add(sub);
         }
-        var dock = new DockPanel { Margin = new Thickness(0, 16, 0, 16) };
-        DockPanel.SetDock(mark, Dock.Left);
-        dock.Children.Add(mark);
+        var dock = new DockPanel { Margin = new Thickness(0, 12, 0, 12) };
         if (trailing is FrameworkElement t)
         {
             t.VerticalAlignment = VerticalAlignment.Center;
@@ -192,16 +181,16 @@ public sealed class SettingsView : UserControl
         return dock;
     }
 
-    static FrameworkElement ChoiceRow(string icon, string title, string subtitle, (string Value, string Label)[] choices, string current, Action<string> pick)
+    static FrameworkElement ChoiceRow(string title, string subtitle, (string Value, string Label)[] choices, string current, Action<string> pick)
     {
-        var chips = new WrapPanel { Margin = new Thickness(46, 0, 0, 16) };
+        var chips = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
         foreach (var (value, label) in choices)
         {
             var chip = Ui.Chip(label, value == current, () => pick(value), style: "ChoiceChip");
             chip.Margin = new Thickness(0, 0, 8, 8);
             chips.Children.Add(chip);
         }
-        return new StackPanel { Children = { Row(icon, title, subtitle), chips } };
+        return new StackPanel { Children = { Row(title, subtitle), chips } };
     }
 
     static CheckBox Toggle(bool value, Action<bool> change)
@@ -211,5 +200,5 @@ public sealed class SettingsView : UserControl
         return box;
     }
 
-    static FrameworkElement Divider() => Ui.Brushed(new Border { Height = 1, Margin = new Thickness(46, 0, 0, 0) }, "Line");
+    static FrameworkElement Divider() => Ui.Brushed(new Border { Height = 1 }, "Line");
 }

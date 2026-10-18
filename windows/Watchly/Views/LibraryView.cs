@@ -27,14 +27,14 @@ public sealed class LibraryView : UserControl
 
     public LibraryView()
     {
-        var (root, actionSlot, body) = Ui.Screen("Library", "clock");
+        var (root, actionSlot, body) = Ui.Screen("Library");
         actions = actionSlot;
         var dock = new DockPanel();
         DockPanel.SetDock(tabs, Dock.Top);
         DockPanel.SetDock(searchSlot, Dock.Top);
         dock.Children.Add(tabs);
         dock.Children.Add(searchSlot);
-        dock.Children.Add(new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = list, Padding = new Thickness(24, 12, 24, 120) });
+        dock.Children.Add(new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = list, Padding = new Thickness(24, 12, 24, 32) });
         body.Content = dock;
         Content = root;
 
@@ -82,7 +82,7 @@ public sealed class LibraryView : UserControl
         {
             if (query is null)
             {
-                var (box, input, trailing) = Ui.SearchField("Search titles and files", 44, 22);
+                var (box, input, trailing) = Ui.SearchField("Search titles and files");
                 box.Margin = new Thickness(24, 8, 24, 0);
                 input.TextChanged += (_, _) =>
                 {
@@ -236,7 +236,7 @@ public sealed class LibraryView : UserControl
             card.Children.Add(dl);
         }
 
-        var border = Ui.Card(card, "Surface", 18, new Thickness(12));
+        var border = Ui.Card(card, "Surface", 10, new Thickness(10));
         border.Margin = new Thickness(0, 0, 12, 12);
         border.VerticalAlignment = VerticalAlignment.Top;
         return border;
@@ -323,7 +323,7 @@ public sealed class LibraryView : UserControl
         }
 
         var dl = Ui.Round("download", () => shell.DownloadFile(item, file.Index), "Muted", "Control", 32, 14, "Download");
-        var play = Ui.Brushed(new Border { Width = 32, Height = 32, CornerRadius = new CornerRadius(16), Margin = new Thickness(6, 0, 0, 0), Child = new Grid { Children = { Ui.Glyph("play", 13, "Accent") } } }, "AccentSoft");
+        var play = Ui.Brushed(new Border { Width = 32, Height = 32, CornerRadius = new CornerRadius(16), Margin = new Thickness(6, 0, 0, 0), Child = new Grid { Children = { Ui.Glyph("play", 14, "OnAccent") } } }, "Accent");
         var dock = new DockPanel { Margin = new Thickness(4, 6, 4, 6) };
         DockPanel.SetDock(mark, Dock.Left);
         DockPanel.SetDock(play, Dock.Right);

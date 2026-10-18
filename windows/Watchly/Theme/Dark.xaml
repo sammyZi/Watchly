@@ -1,39 +1,45 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-  <!-- src/theme.ts darkColors. WPF hex is #AARRGGBB, the phone's is #RRGGBBAA. -->
-  <Color x:Key="BgColor">#000000</Color>
-  <SolidColorBrush x:Key="Control" Color="#151922" />
-  <SolidColorBrush x:Key="Bg" Color="#000000" />
-  <SolidColorBrush x:Key="Surface" Color="#181d28" />
-  <SolidColorBrush x:Key="SurfaceAlt" Color="#232936" />
-  <SolidColorBrush x:Key="Line" Color="#2d3444" />
-  <SolidColorBrush x:Key="Text" Color="#f3f5fa" />
-  <SolidColorBrush x:Key="Muted" Color="#9aa4b8" />
-  <SolidColorBrush x:Key="Faint" Color="#66718a" />
-  <SolidColorBrush x:Key="Accent" Color="#d42f37" />
-  <SolidColorBrush x:Key="AccentSoft" Color="#2a1216" />
+  <!-- tv/core Theme.kt's Ink, dark: near-black page, one red; the artwork carries the colour.
+       Accent is the phone's deeper red (mobile MainActivity). WPF hex is #AARRGGBB. -->
+  <Color x:Key="BgColor">#0a0a0a</Color>
+  <SolidColorBrush x:Key="Control" Color="#222222" />
+  <SolidColorBrush x:Key="Bg" Color="#0a0a0a" />
+  <SolidColorBrush x:Key="Surface" Color="#181818" />
+  <SolidColorBrush x:Key="SurfaceAlt" Color="#262626" />
+  <SolidColorBrush x:Key="Line" Color="#333333" />
+  <SolidColorBrush x:Key="Text" Color="#ffffff" />
+  <SolidColorBrush x:Key="Muted" Color="#b3b3b3" />
+  <SolidColorBrush x:Key="Faint" Color="#7a7a7a" />
+  <SolidColorBrush x:Key="Accent" Color="#b81d24" />
+  <SolidColorBrush x:Key="AccentSoft" Color="#2a0d0f" />
   <SolidColorBrush x:Key="OnAccent" Color="#ffffff" />
-  <SolidColorBrush x:Key="Danger" Color="#ff6b5e" />
-  <SolidColorBrush x:Key="DangerSoft" Color="#2c1512" />
-  <SolidColorBrush x:Key="Good" Color="#46d17f" />
-  <SolidColorBrush x:Key="GoodSoft" Color="#10281b" />
+  <SolidColorBrush x:Key="Danger" Color="#ff5a4e" />
+  <SolidColorBrush x:Key="DangerSoft" Color="#2c1412" />
+  <SolidColorBrush x:Key="Good" Color="#46d369" />
+  <SolidColorBrush x:Key="GoodSoft" Color="#10281a" />
   <SolidColorBrush x:Key="Warn" Color="#ffb340" />
   <SolidColorBrush x:Key="WarnSoft" Color="#2b2011" />
-  <SolidColorBrush x:Key="Scrim" Color="#cc000000" />
-  <SolidColorBrush x:Key="TabBar" Color="#d9181d28" />
+  <SolidColorBrush x:Key="Imdb" Color="#f5c518" />
+  <!-- A tint of the text colour: the grey of secondary buttons and chips on either page. -->
+  <SolidColorBrush x:Key="Tint" Color="#1fffffff" />
+  <SolidColorBrush x:Key="TintHi" Color="#38ffffff" />
+  <SolidColorBrush x:Key="TintLo" Color="#14ffffff" />
+  <SolidColorBrush x:Key="Scrim" Color="#8c000000" />
+  <SolidColorBrush x:Key="TabBar" Color="#0a0a0a" />
   <LinearGradientBrush x:Key="FadeToBg" StartPoint="0,0" EndPoint="0,1">
-    <GradientStop Offset="0" Color="#00000000" />
-    <GradientStop Offset="0.45" Color="#40000000" />
-    <GradientStop Offset="0.82" Color="#eb000000" />
-    <GradientStop Offset="1" Color="#ff000000" />
+    <GradientStop Offset="0" Color="#000a0a0a" />
+    <GradientStop Offset="0.45" Color="#000a0a0a" />
+    <GradientStop Offset="1" Color="#ff0a0a0a" />
   </LinearGradientBrush>
   <LinearGradientBrush x:Key="FadeUp" StartPoint="0,1" EndPoint="0,0">
-    <GradientStop Offset="0.2" Color="#ff000000" />
-    <GradientStop Offset="1" Color="#00000000" />
+    <GradientStop Offset="0.2" Color="#ff0a0a0a" />
+    <GradientStop Offset="1" Color="#000a0a0a" />
   </LinearGradientBrush>
+  <!-- heroScrims: solid page at the left edge, gone by the art's middle. -->
   <LinearGradientBrush x:Key="FadeLeft" StartPoint="0,0" EndPoint="1,0">
-    <GradientStop Offset="0" Color="#e6000000" />
-    <GradientStop Offset="0.55" Color="#66000000" />
-    <GradientStop Offset="1" Color="#00000000" />
+    <GradientStop Offset="0" Color="#ff0a0a0a" />
+    <GradientStop Offset="0.14" Color="#d90a0a0a" />
+    <GradientStop Offset="0.55" Color="#000a0a0a" />
   </LinearGradientBrush>
 </ResourceDictionary>
