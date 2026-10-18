@@ -5,8 +5,9 @@
 #   tv/app/build.gradle.kts, from its tag if one exists, once (skipped if that release exists).
 # - Run it by hand from the Actions tab: releases (or re-uploads the files of) the given tag.
 #
-# Needs the SUBDL_KEY repository secret (Settings → Secrets and variables → Actions):
-# without it online subtitle search would be off in every build.
+# The SUBDL_KEY repository secret (Settings → Secrets and variables → Actions) turns on
+# online subtitle search; without it the builds still go out, with that search off.
+# The release goes out once the TV APKs are built, with whichever other files built too.
 name: Release
 
 on:
@@ -60,9 +61,8 @@ jobs:
               echo "Release $tag already exists; nothing to do."; go=false
             fi
           fi
-          if [ "$go" = true ] && [ -z "$SUBDL_KEY" ]; then
-            echo "::error::Add the SUBDL_KEY repository secret (Settings → Secrets and variables → Actions), then re-run this workflow."
-            exit 1
+          if [ -z "$SUBDL_KEY" ]; then
+            echo "::warning::No SUBDL_KEY repository secret: online subtitle search is off in these builds."
           fi
           if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
             ref="refs/tags/$tag"
@@ -77,7 +77,7 @@ jobs:
             echo "go=$go"
           } >> "$GITHUB_OUTPUT"
 
-  android:
+  tv:
     needs: meta
     if: needs.meta.outputs.go == 'true'
     runs-on: ubuntu-latest
@@ -93,13 +93,42 @@ jobs:
       - name: SubDL key
         env:
           SUBDL_KEY: ${{ secrets.SUBDL_KEY }}
-        run: |
-          echo "SUBDL_KEY=$SUBDL_KEY" > tv/.env
-          echo "SUBDL_KEY=$SUBDL_KEY" > mobile/.env
-      - name: Build TV
+        run: echo "SUBDL_KEY=$SUBDL_KEY" > tv/.env
+      - name: Build
         working-directory: tv
         run: bash gradlew :app:assembleRelease
-      - name: Build phone
+      - name: Collect
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          mkdir dist
+          for abi in arm64-v8a armeabi-v7a; do
+            cp "tv/app/build/outputs/apk/release/app-$abi-release.apk" "dist/Watchly-$VERSION-tv-$abi.apk"
+          done
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tv
+          path: dist/*
+
+  phone:
+    needs: meta
+    if: needs.meta.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.ref }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: SubDL key
+        env:
+          SUBDL_KEY: ${{ secrets.SUBDL_KEY }}
+        run: echo "SUBDL_KEY=$SUBDL_KEY" > mobile/.env
+      - name: Build
         working-directory: mobile
         run: bash gradlew :app:assembleRelease
       - name: Collect
@@ -109,12 +138,11 @@ jobs:
           mkdir dist
           for abi in arm64-v8a armeabi-v7a; do
             cp "mobile/app/build/outputs/apk/release/app-$abi-release.apk" "dist/Watchly-$VERSION-phone-$abi.apk"
-            cp "tv/app/build/outputs/apk/release/app-$abi-release.apk" "dist/Watchly-$VERSION-tv-$abi.apk"
           done
           ls -l dist
       - uses: actions/upload-artifact@v4
         with:
-          name: android
+          name: phone
           path: dist/*
 
   windows:
@@ -148,7 +176,8 @@ jobs:
           path: dist/*
 
   release:
-    needs: [meta, android, windows]
+    needs: [meta, tv, phone, windows]
+    if: always() && needs.meta.outputs.go == 'true' && needs.tv.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
