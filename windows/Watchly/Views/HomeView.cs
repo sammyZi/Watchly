@@ -93,7 +93,8 @@ public sealed class HomeView : UserControl
         if (scrolled == solid && header.Background is not null) return;
         solid = scrolled;
         if (scrolled) header.SetResourceReference(Border.BackgroundProperty, "Bg");
-        else header.Background = new LinearGradientBrush(Color.FromArgb(0x99, 0, 0, 0), Colors.Transparent, 90);
+        // To transparent black: Colors.Transparent is transparent white, and the fade through it reads as a grey band.
+        else header.Background = new LinearGradientBrush(Color.FromArgb(0x99, 0, 0, 0), Color.FromArgb(0, 0, 0, 0), 90);
     }
 
     static double HeroHeight(double page) => Math.Max(420, page * 0.82);
