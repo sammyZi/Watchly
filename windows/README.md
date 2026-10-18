@@ -1,6 +1,6 @@
 # Watchly for Windows
 
-The phone app (`src/`) as a native Windows desktop app — same screens, same
+The phone app as a native Windows desktop app, in the look the phone and the TV share — same screens, same
 catalogue and release search, plus a BitTorrent-style download manager.
 
 | Part | Library |
@@ -45,11 +45,15 @@ time, like the phone app; without it online subtitle search is off.
 windows/Watchly/bin/Debug/net8.0-windows/win-x64/Watchly.exe --smoke
 ```
 
-Runs the phone's `src/lib/*.test.ts` cases against the C# ports, then builds
+Runs the old Expo phone app's `src/lib/*.test.ts` cases (ported) against the C# code, then builds
 and lays out every screen offscreen. Exit code 0 = pass; details in
 `%TEMP%\watchly-smoke.log`. No window opens and no torrent is touched.
 
 ## How it maps to the phone app
+
+The C# was ported from the retired React Native / Expo phone app; its `src/` is gone
+from the repo now (see git history before the Expo removal), and the comments that
+name `src/...` files point there.
 
 | Phone (`src/`) | Windows (`windows/Watchly/`) |
 |---|---|

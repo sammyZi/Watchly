@@ -10,8 +10,7 @@ with its own README:
 | Windows desktop | [`windows/`](windows/README.md) | MonoTorrent + LibVLCSharp (.NET 8, WPF) |
 
 The phone and the TV share one Gradle module, `tv/core`: the torrent engine,
-the players, indexers, metadata, the store and the look. The phone's old
-React Native / Expo build is still in `mobile/` while it is retired.
+the players, indexers, metadata, the store and the look.
 
 ```bash
 cd mobile && ./gradlew compileDebugKotlin
