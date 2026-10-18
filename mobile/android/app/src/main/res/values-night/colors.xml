@@ -1,5 +1,0 @@
-<resources>
-  <color name="splashscreen_background">#000000</color>
-  <!-- Same as dark splash — bridge until React paints the cinema bg. -->
-  <color name="activityBackground">#000000</color>
-</resources>

@@ -1,13 +1,6 @@
 # Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 
-# dependencies
-node_modules/
-
-# Expo
-.expo/
 dist/
-web-build/
-expo-env.d.ts
 
 # Native
 .kotlin/
@@ -16,15 +9,7 @@ expo-env.d.ts
 *.p8
 *.p12
 *.key
-*.mobileprovision
-
-# Metro
-.metro-health-check*
-
-# debug
-npm-debug.*
-yarn-debug.*
-yarn-error.*
+*.iml
 
 # macOS
 .DS_Store
@@ -33,26 +18,6 @@ yarn-error.*
 # local env files
 .env
 .env*.local
-
-# typescript
-*.tsbuildinfo
-
-# generated native folders
-/mobile/ios
-
-# Android: the project is committed (it carries the native module and the
-# intent filters), its build output is not.
-/mobile/android/.gradle/
-/mobile/android/.idea/
-/mobile/android/build/
-/mobile/android/app/build/
-/mobile/android/app/.cxx/
-/mobile/android/local.properties
-*.iml
-# Same for the native module's own gradle output.
-mobile/modules/*/android/build/
-mobile/modules/*/android/.gradle/
-mobile/modules/*/android/.cxx/
 
 # Windows app build output.
 windows/**/bin/
