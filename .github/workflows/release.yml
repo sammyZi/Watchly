@@ -1,0 +1,204 @@
+# Builds the phone and TV APKs and the Windows exe, and publishes them as a GitHub release.
+#
+# - Push a tag v*: releases that tag.
+# - Push notes to .github/release-notes/v<version>.md on any branch: releases the version in
+#   tv/app/build.gradle.kts, from its tag if one exists, once (skipped if that release exists).
+# - Run it by hand from the Actions tab: releases (or re-uploads the files of) the given tag.
+#
+# The SUBDL_KEY repository secret (Settings → Secrets and variables → Actions) turns on
+# online subtitle search; without it the builds still go out, with that search off.
+# The release goes out once the TV APKs are built, with whichever other files built too.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+    branches: ['**']
+    paths:
+      - '.github/release-notes/**'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to release, e.g. v2.0.0
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.m.outputs.tag }}
+      version: ${{ steps.m.outputs.version }}
+      ref: ${{ steps.m.outputs.ref }}
+      go: ${{ steps.m.outputs.go }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: m
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUBDL_KEY: ${{ secrets.SUBDL_KEY }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            tag="$INPUT_TAG"
+          elif [ "$GITHUB_REF_TYPE" = tag ]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            tag="v$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' tv/app/build.gradle.kts)"
+          fi
+          go=true
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF_TYPE" = branch ]; then
+            if [ ! -f ".github/release-notes/$tag.md" ]; then
+              echo "No .github/release-notes/$tag.md on this branch; nothing to release."; go=false
+            elif gh release view "$tag" >/dev/null 2>&1; then
+              echo "Release $tag already exists; nothing to do."; go=false
+            fi
+          fi
+          if [ -z "$SUBDL_KEY" ]; then
+            echo "::warning::No SUBDL_KEY repository secret: online subtitle search is off in these builds."
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            ref="refs/tags/$tag"
+          else
+            ref="$GITHUB_SHA"
+          fi
+          echo "Releasing $tag from $ref"
+          {
+            echo "tag=$tag"
+            echo "version=${tag#v}"
+            echo "ref=$ref"
+            echo "go=$go"
+          } >> "$GITHUB_OUTPUT"
+
+  tv:
+    needs: meta
+    if: needs.meta.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.ref }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: SubDL key
+        env:
+          SUBDL_KEY: ${{ secrets.SUBDL_KEY }}
+        run: echo "SUBDL_KEY=$SUBDL_KEY" > tv/.env
+      - name: Build
+        working-directory: tv
+        run: bash gradlew :app:assembleRelease
+      - name: Collect
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          mkdir dist
+          for abi in arm64-v8a armeabi-v7a; do
+            cp "tv/app/build/outputs/apk/release/app-$abi-release.apk" "dist/Watchly-$VERSION-tv-$abi.apk"
+          done
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tv
+          path: dist/*
+
+  phone:
+    needs: meta
+    if: needs.meta.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.ref }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: SubDL key
+        env:
+          SUBDL_KEY: ${{ secrets.SUBDL_KEY }}
+        run: echo "SUBDL_KEY=$SUBDL_KEY" > mobile/.env
+      - name: Build
+        working-directory: mobile
+        run: bash gradlew :app:assembleRelease
+      - name: Collect
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          mkdir dist
+          for abi in arm64-v8a armeabi-v7a; do
+            cp "mobile/app/build/outputs/apk/release/app-$abi-release.apk" "dist/Watchly-$VERSION-phone-$abi.apk"
+          done
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phone
+          path: dist/*
+
+  windows:
+    needs: meta
+    if: needs.meta.outputs.go == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.ref }}
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: SubDL key
+        shell: bash
+        env:
+          SUBDL_KEY: ${{ secrets.SUBDL_KEY }}
+        run: echo "SUBDL_KEY=$SUBDL_KEY" > mobile/.env
+      - name: Publish
+        shell: bash
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          dotnet publish windows/Watchly -c Release -r win-x64 --self-contained -o windows/dist
+          mkdir dist
+          cp windows/dist/Watchly.exe "dist/Watchly-$VERSION-windows-x64.exe"
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+
+  release:
+    needs: [meta, tv, phone, windows]
+    if: always() && needs.meta.outputs.go == 'true' && needs.tv.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.meta.outputs.tag }}
+          VERSION: ${{ needs.meta.outputs.version }}
+          REF: ${{ needs.meta.outputs.ref }}
+        run: |
+          ls -l dist
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+            exit 0
+          fi
+          notes=(--generate-notes)
+          [ -f ".github/release-notes/$TAG.md" ] && notes=(--notes-file ".github/release-notes/$TAG.md")
+          target=()
+          case "$REF" in refs/tags/*) ;; *) target=(--target "$REF") ;; esac
+          gh release create "$TAG" dist/* --title "Watchly $VERSION" "${notes[@]}" "${target[@]}"
