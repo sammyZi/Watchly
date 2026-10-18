@@ -562,7 +562,14 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
 
-        Section("Extra trackers", "Attach public trackers to bare magnet links so they resolve faster.") {
+        Section("Skip intro", "Where an episode's intro is known, jump past it by itself instead of showing the Skip intro button. Once per episode — seek back to watch it.") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Chip("Automatically", settings.autoSkipIntro, onClick = { set(settings.copy(autoSkipIntro = true)) })
+                Chip("Show the button", !settings.autoSkipIntro, onClick = { set(settings.copy(autoSkipIntro = false)) })
+            }
+        }
+
+        Section("Extra trackers","Attach public trackers to bare magnet links so they resolve faster.") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Chip("On", settings.addTrackers, onClick = { set(settings.copy(addTrackers = true)) })
                 Chip("Off", !settings.addTrackers, onClick = { set(settings.copy(addTrackers = false)) })
@@ -648,6 +655,12 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
                 }
             }
         }
+
+        Text(
+            "Version ${BuildConfig.VERSION_NAME} · built " +
+                java.text.SimpleDateFormat("d MMM yyyy, HH:mm", java.util.Locale.US).format(java.util.Date(BuildConfig.BUILD_TIME)),
+            style = Type.meta.copy(color = Ink.faint),
+        )
     }
 
     picking?.let { which ->

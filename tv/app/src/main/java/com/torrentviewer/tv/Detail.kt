@@ -67,6 +67,8 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
     var season by remember(title.imdb) { mutableStateOf<Int?>(null) }
     LaunchedEffect(seasons) { if (season == null || season !in seasons) season = seasons.firstOrNull() }
     val episodes = title.episodes.filter { it.season == season }
+    val history by History.items.collectAsState()
+    val progress = remember(history, title.imdb) { episodeProgress(history, title.imdb) }
 
     var episode by remember(title.imdb) { mutableStateOf<Episode?>(null) }
     var hits by remember(title.imdb) { mutableStateOf<List<Hit>?>(null) }
@@ -204,6 +206,7 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
                                         fallback = title.wide,
                                         selected = episode?.id == ep.id,
                                         busy = busy && episode?.id == ep.id,
+                                        seen = progress[Ep(ep.season, ep.episode)] ?: 0.0,
                                         requester = if (i == 0) fallback else null,
                                         // The sources land just below, already in view; one press down reaches them.
                                         onClick = { findSources(ep) },
@@ -260,7 +263,7 @@ private fun People(label: String, value: String) {
 
 /** Netflix's episode tile: the still, a number and name, and the synopsis under it. */
 @Composable
-private fun EpisodeCard(ep: Episode, fallback: String?, selected: Boolean, busy: Boolean, requester: FocusRequester?, onClick: () -> Unit) {
+private fun EpisodeCard(ep: Episode, fallback: String?, selected: Boolean, busy: Boolean, seen: Double, requester: FocusRequester?, onClick: () -> Unit) {
     Column(Modifier.width(240.dp)) {
         Focusable(
             onClick,
@@ -272,11 +275,16 @@ private fun EpisodeCard(ep: Episode, fallback: String?, selected: Boolean, busy:
             Artwork(ep.thumbnail ?: fallback, ep.name, Modifier.fillMaxSize())
             if (busy) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) { Spinner(size = 30.dp) }
             if (selected && !busy) Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Ink.accent))
+            // How far it got, as on Continue watching; watched through gets a tick instead.
+            else if (seen > 0.02 && seen < 0.95) Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Color.White.copy(alpha = 0.3f))) {
+                Box(Modifier.fillMaxWidth(seen.toFloat()).fillMaxHeight().background(Ink.accent))
+            }
         }
         Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("${ep.episode}", style = Type.title.copy(color = Ink.muted, fontWeight = FontWeight.Bold))
             Spacer(Modifier.width(10.dp))
-            Text(ep.name, style = Type.label.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(ep.name, Modifier.weight(1f, fill = false), style = Type.label.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (seen >= 0.95) Lc(L.drawable.lucide_ic_circle_check, Modifier.padding(start = 8.dp), tint = Ink.good, size = 18.dp)
         }
         ep.overview?.let { Text(it, Modifier.padding(top = 4.dp), style = Type.meta.copy(color = Ink.faint), maxLines = 2, overflow = TextOverflow.Ellipsis) }
     }

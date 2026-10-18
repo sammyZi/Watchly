@@ -56,6 +56,7 @@ import com.torrentviewer.core.castPhoto
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.torrentviewer.core.Artwork
+import com.torrentviewer.core.Ep
 import com.torrentviewer.core.Episode
 import com.torrentviewer.core.Facts
 import com.torrentviewer.core.Health
@@ -77,6 +78,7 @@ import com.torrentviewer.core.Type
 import com.torrentviewer.core.Watch
 import com.torrentviewer.core.bytes
 import com.torrentviewer.core.episodeTag
+import com.torrentviewer.core.episodeProgress
 import com.torrentviewer.core.health
 import com.torrentviewer.core.heroScrims
 import com.torrentviewer.core.quickest
@@ -125,6 +127,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
     var season by remember(title.imdb) { mutableStateOf<Int?>(null) }
     LaunchedEffect(seasons) { if (season == null || season !in seasons) season = seasons.firstOrNull() }
     val episodes = title.episodes.filter { it.season == season }
+    val progress = remember(history, title.imdb) { episodeProgress(history, title.imdb) }
 
     var episode by remember(title.imdb) { mutableStateOf<Episode?>(null) }
     var hits by remember(title.imdb) { mutableStateOf<List<Hit>?>(null) }
@@ -325,6 +328,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                         fallback = title.wide,
                         busy = busy && episode?.id == ep.id,
                         selected = episode?.id == ep.id,
+                        seen = progress[Ep(ep.season, ep.episode)] ?: 0.0,
                         modifier = Modifier.widthIn(max = 720.dp),
                         onPlay = { playEpisode(ep) },
                         onSources = {
@@ -505,7 +509,7 @@ private fun Pill(text: String, tint: Color) {
 
 /** Netflix's phone episode row: still on the left, number and name beside it, the synopsis under both. */
 @Composable
-private fun EpisodeRow(ep: Episode, fallback: String?, busy: Boolean, selected: Boolean, modifier: Modifier, onPlay: () -> Unit, onSources: () -> Unit, onDownload: () -> Unit) {
+private fun EpisodeRow(ep: Episode, fallback: String?, busy: Boolean, selected: Boolean, seen: Double, modifier: Modifier, onPlay: () -> Unit, onSources: () -> Unit, onDownload: () -> Unit) {
     Column(modifier.padding(horizontal = EDGE, vertical = 10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Tap(onPlay, Modifier.width(132.dp).aspectRatio(16f / 9f), RoundedCornerShape(6.dp)) {
@@ -516,11 +520,21 @@ private fun EpisodeRow(ep: Episode, fallback: String?, busy: Boolean, selected: 
                         else Box(Modifier.clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)).padding(8.dp)) { Lc(L.drawable.lucide_ic_play, tint = Color.White, size = 16.dp) }
                     }
                     if (selected && !busy) Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp).background(Ink.accent))
+                    // How far it got, as on Continue watching; watched through says so beside the name instead.
+                    else if (seen > 0.02 && seen < 0.95) Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp).background(Color.White.copy(alpha = 0.3f))) {
+                        Box(Modifier.fillMaxWidth(seen.toFloat()).fillMaxHeight().background(Ink.accent))
+                    }
                 }
             }
             Column(Modifier.weight(1f).padding(start = 12.dp)) {
                 Text("${ep.episode}. ${ep.name}", style = Type.label.copy(fontWeight = FontWeight.SemiBold), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                ep.released?.take(10)?.let { Text(it, Modifier.padding(top = 2.dp), style = Type.meta.copy(color = Ink.faint, fontSize = 12.sp)) }
+                Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (seen >= 0.95) {
+                        Lc(L.drawable.lucide_ic_check, tint = Ink.good, size = 13.dp)
+                        Text(" Watched" + if (ep.released != null) "  ·  " else "", style = Type.meta.copy(color = Ink.good, fontSize = 12.sp, fontWeight = FontWeight.SemiBold))
+                    }
+                    ep.released?.take(10)?.let { Text(it, style = Type.meta.copy(color = Ink.faint, fontSize = 12.sp)) }
+                }
             }
             // Every release for this episode, to pick one by hand.
             Tap(onSources, shape = CircleShape) { Lc(L.drawable.lucide_ic_list_video, Modifier.padding(10.dp), tint = Ink.muted, size = 22.dp) }

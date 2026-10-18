@@ -305,7 +305,14 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState())
             .padding(start = GUTTER, end = Safe.x, top = Safe.y, bottom = 120.dp),
     ) {
-        Text("Settings", Modifier.padding(bottom = 26.dp), style = Type.display)
+        Text("Settings", style = Type.display)
+        // Up here, not at the foot: the D-pad only scrolls as far as the last thing it can focus.
+        Text(
+            "Version ${BuildConfig.VERSION_NAME} · built " +
+                java.text.SimpleDateFormat("d MMM yyyy, HH:mm", java.util.Locale.US).format(java.util.Date(BuildConfig.BUILD_TIME)),
+            Modifier.padding(top = 4.dp, bottom = 26.dp),
+            style = Type.meta.copy(color = Ink.faint),
+        )
 
         Section("Profile", if (me.isGuest) "Guest keeps nothing — history and My List go when the app closes." else "Library, My List and resume points belong to this profile.") {
             Row(verticalAlignment = Alignment.CenterVertically) {

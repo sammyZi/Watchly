@@ -377,6 +377,15 @@ class LibTest {
         assertNull(carryOver(listOf(first.copy(positions = mapOf(0 to 5900.0)), second), second, "Film.1080p.mkv"))
     }
 
+    @Test fun episodesWatched() {
+        val files = listOf(StoredFile(0, "Show.S01E01.mkv", 1, true, false, null), StoredFile(1, "Show.S01E02.mkv", 1, true, false, null))
+        val pack = Item("a", "Show.S01", at = 1, imdb = "tt6", files = files, positions = mapOf(0 to 1200.0, 1 to 600.0), durations = mapOf(0 to 1200.0, 1 to 2400.0))
+        val single = Item("b", "Show.S01E02", at = 2, imdb = "tt6", files = listOf(StoredFile(0, "Show.S01E02.720p.mkv", 1, true, false, null)), positions = mapOf(0 to 1800.0), durations = mapOf(0 to 2400.0))
+        val other = Item("c", "Other.S01E01", at = 3, imdb = "tt7", files = listOf(files[0]), positions = mapOf(0 to 10.0), durations = mapOf(0 to 100.0))
+        // The furthest release wins; another show's history stays out.
+        assertEquals(mapOf(Ep(1, 1) to 1.0, Ep(1, 2) to 0.75), episodeProgress(listOf(pack, single, other), "tt6"))
+    }
+
     @Test fun introWindow() {
         val intro = Intro(60.0, 150.0)
         assertFalse(intro.covers(57.0))

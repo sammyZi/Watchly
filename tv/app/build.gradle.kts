@@ -20,6 +20,7 @@ android {
         versionCode = 2
         versionName = "2.0.0"
         buildConfigField("String", "SUBDL_KEY", "\"$subdlKey\"")
+        buildConfigField("long", "BUILD_TIME", "${System.currentTimeMillis()}L")
     }
 
     // libtorrent4j and libVLC each ship a large .so per ABI: one APK per ABI.
