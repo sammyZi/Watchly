@@ -65,5 +65,16 @@
             android:name=".DownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- The playback card's Play/Pause on older Android, and a headset's buttons on ROMs
+             that route them by receiver. Exported because the system is the sender; it acts
+             only on ACTION_MEDIA_BUTTON key events. -->
+        <receiver
+            android:name=".MediaButtons"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

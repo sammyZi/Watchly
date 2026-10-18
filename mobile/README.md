@@ -59,6 +59,7 @@ needs no key.
 | `Pages.kt` | Shelf grid with sorts, search (titles or releases), library, settings, profiles. |
 | `Detail.kt` | Title page: logo over the backdrop, Play, My List, like, trailer, reviews, download; seasons and episodes; sources. |
 | `Player.kt` | The touch player. |
+| `MediaCard.kt` | The playback card in the shade and on the lock screen, and a headset's buttons. |
 | `Downloads.kt`, `DownloadsPage.kt` | The download engine, its foreground service, and the Downloads tab. |
 | `Cast.kt` | Google Cast, and handing a stream to another app. |
 
@@ -80,7 +81,9 @@ phone's own keys), lock the screen. Audio and subtitle tracks
 side by side, SubDL search, subtitle delay; speed and picture fit, remembered
 between videos; stats for nerds; skip intro (marked once per show); sleep timer
 (15/30/60 minutes or the end of the episode); picture-in-picture from the Mini
-player button or Home; "Open in…" any other video app at the same position.
+player button or Home; "Open in…" any other video app at the same position;
+a playback card in the notification shade and on the lock screen (play/pause,
+the scrubber, next episode) that headset buttons reach too.
 Media3 first, with libVLC taking over by itself for a file Media3 cannot play.
 
 **Google Cast.** The Cast button in the player hands the stream to a Chromecast
