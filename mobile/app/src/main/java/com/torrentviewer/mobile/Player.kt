@@ -70,6 +70,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -397,6 +398,19 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         }
     }
 
+    fun mediaCard() {
+        if (castSession != null) return
+        MediaCard.update(
+            title = title?.title ?: watch.item?.label ?: "Watchly",
+            subtitle = episode?.let { "S${it.season}:E${it.episode}  “${it.name}”" },
+            paused = paused || !loaded,
+            positionMs = (at * 1000).toLong(),
+            durationMs = (duration * 1000).toLong(),
+            rate = rate,
+            hasNext = (next != null || onlineNext != null) && !noNext,
+        )
+    }
+
     val seeking = remember { mutableStateOf<Seeking?>(null) }
     val seekCheck = remember { mutableStateOf<Job?>(null) }
     fun seekTo(seconds: Double) {
@@ -412,6 +426,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         val s = Seeking(target, from, System.currentTimeMillis(), engine.connections())
         seeking.value = s
         if (reopen) v.reload(ms) else v.seekTo(ms)
+        mediaCard()
         seekCheck.value?.cancel()
         if (reopen) return
         // It can starve just after the check; if the seek has gone nowhere, reopen then.
@@ -495,6 +510,43 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
             controls = false
             panel = null
         }
+    }
+
+    /* ------------------------------------------------------------ media card */
+
+    // The shade's and the lock screen's controls, and a headset's buttons. Casting, the
+    // Cast SDK shows its own.
+    val local = castSession == null
+    val hasNext = (next != null || onlineNext != null) && !noNext
+    val nextNow by rememberUpdatedState { goNext() }
+    val seekNow by rememberUpdatedState { s: Double -> seekTo(s) }
+    DisposableEffect(local) {
+        val remote = object : MediaCard.Remote {
+            override fun play() {
+                view.value?.setPaused(false)
+                paused = false
+            }
+            override fun pause() {
+                view.value?.setPaused(true)
+                paused = true
+                if (at > 0) watch.savePosition(at)
+            }
+            override fun next() = nextNow()
+            override fun seek(ms: Long) = seekNow(ms / 1000.0)
+        }
+        if (local) MediaCard.start(context, remote)
+        onDispose { MediaCard.stop(remote) }
+    }
+    // The system runs the card's clock on from each update; this keeps it honest through stalls.
+    LaunchedEffect(local, title, episode, paused, loaded, duration, rate, hasNext) {
+        if (!local) return@LaunchedEffect
+        while (true) {
+            mediaCard()
+            delay(10_000)
+        }
+    }
+    LaunchedEffect(local, title) {
+        if (local) MediaCard.artwork(title?.poster ?: watch.item?.poster)
     }
 
     /* ------------------------------------------------------------ effects */
