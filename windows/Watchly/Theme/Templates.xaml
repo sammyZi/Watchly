@@ -17,28 +17,37 @@
     </ScrollViewer>
   </ControlTemplate>
 
-  <!-- A poster on a shelf or in a grid: HomeScreen's Poster / PosterGrid's card. -->
+  <!-- core Artwork: the picture over a dark tint of the name's hue, the name on the tint until it lands. -->
+  <DataTemplate x:Key="Art" DataType="{x:Type core:Title}">
+    <Grid>
+      <Border CornerRadius="6" Background="{Binding Name, Converter={StaticResource Hue}, ConverterParameter=dark}">
+        <TextBlock Text="{Binding Name}" Foreground="White" FontSize="15" FontWeight="Bold" TextWrapping="Wrap" TextTrimming="CharacterEllipsis"
+                   VerticalAlignment="Bottom" Margin="10" MaxHeight="60" />
+      </Border>
+      <Border CornerRadius="6">
+        <Border.Background>
+          <ImageBrush ImageSource="{Binding Poster, Converter={StaticResource Img}, ConverterParameter=300}" Stretch="UniformToFill" />
+        </Border.Background>
+      </Border>
+    </Grid>
+  </DataTemplate>
+
+  <!-- Home's rows (mobile Home.kt TitleRow): the poster alone, 2:3. -->
+  <DataTemplate x:Key="RailCard" DataType="{x:Type core:Title}">
+    <Button Style="{StaticResource Bare}" Width="140" Height="210" Margin="0,0,10,0" VerticalAlignment="Top"
+            Command="{x:Static local:Cmd.OpenTitle}" CommandParameter="{Binding}" ToolTip="{Binding Name}">
+      <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource Art}" />
+    </Button>
+  </DataTemplate>
+
+  <!-- A poster with its name under it (mobile Ui.kt PosterCard) — search results, lists, whole shelves. -->
   <DataTemplate x:Key="PosterCard" DataType="{x:Type core:Title}">
-    <Button Style="{StaticResource Bare}" Width="150" Margin="0,0,14,0" VerticalAlignment="Top"
+    <Button Style="{StaticResource Bare}" Width="140" Margin="0,0,10,0" VerticalAlignment="Top"
             Command="{x:Static local:Cmd.OpenTitle}" CommandParameter="{Binding}" ToolTip="{Binding Name}">
       <StackPanel>
-        <Grid Height="225">
-          <Border CornerRadius="12" Background="{Binding Name, Converter={StaticResource Hue}}" />
-          <Border CornerRadius="12">
-            <Border.Background>
-              <ImageBrush ImageSource="{Binding Poster, Converter={StaticResource Img}, ConverterParameter=300}" Stretch="UniformToFill" />
-            </Border.Background>
-          </Border>
-          <Border Visibility="{Binding Rating, Converter={StaticResource Vis}}" CornerRadius="8" Background="#cc0b0e14" Padding="5,2"
-                  HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8">
-            <StackPanel Orientation="Horizontal">
-              <c:Icon Kind="star" Size="9" Foreground="{DynamicResource Warn}" Filled="True" VerticalAlignment="Center" />
-              <TextBlock Text="{Binding Rating}" Foreground="White" FontSize="10" FontWeight="Medium" Margin="3,0,0,0" />
-            </StackPanel>
-          </Border>
-        </Grid>
-        <TextBlock Text="{Binding Name}" FontSize="12" Foreground="{DynamicResource Text}" Margin="0,8,0,0" TextTrimming="CharacterEllipsis" />
-        <TextBlock FontSize="11" Foreground="{DynamicResource Faint}" TextTrimming="CharacterEllipsis">
+        <ContentPresenter Height="210" Content="{Binding}" ContentTemplate="{StaticResource Art}" />
+        <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource Text}" Margin="0,6,0,0" TextTrimming="CharacterEllipsis" />
+        <TextBlock FontSize="12" FontWeight="Medium" Foreground="{DynamicResource Faint}" TextTrimming="CharacterEllipsis">
           <TextBlock.Text>
             <MultiBinding StringFormat="{}{0}{1}">
               <Binding Path="Year" TargetNullValue="" />
@@ -50,25 +59,27 @@
     </Button>
   </DataTemplate>
 
-  <!-- Continue watching: the same card with where you stopped. -->
+  <!-- Continue Watching (mobile Ui.kt LandscapeCard): the art with name, where you stopped
+       and how far, set white over a dark fade at its foot. -->
   <DataTemplate x:Key="ResumeCard" DataType="{x:Type v:ResumeTile}">
-    <Button Style="{StaticResource Bare}" Width="150" Margin="0,0,14,0" VerticalAlignment="Top" Command="{x:Static local:Cmd.PlayResume}" CommandParameter="{Binding}" ToolTip="{Binding Title.Name}">
-      <StackPanel>
-        <Grid Height="225">
-          <Border CornerRadius="12" Background="{Binding Title.Name, Converter={StaticResource Hue}}" />
-          <Border CornerRadius="12">
-            <Border.Background>
-              <ImageBrush ImageSource="{Binding Title.Poster, Converter={StaticResource Img}, ConverterParameter=300}" Stretch="UniformToFill" />
-            </Border.Background>
-          </Border>
-          <Border Visibility="{Binding Stamp, Converter={StaticResource Vis}}" CornerRadius="8" Background="#cc0b0e14" Padding="5,2"
-                  HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="8,0,8,15">
-            <TextBlock Text="{Binding Stamp}" Foreground="White" FontSize="10" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-          </Border>
-          <ProgressBar Style="{StaticResource Bar}" Value="{Binding Progress, Mode=OneWay}" VerticalAlignment="Bottom" Margin="8" />
-        </Grid>
-        <TextBlock Text="{Binding Title.Name}" FontSize="12" Foreground="{DynamicResource Muted}" Margin="0,8,0,0" TextTrimming="CharacterEllipsis" />
-      </StackPanel>
+    <Button Style="{StaticResource Bare}" Width="140" Height="210" Margin="0,0,10,0" VerticalAlignment="Top"
+            Command="{x:Static local:Cmd.PlayResume}" CommandParameter="{Binding}" ToolTip="{Binding Title.Name}">
+      <Grid>
+        <ContentPresenter Content="{Binding Title}" ContentTemplate="{StaticResource Art}" />
+        <Border CornerRadius="0,0,6,6" VerticalAlignment="Bottom" Height="126">
+          <Border.Background>
+            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+              <GradientStop Offset="0" Color="#00000000" />
+              <GradientStop Offset="1" Color="#cc000000" />
+            </LinearGradientBrush>
+          </Border.Background>
+        </Border>
+        <StackPanel VerticalAlignment="Bottom" Margin="8,0,8,6">
+          <TextBlock Text="{Binding Title.Name}" Foreground="White" FontSize="13" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
+          <TextBlock Text="{Binding Stamp}" Visibility="{Binding Stamp, Converter={StaticResource Vis}}" Foreground="#bfffffff" FontSize="11" FontWeight="Medium" TextTrimming="CharacterEllipsis" />
+          <ProgressBar Style="{StaticResource Bar}" Value="{Binding Progress, Mode=OneWay}" Background="#40ffffff" Margin="0,5,0,0" />
+        </StackPanel>
+      </Grid>
     </Button>
   </DataTemplate>
 </ResourceDictionary>

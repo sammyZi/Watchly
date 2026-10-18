@@ -21,15 +21,20 @@ public sealed class HomeView : UserControl
 {
     static readonly Shelf[] Fixed =
     {
-        new("Trending films", "movie"),
-        new("Popular series", "tv"),
+        new("Trending Movies", "movie"),
+        new("Popular Series", "tv"),
         new("Anime", "tv", Meta.AnimeGenre),
     };
 
+    /// <summary>A poster on Home's rows, and the gap between rows (mobile Home.kt).</summary>
+    const double CardHeight = 210, RowGap = 22;
+
     readonly MainWindow shell = MainWindow.Shell;
     readonly ScrollViewer scroll;
-    readonly StackPanel page = new() { Margin = new Thickness(0, 0, 0, 120) };
+    readonly StackPanel page = new() { Margin = new Thickness(0, 0, 0, 32) };
     readonly Grid hero = new() { Height = 480 };
+    /// <summary>The wordmark: a fade over the hero, a solid bar once the rows scroll under it.</summary>
+    readonly Border header = new() { VerticalAlignment = VerticalAlignment.Top, Padding = new Thickness(24, 14, 24, 14) };
     readonly StackPanel personal = new();
     readonly StackPanel shelves = new();
     readonly Dictionary<string, List<Title>> loaded = new();
@@ -50,14 +55,22 @@ public sealed class HomeView : UserControl
         scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = page };
         Ui.SmoothWheel(scroll);
         // Rows are built as they come near the screen — see Fill.
-        scroll.ScrollChanged += (_, _) => FillVisible();
+        scroll.ScrollChanged += (_, _) =>
+        {
+            FillVisible();
+            Header();
+        };
         scroll.SizeChanged += (_, _) => FillVisible();
         Loaded += (_, _) => Dispatcher.BeginInvoke(FillVisible, DispatcherPriority.Loaded);
+        // The billboard fills most of the window, as it does a phone held sideways.
+        SizeChanged += (_, e) => { if (heroTitles.Count > 0) hero.Height = HeroHeight(e.NewSize.Height); };
 
         page.Children.Add(hero);
         page.Children.Add(personal);
         page.Children.Add(shelves);
-        Content = scroll;
+        header.Child = Ui.Text("WATCHLY", "TitleText", "Accent", 20, FontWeights.Black);
+        Header();
+        Content = new Grid { Children = { scroll, header } };
 
         foreach (var s in AllShelves())
             if (Meta.PeekCatalog(s.Kind, s.Genre) is { } ready) loaded[s.Key] = ready;
@@ -72,6 +85,18 @@ public sealed class HomeView : UserControl
     }
 
     bool dirty;
+    bool solid;
+
+    void Header()
+    {
+        var scrolled = scroll.VerticalOffset > 240;
+        if (scrolled == solid && header.Background is not null) return;
+        solid = scrolled;
+        if (scrolled) header.SetResourceReference(Border.BackgroundProperty, "Bg");
+        else header.Background = new LinearGradientBrush(Color.FromArgb(0x99, 0, 0, 0), Colors.Transparent, 90);
+    }
+
+    static double HeroHeight(double page) => Math.Max(420, page * 0.82);
 
     static bool InProgress(HistoryItem item) => item.LastFileIndex is int i && item.ResumeRatio(i) < 0.9;
 
@@ -148,7 +173,7 @@ public sealed class HomeView : UserControl
             taste = await Meta.Taste(identified);
             try { Store.Save(TasteKey, taste); } catch { }
             if (mine != version) return;
-            var next = genres.Select((g, i) => new Shelf(i == 0 ? "Recommended for you" : $"Because you like {g.Genre}", g.Kind, g.Genre)).ToList();
+            var next = genres.Select((g, i) => new Shelf(i == 0 ? $"Because you watched {g.Genre.ToLowerInvariant()}" : $"More {g.Genre.ToLowerInvariant()}", g.Kind, g.Genre)).ToList();
             if (!next.SequenceEqual(picks))
             {
                 picks = next;
@@ -174,7 +199,7 @@ public sealed class HomeView : UserControl
                 if (t.Result.Count == 0) return;
                 loaded[shelf.Key] = t.Result;
                 var watched = shell.HistoryList.Select(h => h.Imdb).Where(i => i is not null).ToHashSet();
-                if (shelfControls.TryGetValue(shelf.Key, out var pair) && pair.Body.Content is Grid { Tag: Loading })
+                if (shelfControls.TryGetValue(shelf.Key, out var pair) && pair.Body.Content is FrameworkElement { Tag: Loading })
                     Fill(shelf, pair.Container, pair.Body, watched);
                 BuildHero(AllShelves(), watched);
             }), TaskScheduler.Default);
@@ -202,7 +227,7 @@ public sealed class HomeView : UserControl
         void Build()
         {
             waiting.Remove(body);
-            body.Content = Ui.Rail(Today(shelf, raw, watched), "PosterCard", 290);
+            body.Content = Ui.Rail(Today(shelf, raw, watched), "RailCard", CardHeight);
         }
         if (NearScreen(container))
         {
@@ -210,7 +235,7 @@ public sealed class HomeView : UserControl
             return;
         }
         // Not a Loading grid: this shelf has its titles and only waits to be seen.
-        body.Content = new Grid { Height = 290 };
+        body.Content = new Grid { Height = CardHeight };
         waiting[body] = Build;
     }
 
@@ -251,20 +276,29 @@ public sealed class HomeView : UserControl
             var position = item.PositionOf(index) ?? 0;
             return new ResumeTile(FromHistory(item), item, index, duration > 0 ? position / duration.Value * 100 : 0, ResumeStamp(item));
         }).ToList();
-        if (resumable.Count > 0) personal.Children.Add(Section("Continue watching", Ui.Hues[0], () => shell.ShowTab("history"), resumable, "ResumeCard"));
+        if (resumable.Count > 0) personal.Children.Add(Section("Continue Watching", () => shell.ShowTab("history"), resumable, "ResumeCard"));
 
         var later = Saved.InList(shell.SavedList, "later").Select(s => s.AsTitle()).ToList();
-        if (later.Count > 0) personal.Children.Add(Section("Watch later", Ui.Hues[1], null, later, "PosterCard"));
+        if (later.Count > 0) personal.Children.Add(Section("My List", null, later, "RailCard"));
 
         var favorites = Saved.InList(shell.SavedList, "favorite").Select(s => s.AsTitle()).ToList();
-        if (favorites.Count > 0) personal.Children.Add(Section("Favourites", Ui.Hues[2], null, favorites, "PosterCard"));
+        if (favorites.Count > 0) personal.Children.Add(Section("Liked", null, favorites, "RailCard"));
     }
 
-    static FrameworkElement Section(string title, string hue, Action? seeAll, System.Collections.IEnumerable items, string template) => new StackPanel
+    static FrameworkElement Section(string title, Action? seeAll, System.Collections.IEnumerable items, string template) => new StackPanel
     {
-        Margin = new Thickness(0, 28, 0, 0),
-        Children = { Ui.Head(title, hue, seeAll), Ui.Rail(items, template, 290) },
+        Margin = new Thickness(0, RowGap, 0, 0),
+        Children = { Ui.Head(title, seeAll), Ui.Rail(items, template, CardHeight) },
     };
+
+    /// <summary>A row still waiting for its titles: grey posters where they will be.</summary>
+    static FrameworkElement Placeholders()
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(24, 0, 0, 0), Height = CardHeight, Tag = Loading };
+        for (var i = 0; i < 8; i++)
+            row.Children.Add(Ui.Brushed(new Border { Width = 140, Margin = new Thickness(0, 0, 10, 0), CornerRadius = new CornerRadius(6) }, "Surface"));
+        return row;
+    }
 
     void BuildShelves()
     {
@@ -279,21 +313,19 @@ public sealed class HomeView : UserControl
             shelves.Children.Clear();
             shelfControls.Clear();
             waiting.Clear();
-            for (var i = 0; i < all.Count; i++)
+            foreach (var shelf in all)
             {
-                var shelf = all[i];
-                var hue = Ui.Hues[(i + 1) % Ui.Hues.Length];
                 var body = new ContentControl();
                 var captured = shelf;
-                var head = Ui.Head(shelf.Heading, hue, () => MainWindow.Shell.OpenShelfPage(captured));
+                var head = Ui.Head(shelf.Heading, () => MainWindow.Shell.OpenShelfPage(captured));
                 var container = new StackPanel
                 {
-                    Margin = new Thickness(0, 28, 0, 0),
+                    Margin = new Thickness(0, RowGap, 0, 0),
                     Tag = shelf.Genre ?? shelf.Heading,
                     Children = { head, body },
                 };
 
-                body.Content = new Grid { Height = 225, Tag = Loading, Children = { Ui.Spinner(20, "Faint") } };
+                body.Content = Placeholders();
                 shelves.Children.Add(container);
                 shelfControls[shelf.Key] = (container, body);
                 Fill(shelf, container, body, watched);
@@ -305,7 +337,7 @@ public sealed class HomeView : UserControl
             {
                 // Only a shelf still on its spinner — a built row is a Grid too, and
                 // testing for that alone rebuilt every row on each refresh.
-                if (shelfControls.TryGetValue(shelf.Key, out var pair) && pair.Body.Content is Grid { Tag: Loading })
+                if (shelfControls.TryGetValue(shelf.Key, out var pair) && pair.Body.Content is FrameworkElement { Tag: Loading })
                     Fill(shelf, pair.Container, pair.Body, watched);
             }
         }
@@ -327,28 +359,33 @@ public sealed class HomeView : UserControl
         var heroFrom = loaded.ContainsKey(heroShelf.Key) ? heroShelf : Fixed[0];
         var source = loaded.GetValueOrDefault(heroFrom.Key) ?? new();
         // Today's picks too, but from the whole pool (not one genre's share), so the banner changes daily.
-        var titles = Recommend.ForToday(source, heroFrom.Genre, taste, watched, onePerGenre: false).Take(5).ToList();
-        var eyebrow = loaded.ContainsKey(heroShelf.Key)
-            ? chosen.Count > 0 ? $"in {chosen[0].Genre}" : picks.Count > 0 ? "for you" : "today"
-            : "today";
-        var key = string.Join("|", titles.Select(t => t.Imdb)) + eyebrow + Theme.IsLight;
+        var titles = Recommend.ForToday(source, heroFrom.Genre, taste, watched, onePerGenre: false).Take(6).ToList();
+        var key = string.Join("|", titles.Select(t => t.Imdb)) + Theme.IsLight;
         if (key == heroKey) return;
         heroKey = key;
         heroTitles = titles;
         heroPage = 0;
-        heroEyebrow = eyebrow;
 
         heroTimer?.Stop();
         if (titles.Count > 1)
         {
-            heroTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
+            // Moves on by itself, and waits again after every turn by hand (mobile Home.kt Hero).
+            heroTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(8) };
             heroTimer.Tick += (_, _) => { if (IsVisible) ShowHeroPage((heroPage + 1) % heroTitles.Count); };
             heroTimer.Start();
         }
         ShowHeroPage(0);
     }
 
-    string heroEyebrow = "today";
+    /// <summary>The full entries of hero titles: a shelf row carries no logo or runtime.</summary>
+    readonly Dictionary<string, Title> heroFull = new();
+
+    void Turn(int to)
+    {
+        ShowHeroPage((to + heroTitles.Count) % heroTitles.Count);
+        heroTimer?.Stop();
+        heroTimer?.Start();
+    }
 
     void ShowHeroPage(int index)
     {
@@ -359,76 +396,85 @@ public sealed class HomeView : UserControl
             hero.Children.Add(Ui.Spinner());
             return;
         }
-        hero.Height = 480;
+        hero.Height = HeroHeight(ActualHeight);
+        var again = heroPage == index && hero.Tag as string == heroTitles[index].Imdb;
         heroPage = index;
-        var title = heroTitles[index];
+        var title = heroFull.GetValueOrDefault(heroTitles[index].Imdb) ?? heroTitles[index];
+        hero.Tag = title.Imdb;
+        if (!heroFull.ContainsKey(title.Imdb))
+        {
+            _ = Meta.LoadTitle(title.Imdb, title.Kind).ContinueWith(t => Dispatcher.BeginInvoke(() =>
+            {
+                if (t.Result is not { } full) return;
+                heroFull[full.Imdb] = full;
+                if (heroTitles.ElementAtOrDefault(heroPage)?.Imdb == full.Imdb) ShowHeroPage(heroPage);
+            }), TaskScheduler.Default);
+        }
 
-        var art = new Border { Opacity = 0 };
-        if (ImageUrl.Load(title.Backdrop ?? title.Poster, 1920) is { } image)
-            art.Background = new ImageBrush(image) { Stretch = Stretch.UniformToFill, AlignmentY = AlignmentY.Top };
-        hero.Children.Add(art);
-        art.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(450)));
+        // The TV's billboard, as the phone shows it held sideways: the backdrop on the right,
+        // faded into the page at its left and foot, and the words down the left beside it.
+        var art = new Grid { Cursor = Cursors.Hand };
+        Grid.SetColumn(art, 1);
+        if (ImageUrl.Load(title.Backdrop ?? $"https://images.metahub.space/background/medium/{title.Imdb}/img", 1920) is { } image)
+            art.Children.Add(new Border { Background = new ImageBrush(image) { Stretch = Stretch.UniformToFill, AlignmentY = AlignmentY.Top } });
+        art.Children.Add(Ui.Brushed(new Border(), "FadeToBg"));
+        art.Children.Add(Ui.Brushed(new Border(), "FadeLeft"));
+        // Clicking anywhere on the art opens the title, like the phone's full-page Pressable.
+        art.MouseLeftButtonUp += (_, _) => shell.OpenTitle(title);
+        var stage = new Grid { ColumnDefinitions = { new ColumnDefinition { Width = new GridLength(28, GridUnitType.Star) }, new ColumnDefinition { Width = new GridLength(72, GridUnitType.Star) } }, Children = { art } };
+        hero.Children.Add(stage);
+        if (!again) art.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(450)));
 
-        hero.Children.Add(Ui.Brushed(new Border(), "FadeToBg"));
-        hero.Children.Add(new Border { Width = 760, HorizontalAlignment = HorizontalAlignment.Left, Background = (Brush)FindResource("FadeLeft") });
-
-        var facts = string.Join("   ", new[] { title.Rating is null ? null : $"★ {title.Rating}", title.Year, string.Join(" · ", title.Genres) }.Where(s => !string.IsNullOrEmpty(s)));
-        var watch = Ui.Button(new StackPanel
+        var mark = Ui.TitleMark(title, 88, 340, 34);
+        var facts = Ui.Facts(title);
+        facts.Margin = new Thickness(0, 12, 0, 0);
+        var words = new StackPanel
+        {
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            MaxWidth = 420,
+            Margin = new Thickness(32, 40, 0, 0),
+            Children = { mark, facts },
+        };
+        if (title.Plot is not null)
+        {
+            var plot = Ui.Text(title.Plot, "Body", "Text");
+            plot.Opacity = 0.78;
+            plot.MaxHeight = 66;
+            plot.TextTrimming = TextTrimming.WordEllipsis;
+            plot.Margin = new Thickness(0, 8, 0, 0);
+            words.Children.Add(plot);
+        }
+        var inList = Saved.OnList(shell.SavedList, title.Imdb, "later");
+        var list = Ui.Action(inList ? "In My List" : "My List", inList ? "check" : "plus", () => { shell.ToggleSaved(title, "later"); ShowHeroPage(heroPage); }, width: 132);
+        list.Margin = new Thickness(10, 0, 0, 0);
+        words.Children.Add(new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Children = { Ui.Glyph("play", 16, "OnAccent"), Ui.Text("Watch", "Label", "OnAccent", 14, FontWeights.SemiBold) },
-        }, () => shell.OpenTitle(title), "PillAccent");
-        ((StackPanel)watch.Content).Children[1].SetValue(MarginProperty, new Thickness(8, 0, 0, 0));
-        watch.Height = 44;
-        watch.Tag = 22;
-        watch.Padding = new Thickness(24, 0, 24, 0);
-        watch.HorizontalAlignment = HorizontalAlignment.Left;
-        watch.Margin = new Thickness(0, 12, 0, 0);
+            Margin = new Thickness(0, 16, 0, 0),
+            Children = { Ui.Action("Watch", "play", () => shell.OpenTitle(title), primary: true, width: 132), list },
+        });
+        hero.Children.Add(words);
 
-        var name = Ui.Text(title.Name, "Display", "Text", 34);
-        name.TextWrapping = TextWrapping.Wrap;
-        name.MaxWidth = 640;
-        // Left, not the default stretch — a capped width on a stretched block centres it.
-        name.HorizontalAlignment = HorizontalAlignment.Left;
-        var body = new StackPanel
-        {
-            VerticalAlignment = VerticalAlignment.Bottom,
-            Margin = new Thickness(40, 0, 40, 56),
-            Children =
-            {
-                Ui.Text($"#{index + 1} {heroEyebrow}".ToUpperInvariant(), "Overline", "Accent", 12, FontWeights.Bold),
-                name,
-                Ui.Text(facts, "Meta", "Accent", 13),
-                watch,
-            },
-        };
-        name.Margin = new Thickness(0, 6, 0, 6);
-        hero.Children.Add(body);
-
-        // Clicking anywhere on the art opens the title, like the phone's full-page Pressable.
-        art.Cursor = Cursors.Hand;
-        art.MouseLeftButtonUp += (_, _) => shell.OpenTitle(title);
-
-        var dots = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 20) };
+        var dots = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 8) };
         for (var i = 0; i < heroTitles.Count; i++)
         {
             var at = i;
-            var dot = Ui.Brushed(new Border { Height = 6, Width = i == index ? 18 : 6, CornerRadius = new CornerRadius(3), Margin = new Thickness(3, 0, 3, 0), Opacity = i == index ? 1 : 0.45, Cursor = Cursors.Hand }, i == index ? "Accent" : "Faint");
-            dot.MouseLeftButtonUp += (_, e) => { e.Handled = true; ShowHeroPage(at); heroTimer?.Stop(); heroTimer?.Start(); };
+            var dot = Ui.Brushed(new Border { Height = 4, Width = i == index ? 16 : 6, CornerRadius = new CornerRadius(2), Margin = new Thickness(3, 0, 3, 0), Cursor = Cursors.Hand }, i == index ? "Text" : "Faint");
+            dot.MouseLeftButtonUp += (_, e) => { e.Handled = true; Turn(at); };
             dots.Children.Add(dot);
         }
         hero.Children.Add(dots);
 
+        // The phone swipes; a mouse gets arrows, at the foot of the art.
         if (heroTitles.Count > 1)
         {
-            var prev = Ui.Round("chevron-left", () => { ShowHeroPage((heroPage + heroTitles.Count - 1) % heroTitles.Count); heroTimer?.Stop(); heroTimer?.Start(); }, "Text", "SurfaceAlt", 40, 20);
-            var next = Ui.Round("chevron-right", () => { ShowHeroPage((heroPage + 1) % heroTitles.Count); heroTimer?.Stop(); heroTimer?.Start(); }, "Text", "SurfaceAlt", 40, 20);
-            prev.HorizontalAlignment = HorizontalAlignment.Right;
-            next.HorizontalAlignment = HorizontalAlignment.Right;
+            var prev = Ui.Round("chevron-left", () => Turn(heroPage - 1), "Text", "Tint", 40, 20);
+            var next = Ui.Round("chevron-right", () => Turn(heroPage + 1), "Text", "Tint", 40, 20);
+            prev.HorizontalAlignment = next.HorizontalAlignment = HorizontalAlignment.Right;
             prev.VerticalAlignment = next.VerticalAlignment = VerticalAlignment.Bottom;
-            prev.Margin = new Thickness(0, 0, 88, 56);
-            next.Margin = new Thickness(0, 0, 40, 56);
-            prev.Opacity = next.Opacity = 0.85;
+            prev.Margin = new Thickness(0, 0, 80, 24);
+            next.Margin = new Thickness(0, 0, 32, 24);
             hero.Children.Add(prev);
             hero.Children.Add(next);
         }

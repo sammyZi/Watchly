@@ -10,38 +10,39 @@
   <c:Initials x:Key="Initials" />
   <c:PillRadius x:Key="PillRadius" />
 
-  <!-- src/theme.ts `type`. -->
+  <!-- tv/core Theme.kt's Type, which the phone and the TV share. -->
   <Style x:Key="Display" TargetType="TextBlock">
-    <Setter Property="FontSize" Value="21" />
+    <Setter Property="FontSize" Value="28" />
     <Setter Property="FontWeight" Value="Bold" />
     <Setter Property="Foreground" Value="{DynamicResource Text}" />
   </Style>
   <Style x:Key="TitleText" TargetType="TextBlock">
+    <Setter Property="FontSize" Value="18" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource Text}" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+  <Style x:Key="Body" TargetType="TextBlock">
+    <Setter Property="FontSize" Value="15" />
+    <Setter Property="LineHeight" Value="22" />
+    <Setter Property="Foreground" Value="{DynamicResource Muted}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+  <Style x:Key="Label" TargetType="TextBlock">
     <Setter Property="FontSize" Value="15" />
     <Setter Property="FontWeight" Value="Medium" />
     <Setter Property="Foreground" Value="{DynamicResource Text}" />
     <Setter Property="TextTrimming" Value="CharacterEllipsis" />
   </Style>
-  <Style x:Key="Body" TargetType="TextBlock">
-    <Setter Property="FontSize" Value="14" />
-    <Setter Property="LineHeight" Value="21" />
-    <Setter Property="Foreground" Value="{DynamicResource Muted}" />
-    <Setter Property="TextWrapping" Value="Wrap" />
-  </Style>
-  <Style x:Key="Label" TargetType="TextBlock">
+  <Style x:Key="Meta" TargetType="TextBlock">
     <Setter Property="FontSize" Value="13" />
     <Setter Property="FontWeight" Value="Medium" />
-    <Setter Property="Foreground" Value="{DynamicResource Text}" />
-    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
-  </Style>
-  <Style x:Key="Meta" TargetType="TextBlock">
-    <Setter Property="FontSize" Value="12" />
-    <Setter Property="Foreground" Value="{DynamicResource Faint}" />
+    <Setter Property="Foreground" Value="{DynamicResource Muted}" />
     <Setter Property="TextTrimming" Value="CharacterEllipsis" />
   </Style>
   <Style x:Key="Overline" TargetType="TextBlock">
     <Setter Property="FontSize" Value="11" />
-    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="FontWeight" Value="Bold" />
     <Setter Property="Foreground" Value="{DynamicResource Faint}" />
   </Style>
 
@@ -94,15 +95,16 @@
     <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
 
-  <!-- src/components/Button.tsx: pill, 40 high. -->
+  <!-- The TV's buttons (mobile Ui.kt Button): 46 high, corners of 8, red for the main
+       action, a translucent grey for the rest. -->
   <Style x:Key="Pill" TargetType="Button" BasedOn="{StaticResource Bare}">
-    <Setter Property="Height" Value="40" />
-    <Setter Property="Tag" Value="20" />
-    <Setter Property="Padding" Value="16,0" />
-    <Setter Property="Background" Value="{DynamicResource Control}" />
-    <Setter Property="Foreground" Value="{DynamicResource Muted}" />
-    <Setter Property="FontSize" Value="13" />
-    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="Height" Value="46" />
+    <Setter Property="Tag" Value="8" />
+    <Setter Property="Padding" Value="20,0" />
+    <Setter Property="Background" Value="{DynamicResource Tint}" />
+    <Setter Property="Foreground" Value="{DynamicResource Text}" />
+    <Setter Property="FontSize" Value="15" />
+    <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
@@ -117,27 +119,26 @@
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
 
-  <!-- Chips: a ToggleButton so IsChecked is the "on" state. -->
+  <!-- Chips (mobile Ui.kt Chip): a pill of choices, red when on. A ToggleButton so IsChecked is "on". -->
   <Style x:Key="Chip" TargetType="ToggleButton" BasedOn="{StaticResource Bare}">
     <Setter Property="Tag" Value="999" />
-    <Setter Property="Padding" Value="12,7" />
-    <Setter Property="Background" Value="{DynamicResource Surface}" />
+    <Setter Property="Height" Value="36" />
+    <Setter Property="Padding" Value="16,0" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Background" Value="{DynamicResource TintLo}" />
     <Setter Property="Foreground" Value="{DynamicResource Muted}" />
-    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontSize" Value="14" />
     <Setter Property="FontWeight" Value="Medium" />
     <Style.Triggers>
       <Trigger Property="IsChecked" Value="True">
         <Setter Property="Background" Value="{DynamicResource Accent}" />
         <Setter Property="Foreground" Value="{DynamicResource OnAccent}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
       </Trigger>
     </Style.Triggers>
   </Style>
 
-  <Style x:Key="ChoiceChip" TargetType="ToggleButton" BasedOn="{StaticResource Chip}">
-    <Setter Property="Padding" Value="16,8" />
-    <Setter Property="Background" Value="{DynamicResource SurfaceAlt}" />
-    <Setter Property="FontSize" Value="13" />
-  </Style>
+  <Style x:Key="ChoiceChip" TargetType="ToggleButton" BasedOn="{StaticResource Chip}" />
 
   <!-- Thin, rounded, only there when it is needed. -->
   <Style x:Key="ThinThumb" TargetType="Thumb">
@@ -192,7 +193,7 @@
     <Setter Property="Foreground" Value="{DynamicResource Text}" />
     <Setter Property="CaretBrush" Value="{DynamicResource Accent}" />
     <Setter Property="SelectionBrush" Value="{DynamicResource Accent}" />
-    <Setter Property="FontSize" Value="14" />
+    <Setter Property="FontSize" Value="16" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
     <Setter Property="Template">
       <Setter.Value>
@@ -219,8 +220,8 @@
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="CheckBox">
-          <Border x:Name="Track" Width="42" Height="24" CornerRadius="12" Background="{DynamicResource SurfaceAlt}">
-            <Ellipse x:Name="Knob" Width="18" Height="18" Fill="{DynamicResource Control}" HorizontalAlignment="Left" Margin="3,0" />
+          <Border x:Name="Track" Width="42" Height="24" CornerRadius="12" Background="{DynamicResource Line}">
+            <Ellipse x:Name="Knob" Width="18" Height="18" Fill="{DynamicResource Muted}" HorizontalAlignment="Left" Margin="3,0" />
           </Border>
           <ControlTemplate.Triggers>
             <Trigger Property="IsChecked" Value="True">

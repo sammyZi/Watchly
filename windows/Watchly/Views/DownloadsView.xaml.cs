@@ -193,7 +193,7 @@ public partial class DownloadsView : UserControl
                     foreach (var entry in season.Items) stack.Children.Add(SavedRow(entry, true));
                 }
             }
-            var card = Ui.Card(stack, "Surface", 18, new Thickness(12));
+            var card = Ui.Card(stack, "Surface", 10, new Thickness(12));
             card.Margin = new Thickness(0, 0, 12, 12);
             card.VerticalAlignment = VerticalAlignment.Top;
             SavedList.Children.Add(card);
@@ -216,7 +216,7 @@ public partial class DownloadsView : UserControl
             () => SavedDownloads.Remove(new[] { entry.Path })), "Faint", "Control", 32, 15, "Delete");
         var reveal = Ui.Round("folder", () => Reveal(entry.Path), "Muted", "Control", 32, 14, "Show in folder");
         reveal.Margin = new Thickness(0, 0, 6, 0);
-        var play = Ui.Brushed(new Border { Width = 36, Height = 36, CornerRadius = new CornerRadius(18), Margin = new Thickness(0, 0, 8, 0), Child = new Grid { Children = { Ui.Glyph("play", 14, "Accent") } } }, "AccentSoft");
+        var play = Ui.Brushed(new Border { Width = 36, Height = 36, CornerRadius = new CornerRadius(18), Margin = new Thickness(0, 0, 8, 0), Child = new Grid { Children = { Ui.Glyph("play", 16, "OnAccent") } } }, "Accent");
         foreach (var e in new FrameworkElement[] { delete, reveal, play })
         {
             DockPanel.SetDock(e, Dock.Right);
@@ -240,7 +240,7 @@ public partial class DownloadsView : UserControl
             button.Margin = new Thickness(0, 8, 0, 0);
             return button;
         }
-        var card = Ui.Card(button, "Surface", 18, new Thickness(12));
+        var card = Ui.Card(button, "Surface", 10, new Thickness(12));
         card.Margin = new Thickness(0, 0, 12, 12);
         card.VerticalAlignment = VerticalAlignment.Top;
         return card;

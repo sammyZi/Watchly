@@ -71,13 +71,13 @@ public partial class MainWindow : Window
     {
         ("home", "Home", "home"),
         ("search", "Search", "search"),
-        ("history", "Library", "clock"),
+        ("history", "Library", "library"),
         ("downloads", "Downloads", "download"),
-        ("settings", "Settings", "sliders"),
+        ("settings", "Settings", "settings"),
     };
 
     readonly Dictionary<string, FrameworkElement> tabViews = new();
-    readonly Dictionary<string, (TextBlock Label, Icon Icon)> tabParts = new();
+    readonly Dictionary<string, (TextBlock Label, Icon Icon, Border Tick)> tabParts = new();
     string tab = "home";
 
     public MainWindow(string? openOnStart)
@@ -115,16 +115,24 @@ public partial class MainWindow : Window
         foreach (var (key, label, icon) in TabList)
         {
             var glyph = new Icon { Kind = icon, Size = 22, HorizontalAlignment = HorizontalAlignment.Center };
-            var text = new TextBlock { Text = label, FontSize = 10, Margin = new Thickness(0, 3, 0, 0), HorizontalAlignment = HorizontalAlignment.Center };
+            var text = new TextBlock { Text = label, FontSize = 11, Margin = new Thickness(0, 3, 0, 0), HorizontalAlignment = HorizontalAlignment.Center };
+            var tick = new Border { Width = 3, Height = 22, CornerRadius = new CornerRadius(2), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center };
+            tick.SetResourceReference(Border.BackgroundProperty, "Accent");
             var button = new Button
             {
                 Style = (Style)FindResource("Bare"),
-                Content = new StackPanel { Children = { glyph, text }, VerticalAlignment = VerticalAlignment.Center },
+                Height = 60,
+                Content = new Grid { Children = { tick, new StackPanel { Children = { glyph, text }, VerticalAlignment = VerticalAlignment.Center } } },
                 ToolTip = label,
             };
-            button.Click += (_, _) => ShowTab(key);
+            // A tab is a fresh start, as on the phone: whatever pages were open over it close.
+            button.Click += (_, _) =>
+            {
+                foreach (var page in Layers.Children.OfType<FrameworkElement>().ToList()) CloseLayer(page);
+                ShowTab(key);
+            };
             TabButtons.Children.Add(button);
-            tabParts[key] = (text, glyph);
+            tabParts[key] = (text, glyph, tick);
         }
     }
 
@@ -148,9 +156,10 @@ public partial class MainWindow : Window
         foreach (var (k, parts) in tabParts)
         {
             var on = k == key;
-            parts.Label.SetResourceReference(TextBlock.ForegroundProperty, on ? "Accent" : "Faint");
-            parts.Label.FontWeight = on ? FontWeights.Medium : FontWeights.Normal;
-            parts.Icon.SetResourceReference(Controls.Icon.ForegroundProperty, on ? "Accent" : "Faint");
+            parts.Label.SetResourceReference(TextBlock.ForegroundProperty, on ? "Text" : "Faint");
+            parts.Label.FontWeight = on ? FontWeights.Bold : FontWeights.Medium;
+            parts.Icon.SetResourceReference(Controls.Icon.ForegroundProperty, on ? "Text" : "Faint");
+            parts.Tick.Visibility = on ? Visibility.Visible : Visibility.Hidden;
         }
     }
 
@@ -160,7 +169,6 @@ public partial class MainWindow : Window
     {
         page.SetResourceReference(BackgroundProperty, "Bg");
         Layers.Children.Add(page);
-        TabDock.Visibility = Visibility.Collapsed;
         ShowTopLayerOnly();
     }
 
@@ -168,7 +176,6 @@ public partial class MainWindow : Window
     {
         Layers.Children.Remove(page);
         (page as IDisposable)?.Dispose();
-        if (Layers.Children.Count == 0) TabDock.Visibility = Visibility.Visible;
         ShowTopLayerOnly();
     }
 
@@ -592,7 +599,7 @@ public partial class MainWindow : Window
         {
             if (PlayerHost.Content == player) PlayerHost.Visibility = Visibility.Collapsed;
             Layers.Visibility = Visibility.Visible;
-            TabDock.Visibility = Layers.Children.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
+            TabDock.Visibility = Visibility.Visible;
             ShowTopLayerOnly();
             LibraryChanged?.Invoke();
             // Hidden now, removed once libVLC has let go: destroying the video
@@ -656,7 +663,7 @@ public partial class MainWindow : Window
     public void Toast(string message, bool bad = false)
     {
         ToastText.Text = message;
-        ToastBar.Background = bad ? (System.Windows.Media.Brush)FindResource("Danger") : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(0xe6, 0x0b, 0x0e, 0x14));
+        ToastIcon.SetResourceReference(Controls.Icon.ForegroundProperty, bad ? "Danger" : "Accent");
         ToastBar.Visibility = Visibility.Visible;
         toastTimer?.Stop();
         toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(bad ? 5 : 3) };

@@ -48,12 +48,12 @@
 
     <!-- The live card: artwork, stage, progress, swarm, controls, queue. -->
     <DataTemplate x:Key="ActiveCard" DataType="{x:Type e:ActiveDownload}">
-      <Border CornerRadius="18" Background="{DynamicResource Surface}" Padding="16" Margin="0,0,14,14" VerticalAlignment="Top">
+      <Border CornerRadius="10" Background="{DynamicResource Surface}" Padding="16" Margin="0,0,14,14" VerticalAlignment="Top">
         <StackPanel>
           <DockPanel>
             <Grid DockPanel.Dock="Left" Width="84" Height="126">
-              <Border CornerRadius="12" Background="{Binding Headline, Converter={StaticResource Hue}}" />
-              <Border CornerRadius="12">
+              <Border CornerRadius="6" Background="{Binding Headline, Converter={StaticResource Hue}}" />
+              <Border CornerRadius="6">
                 <Border.Background>
                   <ImageBrush ImageSource="{Binding Poster, Converter={StaticResource Img}, ConverterParameter=168}" Stretch="UniformToFill" />
                 </Border.Background>
@@ -85,7 +85,7 @@
           </DockPanel>
 
           <!-- What went wrong, where it can be fixed. -->
-          <Border CornerRadius="12" Background="{DynamicResource DangerSoft}" Padding="12,10" Margin="0,14,0,0"
+          <Border CornerRadius="6" Background="{DynamicResource DangerSoft}" Padding="12,10" Margin="0,14,0,0"
                   Visibility="{Binding HasError, Converter={StaticResource Vis}}">
             <DockPanel>
               <Button DockPanel.Dock="Right" Style="{StaticResource Pill}" Height="32" Tag="16" Click="OnChangeFolder" Margin="10,0,0,0" VerticalAlignment="Center">
@@ -163,7 +163,7 @@
       <RowDefinition />
     </Grid.RowDefinitions>
     <DockPanel Margin="24,20,24,12">
-      <Border DockPanel.Dock="Left" Width="34" Height="34" CornerRadius="12" Background="{DynamicResource AccentSoft}" Margin="0,0,12,0">
+      <Border DockPanel.Dock="Left" Width="34" Height="34" CornerRadius="6" Background="{DynamicResource AccentSoft}" Margin="0,0,12,0">
         <c:Icon Kind="download" Size="17" Foreground="{DynamicResource Accent}" />
       </Border>
       <TextBlock Text="Downloads" Style="{StaticResource Display}" VerticalAlignment="Center" />
@@ -172,7 +172,7 @@
     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
       <StackPanel Margin="24,0,24,120">
         <!-- BitTorrent-style: paste a magnet or pick a .torrent and it downloads everything in it. -->
-        <Border CornerRadius="14" Background="{DynamicResource Surface}" Padding="14,0,6,0" Height="50" Margin="0,4,0,10">
+        <Border CornerRadius="8" Background="{DynamicResource Surface}" Padding="14,0,6,0" Height="50" Margin="0,4,0,10">
           <DockPanel>
             <c:Icon DockPanel.Dock="Left" Kind="link" Size="16" Foreground="{DynamicResource Faint}" Margin="0,0,12,0" />
             <Button DockPanel.Dock="Right" Style="{StaticResource PillAccent}" Height="38" Tag="19" Content="Add" Click="OnAdd" Margin="6,0,0,0" />

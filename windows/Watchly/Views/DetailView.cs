@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Watchly.Controls;
@@ -9,19 +10,23 @@ using Watchly.Engine;
 namespace Watchly.Views;
 
 /// <summary>
-/// src/screens/DetailScreen.tsx: artwork and facts up top, a Play button for the
-/// healthiest release, the episode list for a series, and every release under it.
+/// One title, laid out as the phone shows it held sideways and as the TV does (mobile
+/// Detail.kt): the backdrop on the right, the logo, facts and Play down the left, the
+/// actions under them, then the episodes of a series and the releases to play.
 /// </summary>
 public sealed class DetailView : UserControl, IDisposable
 {
     static readonly string[] Qualities = { "4K", "1080p", "720p", "CAM" };
     const int EpisodePage = 10;
+    /// <summary>Past this the list is noise; the best are at the top.</summary>
+    const int MaxSources = 60;
+    /// <summary>The words' column beside the backdrop, and the lists under it.</summary>
+    const double Column = 460, ListWidth = 720;
 
     readonly MainWindow shell = MainWindow.Shell;
     readonly ScrollViewer scroll = new() { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-    readonly StackPanel page = new();
-    readonly StackPanel topRight = new() { Orientation = Orientation.Horizontal };
-    readonly StackPanel content = new() { MaxWidth = 1100, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 80) };
+    readonly StackPanel content = new() { HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(32, 72, 32, 40) };
+    readonly Border backdrop = new();
     readonly DispatcherTimer searchDelay = new() { Interval = TimeSpan.FromMilliseconds(280) };
 
     Title title;
@@ -33,7 +38,10 @@ public sealed class DetailView : UserControl, IDisposable
     string? wanted;
     bool plotOpen;
     bool saving;
+    /// <summary>An episode's download button asked before its releases were in: keep the best once they are.</summary>
+    bool saveWhenFound;
     string? error;
+    string? backdropUrl;
     CancellationTokenSource? searching;
     int searchGen;
     FrameworkElement? actionsAnchor;
@@ -49,20 +57,28 @@ public sealed class DetailView : UserControl, IDisposable
             season = picked.Season;
         }
 
-        var root = new Grid();
-        scroll.Content = page;
-        root.Children.Add(scroll);
+        // The backdrop stays put while the page scrolls over it.
+        var stage = new Grid
+        {
+            ColumnDefinitions = { new ColumnDefinition { Width = new GridLength(30, GridUnitType.Star) }, new ColumnDefinition { Width = new GridLength(70, GridUnitType.Star) } },
+            RowDefinitions = { new RowDefinition { Height = new GridLength(90, GridUnitType.Star) }, new RowDefinition { Height = new GridLength(10, GridUnitType.Star) } },
+        };
+        var art = new Grid { Children = { backdrop, Ui.Brushed(new Border(), "FadeToBg"), Ui.Brushed(new Border(), "FadeLeft") } };
+        Grid.SetColumn(art, 1);
+        stage.Children.Add(art);
 
-        var back = Ui.Round("arrow-left", () => shell.CloseLayer(this), "Accent", "AccentSoft", 40, 20, "Back");
+        scroll.Content = content;
+        Ui.SmoothWheel(scroll);
+
+        // mobile Ui.kt BackButton: round, dark, over the art.
+        var back = Ui.Round("arrow-left", () => shell.CloseLayer(this), "Text", "Tint", 40, 20, "Back");
+        ((Icon)back.Content).Foreground = Brushes.White;
+        back.Background = new SolidColorBrush(Color.FromArgb(0x80, 0, 0, 0));
         back.HorizontalAlignment = HorizontalAlignment.Left;
         back.VerticalAlignment = VerticalAlignment.Top;
         back.Margin = new Thickness(20, 16, 0, 0);
-        root.Children.Add(back);
-        topRight.HorizontalAlignment = HorizontalAlignment.Right;
-        topRight.VerticalAlignment = VerticalAlignment.Top;
-        topRight.Margin = new Thickness(0, 16, 28, 0);
-        root.Children.Add(topRight);
-        Content = root;
+
+        Content = new Grid { Children = { stage, scroll, back } };
 
         searchDelay.Tick += (_, _) => { searchDelay.Stop(); FindReleases(); };
         shell.LibraryChanged += OnLibrary;
@@ -86,10 +102,10 @@ public sealed class DetailView : UserControl, IDisposable
         if (IsVisible) Render();
     }
 
-    /// <summary>A shelf row carries no episodes, so a series always needs the full record.</summary>
+    /// <summary>A shelf row carries no episodes or logo, so the full record is always fetched.</summary>
     async void LoadFull()
     {
-        if (title.Plot is not null && (title.Kind == "movie" || title.Episodes.Count > 0)) return;
+        if (title.Plot is not null && title.Logo is not null && (title.Kind == "movie" || title.Episodes.Count > 0)) return;
         var full = await Meta.LoadTitle(title.Imdb, title.Kind);
         if (full is null) return;
         title = full;
@@ -132,6 +148,8 @@ public sealed class DetailView : UserControl, IDisposable
     string PickKey => picked is not null ? $"{picked.Season}:{picked.Number}" : $"movie:{title.Imdb}";
     int? PickedAbsolute => picked is not null ? Meta.AbsoluteNumber(title.Episodes, picked.Season, picked.Number) : null;
     string? PickedTag => picked is not null ? Search.PickTag(picked.Season, picked.Number, PickedAbsolute) : null;
+    /// <summary>"S2:E4", as the phone and the TV write an episode.</summary>
+    static string Short(Episode ep) => $"S{ep.Season}:E{ep.Number}";
 
     /// <summary>Releases for the selected episode (or the film), debounced across season flips.</summary>
     void FindReleases(bool debounce = false)
@@ -158,18 +176,36 @@ public sealed class DetailView : UserControl, IDisposable
             if (t.IsFaulted) error = t.Exception?.GetBaseException().Message;
             sourceKey = key;
             if (wanted is not null && !sources.Any(h => h.Quality == wanted)) wanted = null;
+            if (saveWhenFound)
+            {
+                saveWhenFound = false;
+                if (sources.FirstOrDefault() is { } hit) { Save(hit.Magnet); return; }
+                shell.Toast($"No sources found for {(picked is null ? title.Name : Short(picked))}", true);
+            }
             Render();
         }));
     }
 
     // ── Render ──────────────────────────────────────────────────────────────
 
+    static TextBlock Heading(string text, double size = 18)
+    {
+        var t = Ui.Text(text, "TitleText", "Text", size, FontWeights.Bold);
+        t.Margin = new Thickness(0, 0, 0, 12);
+        return t;
+    }
+
     void Render()
     {
         var offset = scroll.VerticalOffset;
-        page.Children.Clear();
         content.Children.Clear();
-        RenderSaveButtons();
+
+        var url = title.Backdrop ?? $"https://images.metahub.space/background/medium/{title.Imdb}/img";
+        if (url != backdropUrl && ImageUrl.Load(url, 1920) is { } image)
+        {
+            backdropUrl = url;
+            backdrop.Background = new ImageBrush(image) { Stretch = Stretch.UniformToFill, AlignmentY = AlignmentY.Top };
+        }
 
         var progress = shell.EpisodeProgress(title.Episodes);
         var resume = title.Kind == "movie" ? shell.FilmProgress(title.Imdb) : null;
@@ -179,258 +215,164 @@ public sealed class DetailView : UserControl, IDisposable
         var seen = picked is not null ? progress.GetValueOrDefault(picked.Id) : resume is { } r ? Math.Min(100, r.Position / r.Duration * 100) : 0;
         var canResume = seen >= 1 && seen < EpisodeLinks.Watched;
         var wait = shell.IsOpening || saving;
+        var live = best is not null && !wait;
 
-        // Artwork, with the page fading into it.
-        var art = new Grid { Height = 400 };
-        art.SetResourceReference(Panel.BackgroundProperty, "Surface");
-        if (ImageUrl.Load(title.Backdrop ?? title.Poster, 1920) is { } backdrop)
-            art.Children.Add(new Border { Background = new ImageBrush(backdrop) { Stretch = Stretch.UniformToFill, AlignmentY = AlignmentY.Top } });
-        art.Children.Add(Ui.Brushed(new Border(), "FadeToBg"));
-        page.Children.Add(art);
+        var head = new StackPanel { Width = Column, HorizontalAlignment = HorizontalAlignment.Left };
+        head.Children.Add(Ui.TitleMark(title, 80, 320));
+        var facts = Ui.Facts(title);
+        facts.Margin = new Thickness(0, 12, 0, 16);
+        head.Children.Add(facts);
 
-        // Poster and facts, pulled up over the fade.
-        var head = new DockPanel { Margin = new Thickness(40, -120, 40, 0) };
-        if (title.Poster is not null)
-        {
-            var poster = Ui.Art(title.Poster, title.Name, 140, 206, 12, 280);
-            poster.Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 24, ShadowDepth = 6, Opacity = 0.35 };
-            DockPanel.SetDock(poster, Dock.Left);
-            head.Children.Add(poster);
-        }
-        var name = Ui.Text(title.Name, "Display", "Text", 30);
-        name.TextWrapping = TextWrapping.Wrap;
-        var facts = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 8) };
-        if (title.Rating is not null)
-        {
-            var star = new Icon { Kind = "star", Size = 13, Filled = true };
-            star.SetResourceReference(Icon.ForegroundProperty, "Warn");
-            facts.Children.Add(star);
-            facts.Children.Add(Ui.Text(title.Rating, "Label", "Warn", 13, FontWeights.SemiBold));
-            ((FrameworkElement)facts.Children[^1]).Margin = new Thickness(4, 0, 14, 0);
-        }
-        facts.Children.Add(Ui.Text(string.Join(" · ", new[] { title.Year, title.Runtime, title.Kind == "tv" ? "Series" : "Film" }.Where(s => !string.IsNullOrEmpty(s))), "Meta", "Accent", 13));
-        var genres = new WrapPanel();
-        foreach (var g in title.Genres)
-        {
-            var chip = Ui.Brushed(new Border { CornerRadius = new CornerRadius(8), Padding = new Thickness(8, 3, 8, 3), Margin = new Thickness(0, 0, 6, 6), Child = Ui.Text(g, "Meta", "Accent", 11) }, "SurfaceAlt");
-            genres.Children.Add(chip);
-        }
-        head.Children.Add(new StackPanel { Margin = new Thickness(20, 120, 0, 0), VerticalAlignment = VerticalAlignment.Bottom, Children = { name, facts, genres } });
-        content.Children.Add(head);
-
-        // The one thing most people want: start the healthiest release.
-        var actions = new DockPanel { Margin = new Thickness(40, 24, 40, 0), MaxWidth = 720, HorizontalAlignment = HorizontalAlignment.Left };
-        actionsAnchor = actions;
-        var playLabel = wait ? "Opening…"
-            : best is null ? "Finding releases…"
-            : canResume ? $"Continue{(PickedTag is null ? "" : " " + PickedTag)} · {Math.Round(seen)}%"
-            : PickedTag is not null ? $"Play {PickedTag}" : "Play";
-        var saveButton = Ui.Round("download", () => { if (best is not null) Save(best.Magnet); }, "Text", "SurfaceAlt", 50, 18, "Download");
-        if (saving) saveButton.Content = Ui.Spinner(18, "Text");
-        saveButton.IsEnabled = best is not null && !wait;
-        saveButton.Margin = new Thickness(12, 0, 0, 0);
-        DockPanel.SetDock(saveButton, Dock.Right);
-        actions.Children.Add(saveButton);
+        // The one thing most people want: start the healthiest release — or carry on.
+        var label = wait ? saving ? "Starting download…" : "Opening…"
+            : best is null ? fresh && sources is not null ? "No sources" : "Finding sources…"
+            : canResume ? "Resume  ·  " + (picked is null ? "" : Short(picked) + "  ·  ") + $"{Math.Round(seen)}%"
+            : picked is not null ? $"Play {Short(picked)}" : "Play";
+        var play = Ui.Action(label, "play", () => { if (best is not null) Start(best.Magnet, false); }, primary: true);
+        play.IsHitTestVisible = live;
+        play.Opacity = live ? 1 : 0.6;
+        actionsAnchor = play;
+        head.Children.Add(play);
         if (canResume)
         {
-            var over = Ui.Round("rotate-ccw", () => { if (best is not null) Start(best.Magnet, true); }, "Text", "SurfaceAlt", 50, 17, "Start over");
-            over.IsEnabled = best is not null && !wait;
-            over.Margin = new Thickness(12, 0, 0, 0);
-            DockPanel.SetDock(over, Dock.Right);
-            actions.Children.Add(over);
-        }
-        var play = Ui.Button(new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Children = { Ui.Glyph("play", 17, best is null || wait ? "Muted" : "OnAccent"), Ui.Text(playLabel, "Label", best is null || wait ? "Muted" : "OnAccent", 15, FontWeights.SemiBold) },
-        }, () => { if (best is not null) Start(best.Magnet, false); }, best is null || wait ? "Pill" : "PillAccent");
-        ((FrameworkElement)((StackPanel)play.Content).Children[1]).Margin = new Thickness(8, 0, 0, 0);
-        play.Height = 50;
-        play.Tag = 25;
-        play.IsHitTestVisible = best is not null && !wait;
-        actions.Children.Add(play);
-        content.Children.Add(actions);
-
-        if (title.Kind == "tv" && season is not null)
-        {
-            var seasonDl = Ui.Button(new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Children = { saving ? Ui.Spinner(15, "Text") : Ui.Glyph("download", 15, "Text"), Ui.Text(saving ? "Starting download…" : $"Download season {(season == 0 ? "specials" : season.ToString())}", "Label", "Text", 13) },
-            }, SaveSeason, "Pill");
-            ((FrameworkElement)((StackPanel)seasonDl.Content).Children[1]).Margin = new Thickness(8, 0, 0, 0);
-            seasonDl.SetResourceReference(BackgroundProperty, "SurfaceAlt");
-            seasonDl.Margin = new Thickness(40, 12, 40, 0);
-            seasonDl.MaxWidth = 720;
-            seasonDl.HorizontalAlignment = HorizontalAlignment.Left;
-            seasonDl.Width = 720;
-            seasonDl.IsEnabled = best is not null && !wait;
-            content.Children.Add(seasonDl);
+            var over = Ui.Action("Start over", "rotate-ccw", () => { if (best is not null) Start(best.Magnet, true); });
+            over.Margin = new Thickness(0, 8, 0, 0);
+            over.IsEnabled = live;
+            head.Children.Add(over);
         }
 
-        // Quality: one track of segments, directly under the button it governs.
-        var qualities = Qualities.Where(q => sources?.Any(h => h.Quality == q) == true).ToList();
-        if (qualities.Count > 1 && sources is not null)
-        {
-            var bar = new System.Windows.Controls.Primitives.UniformGrid { Rows = 1 };
-            foreach (var q in qualities.Prepend(null))
-            {
-                var on = wanted == q;
-                var count = q is null ? sources.Count : sources.Count(h => h.Quality == q);
-                var label = new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    Children = { Ui.Text(q ?? "Best", "Meta", on ? "Text" : "Faint", 12, on ? FontWeights.SemiBold : FontWeights.Medium), Ui.Text(count.ToString(), "Meta", on ? "Accent" : "Faint", 10) },
-                };
-                ((FrameworkElement)label.Children[1]).Margin = new Thickness(5, 0, 0, 0);
-                var captured = q;
-                var segment = Ui.Button(label, () => { wanted = captured; Render(); });
-                segment.Tag = 999;
-                segment.Padding = new Thickness(0, 9, 0, 9);
-                segment.Background = on ? (Brush)FindResource("SurfaceAlt") : Brushes.Transparent;
-                bar.Children.Add(segment);
-            }
-            var track = Ui.Pill(Ui.Card(bar, "Surface", 0, new Thickness(3)));
-            track.Margin = new Thickness(40, 12, 40, 0);
-            track.MaxWidth = 720;
-            track.HorizontalAlignment = HorizontalAlignment.Left;
-            track.Width = 720;
-            content.Children.Add(track);
-        }
-
-        // A film's own progress bar; series show theirs per episode.
+        // A film's own progress; a series shows each episode's.
         if (picked is null && seen >= 1 && resume is { } res)
         {
-            var bar = Ui.Bar(seen, 3);
-            var line = Ui.Text($"{Format.Clock(res.Position)} of {Format.Clock(res.Duration)}" + (seen >= EpisodeLinks.Watched ? " · finished" : $" · {Format.Left(res.Duration - res.Position)}"), "Meta", "Faint", 11);
+            var line = Ui.Text($"{Format.Clock(res.Position)} of {Format.Clock(res.Duration)}" + (seen >= EpisodeLinks.Watched ? " · finished" : $" · {Format.Left(res.Duration - res.Position)}"), "Meta", "Faint", 12);
             line.Margin = new Thickness(0, 4, 0, 0);
-            content.Children.Add(new StackPanel { Margin = new Thickness(40, 12, 40, 0), MaxWidth = 720, HorizontalAlignment = HorizontalAlignment.Left, Width = 720, Children = { bar, line } });
+            head.Children.Add(new StackPanel { Margin = new Thickness(0, 10, 0, 0), Children = { Ui.Bar(seen, 3), line } });
         }
 
         if (title.Plot is not null)
         {
-            var plot = Ui.Text(title.Plot, "Body", "Muted", 15);
-            plot.LineHeight = 24;
-            plot.MaxWidth = 820;
-            plot.HorizontalAlignment = HorizontalAlignment.Left;
+            var plot = Ui.Text(title.Plot, "Body", "Text");
+            plot.Opacity = 0.85;
             if (!plotOpen)
             {
-                plot.MaxHeight = 72;
+                plot.MaxHeight = 88;
                 plot.TextTrimming = TextTrimming.WordEllipsis;
             }
             var plotButton = Ui.Button(plot, () => { plotOpen = !plotOpen; Render(); });
-            plotButton.Margin = new Thickness(40, 20, 40, 0);
-            plotButton.HorizontalAlignment = HorizontalAlignment.Left;
-            content.Children.Add(plotButton);
+            plotButton.Margin = new Thickness(0, 14, 0, 0);
+            head.Children.Add(plotButton);
         }
 
         if (title.Directors.Count > 0)
         {
-            var crew = new TextBlock { FontSize = 12, Margin = new Thickness(40, 12, 40, 0) };
-            crew.Inlines.Add(new System.Windows.Documents.Run("Directed by ") { Foreground = (Brush)FindResource("Faint") });
-            crew.Inlines.Add(new System.Windows.Documents.Run(string.Join(", ", title.Directors)) { Foreground = (Brush)FindResource("Muted") });
-            content.Children.Add(crew);
+            var crew = new TextBlock { FontSize = 13, FontWeight = FontWeights.Medium, Margin = new Thickness(0, 8, 0, 0), TextWrapping = TextWrapping.Wrap };
+            crew.Inlines.Add(new System.Windows.Documents.Run((title.Kind == "tv" ? "Creators" : "Director") + ": ") { Foreground = (Brush)FindResource("Faint") });
+            crew.Inlines.Add(new System.Windows.Documents.Run(string.Join(", ", title.Directors.Take(2))) { Foreground = (Brush)FindResource("Muted") });
+            head.Children.Add(crew);
         }
 
-        if (title.Cast.Count > 0)
-        {
-            var heading = Ui.Text("CAST", "Overline");
-            heading.Margin = new Thickness(40, 28, 40, 12);
-            content.Children.Add(heading);
-            var rail = new WrapPanel { Margin = new Thickness(40, 0, 40, 0) };
-            var photos = new Dictionary<string, System.Windows.Shapes.Ellipse>();
-            foreach (var who in title.Cast.Take(12))
+        // However many actions there are, they share the width evenly.
+        var later = Saved.OnList(shell.SavedList, title.Imdb, "later");
+        var liked = Saved.OnList(shell.SavedList, title.Imdb, "favorite");
+        var actions = new UniformGrid { Rows = 1, Margin = new Thickness(0, 14, 0, 0) };
+        actions.Children.Add(Ui.IconAction(later ? "check" : "plus", later ? "In My List" : "My List", () => { shell.ToggleSaved(title, "later"); Render(); }, later, "Good", double.NaN));
+        actions.Children.Add(Ui.IconAction("heart", liked ? "Liked" : "Like", () => { shell.ToggleSaved(title, "favorite"); Render(); }, liked, "Accent", double.NaN));
+        if (title.Kind != "tv")
+            actions.Children.Add(Ui.IconAction("download", "Download", () =>
             {
-                var face = new Border
-                {
-                    Width = 68,
-                    Height = 68,
-                    CornerRadius = new CornerRadius(34),
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    Background = (Brush)new HueBrush().Convert(who, typeof(Brush), "dark", null!),
-                    Child = new TextBlock { Text = (string)new Initials().Convert(who, typeof(string), null!, null!), Foreground = Brushes.White, FontSize = 20, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center },
-                };
-                var label = Ui.Text(who, "Meta", "Muted", 11);
-                label.TextWrapping = TextWrapping.Wrap;
-                label.TextAlignment = TextAlignment.Center;
-                label.MaxHeight = 30;
-                label.Margin = new Thickness(0, 8, 0, 0);
-                // The photo covers the initials once it arrives; until then (or without one) they show.
-                var photo = new System.Windows.Shapes.Ellipse { Width = 68, Height = 68 };
-                photos[who] = photo;
-                var avatar = new Grid { HorizontalAlignment = HorizontalAlignment.Center, Children = { face, photo } };
-                rail.Children.Add(new StackPanel { Width = 82, Margin = new Thickness(0, 0, 12, 12), Children = { avatar, label } });
-            }
-            content.Children.Add(rail);
-            Meta.CastPhotos(title.Imdb, title.Cast.Take(12).ToList()).ContinueWith(t => Dispatcher.BeginInvoke(() =>
-            {
-                foreach (var (who, url) in t.Result)
-                    if (photos.TryGetValue(who, out var photo) && ImageUrl.Load(url, 136) is { } image)
-                        photo.Fill = new ImageBrush(image) { Stretch = Stretch.UniformToFill, AlignmentY = AlignmentY.Top };
-            }), TaskScheduler.Default);
-        }
+                if (best is not null) Save(best.Magnet);
+                else shell.Toast(fresh && sources is not null ? "No sources to download." : "Still finding sources…");
+            }, width: double.NaN));
+        head.Children.Add(actions);
+
+        if (title.Cast.Count > 0) head.Children.Add(CastRow());
+        if (title.Awards is not null) head.Children.Add(AwardsCard(title.Awards));
+        content.Children.Add(head);
 
         if (title.Kind == "tv") RenderEpisodes(progress);
-
-        if (title.Awards is not null)
-        {
-            var text = Ui.Text(title.Awards, "Meta", "Warn", 12);
-            text.TextWrapping = TextWrapping.Wrap;
-            text.Margin = new Thickness(8, 0, 0, 0);
-            var dock = new DockPanel();
-            var award = Ui.Glyph("award", 14, "Warn");
-            award.VerticalAlignment = VerticalAlignment.Top;
-            DockPanel.SetDock(award, Dock.Left);
-            dock.Children.Add(award);
-            dock.Children.Add(text);
-            var card = Ui.Card(dock, "WarnSoft", 12, new Thickness(12));
-            card.Margin = new Thickness(40, 20, 40, 0);
-            card.MaxWidth = 720;
-            card.HorizontalAlignment = HorizontalAlignment.Left;
-            content.Children.Add(card);
-        }
-
-        var reviews = Ui.Text("RATINGS & REVIEWS", "Overline");
-        reviews.Margin = new Thickness(40, 28, 40, 10);
-        content.Children.Add(reviews);
-        var links = new WrapPanel { Margin = new Thickness(40, 0, 40, 0) };
-        foreach (var (label, url) in Meta.ReviewLinks(title))
-        {
-            var link = Ui.Button(new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Children = { Ui.Text(label, "Meta", "Text", 12, FontWeights.Medium), Ui.Glyph("external-link", 12, "Muted") },
-            }, () => Ui.Open(url), tooltip: url);
-            ((FrameworkElement)((StackPanel)link.Content).Children[1]).Margin = new Thickness(8, 0, 0, 0);
-            link.Tag = 999;
-            link.Padding = new Thickness(12, 8, 12, 8);
-            link.Margin = new Thickness(0, 0, 8, 8);
-            link.SetResourceReference(BackgroundProperty, "SurfaceAlt");
-            links.Children.Add(link);
-        }
-        content.Children.Add(links);
-
         RenderSources(fresh, shown, wait);
+        RenderReviews();
 
-        page.Children.Add(content);
         Dispatcher.BeginInvoke(() => scroll.ScrollToVerticalOffset(offset), DispatcherPriority.Loaded);
     }
 
-    void RenderSaveButtons()
+    /// <summary>The cast as faces: a round photo over each name. Initials until the photos arrive.</summary>
+    FrameworkElement CastRow()
     {
-        topRight.Children.Clear();
-        foreach (var (list, glyph, label) in new[] { ("later", "bookmark", "Watch later"), ("favorite", "heart", "Favourite") })
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        var photos = new Dictionary<string, System.Windows.Shapes.Ellipse>();
+        foreach (var who in title.Cast.Take(12))
         {
-            var active = Saved.OnList(shell.SavedList, title.Imdb, list);
-            var icon = new Icon { Kind = glyph, Size = 20, Filled = active };
-            if (active) icon.Foreground = new SolidColorBrush(Color.FromRgb(0xe5, 0x09, 0x14));
-            else icon.SetResourceReference(Icon.ForegroundProperty, "Muted");
-            var button = Ui.Button(icon, () => { shell.ToggleSaved(title, list); Render(); }, "Round", active ? $"Remove from {label}" : label);
-            button.SetResourceReference(BackgroundProperty, "AccentSoft");
-            button.Margin = new Thickness(8, 0, 0, 0);
-            topRight.Children.Add(button);
+            var face = Ui.Brushed(new Border
+            {
+                Width = 64,
+                Height = 64,
+                CornerRadius = new CornerRadius(32),
+                Child = Ui.Text((string)new Initials().Convert(who, typeof(string), null!, null!), "Label", "Muted", 15, FontWeights.Bold),
+            }, "SurfaceAlt");
+            ((FrameworkElement)face.Child).HorizontalAlignment = HorizontalAlignment.Center;
+            ((FrameworkElement)face.Child).VerticalAlignment = VerticalAlignment.Center;
+            var photo = new System.Windows.Shapes.Ellipse { Width = 64, Height = 64 };
+            photos[who] = photo;
+            var name = Ui.Text(who, "Meta", "Text", 12);
+            name.TextWrapping = TextWrapping.Wrap;
+            name.TextAlignment = TextAlignment.Center;
+            name.MaxHeight = 34;
+            name.Margin = new Thickness(0, 6, 0, 0);
+            row.Children.Add(new StackPanel { Width = 72, Margin = new Thickness(0, 0, 14, 0), Children = { new Grid { Width = 64, Children = { face, photo } }, name } });
         }
+        Meta.CastPhotos(title.Imdb, title.Cast.Take(12).ToList()).ContinueWith(t => Dispatcher.BeginInvoke(() =>
+        {
+            foreach (var (who, url) in t.Result)
+                if (photos.TryGetValue(who, out var photo) && ImageUrl.Load(url, 128) is { } image)
+                    photo.Fill = new ImageBrush(image) { Stretch = Stretch.UniformToFill, AlignmentY = AlignmentY.Top };
+        }), TaskScheduler.Default);
+
+        var rail = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = row };
+        Ui.PassWheel(rail);
+        Ui.DragScroll(rail);
+        return new StackPanel { Margin = new Thickness(0, 18, 0, 0), Children = { Heading("Cast", 16), rail } };
+    }
+
+    /// <summary>Awards as a card: a trophy, the headline prize, and the tally as two pills (core awardsOf).</summary>
+    static FrameworkElement AwardsCard(string text)
+    {
+        var wins = System.Text.RegularExpressions.Regex.Match(text, @"(\d+) wins?", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var noms = System.Text.RegularExpressions.Regex.Match(text, @"(\d+) nominations?", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var headline = text.Split('.').Select(s => s.Trim()).FirstOrDefault(s => s.Length > 0 && !System.Text.RegularExpressions.Regex.IsMatch(s, @"^\d+ (wins?|nominations?)", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+
+        var trophy = new Border
+        {
+            Width = 42,
+            Height = 42,
+            CornerRadius = new CornerRadius(21),
+            Background = new SolidColorBrush(Color.FromArgb(0x29, 0xf5, 0xc5, 0x18)),
+            Child = Ui.Glyph("award", 22, "Imdb"),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var words = new StackPanel { Margin = new Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        var top = Ui.Text(headline ?? (wins.Success || noms.Success ? "Awards" : text), "Label", "Text", 15, FontWeights.SemiBold);
+        top.TextWrapping = TextWrapping.Wrap;
+        words.Children.Add(top);
+        if (wins.Success || noms.Success)
+        {
+            var pills = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
+            FrameworkElement Pill(string label, Color tint, string brush)
+            {
+                var b = new Border { CornerRadius = new CornerRadius(999), Padding = new Thickness(10, 3, 10, 3), Margin = new Thickness(0, 0, 8, 0), Background = new SolidColorBrush(Color.FromArgb(0x24, tint.R, tint.G, tint.B)), Child = Ui.Text(label, "Meta", brush, 12, FontWeights.SemiBold) };
+                return b;
+            }
+            if (wins.Success) pills.Children.Add(Pill($"{wins.Groups[1].Value} {(wins.Groups[1].Value == "1" ? "win" : "wins")}", Color.FromRgb(0xf5, 0xc5, 0x18), "Imdb"));
+            if (noms.Success) pills.Children.Add(Pill($"{noms.Groups[1].Value} {(noms.Groups[1].Value == "1" ? "nomination" : "nominations")}", Color.FromRgb(0xb3, 0xb3, 0xb3), "Muted"));
+            words.Children.Add(pills);
+        }
+        var dock = new DockPanel();
+        DockPanel.SetDock(trophy, Dock.Left);
+        dock.Children.Add(trophy);
+        dock.Children.Add(words);
+        var card = Ui.Card(dock, "Surface", 10, new Thickness(14));
+        card.Margin = new Thickness(0, 18, 0, 0);
+        return card;
     }
 
     void RenderEpisodes(Dictionary<string, double> progress)
@@ -442,17 +384,12 @@ public sealed class DetailView : UserControl, IDisposable
         var showsWhole = wholeSeason || (picked is not null && inSeason.FindIndex(e => e.Id == picked.Id) >= EpisodePage);
         var listed = showsWhole ? inSeason : inSeason.Take(EpisodePage).ToList();
 
-        var block = new StackPanel { Margin = new Thickness(40, 28, 40, 0), MaxWidth = 820, HorizontalAlignment = HorizontalAlignment.Left };
-        var headRow = new DockPanel();
-        var count = Ui.Text($"{inSeason.Count} in season", "Meta", "Faint", 11);
-        DockPanel.SetDock(count, Dock.Right);
-        headRow.Children.Add(count);
-        headRow.Children.Add(Ui.Text("EPISODES", "Overline"));
-        block.Children.Add(headRow);
+        var block = new StackPanel { Margin = new Thickness(0, 26, 0, 0), Width = ListWidth, HorizontalAlignment = HorizontalAlignment.Left };
+        block.Children.Add(Heading("Episodes"));
 
         if (seasons.Count > 1)
         {
-            var chips = new WrapPanel { Margin = new Thickness(0, 10, 0, 6) };
+            var chips = new WrapPanel();
             foreach (var s in seasons)
             {
                 var captured = s;
@@ -463,159 +400,204 @@ public sealed class DetailView : UserControl, IDisposable
             block.Children.Add(chips);
         }
 
-        foreach (var ep in listed)
+        if (season is not null)
         {
-            var seen = progress.GetValueOrDefault(ep.Id);
-            var done = seen >= EpisodeLinks.Watched;
-            var on = picked?.Id == ep.Id;
-
-            var still = new Grid { Width = 160, Height = 90 };
-            still.Children.Add(Ui.Brushed(new Border { CornerRadius = new CornerRadius(8), Child = ep.Thumbnail is null ? Ui.Glyph("film", 16, "Faint") : null }, "SurfaceAlt"));
-            if (ImageUrl.Load(ep.Thumbnail, 320) is { } image)
-                still.Children.Add(new Border { CornerRadius = new CornerRadius(8), Background = new ImageBrush(image) { Stretch = Stretch.UniformToFill } });
-            if (seen > 0 && !done)
-            {
-                var bar = Ui.Bar(seen, 3);
-                bar.VerticalAlignment = VerticalAlignment.Bottom;
-                bar.Margin = new Thickness(8);
-                still.Children.Add(bar);
-            }
-            if (done)
-            {
-                still.Children.Add(Ui.Brushed(new Border { Width = 18, Height = 18, CornerRadius = new CornerRadius(9), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(4), Child = Ui.Glyph("check", 11, "OnAccent") }, "Accent"));
-            }
-
-            var text = new StackPanel { Margin = new Thickness(14, 2, 0, 2) };
-            text.Children.Add(Ui.Text($"{ep.Number}. {ep.Name}", "Label", "Text", 14));
-            text.Children.Add(Ui.Text(done ? "Watched" : seen > 0 ? $"{Math.Round(seen)}% watched" : ep.Released is { Length: >= 10 } rel ? rel[..10] : "Not watched", "Meta", "Faint", 11));
-            if (ep.Overview is not null)
-            {
-                var overview = Ui.Text(ep.Overview, "Meta", "Muted", 12);
-                overview.TextWrapping = TextWrapping.Wrap;
-                overview.MaxHeight = 36;
-                overview.TextTrimming = TextTrimming.WordEllipsis;
-                overview.Margin = new Thickness(0, 4, 0, 0);
-                text.Children.Add(overview);
-            }
-            var dock = new DockPanel();
-            DockPanel.SetDock(still, Dock.Left);
-            dock.Children.Add(still);
-            dock.Children.Add(text);
-            var card = Ui.Card(dock, on ? "SurfaceAlt" : "Surface", 12, new Thickness(8));
-            var captured = ep;
-            var button = Ui.Button(card, () =>
-            {
-                picked = captured;
-                FindReleases(debounce: true);
-                Render();
-                // Bring the Play button — which now refers to this episode — into view.
-                if (actionsAnchor is not null)
-                {
-                    var y = actionsAnchor.TransformToAncestor(page).Transform(new Point(0, 0)).Y;
-                    scroll.ScrollToVerticalOffset(Math.Max(0, y - 80));
-                }
-            });
-            button.Margin = new Thickness(0, 8, 0, 0);
-            block.Children.Add(button);
+            var name = season == 0 ? "specials" : $"season {season}";
+            var words = Ui.Text(saving ? "Starting download…" : $"Download {name}", "Meta", "Muted", 13, FontWeights.SemiBold);
+            words.Margin = new Thickness(8, 0, 0, 0);
+            var link = Ui.Button(new StackPanel { Orientation = Orientation.Horizontal, Children = { saving ? Ui.Spinner(16, "Muted") : Ui.Glyph("download", 16, "Muted"), words } }, SaveSeason);
+            link.HorizontalAlignment = HorizontalAlignment.Left;
+            link.Padding = new Thickness(4, 6, 6, 6);
+            link.Margin = new Thickness(-4, 0, 0, 4);
+            link.Tag = 6;
+            link.IsEnabled = !shell.IsOpening && !saving;
+            block.Children.Add(link);
         }
+
+        foreach (var ep in listed) block.Children.Add(EpisodeRow(ep, progress.GetValueOrDefault(ep.Id)));
 
         if (inSeason.Count > listed.Count || (wholeSeason && inSeason.Count > EpisodePage))
         {
             var less = wholeSeason && inSeason.Count > EpisodePage && inSeason.Count == listed.Count;
-            var more = Ui.Button(new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                Children = { Ui.Text(less ? "Show less" : $"Show all {inSeason.Count} episodes", "Label", "Accent", 13), Ui.Glyph(less ? "chevron-up" : "chevron-down", 16, "Accent") },
-            }, () => { wholeSeason = !less; Render(); });
-            var card = Ui.Card(more, "Surface", 12, new Thickness(12));
-            card.Margin = new Thickness(0, 8, 0, 0);
-            block.Children.Add(card);
+            var more = Ui.Action(less ? "Show fewer episodes" : $"Show all {inSeason.Count} episodes", less ? "chevron-up" : "chevron-down", () => { wholeSeason = !less; Render(); });
+            more.Margin = new Thickness(0, 8, 0, 0);
+            block.Children.Add(more);
         }
         content.Children.Add(block);
     }
 
+    /// <summary>Netflix's episode row (mobile Detail.kt): the still, number and name beside it, the synopsis under both.</summary>
+    FrameworkElement EpisodeRow(Episode ep, double seen)
+    {
+        var done = seen >= EpisodeLinks.Watched;
+        var on = picked?.Id == ep.Id;
+        var busy = on && sourceKey != PickKey;
+
+        var still = new Grid { Width = 132, Height = 74, ClipToBounds = true };
+        still.Children.Add(Ui.Art(ep.Thumbnail ?? title.Backdrop, ep.Name, 132, 74, 6, 264));
+        still.Children.Add(new Border { CornerRadius = new CornerRadius(6), Background = new SolidColorBrush(Color.FromArgb((byte)(busy ? 0x80 : 0x33), 0, 0, 0)) });
+        if (busy) still.Children.Add(Ui.Spinner(24, "Accent"));
+        else
+        {
+            var mark = Ui.Glyph("play", 16, "Text");
+            mark.Foreground = Brushes.White;
+            still.Children.Add(new Border { Width = 32, Height = 32, CornerRadius = new CornerRadius(16), Background = new SolidColorBrush(Color.FromArgb(0x8c, 0, 0, 0)), Child = mark });
+        }
+        if (seen > 0 && !done)
+        {
+            var bar = Ui.Bar(seen, 3);
+            bar.VerticalAlignment = VerticalAlignment.Bottom;
+            bar.Background = new SolidColorBrush(Color.FromArgb(0x40, 0xff, 0xff, 0xff));
+            still.Children.Add(bar);
+        }
+        else if (on && !busy) still.Children.Add(Ui.Brushed(new Border { Height = 3, VerticalAlignment = VerticalAlignment.Bottom }, "Accent"));
+        if (done)
+            still.Children.Add(Ui.Brushed(new Border { Width = 18, Height = 18, CornerRadius = new CornerRadius(9), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(4), Child = Ui.Glyph("check", 11, "OnAccent") }, "Accent"));
+
+        var name = Ui.Text($"{ep.Number}. {ep.Name}", "Label", "Text", 15, FontWeights.SemiBold);
+        name.TextWrapping = TextWrapping.Wrap;
+        name.MaxHeight = 40;
+        var when = Ui.Text(done ? "Watched" : seen > 0 ? $"{Math.Round(seen)}% watched" : ep.Released is { Length: >= 10 } rel ? rel[..10] : "", "Meta", "Faint", 12);
+        when.Margin = new Thickness(0, 2, 0, 0);
+        var text = new StackPanel { Margin = new Thickness(12, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center, Children = { name, when } };
+
+        var captured = ep;
+        var download = Ui.Round("download", () => DownloadEpisode(captured), "Muted", "Transparent", 40, 22, $"Download {Short(ep)}");
+        download.Background = Brushes.Transparent;
+        download.VerticalAlignment = VerticalAlignment.Center;
+
+        var top = new DockPanel();
+        DockPanel.SetDock(still, Dock.Left);
+        DockPanel.SetDock(download, Dock.Right);
+        top.Children.Add(still);
+        top.Children.Add(download);
+        top.Children.Add(text);
+        var body = new StackPanel { Children = { top } };
+        if (ep.Overview is not null)
+        {
+            var overview = Ui.Text(ep.Overview, "Meta", "Faint", 12);
+            overview.TextWrapping = TextWrapping.Wrap;
+            overview.MaxHeight = 36;
+            overview.TextTrimming = TextTrimming.WordEllipsis;
+            overview.Margin = new Thickness(0, 6, 0, 0);
+            body.Children.Add(overview);
+        }
+
+        // Picking an episode makes it what Play plays, and lists its releases below.
+        var row = Ui.Button(body, () =>
+        {
+            picked = captured;
+            FindReleases(debounce: true);
+            Render();
+            // Bring the Play button — which now refers to this episode — into view.
+            if (actionsAnchor is not null)
+            {
+                var y = actionsAnchor.TransformToAncestor(content).Transform(new Point(0, 0)).Y;
+                scroll.ScrollToVerticalOffset(Math.Max(0, y - 80));
+            }
+        });
+        row.Padding = new Thickness(8, 10, 8, 10);
+        row.Margin = new Thickness(-8, 0, -8, 0);
+        row.Tag = 8;
+        if (on) row.SetResourceReference(BackgroundProperty, "TintLo");
+        return row;
+    }
+
     void RenderSources(bool fresh, List<Hit>? shown, bool wait)
     {
-        var block = new StackPanel { Margin = new Thickness(40, 28, 40, 0), MaxWidth = 820, HorizontalAlignment = HorizontalAlignment.Left, Width = 820 };
-        block.Children.Add(Ui.Text((!fresh || shown is null ? "Finding releases…" : $"{shown.Count} release{(shown.Count == 1 ? "" : "s")}").ToUpperInvariant(), "Overline"));
-        if (sources is null || !fresh)
+        var block = new StackPanel { Margin = new Thickness(0, 26, 0, 0), Width = ListWidth, HorizontalAlignment = HorizontalAlignment.Left };
+        block.Children.Add(Heading(picked is null ? "Sources" : $"Sources  ·  {Short(picked)}"));
+
+        var qualities = Qualities.Where(q => sources?.Any(h => h.Quality == q) == true).ToList();
+        if (fresh && qualities.Count > 1)
         {
-            var spin = Ui.Spinner();
-            spin.Margin = new Thickness(0, 16, 0, 0);
-            spin.HorizontalAlignment = HorizontalAlignment.Left;
-            block.Children.Add(spin);
-        }
-        if (wait)
-        {
-            var opening = Ui.Card(new StackPanel
+            var chips = new WrapPanel { Margin = new Thickness(0, 0, 0, 4) };
+            foreach (var q in qualities.Prepend(null))
             {
-                Orientation = Orientation.Horizontal,
-                Children = { Ui.Spinner(18), Ui.Text(saving ? "Starting download…" : "Reading torrent…", "Label", "Accent", 13) },
-            }, "AccentSoft", 12, new Thickness(12));
-            ((FrameworkElement)((StackPanel)opening.Child).Children[1]).Margin = new Thickness(12, 0, 0, 0);
-            opening.Margin = new Thickness(0, 10, 0, 0);
-            block.Children.Add(opening);
-        }
-        if (error is not null)
-        {
-            var e = Ui.Text(error, "Meta", "Danger", 12);
-            e.TextWrapping = TextWrapping.Wrap;
-            e.Margin = new Thickness(0, 10, 0, 0);
-            block.Children.Add(e);
-        }
-        if (sources is { Count: 0 } && fresh && error is null)
-        {
-            var none = Ui.Text("Nothing on the index for this title. Try the Search tab with a different spelling.", "Meta", "Faint", 12);
-            none.TextWrapping = TextWrapping.Wrap;
-            none.Margin = new Thickness(0, 10, 0, 0);
-            block.Children.Add(none);
-        }
-        if (fresh && shown is not null)
-        {
-            for (var i = 0; i < shown.Count; i++)
-            {
-                var hit = shown[i];
-                var tone = Ui.HealthTone(hit.Seeders);
-                var mark = Ui.Brushed(new Border { Width = 34, Height = 34, CornerRadius = new CornerRadius(17), Child = Ui.Glyph("play", 14, i == 0 ? "OnAccent" : "Muted") }, i == 0 ? "Accent" : "SurfaceAlt");
-                var name = Ui.Text(hit.Name, "Label", "Text", 13);
-                name.ToolTip = hit.Name;
-                var meta = Format.Bytes(TorrentBytes(hit)) + (hit.Quality is null ? "" : $" · {hit.Quality}")
-                    + (picked is not null && hit.Scope != "episode" ? $" · {(hit.Scope == "season" ? "season pack" : "complete series")}" : "");
-                var body = new StackPanel { Margin = new Thickness(12, 0, 12, 0), VerticalAlignment = VerticalAlignment.Center, Children = { name, Ui.Text(meta, "Meta", "Faint", 11) } };
-                var pill = Ui.Brushed(new Border
-                {
-                    CornerRadius = new CornerRadius(11),
-                    Padding = new Thickness(8, 4, 8, 4),
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Child = new StackPanel
-                    {
-                        Orientation = Orientation.Horizontal,
-                        Children =
-                        {
-                            Ui.Brushed(new Border { Width = 6, Height = 6, CornerRadius = new CornerRadius(3), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 5, 0) }, tone.Fg),
-                            Ui.Text(hit.Seeders.ToString(), "Meta", tone.Fg, 11, FontWeights.Medium),
-                        },
-                    },
-                    ToolTip = $"{tone.Label} · {hit.Seeders} seeders",
-                }, tone.Bg);
-                var download = Ui.Round("download", () => Save(hit.Magnet), "Muted", "SurfaceAlt", 32, 14, "Download this release");
-                download.Margin = new Thickness(0, 0, 8, 0);
-                var dock = new DockPanel();
-                DockPanel.SetDock(mark, Dock.Left);
-                DockPanel.SetDock(pill, Dock.Right);
-                DockPanel.SetDock(download, Dock.Right);
-                dock.Children.Add(mark);
-                dock.Children.Add(pill);
-                dock.Children.Add(download);
-                dock.Children.Add(body);
-                var captured = hit;
-                var row = Ui.Button(Ui.Card(dock, "Surface", 12, new Thickness(12)), () => Start(captured.Magnet, false));
-                row.Margin = new Thickness(0, 8, 0, 0);
-                block.Children.Add(row);
+                var captured = q;
+                var chip = Ui.Chip(q ?? "All", wanted == q, () => { wanted = captured; Render(); });
+                chip.Margin = new Thickness(0, 0, 8, 8);
+                chips.Children.Add(chip);
             }
+            block.Children.Add(chips);
         }
+
+        FrameworkElement Note(string text, string brush = "Faint")
+        {
+            var t = Ui.Text(text, "Body", brush);
+            t.Margin = new Thickness(0, 0, 0, 8);
+            return t;
+        }
+        FrameworkElement Busy(string text)
+        {
+            var words = Ui.Text(text, "Body");
+            words.Margin = new Thickness(12, 0, 0, 0);
+            return new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 12), Children = { Ui.Spinner(24), words } };
+        }
+        if (wait) block.Children.Add(Busy(saving ? "Starting download…" : "Reading torrent…"));
+        if (sources is null || !fresh) block.Children.Add(Busy("Asking every index…"));
+        else if (error is not null) block.Children.Add(Note(error, "Danger"));
+        else if (sources.Count == 0) block.Children.Add(Note("Nothing found. Try another episode, or search for the release by name."));
+
+        if (fresh && shown is not null)
+            foreach (var hit in shown.Take(MaxSources)) block.Children.Add(SourceRow(hit));
         content.Children.Add(block);
+    }
+
+    /// <summary>One release (mobile Detail.kt Source): what it is, how big, and how well it will stream — in words.</summary>
+    FrameworkElement SourceRow(Hit hit)
+    {
+        var tone = Ui.HealthTone(hit.Seeders);
+        var dock = new DockPanel();
+        if (hit.Quality is not null)
+        {
+            var tag = Ui.Brushed(new Border { CornerRadius = new CornerRadius(4), Padding = new Thickness(7, 3, 7, 3), Margin = new Thickness(0, 0, 12, 0), VerticalAlignment = VerticalAlignment.Center, Child = Ui.Text(hit.Quality, "Overline", "Text") }, "Tint");
+            DockPanel.SetDock(tag, Dock.Left);
+            dock.Children.Add(tag);
+        }
+        var captured = hit;
+        var download = Ui.Round("download", () => Save(captured.Magnet), "Muted", "Transparent", 36, 20, "Download this release");
+        download.Background = Brushes.Transparent;
+        download.Margin = new Thickness(4, 0, 0, 0);
+        DockPanel.SetDock(download, Dock.Right);
+        dock.Children.Add(download);
+        var grade = Ui.Text(tone.Label, "Meta", tone.Fg, 13, FontWeights.Bold);
+        grade.VerticalAlignment = VerticalAlignment.Center;
+        grade.Margin = new Thickness(10, 0, 0, 0);
+        DockPanel.SetDock(grade, Dock.Right);
+        dock.Children.Add(grade);
+
+        var name = Ui.Text(hit.Name, "Label", "Text", 14);
+        name.ToolTip = hit.Name;
+        // A film's scope is "episode" only by default — it says nothing there.
+        var scope = picked is null && hit.Scope == "episode" ? null : hit.Scope switch { "season" => "Season pack", "complete" => "Complete series", _ => "Episode" };
+        var meta = Ui.Text(string.Join("  ·  ", new[] { scope, Format.Bytes(TorrentBytes(hit)), $"{hit.Seeders} seeds" }.Where(s => s is not null)), "Meta", "Faint", 12);
+        meta.Margin = new Thickness(0, 2, 0, 0);
+        dock.Children.Add(new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { name, meta } });
+
+        var row = Ui.Button(Ui.Card(dock, "Surface", 8, new Thickness(14, 11, 8, 11)), () => Start(captured.Magnet, false));
+        row.Margin = new Thickness(0, 0, 0, 8);
+        return row;
+    }
+
+    /// <summary>Where to read what other people thought.</summary>
+    void RenderReviews()
+    {
+        var links = new WrapPanel();
+        foreach (var (label, url) in Meta.ReviewLinks(title))
+        {
+            var words = Ui.Text(label, "Meta", "Text", 13);
+            var mark = Ui.Glyph("external-link", 13, "Muted");
+            mark.Margin = new Thickness(8, 0, 0, 0);
+            var link = Ui.Button(new StackPanel { Orientation = Orientation.Horizontal, Children = { words, mark } }, () => Ui.Open(url), tooltip: url);
+            link.Tag = 999;
+            link.Height = 36;
+            link.Padding = new Thickness(16, 0, 14, 0);
+            link.Margin = new Thickness(0, 0, 8, 8);
+            link.SetResourceReference(BackgroundProperty, "TintLo");
+            links.Children.Add(link);
+        }
+        content.Children.Add(new StackPanel { Margin = new Thickness(0, 26, 0, 0), Width = ListWidth, HorizontalAlignment = HorizontalAlignment.Left, Children = { Heading("Reviews"), links } });
     }
 
     /// <summary>Torrentio's size is one file; a pack's torrent is that times its episodes.</summary>
@@ -641,6 +623,20 @@ public sealed class DetailView : UserControl, IDisposable
             picked = next;
             FindReleases(debounce: true);
         }
+        Render();
+    }
+
+    /// <summary>An episode's own download: its best release, looked up first if the list shows another's.</summary>
+    void DownloadEpisode(Episode ep)
+    {
+        if (picked?.Id == ep.Id && sourceKey == PickKey && sources?.FirstOrDefault() is { } ready)
+        {
+            Save(ready.Magnet);
+            return;
+        }
+        picked = ep;
+        saveWhenFound = true;
+        FindReleases();
         Render();
     }
 

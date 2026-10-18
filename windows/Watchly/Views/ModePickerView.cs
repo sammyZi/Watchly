@@ -25,7 +25,7 @@ public sealed class ModePickerView : UserControl
             text.Margin = new Thickness(0, 8, 0, 0);
             var note = Ui.Text(sub, "Meta", "Faint", 11);
             note.HorizontalAlignment = HorizontalAlignment.Center;
-            var card = Ui.Card(new StackPanel { Children = { circle, text, note } }, "Surface", 18, new Thickness(14, 22, 14, 22));
+            var card = Ui.Card(new StackPanel { Children = { circle, text, note } }, "Surface", 10, new Thickness(14, 22, 14, 22));
             return Ui.Button(card, onClick);
         }
 

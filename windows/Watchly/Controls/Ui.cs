@@ -10,8 +10,6 @@ namespace Watchly.Controls;
 /// <summary>Small builders for the pieces every screen repeats.</summary>
 public static class Ui
 {
-    public static readonly string[] Hues = { "#d42f37", "#7c5cff", "#00b8d4", "#f5a623", "#38c172" };
-
     static Style S(string key) => (Style)Application.Current.FindResource(key);
 
     public static TextBlock Text(string text, string style, string? brush = null, double? size = null, FontWeight? weight = null)
@@ -47,7 +45,7 @@ public static class Ui
         return b;
     }
 
-    public static Border Card(UIElement child, string background = "Surface", double radius = 18, Thickness? padding = null) =>
+    public static Border Card(UIElement child, string background = "Surface", double radius = 10, Thickness? padding = null) =>
         Brushed(new Border { Child = child, CornerRadius = new CornerRadius(radius), Padding = padding ?? new Thickness(12) }, background);
 
     /// <summary>Round the ends fully, whatever height the border lays out at — see PillRadius.</summary>
@@ -127,14 +125,12 @@ public static class Ui
         };
     }
 
-    /// <summary>Heading row: colour tick, title, optional "See all".</summary>
-    public static FrameworkElement Head(string title, string hue, Action? seeAll, double sidePadding = 24)
+    /// <summary>A shelf's heading (mobile Home.kt Rail): the name in bold, "See all ›" on the right.</summary>
+    public static FrameworkElement Head(string title, Action? seeAll, double sidePadding = 24)
     {
-        var row = new DockPanel { Margin = new Thickness(sidePadding, 0, sidePadding, 12), LastChildFill = false };
-        var tick = new Border { Width = 3, Height = 15, CornerRadius = new CornerRadius(2), Background = (Brush)new BrushConverter().ConvertFromString(hue)!, Margin = new Thickness(0, 0, 8, 0) };
-        DockPanel.SetDock(tick, Dock.Left);
-        row.Children.Add(tick);
-        var text = Text(title, "Label", "Text", 15, FontWeights.SemiBold);
+        var row = new DockPanel { Margin = new Thickness(sidePadding, 0, sidePadding - 10, 8), LastChildFill = false };
+        var text = Text(title, "TitleText", "Text", 17, FontWeights.Bold);
+        text.VerticalAlignment = VerticalAlignment.Center;
         DockPanel.SetDock(text, Dock.Left);
         row.Children.Add(text);
         if (seeAll is not null)
@@ -142,8 +138,10 @@ public static class Ui
             var link = Button(new StackPanel
             {
                 Orientation = Orientation.Horizontal,
-                Children = { Text("See all", "Meta", "Accent", 12, FontWeights.Medium), Glyph("chevron-right", 14, "Accent") },
+                Children = { Text("See all", "Meta"), Glyph("chevron-right", 16, "Muted") },
             }, seeAll);
+            link.Padding = new Thickness(10, 6, 10, 6);
+            link.Tag = 999;
             DockPanel.SetDock(link, Dock.Right);
             row.Children.Add(link);
         }
@@ -211,8 +209,8 @@ public static class Ui
         return grid;
     }
 
-    /// <summary>One card plus the gap after it — PosterCard's 150 wide and 14 margin.</summary>
-    const double CardStep = 164;
+    /// <summary>One card plus the gap after it — the cards' 140 wide and 10 margin.</summary>
+    const double CardStep = 150;
 
     /// <summary>
     /// The arrows move a whole screenful of cards, landing on a card edge, so the
@@ -327,7 +325,7 @@ public static class Ui
             Focusable = false,
         };
         var panel = new FrameworkElementFactory(typeof(ColumnWrap));
-        panel.SetValue(ColumnWrap.MinColumnProperty, 164.0);
+        panel.SetValue(ColumnWrap.MinColumnProperty, 150.0);
         list.ItemsPanel = new ItemsPanelTemplate(panel);
         list.ItemContainerStyle = new Style(typeof(ContentPresenter)) { Setters = { new Setter(FrameworkElement.MarginProperty, new Thickness(0, 0, 0, 18)) } };
         return list;
@@ -375,20 +373,22 @@ public static class Ui
     }
 
     /// <summary>
-    /// src/components/Screen.tsx: icon mark, title, an action slot on the right,
-    /// and the page under it. Returns the root plus the two slots to fill.
+    /// A page heading (mobile Ui.kt Heading): the name large, an action slot on the right,
+    /// and the page under it; with <paramref name="back"/>, a round back button before the name.
+    /// Returns the root plus the two slots to fill.
     /// </summary>
-    public static (Grid Root, StackPanel Actions, ContentControl Body) Screen(string title, string? icon)
+    public static (Grid Root, StackPanel Actions, ContentControl Body) Screen(string title, Action? back = null)
     {
         var root = new Grid();
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition());
-        var header = new DockPanel { Margin = new Thickness(24, 20, 24, 12), LastChildFill = false };
-        if (icon is not null)
+        var header = new DockPanel { Margin = new Thickness(24, 24, 24, 14), LastChildFill = false };
+        if (back is not null)
         {
-            var mark = Brushed(new Border { Width = 34, Height = 34, CornerRadius = new CornerRadius(12), Child = new Grid { Children = { Glyph(icon, 17, "Accent") } }, Margin = new Thickness(0, 0, 12, 0) }, "AccentSoft");
-            DockPanel.SetDock(mark, Dock.Left);
-            header.Children.Add(mark);
+            var button = Round("arrow-left", back, "Text", "Tint", 40, 20, "Back");
+            button.Margin = new Thickness(0, 0, 14, 0);
+            DockPanel.SetDock(button, Dock.Left);
+            header.Children.Add(button);
         }
         var name = Text(title, "Display");
         name.VerticalAlignment = VerticalAlignment.Center;
@@ -405,19 +405,19 @@ public static class Ui
     }
 
     /// <summary>A search field in its rounded surface: icon, box, and a clear button.</summary>
-    public static (Border Box, TextBox Input, ContentControl Trailing) SearchField(string hint, double height = 46, double radius = 12)
+    public static (Border Box, TextBox Input, ContentControl Trailing) SearchField(string hint, double height = 50, double radius = 8)
     {
         var input = new TextBox { Style = S("Field"), Tag = hint, VerticalAlignment = VerticalAlignment.Center };
         var trailing = new ContentControl { Focusable = false, VerticalAlignment = VerticalAlignment.Center };
         var dock = new DockPanel();
-        var icon = Glyph("search", 16, "Faint");
+        var icon = Glyph("search", 20, "Faint");
         icon.Margin = new Thickness(0, 0, 12, 0);
         DockPanel.SetDock(icon, Dock.Left);
         DockPanel.SetDock(trailing, Dock.Right);
         dock.Children.Add(icon);
         dock.Children.Add(trailing);
         dock.Children.Add(input);
-        var box = Brushed(new Border { Height = height, CornerRadius = new CornerRadius(radius), Padding = new Thickness(14, 0, 12, 0), Child = dock, Cursor = Cursors.IBeam }, "Surface");
+        var box = Brushed(new Border { Height = height, CornerRadius = new CornerRadius(radius), Padding = new Thickness(14, 0, 12, 0), Child = dock, Cursor = Cursors.IBeam }, "TintLo");
         box.MouseLeftButtonDown += (_, _) => input.Focus();
         return (box, input, trailing);
     }
@@ -437,6 +437,91 @@ public static class Ui
         return chip;
     }
 
+    /// <summary>
+    /// core TitleMark: the title's logo when Cinemeta has one, else its name set large. The
+    /// name shows until the logo lands, and stays if it never does.
+    /// </summary>
+    public static FrameworkElement TitleMark(Core.Title title, double maxHeight, double maxWidth, double fontSize = 28)
+    {
+        var name = Text(title.Name, "Display", "Text", fontSize);
+        name.TextWrapping = TextWrapping.Wrap;
+        name.MaxWidth = maxWidth;
+        name.HorizontalAlignment = HorizontalAlignment.Left;
+        var grid = new Grid { HorizontalAlignment = HorizontalAlignment.Left, Children = { name } };
+        if (ImageUrl.Load(title.Logo, 600) is not DrawingImage { Drawing: ImageDrawing drawing } logo) return grid;
+        var image = new Image { Source = logo, Stretch = Stretch.Uniform, MaxHeight = maxHeight, MaxWidth = maxWidth, HorizontalAlignment = HorizontalAlignment.Left, Visibility = Visibility.Collapsed };
+        grid.Children.Add(image);
+        void Show()
+        {
+            if (drawing.ImageSource is null) return;
+            image.Visibility = Visibility.Visible;
+            name.Visibility = Visibility.Collapsed;
+        }
+        Show();
+        logo.Changed += (_, _) => Show();
+        return grid;
+    }
+
+    /// <summary>core Facts: the IMDb badge, then year • runtime • genres.</summary>
+    public static FrameworkElement Facts(Core.Title title, int genres = 2)
+    {
+        var row = new WrapPanel();
+        if (title.Rating is not null)
+        {
+            var badge = Brushed(new Border
+            {
+                CornerRadius = new CornerRadius(3),
+                Padding = new Thickness(5, 1, 5, 1),
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = new TextBlock { Text = "IMDb", FontSize = 11, FontWeight = FontWeights.Black, Foreground = Brushes.Black },
+            }, "Imdb");
+            var score = Text(title.Rating, "Meta", "Text", 13, FontWeights.SemiBold);
+            score.Margin = new Thickness(6, 0, 14, 0);
+            score.VerticalAlignment = VerticalAlignment.Center;
+            row.Children.Add(badge);
+            row.Children.Add(score);
+        }
+        var facts = new[] { title.Year is { Length: > 9 } y ? y[..9] : title.Year, title.Runtime }.Concat(title.Genres.Take(genres)).Where(f => !string.IsNullOrEmpty(f));
+        var line = Text(string.Join("  •  ", facts), "Meta", "Text", 13);
+        line.Opacity = 0.85;
+        line.VerticalAlignment = VerticalAlignment.Center;
+        row.Children.Add(line);
+        return row;
+    }
+
+    /// <summary>The TV's button: an icon and a word, red for the main action (mobile Ui.kt Button).</summary>
+    public static Button Action(string label, string icon, Action onClick, bool primary = false, double width = double.NaN)
+    {
+        var fg = primary ? "OnAccent" : "Text";
+        var words = Text(label, "Label", fg, 15, FontWeights.SemiBold);
+        words.Margin = new Thickness(10, 0, 0, 0);
+        var b = Button(new StackPanel { Orientation = Orientation.Horizontal, Children = { Glyph(icon, 18, fg), words } }, onClick, primary ? "PillAccent" : "Pill");
+        b.Width = width;
+        return b;
+    }
+
+    /// <summary>
+    /// Netflix's actions under the Play button (mobile Ui.kt Action): an icon over a word. A
+    /// toggle that is on sits in a disc of <paramref name="onBrush"/>, its word in the same colour.
+    /// </summary>
+    public static Button IconAction(string icon, string label, Action onClick, bool on = false, string onBrush = "Good", double width = 84)
+    {
+        var disc = Brushed(new Border { Width = 36, Height = 36, CornerRadius = new CornerRadius(18), Visibility = on ? Visibility.Visible : Visibility.Hidden }, onBrush);
+        var glyph = Glyph(icon, 22, "Text");
+        if (on) glyph.Foreground = Brushes.White;
+        var words = Text(label, "Meta", on ? onBrush : "Muted", 12, on ? FontWeights.SemiBold : FontWeights.Medium);
+        words.HorizontalAlignment = HorizontalAlignment.Center;
+        words.Margin = new Thickness(0, 4, 0, 0);
+        var b = Button(new StackPanel
+        {
+            Margin = new Thickness(0, 6, 0, 6),
+            Children = { new Grid { Width = 40, Height = 40, Children = { disc, glyph } }, words },
+        }, onClick);
+        b.Width = width;
+        b.Tag = 8;
+        return b;
+    }
+
     public static Border Rule(double height = 16) => Brushed(new Border { Width = 1, Height = height, Margin = new Thickness(4, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center }, "Line");
 
     /// <summary>Health dot colours for a seeder count — DetailScreen's healthTone.</summary>
@@ -445,7 +530,7 @@ public static class Ui
         "fast" => ("Fast", "Good", "GoodSoft"),
         "good" => ("Good", "Good", "GoodSoft"),
         "weak" => ("Weak", "Warn", "WarnSoft"),
-        _ => ("Dead", "Danger", "DangerSoft"),
+        _ => ("No seeds", "Danger", "DangerSoft"),
     };
 
     /// <summary>A web page in the browser. Only http(s): handed to the shell, a file path or other scheme would run.</summary>

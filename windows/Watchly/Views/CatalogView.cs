@@ -10,8 +10,7 @@ public sealed class CatalogView : UserControl
 {
     public CatalogView(Shelf shelf)
     {
-        var (root, actions, body) = Ui.Screen(shelf.Heading, null);
-        actions.Children.Add(Ui.Round("x", () => MainWindow.Shell.CloseLayer(this), "Accent", "AccentSoft", 36, 18, "Back"));
+        var (root, _, body) = Ui.Screen(shelf.Heading, () => MainWindow.Shell.CloseLayer(this));
         body.Content = new Grid { Children = { Ui.Spinner() }, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 32, 0, 0) };
         Content = root;
         Load(shelf, body);

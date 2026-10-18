@@ -36,13 +36,13 @@ public sealed class SearchView : UserControl
 
     public SearchView()
     {
-        var (root, _, body) = Ui.Screen("Search", "search");
+        var (root, _, body) = Ui.Screen("Search");
         var (box, field, trail) = Ui.SearchField("Films and series");
         input = field;
         trailing = trail;
         box.Margin = new Thickness(24, 4, 24, 12);
 
-        var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = results, Padding = new Thickness(24, 0, 24, 120) };
+        var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = results, Padding = new Thickness(24, 0, 24, 32) };
         var dock = new DockPanel();
         foreach (var top in new FrameworkElement[] { box, recentRow, chipRow })
         {
