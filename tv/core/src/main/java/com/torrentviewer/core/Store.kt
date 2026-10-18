@@ -128,6 +128,8 @@ data class Settings(
     val wholeFile: Boolean = false,
     /** "system", "light" or "dark" — the phone's page; the TV is always dark. */
     val themeMode: String = "system",
+    /** Jump past an episode's intro by itself, rather than offer the button. */
+    val autoSkipIntro: Boolean = false,
 )
 
 /** Subtitle text; [size] is one of [SUB_SIZES]' keys. The Expo build's names and values. */
@@ -164,6 +166,7 @@ object SettingsStore {
         playerScale = o.optString("playerScale", "Best fit").ifBlank { "Best fit" },
         wholeFile = o.optBoolean("streamWholeFile", false),
         themeMode = o.optString("themeMode").takeIf { it == "light" || it == "dark" } ?: "system",
+        autoSkipIntro = o.optBoolean("autoSkipIntro", false),
     )
 
     /** Over what is stored, not instead of it: the TV and the phone each keep fields the other never reads. */
@@ -174,7 +177,7 @@ object SettingsStore {
             .put("cacheCapMb", next.cacheCapMb).put("genres", JSONArray(next.genres)).put("vlcPlayer", next.vlcPlayer)
             .put("subLang", next.subLang).put("audioLang", next.audioLang)
             .put("subSize", next.subtitles.size).put("subColor", if (next.subtitles.yellow) "yellow" else "white").put("subBackground", next.subtitles.box)
-            .put("playbackRate", next.playbackRate.toDouble()).put("playerScale", next.playerScale).put("streamWholeFile", next.wholeFile).put("themeMode", next.themeMode)
+            .put("playbackRate", next.playbackRate.toDouble()).put("playerScale", next.playerScale).put("streamWholeFile", next.wholeFile).put("themeMode", next.themeMode).put("autoSkipIntro", next.autoSkipIntro)
         Kv.setGlobal("settings", o.toString())
     }
 }
@@ -368,6 +371,18 @@ fun carryOver(items: List<Item>, target: Item, fileName: String): Pair<Double, D
     // Watched through is not a place to start a new copy from.
     if (duration != null && donor.positions[i]!! >= duration * 0.95) return null
     return donor.positions[i]!! to duration
+}
+
+/** How far through each episode of [imdb] anyone got, 0–1, by its file name — the furthest of every release it was played from. */
+fun episodeProgress(items: List<Item>, imdb: String): Map<Ep, Double> {
+    val out = mutableMapOf<Ep, Double>()
+    for (item in items) if (item.imdb == imdb) for (file in item.files.orEmpty()) {
+        val ep = parseEpisode(file.name) ?: continue
+        val at = item.positions[file.index] ?: continue
+        val of = item.durations[file.index]?.takeIf { it > 0 } ?: continue
+        out[ep] = maxOf(out[ep] ?: 0.0, (at / of).coerceIn(0.0, 1.0))
+    }
+    return out
 }
 
 /** Prefer a real http(s) URL over a missing or local one. */

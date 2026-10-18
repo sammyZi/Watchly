@@ -22,6 +22,7 @@ android {
         versionCode = 2
         versionName = "2.0.0"
         buildConfigField("String", "SUBDL_KEY", "\"$subdlKey\"")
+        buildConfigField("long", "BUILD_TIME", "${System.currentTimeMillis()}L")
         manifestPlaceholders["appLabel"] = "Watchly"
     }
 

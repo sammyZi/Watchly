@@ -202,7 +202,7 @@ private const val SEEK_CHECK_MS = 2500L
 /** A seek that has not landed: the player goes on reporting the old time until it does. */
 private class Seeking(val target: Double, val from: Double, val since: Long, val connections: Long)
 
-private enum class Panel { TRACKS, SPEED, ASPECT, FIND }
+private enum class Panel { TRACKS, SPEED, ASPECT, FIND, MORE }
 
 private data class Flash(val seconds: Int, val id: Long)
 
@@ -690,6 +690,15 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         goNext()
     }
     val skipIntro by remember { derivedStateOf { intro?.covers(at) == true && loaded } }
+    // Once per intro: scrubbing back into it to watch it is not undone.
+    var autoSkipped by remember(intro) { mutableStateOf(false) }
+    LaunchedEffect(skipIntro) {
+        val i = intro ?: return@LaunchedEffect
+        if (!skipIntro || autoSkipped || !SettingsStore.value.value.autoSkipIntro) return@LaunchedEffect
+        autoSkipped = true
+        seekTo(i.end)
+        say("Skipped intro", L.drawable.lucide_ic_chevrons_right)
+    }
 
     /* ------------------------------------------------------------ input */
 
@@ -941,38 +950,12 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                                 scrub = null
                             },
                         )
-                        // Icons alone, spread across the bar.
-                        Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
-                            BarButton(L.drawable.lucide_ic_captions, "Audio & subtitles", on = subtitle != null) { panel = Panel.TRACKS }
-                            BarButton(L.drawable.lucide_ic_gauge, "Speed (${rateLabel(rate)})", on = rate != 1f) { panel = Panel.SPEED }
-                            BarButton(L.drawable.lucide_ic_ratio, SCALES[scale].second, on = scale != 0) { panel = Panel.ASPECT }
-                            BarButton(
-                                L.drawable.lucide_ic_moon,
-                                when {
-                                    SLEEP[sleep] == 0 -> "Sleep timer"
-                                    SLEEP[sleep] < 0 -> "End of episode"
-                                    else -> "${maxOf(1L, (sleepEnds - System.currentTimeMillis() + 59_999) / 60_000)} min"
-                                },
-                                on = SLEEP[sleep] != 0,
-                                onClick = ::cycleSleep,
-                            )
-                            BarButton(if (wholeFile) L.drawable.lucide_ic_hard_drive else L.drawable.lucide_ic_clock, if (wholeFile) "Whole file" else "Next 5 minutes", on = wholeFile) {
-                                wholeFile = !wholeFile
-                                engine.wholeFile = wholeFile
-                                SettingsStore.save(SettingsStore.value.value.copy(wholeFile = wholeFile))
-                                say(if (wholeFile) "Downloading the whole file" else "Downloading the next 5 minutes", if (wholeFile) L.drawable.lucide_ic_hard_drive else L.drawable.lucide_ic_clock)
-                            }
-                            BarButton(L.drawable.lucide_ic_external_link, "Open in…") {
-                                val r = ready ?: return@BarButton
-                                if (openExternally(context, r.url, r.name, at)) {
-                                    view.value?.setPaused(true)
-                                    paused = true
-                                } else watch.notes.tryEmit("No other player on this phone can open it.")
-                            }
-                            if (canPip) BarButton(L.drawable.lucide_ic_picture_in_picture_2, "Mini player") {
-                                pipParams()?.let { p -> runCatching { activity?.enterPictureInPictureMode(p) } }
-                            }
+                        // Netflix's bar: the few things reached for mid-film, named; the rest under More.
+                        Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)) {
                             watch.prev?.let { prev -> BarButton(L.drawable.lucide_ic_skip_back, "Previous") { watch.playSibling(prev) } }
+                            BarButton(L.drawable.lucide_ic_gauge, "Speed (${rateLabel(rate)})", on = rate != 1f) { panel = Panel.SPEED }
+                            BarButton(L.drawable.lucide_ic_captions, "Audio & subtitles", on = subtitle != null) { panel = Panel.TRACKS }
+                            BarButton(L.drawable.lucide_ic_ellipsis, "More", on = scale != 0 || SLEEP[sleep] != 0 || wholeFile) { panel = Panel.MORE }
                             if (next != null || onlineNext != null) BarButton(L.drawable.lucide_ic_skip_forward, "Next episode", onClick = ::goNext)
                         }
                     }
@@ -1139,6 +1122,51 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                 },
                 onDismiss = { panel = null },
             )
+            // Sleep and download are toggles: the sheet stays up, its hint showing the new setting.
+            Panel.MORE -> Sheet(
+                title = "More",
+                options = listOfNotNull(
+                    Option("picture", "Picture", SCALES[scale].second),
+                    Option(
+                        "sleep", "Sleep timer",
+                        when {
+                            SLEEP[sleep] == 0 -> "Off"
+                            SLEEP[sleep] < 0 -> "End of episode"
+                            else -> "${maxOf(1L, (sleepEnds - System.currentTimeMillis() + 59_999) / 60_000)} min left"
+                        },
+                    ),
+                    Option("download", "Download ahead", if (wholeFile) "Whole file" else "Next 5 minutes"),
+                    Option("open", "Open in another player"),
+                    if (canPip) Option("pip", "Mini player") else null,
+                ),
+                selected = null,
+                onPick = { what ->
+                    when (what) {
+                        "picture" -> panel = Panel.ASPECT
+                        "sleep" -> cycleSleep()
+                        "download" -> {
+                            wholeFile = !wholeFile
+                            engine.wholeFile = wholeFile
+                            SettingsStore.save(SettingsStore.value.value.copy(wholeFile = wholeFile))
+                            say(if (wholeFile) "Downloading the whole file" else "Downloading the next 5 minutes", if (wholeFile) L.drawable.lucide_ic_hard_drive else L.drawable.lucide_ic_clock)
+                        }
+                        "open" -> {
+                            panel = null
+                            ready?.let { r ->
+                                if (openExternally(context, r.url, r.name, at)) {
+                                    view.value?.setPaused(true)
+                                    paused = true
+                                } else watch.notes.tryEmit("No other player on this phone can open it.")
+                            }
+                        }
+                        "pip" -> {
+                            panel = null
+                            pipParams()?.let { p -> runCatching { activity?.enterPictureInPictureMode(p) } }
+                        }
+                    }
+                },
+                onDismiss = { panel = null },
+            )
             Panel.FIND -> Sheet(
                 title = "Find subtitles",
                 options = found.orEmpty().mapIndexed { i, s -> Option(i, s.language, s.release.ifEmpty { s.name }) },
@@ -1241,13 +1269,16 @@ private fun BrightnessRail(level: Float, onChange: (Float) -> Unit, modifier: Mo
     }
 }
 
-/** A bar button: the icon alone, a red dot when on; [label] is what a screen reader says. */
+/** A bar button: the icon and its name, a red dot when on. */
 @Composable
 private fun BarButton(@DrawableRes icon: Int, label: String, on: Boolean = false, onClick: () -> Unit) {
-    Tap(onClick, Modifier.semantics { contentDescription = label }, CircleShape) {
-        Box(Modifier.padding(12.dp)) {
-            Lc(icon, tint = Color.White, size = 22.dp)
-            if (on) Box(Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-3).dp).size(6.dp).clip(CircleShape).background(Ink.accent))
+    Tap(onClick, shape = CircleShape) {
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box {
+                Lc(icon, tint = Color.White, size = 20.dp)
+                if (on) Box(Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-3).dp).size(6.dp).clip(CircleShape).background(Ink.accent))
+            }
+            Text(label, Modifier.padding(start = 8.dp), style = Type.label.copy(color = Color.White, fontWeight = FontWeight.SemiBold), maxLines = 1)
         }
     }
 }
