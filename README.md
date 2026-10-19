@@ -34,7 +34,7 @@ Watchly is built on open-source projects:
 - [VLC / libVLC](https://www.videolan.org/vlc/libvlc.html) and [LibVLCSharp](https://github.com/videolan/libvlcsharp) — the fallback player, and the player on Windows
 - [Jetpack Compose](https://developer.android.com/jetpack/compose), [Coil](https://github.com/coil-kt/coil) and [Lucide](https://lucide.dev) icons — the look
 
-Titles, artwork and episode lists come from [Cinemeta](https://v3-cinemeta.strem.io), Stremio's public catalogue,,
+Titles, artwork and episode lists come from [Cinemeta](https://v3-cinemeta.strem.io), Stremio's public catalogue,
 intro timings from [IntroDB](https://introdb.app) and subtitles from [SubDL](https://subdl.com).
 
 ## Screenshots
