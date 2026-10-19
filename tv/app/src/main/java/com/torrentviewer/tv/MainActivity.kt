@@ -57,19 +57,4 @@ class MainActivity : ComponentActivity() {
         if (isFinishing) AppScope.launch(Dispatchers.IO) { Services.engine.shutdown() }
         super.onDestroy()
     }
-
-    /** The panel's highest mode up to 120Hz at the current resolution. */
-    private fun preferHighRefreshRate() {
-        runCatching {
-            @Suppress("DEPRECATION")
-            val display = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) display ?: return else windowManager.defaultDisplay
-            val current = display.mode
-            val best = display.supportedModes
-                .filter { it.physicalWidth == current.physicalWidth && it.physicalHeight == current.physicalHeight && it.refreshRate <= 120.5f }
-                .maxByOrNull { it.refreshRate } ?: return
-            window.attributes = window.attributes.apply {
-                preferredDisplayModeId = best.modeId
-            }
-        }
-    }
 }
