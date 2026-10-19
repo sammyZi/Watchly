@@ -2,6 +2,8 @@ package com.torrentviewer.mobile
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -49,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.sp
 import com.torrentviewer.core.ANIME_GENRE
 import com.torrentviewer.core.Artwork
@@ -56,6 +59,7 @@ import com.torrentviewer.core.Avatar
 import com.torrentviewer.core.Facts
 import com.torrentviewer.core.History
 import com.torrentviewer.core.Ink
+import com.torrentviewer.core.grain
 import com.torrentviewer.core.Item
 import com.torrentviewer.core.Lc
 import com.torrentviewer.core.Meta
@@ -105,6 +109,9 @@ private val SHELVES = listOf(
 
 /** How many titles of the lead shelf the hero swipes through. */
 private const val HEROES = 6
+
+/** How far the header's page colour fades out below its bar. */
+private val HEADER_FADE = 28.dp
 
 /** Survives opening a title, so coming back lands on the same row, same card. */
 class HomeState {
@@ -235,16 +242,23 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
             }
         }
 
-        // The wordmark and who is watching: a fade over the hero, a solid bar once the rows scroll under it.
+        // The wordmark and who is watching: a shade over the hero; once the rows scroll under it, the
+        // page itself, eased in and ending in a soft fade rather than a hard edge across the art.
         val scrolled by remember { derivedStateOf { state.list.firstVisibleItemIndex > 0 || state.list.firstVisibleItemScrollOffset > 240 } }
-        Row(
-            Modifier.fillMaxWidth()
-                .background(if (scrolled) Brush.verticalGradient(listOf(Ink.bg, Ink.bg.copy(alpha = 0.94f))) else Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)))
-                .statusBarsPadding().padding(horizontal = EDGE, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("WATCHLY", Modifier.weight(1f), style = Type.title.copy(color = Ink.accent, fontWeight = FontWeight.Black, letterSpacing = 2.sp))
-            if (!isWide()) Tap(onProfile, shape = RoundedCornerShape(6.dp)) { Avatar(who, 30.dp) }
+        val solid by animateFloatAsState(if (scrolled) 1f else 0f, tween(260), label = "bar")
+        Box(Modifier.fillMaxWidth()) {
+            Box(Modifier.matchParentSize().graphicsLayer { alpha = 1f - solid }.background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent))))
+            Column(Modifier.matchParentSize().graphicsLayer { alpha = solid }) {
+                Box(Modifier.fillMaxWidth().weight(1f).background(Ink.bg).grain())
+                Box(Modifier.fillMaxWidth().height(HEADER_FADE).background(Brush.verticalGradient(listOf(Ink.bg, Ink.bg.copy(alpha = 0f)))))
+            }
+            Column {
+                Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = EDGE, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("WATCHLY", Modifier.weight(1f), style = Type.title.copy(color = Ink.accent, fontWeight = FontWeight.Black, letterSpacing = 2.sp))
+                    if (!isWide()) Tap(onProfile, shape = RoundedCornerShape(6.dp)) { Avatar(who, 30.dp) }
+                }
+                Spacer(Modifier.height(HEADER_FADE))
+            }
         }
         if (!online) {
             Text(

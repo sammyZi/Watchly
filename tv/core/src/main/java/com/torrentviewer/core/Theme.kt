@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -49,6 +50,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
@@ -86,7 +88,8 @@ object Ink {
         Color(0xFFFFFFFF), Color(0xFFB3B3B3), Color(0xFF7A7A7A), Color(0xFF46D369), Color(0xFFFFB340), Color(0xFFFF5A4E),
     )
     private val LIGHT = Palette(
-        Color(0xFFFFFFFF), Color(0xFFF1F1F1), Color(0xFFE4E4E4), Color(0xFFD0D0D0),
+        // A warm paper page; cards and sheets white on it, the greys warmed to match.
+        Color(0xFFF6F2EE), Color(0xFFFFFFFF), Color(0xFFEAE4DE), Color(0xFFDDD5CE),
         Color(0xFF141414), Color(0xFF575757), Color(0xFF8A8A8A), Color(0xFF1E8E3E), Color(0xFFB26A00), Color(0xFFD32F2F),
     )
     private var p by mutableStateOf(DARK)
@@ -254,6 +257,45 @@ fun Modifier.heroScrims(): Modifier = drawWithContent {
         Brush.verticalGradient(0f to Color.Transparent, 1f to Ink.bg, startY = top, endY = size.height),
         topLeft = androidx.compose.ui.geometry.Offset(0f, top),
         size = Size(size.width, size.height - top),
+    )
+}
+
+/**
+ * A grainy gradient — a loud surface: [colors] (base, middle, glow) as a radial glow from
+ * ([cx], [cy]), fractions of the size, with film grain in it. Warmer and quieter than a
+ * glossy linear gradient. From the PDF app's Kit.kt, with the grain under the content
+ * here, so text stays crisp and artwork clean.
+ */
+fun Modifier.glow(colors: List<Color>, cx: Float, cy: Float) = drawBehind {
+    drawRect(colors[0])
+    drawRect(Brush.radialGradient(listOf(colors[2], colors[1], colors[0]), androidx.compose.ui.geometry.Offset(size.width * cx, size.height * cy), size.maxDimension * 0.95f))
+    drawRect(grainBrush)
+}
+
+/** Film grain on a surface, under its content: after `.background(…)`. */
+fun Modifier.grain() = drawBehind { drawRect(grainBrush) }
+
+/** [glow]'s colours for the accent: a deep base, the red itself, and a warm light rising in it. */
+fun accentGlow() = listOf(
+    androidx.compose.ui.graphics.lerp(Ink.accent, Color.Black, 0.45f),
+    Ink.accent,
+    androidx.compose.ui.graphics.lerp(Ink.accent, Color(0xFFFF8A4C), 0.6f),
+)
+
+/** Fine black-and-white noise, at most 22/255 opaque, tiled. */
+private val grainBrush: androidx.compose.ui.graphics.ShaderBrush by lazy {
+    val n = 192
+    val r = kotlin.random.Random(42)
+    val px = IntArray(n * n) {
+        val v = if (r.nextBoolean()) 255 else 0
+        android.graphics.Color.argb(r.nextInt(0, 22), v, v, v)
+    }
+    androidx.compose.ui.graphics.ShaderBrush(
+        androidx.compose.ui.graphics.ImageShader(
+            android.graphics.Bitmap.createBitmap(px, n, n, android.graphics.Bitmap.Config.ARGB_8888).asImageBitmap(),
+            androidx.compose.ui.graphics.TileMode.Repeated,
+            androidx.compose.ui.graphics.TileMode.Repeated,
+        ),
     )
 }
 

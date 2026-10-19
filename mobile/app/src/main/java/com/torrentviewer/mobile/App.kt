@@ -78,6 +78,7 @@ import com.torrentviewer.core.Avatar
 import com.torrentviewer.core.COLOURS
 import com.torrentviewer.core.History
 import com.torrentviewer.core.Ink
+import com.torrentviewer.core.grain
 import com.torrentviewer.core.Item
 import com.torrentviewer.core.Kv
 import com.torrentviewer.core.Lc
@@ -161,7 +162,7 @@ fun App(watch: Watch, incoming: MutableState<Uri?>) {
     LaunchedEffect(dark) { if (watch.phase != Phase.PLAYING) activity?.applyTheme(dark) }
     val scheme = if (dark) darkColorScheme(primary = Ink.accent, background = Ink.bg, surface = Ink.surface) else lightColorScheme(primary = Ink.accent, background = Ink.bg, surface = Ink.surface)
     MaterialTheme(colorScheme = scheme) {
-        Box(Modifier.fillMaxSize().background(Ink.bg)) {
+        Box(Modifier.fillMaxSize().background(Ink.bg).grain()) {
             Shell(watch, incoming)
             Toast(watch)
         }
@@ -313,7 +314,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
 /** Portrait: the tabs along the bottom, the one you are on white with the TV rail's red tick. */
 @Composable
 private fun TabBar(tab: Tab, onTab: (Tab) -> Unit) {
-    Row(Modifier.fillMaxWidth().background(Ink.bg).navigationBarsPadding().height(58.dp)) {
+    Row(Modifier.fillMaxWidth().background(Ink.bg).grain().navigationBarsPadding().height(58.dp)) {
         Tab.entries.forEach { t ->
             val on = t == tab
             Tap({ onTab(t) }, Modifier.weight(1f).fillMaxHeight(), RoundedCornerShape(0.dp)) {
@@ -333,7 +334,7 @@ private fun TabBar(tab: Tab, onTab: (Tab) -> Unit) {
 @Composable
 private fun NavRail(tab: Tab, who: Profile, onTab: (Tab) -> Unit, onProfile: () -> Unit) {
     Column(
-        Modifier.width(76.dp).fillMaxHeight().background(Ink.bg).statusBarsPadding().padding(vertical = 12.dp),
+        Modifier.width(76.dp).fillMaxHeight().background(Ink.bg).grain().statusBarsPadding().padding(vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Tap(onProfile, shape = RoundedCornerShape(8.dp)) { Avatar(who, 34.dp) }
@@ -390,7 +391,7 @@ private fun Toast(watch: Watch) {
     Box(Modifier.fillMaxSize().navigationBarsPadding().padding(bottom = 72.dp, start = EDGE, end = EDGE), contentAlignment = Alignment.BottomCenter) {
         AnimatedVisibility(note != null, enter = fadeIn() + slideInVertically { it / 2 }, exit = fadeOut() + slideOutVertically { it / 2 }) {
             Row(
-                Modifier.widthIn(max = 520.dp).clip(RoundedCornerShape(10.dp)).background(Ink.surface2).padding(horizontal = 16.dp, vertical = 12.dp),
+                Modifier.widthIn(max = 520.dp).clip(RoundedCornerShape(10.dp)).background(Ink.surface2).grain().padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Start,
             ) {
