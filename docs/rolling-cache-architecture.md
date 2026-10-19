@@ -8,7 +8,7 @@ This describes what the code does today:
   through libtorrent4j) and `LocalFileServer.kt`, played by Media3 (`ExoView.kt`)
   or libVLC (`VlcView.kt`).
 - **Windows** has its own engine on MonoTorrent (`windows/Watchly/Engine/`),
-  covered in §9.
+  covered in section 9.
 
 The numbers below are the constants in the code; each was measured on a real
 swarm, and the comments beside them say what went wrong before.
@@ -111,7 +111,7 @@ set once — deadlines are absolute. Deadlines no longer wanted are reset.
 | waiting on a piece for over 5 s | narrow fetching to the rushed pieces until it lands; a thin swarm spread over the readahead starves the one the player needs |
 | no data at all before the first frame | re-announce every 10 s; give up after 90 s |
 | a file error on the torrent | clear it and carry on |
-| free space under 512 MB | one last roll (§4), then stop and clear |
+| free space under 512 MB | one last roll (see section 4), then stop and clear |
 
 ---
 
@@ -172,7 +172,7 @@ note in `rollCache`.
   is noticed every 500 ms.
 - **`starved()`**: true while any reader is blocked on a missing piece. libVLC is
   stuck inside that read and ignores a seek until it returns, so the player
-  reloads at the target instead of seeking (§6).
+  reloads at the target instead of seeking (see section 6).
 
 ---
 
