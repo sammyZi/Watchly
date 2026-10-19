@@ -17,6 +17,26 @@ phone and TV APKs and the Windows exe.
 - **Find anything** — search titles, or torrents by name
 - **Made yours** — profiles with PINs, light and dark themes, Media3 or VLC, subtitles in your language
 
+## Disclaimer
+
+Watchly is only a player. It does not host, upload, share or own any videos or
+torrent files, and none come with it. It searches public, third-party indexes
+and plays what you choose, through the BitTorrent protocol, the way any torrent
+client does. You are responsible for what you stream or download, and for
+following the copyright laws where you live. Please only watch what you have
+the right to.
+
+Watchly is built on open-source projects:
+
+- [libtorrent](https://libtorrent.org) via [libtorrent4j](https://github.com/aldenml/libtorrent4j) — the torrent engine on Android
+- [MonoTorrent](https://github.com/alanmcgovern/monotorrent) — the torrent engine on Windows
+- [AndroidX Media3](https://github.com/androidx/media) with the [Jellyfin FFmpeg decoder](https://github.com/jellyfin/jellyfin-androidx-media) — the default player
+- [VLC / libVLC](https://www.videolan.org/vlc/libvlc.html) and [LibVLCSharp](https://github.com/videolan/libvlcsharp) — the fallback player, and the player on Windows
+- [Jetpack Compose](https://developer.android.com/jetpack/compose), [Coil](https://github.com/coil-kt/coil) and [Lucide](https://lucide.dev) icons — the look
+
+Titles, artwork and episode lists come from [Cinemeta](https://v3-cinemeta.strem.io), Stremio's public catalogue,,
+intro timings from [IntroDB](https://introdb.app) and subtitles from [SubDL](https://subdl.com).
+
 ## Screenshots
 
 <table>
