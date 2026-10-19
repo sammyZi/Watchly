@@ -391,7 +391,7 @@ private fun Toast(watch: Watch) {
     Box(Modifier.fillMaxSize().navigationBarsPadding().padding(bottom = 72.dp, start = EDGE, end = EDGE), contentAlignment = Alignment.BottomCenter) {
         AnimatedVisibility(note != null, enter = fadeIn() + slideInVertically { it / 2 }, exit = fadeOut() + slideOutVertically { it / 2 }) {
             Row(
-                Modifier.widthIn(max = 520.dp).clip(RoundedCornerShape(10.dp)).background(Ink.surface2).grain().padding(horizontal = 16.dp, vertical = 12.dp),
+                Modifier.widthIn(max = 520.dp).clip(RoundedCornerShape(10.dp)).background(Ink.surface2).padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Start,
             ) {
