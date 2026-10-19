@@ -5,8 +5,8 @@
 #   tv/app/build.gradle.kts, from its tag if one exists, once (skipped if that release exists).
 # - Run it by hand from the Actions tab: releases (or re-uploads the files of) the given tag.
 #
-# The SUBDL_KEY repository secret (Settings → Secrets and variables → Actions) turns on
-# online subtitle search; without it the builds still go out, with that search off.
+# The SUBDL_KEY repository secret (Settings → Secrets and variables → Actions) adds SubDL
+# to online subtitle search; without it the builds search OpenSubtitles alone, which needs no key.
 # The release goes out once the TV APKs are built, with whichever other files built too.
 name: Release
 
@@ -62,7 +62,7 @@ jobs:
             fi
           fi
           if [ -z "$SUBDL_KEY" ]; then
-            echo "::warning::No SUBDL_KEY repository secret: online subtitle search is off in these builds."
+            echo "::notice::No SUBDL_KEY repository secret: these builds search subtitles on OpenSubtitles alone."
           fi
           if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
             ref="refs/tags/$tag"

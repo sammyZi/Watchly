@@ -14,7 +14,7 @@ as the old Expo build, so it installs over it in place. On first launch the old
 build's AsyncStorage database (`RKStorage`) is imported once, so profiles,
 history, My List, recent searches and settings carry over.
 
-Put a SubDL key in `tv/.env` (see `.env.example`) for "Find subtitles online";
+"Find subtitles online" searches OpenSubtitles with no key; a SubDL key in `tv/.env` (see `.env.example`) adds SubDL;
 it is read into `BuildConfig.SUBDL_KEY` at build time and never committed.
 
 ## Layout
@@ -27,7 +27,7 @@ it is read into `BuildConfig.SUBDL_KEY` at build time and never committed.
 | `LocalFileServer.kt` | Loopback HTTP server that blocks on pieces that have not landed, so libVLC never reads holes. |
 | `VlcView.kt` | libVLC surface: AC3/DTS decoders, PGS subtitles, audio focus, stats. |
 | `Watch.kt` | One stream at a time: resolve, pick the file, play, next/previous episode. |
-| `Search.kt` / `Meta.kt` | Indexers (apibay, torrents-csv, Knaben, Nyaa, YTS, EZTV, Torrentio), Cinemeta metadata, SubDL. |
+| `Search.kt` / `Meta.kt` | Indexers (apibay, torrents-csv, Knaben, Nyaa, YTS, EZTV, Torrentio), Cinemeta metadata, OpenSubtitles and SubDL. |
 | `Store.kt` | SharedPreferences with the Expo build's keys and JSON; per-profile namespaces; guest in memory only. |
 | `ExoView.kt` | Media3 surface with the FFmpeg audio decoders; `VlcView` takes over when it cannot play a file. |
 | `Theme.kt` | Ink palette, type, artwork, title logos, facts row, progress line, hero scrims, avatars. |
@@ -50,7 +50,7 @@ Netflix-style, driven entirely by the remote:
 - **Bar up:** title and episode top-left; clock, "Ends at", speed and peers
   top-right; a red seek bar with time left, a scrub bubble showing the target
   and the jump; round controls whose names rise above them on focus.
-- **Audio & subtitles** side by side, with "Find subtitles online" (SubDL);
+- **Audio & subtitles** side by side, with "Find subtitles online" (OpenSubtitles, and SubDL with a key);
   speed, picture fit and "stats for nerds" (codecs, bitrate, dropped frames).
 - **Loading** over the title's own backdrop and logo with a ring that fills;
   a stall spinner mid-film; Netflix's "You're watching" card when paused; an

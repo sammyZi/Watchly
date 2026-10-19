@@ -6,6 +6,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -629,4 +630,72 @@ object SubDl {
         if (body.has("status") && !body.optBoolean("status", true)) throw IllegalStateException(body.optString("error", "SubDL refused the request"))
         return toSubs(body.optJSONArray("subtitles") ?: JSONArray())
     }
+}
+
+/** OpenSubtitles through Stremio's add-on: no key, by IMDb id, and plain UTF-8 .srt files. */
+object OpenSubs {
+    private const val API = "https://opensubtitles-v3.strem.io/subtitles"
+
+    /** Its languages are three letters ("eng", "ger"); [LANGS] already knows them, so they come back as the app's codes. */
+    fun toSubs(body: JSONObject): List<Sub> = (body.optJSONArray("subtitles") ?: JSONArray()).objects().mapNotNull { r ->
+        val url = r.str("url") ?: return@mapNotNull null
+        val lang = r.optString("lang")
+        val file = r.str("subtitleFileName")
+        val release = r.str("movieReleaseName") ?: file?.substringBeforeLast('.').orEmpty()
+        Sub(
+            release = release,
+            name = file ?: release,
+            language = LANGS.find { it.match.containsMatchIn(lang) }?.code ?: lang.uppercase(),
+            url = url,
+            season = r.optInt("season").takeIf { it > 0 },
+            episode = r.optInt("episode").takeIf { it > 0 },
+        )
+    }
+
+    suspend fun search(imdb: String, season: Int?, episode: Int?): List<Sub> {
+        if (!imdb.startsWith("tt")) return emptyList()
+        val path = if (season != null && episode != null) "series/$imdb:$season:$episode" else "movie/$imdb"
+        return toSubs(JSONObject(Net.get("$API/$path.json")))
+    }
+}
+
+/**
+ * Subtitles for what is playing: OpenSubtitles always, SubDL's too when the build has [subdlKey].
+ * Without an IMDb id the file's name is looked up first. In [language] (English when unset) —
+ * or every language when there are none in it — one per release, and those whose release
+ * shares the most words with [fileName] first: a subtitle cut for the same release keeps its timing.
+ * Throws only when every source failed.
+ */
+suspend fun findSubtitles(
+    query: String,
+    imdb: String?,
+    season: Int?,
+    episode: Int?,
+    type: String?,
+    language: String,
+    subdlKey: String,
+    fileName: String,
+): List<Sub> = coroutineScope {
+    val lang = language.ifBlank { "EN" }
+    val id = imdb ?: Meta.resolve(fileName.ifBlank { query })?.imdb
+    val sources = listOfNotNull(
+        id?.let { async { "OpenSubtitles" to runCatching { OpenSubs.search(it, season, episode) } } },
+        subdlKey.takeIf { it.isNotBlank() }?.let { key -> async { "SubDL" to runCatching { SubDl.search(query, key, id, season, episode, type, lang) } } },
+    ).map { it.await() }
+    sources.forEach { (name, r) ->
+        r.onSuccess { Log.i("Subtitles", "$name: ${it.size} for $id S${season}E$episode") }
+            .onFailure { Log.w("Subtitles", "$name failed for $id", it) }
+    }
+    if (sources.isEmpty()) Log.w("Subtitles", "No IMDb id for \"$query\", nothing to search")
+    if (sources.isNotEmpty() && sources.all { it.second.isFailure }) throw sources.first().second.exceptionOrNull()!!
+    rankSubtitles(sources.flatMap { it.second.getOrDefault(emptyList()) }, lang, fileName)
+}
+
+fun rankSubtitles(subs: List<Sub>, language: String, fileName: String): List<Sub> {
+    fun words(s: String) = s.lowercase().split(Regex("[^a-z0-9]+")).filter { it.length > 1 }.toSet()
+    val playing = words(fileName)
+    val mine = subs.filter { it.language.equals(language, ignoreCase = true) }
+    return mine.ifEmpty { subs }
+        .distinctBy { (it.language + it.release).lowercase().ifEmpty { it.url } }
+        .sortedByDescending { (words(it.release) intersect playing).size }
 }
