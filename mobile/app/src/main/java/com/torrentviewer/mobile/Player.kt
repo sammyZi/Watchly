@@ -1012,7 +1012,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         }
 
         AnimatedVisibility(info && !waiting, Modifier.align(Alignment.TopStart).windowInsetsPadding(WindowInsets.safeDrawing).padding(start = if (controls) 64.dp else 16.dp, top = if (controls) 64.dp else 16.dp), enter = fadeIn(), exit = fadeOut()) {
-            StatsPanel(stats, progressState.value, file)
+            StatsPanel(stats, progressState.value, file, duration)
         }
 
         if (offerNext && !locked) {
@@ -1618,7 +1618,7 @@ private fun TrackRow(label: String, on: Boolean, @DrawableRes icon: Int? = null,
 
 /** What is playing and how it is going — dropped frames climbing means the player is discarding them. */
 @Composable
-private fun StatsPanel(s: Stats?, progress: Progress?, file: TorrentFile?) {
+private fun StatsPanel(s: Stats?, progress: Progress?, file: TorrentFile?, duration: Double) {
     fun mbps(kbps: Double) = "%.1f Mb/s".format(kbps / 1000)
     val rows = buildList {
         if (s == null) add("Player" to "Reading…")
@@ -1628,7 +1628,11 @@ private fun StatsPanel(s: Stats?, progress: Progress?, file: TorrentFile?) {
             add("Audio" to listOfNotNull(s.audioCodec, if (s.channels > 0) "${s.channels} ch" else null, if (s.sampleRate > 0) "${s.sampleRate / 1000} kHz" else null, s.language).joinToString("  ·  ").ifEmpty { "—" })
             // "Arriving" is the swarm's rate: the player's own input is reads from the phone's
             // loopback server, which run far faster than the torrent and said nothing about it.
-            add("Bitrate" to "${mbps(s.contentKbps)} video" + (progress?.let { "  ·  ${mbps(it.speed * 8 / 1000.0)} arriving" } ?: ""))
+            // Media3 knows a bitrate only where the container states one, and MKV does not: then the file's average.
+            val video = s.contentKbps.takeIf { it > 0 }?.let { "${mbps(it)} video" }
+                ?: file?.size?.takeIf { it > 0 && duration > 0 }?.let { "${mbps(it * 8 / duration / 1000)} average" }
+                ?: "—"
+            add("Bitrate" to video + (progress?.let { "  ·  ${mbps(it.speed * 8 / 1000.0)} arriving" } ?: ""))
             add("Frames" to "${s.displayed} shown  ·  ${s.lostFrames} dropped")
             add("Buffer" to "${s.cacheMs / 1000} s" + if (s.lostBuffers > 0) "  ·  ${s.lostBuffers} audio gaps" else "")
         }
