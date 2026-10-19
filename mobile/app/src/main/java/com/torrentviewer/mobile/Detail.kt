@@ -64,6 +64,7 @@ import com.torrentviewer.core.Hit
 import com.torrentviewer.core.History
 import com.torrentviewer.core.latestPerTitle
 import com.torrentviewer.core.Ink
+import com.torrentviewer.core.grain
 import com.torrentviewer.core.Lc
 import com.torrentviewer.core.Meta
 import com.torrentviewer.core.NewEpisodes
@@ -353,7 +354,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
         // Over the art, a round back button; once the page scrolls under it, a solid bar with the name.
         val scrolled by remember { derivedStateOf { list.firstVisibleItemIndex > 0 || list.firstVisibleItemScrollOffset > 420 } }
         if (scrolled) {
-            Row(Modifier.fillMaxWidth().background(Ink.bg).statusBarsPadding().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().background(Ink.bg).grain().statusBarsPadding().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 RoundIcon(L.drawable.lucide_ic_arrow_left, onBack)
                 Text(title.title, Modifier.padding(start = 12.dp), style = Type.title.copy(fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
@@ -484,7 +485,7 @@ private fun CastRow(names: List<String>) {
 private fun AwardsCard(text: String) {
     val a = remember(text) { awardsOf(text) }
     Row(
-        Modifier.padding(top = 18.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Ink.surface).padding(14.dp),
+        Modifier.padding(top = 18.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Ink.surface).grain().padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(42.dp).clip(CircleShape).background(Ink.imdb.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
