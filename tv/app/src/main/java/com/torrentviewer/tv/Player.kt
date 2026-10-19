@@ -416,6 +416,28 @@ private fun Player(watch: Watch) {
         goNext()
     }
 
+    // This episode's intro: IntroDB's window once it answers; until then, one marked before. A film has none.
+    val introKey = remember(title, file) {
+        if (title?.isSeries == true || parseEpisode(file?.name.orEmpty()) != null) title?.imdb ?: watch.item?.imdb ?: title?.title else null
+    }
+    var intro by remember { mutableStateOf(introKey?.let(Intros::get)) }
+    val imdb = title?.imdb ?: watch.item?.imdb
+    val introEp = remember(episode, file) { episode?.let { Ep(it.season, it.episode) } ?: parseEpisode(file?.name.orEmpty()) }
+    LaunchedEffect(imdb, introEp) {
+        if (introKey == null || imdb == null || introEp == null) return@LaunchedEffect
+        IntroDb.intro(imdb, introEp.season, introEp.episode)?.let { intro = it }
+    }
+    val skipIntro by remember { derivedStateOf { intro?.covers(at) == true && loaded } }
+    fun skipPastIntro() = intro?.let { seekTo(it.end) }
+    // Once per intro: scrubbing back into it to watch it is not undone.
+    var autoSkipped by remember(intro) { mutableStateOf(false) }
+    LaunchedEffect(skipIntro) {
+        if (!skipIntro || autoSkipped || !SettingsStore.value.value.autoSkipIntro) return@LaunchedEffect
+        autoSkipped = true
+        skipPastIntro()
+        say("Skipped intro")
+    }
+
     /* ----------------------------------------------------------------- back */
 
     // BACK closes a panel, then the controls, then the info card — and only then leaves.
@@ -458,10 +480,13 @@ private fun Player(watch: Watch) {
                 val sign = if (code == KeyEvent.KEYCODE_DPAD_LEFT) -1 else 1
                 if (!controls) {
                     when (code) {
-                        // OK is play/pause with the bar down; up/down only peek, as Android TV asks.
+                        // OK is play/pause with the bar down — or Skip intro while that is up; up/down only peek, as Android TV asks.
                         KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                            togglePause()
-                            show()
+                            if (skipIntro) skipPastIntro()
+                            else {
+                                togglePause()
+                                show()
+                            }
                             true
                         }
                         KeyEvent.KEYCODE_DPAD_UP -> { show(Band.SLIDER); true }
@@ -627,6 +652,19 @@ private fun Player(watch: Watch) {
         }
 
         if (!waiting) SeekFlash(flash)
+
+        // Skip intro, bottom-right, drawn as the focused button: with the bar down, OK presses it.
+        AnimatedVisibility(
+            skipIntro && !barUp && !offerNext && panel == null,
+            Modifier.align(Alignment.BottomEnd).padding(end = Safe.x, bottom = Safe.y),
+            enter = fadeIn() + slideInHorizontally { it / 3 },
+            exit = fadeOut(),
+        ) {
+            Row(Modifier.clip(RoundedCornerShape(8.dp)).background(Color.White).padding(horizontal = 22.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
+                Lc(L.drawable.lucide_ic_chevrons_right, tint = Color.Black, size = 22.dp)
+                Text("  Skip intro", style = Type.label.copy(color = Color.Black, fontWeight = FontWeight.Bold))
+            }
+        }
 
         // A short word for anything that happened without the bar: "Added EN".
         AnimatedVisibility(hud != null && !waiting, Modifier.align(Alignment.TopCenter).padding(top = Safe.y + 8.dp), enter = fadeIn() + slideInVertically { -it }, exit = fadeOut()) {

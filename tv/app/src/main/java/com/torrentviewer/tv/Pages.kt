@@ -370,7 +370,14 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
 
-        Section("Extra trackers", "Attach public trackers to bare magnet links so they resolve faster.") {
+        Section("Skip intro", "Where an episode's intro is known, jump past it by itself instead of showing the Skip intro button. Once per episode — rewind to watch it.") {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Chip("Automatically", settings.autoSkipIntro, onClick = { set(settings.copy(autoSkipIntro = true)) })
+                Chip("Show the button", !settings.autoSkipIntro, onClick = { set(settings.copy(autoSkipIntro = false)) })
+            }
+        }
+
+        Section("Extra trackers","Attach public trackers to bare magnet links so they resolve faster.") {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Chip("On", settings.addTrackers, onClick = { set(settings.copy(addTrackers = true)) })
                 Chip("Off", !settings.addTrackers, onClick = { set(settings.copy(addTrackers = false)) })
