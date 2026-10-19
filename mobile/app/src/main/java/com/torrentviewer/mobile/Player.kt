@@ -950,11 +950,14 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                                 scrub = null
                             },
                         )
-                        // Netflix's bar: the few things reached for mid-film, named; the rest under More.
-                        Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)) {
+                        // Icons alone, just the few reached for mid-film; the rest under More.
+                        Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(18.dp, Alignment.CenterHorizontally)) {
                             watch.prev?.let { prev -> BarButton(L.drawable.lucide_ic_skip_back, "Previous") { watch.playSibling(prev) } }
                             BarButton(L.drawable.lucide_ic_gauge, "Speed (${rateLabel(rate)})", on = rate != 1f) { panel = Panel.SPEED }
                             BarButton(L.drawable.lucide_ic_captions, "Audio & subtitles", on = subtitle != null) { panel = Panel.TRACKS }
+                            if (canPip) BarButton(L.drawable.lucide_ic_picture_in_picture_2, "Mini player") {
+                                pipParams()?.let { p -> runCatching { activity?.enterPictureInPictureMode(p) } }
+                            }
                             BarButton(L.drawable.lucide_ic_ellipsis, "More", on = scale != 0 || SLEEP[sleep] != 0 || wholeFile) { panel = Panel.MORE }
                             if (next != null || onlineNext != null) BarButton(L.drawable.lucide_ic_skip_forward, "Next episode", onClick = ::goNext)
                         }
@@ -1137,7 +1140,6 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                     ),
                     Option("download", "Download ahead", if (wholeFile) "Whole file" else "Next 5 minutes"),
                     Option("open", "Open in another player"),
-                    if (canPip) Option("pip", "Mini player") else null,
                 ),
                 selected = null,
                 onPick = { what ->
@@ -1158,10 +1160,6 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                                     paused = true
                                 } else watch.notes.tryEmit("No other player on this phone can open it.")
                             }
-                        }
-                        "pip" -> {
-                            panel = null
-                            pipParams()?.let { p -> runCatching { activity?.enterPictureInPictureMode(p) } }
                         }
                     }
                 },
@@ -1269,16 +1267,13 @@ private fun BrightnessRail(level: Float, onChange: (Float) -> Unit, modifier: Mo
     }
 }
 
-/** A bar button: the icon and its name, a red dot when on. */
+/** A bar button: the icon alone, a red dot when on; [label] is what a screen reader says. */
 @Composable
 private fun BarButton(@DrawableRes icon: Int, label: String, on: Boolean = false, onClick: () -> Unit) {
-    Tap(onClick, shape = CircleShape) {
-        Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box {
-                Lc(icon, tint = Color.White, size = 20.dp)
-                if (on) Box(Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-3).dp).size(6.dp).clip(CircleShape).background(Ink.accent))
-            }
-            Text(label, Modifier.padding(start = 8.dp), style = Type.label.copy(color = Color.White, fontWeight = FontWeight.SemiBold), maxLines = 1)
+    Tap(onClick, Modifier.semantics { contentDescription = label }, CircleShape) {
+        Box(Modifier.padding(12.dp)) {
+            Lc(icon, tint = Color.White, size = 22.dp)
+            if (on) Box(Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-3).dp).size(6.dp).clip(CircleShape).background(Ink.accent))
         }
     }
 }
