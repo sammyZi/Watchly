@@ -91,9 +91,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.torrentviewer.core.Artwork
 import com.torrentviewer.core.Ink
-import com.torrentviewer.core.accentGlow
-import com.torrentviewer.core.glow
-import com.torrentviewer.core.grain
 import com.torrentviewer.core.Lc
 import com.torrentviewer.core.Motion
 import com.torrentviewer.core.Note
@@ -154,8 +151,7 @@ fun Button(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, @D
         )
         val fg = if (primary) Color.White else Ink.text
         Row(
-            // The primary one a grainy red glow, a shade deeper while pressed; the rest a flat tint.
-            (if (primary) Modifier.glow(accentGlow(), 0.85f, 1.1f).background(Color.Black.copy(alpha = if (pressed) 0.18f else 0f)) else Modifier.background(bg))
+            Modifier.background(bg)
                 .height(46.dp).padding(horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
@@ -392,7 +388,7 @@ fun BottomSheet(title: String, onDismiss: () -> Unit, content: @Composable () ->
                 Modifier.widthIn(max = 600.dp).fillMaxWidth().heightIn(max = maxHeight)
                     .graphicsLayer { translationY = offset }
                     .nestedScroll(pull)
-                    .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)).background(Ink.surface).grain()
+                    .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)).background(Ink.surface)
                     // Taps on the sheet stay on the sheet.
                     .clickable(remember { MutableInteractionSource() }, indication = null) {}
                     .navigationBarsPadding().padding(bottom = 10.dp),

@@ -39,7 +39,6 @@ import com.torrentviewer.core.Artwork
 import com.torrentviewer.core.Episode
 import com.torrentviewer.core.Hit
 import com.torrentviewer.core.Ink
-import com.torrentviewer.core.grain
 import com.torrentviewer.core.Lc
 import com.torrentviewer.core.Note
 import com.torrentviewer.core.ProgressLine
@@ -157,7 +156,7 @@ private fun ActiveRow(row: LiveDownload, onPause: () -> Unit, onResume: () -> Un
     var openSeasons by remember(row.job.uri) {
         mutableStateOf(setOf(row.files.firstOrNull { it.wanted && !it.saved }?.let { parseEpisode(it.name)?.season }))
     }
-    Column(Modifier.fillMaxWidth().widthIn(max = 720.dp).padding(bottom = 12.dp).clip(RoundedCornerShape(12.dp)).background(Ink.surface).grain().padding(12.dp)) {
+    Column(Modifier.fillMaxWidth().widthIn(max = 720.dp).padding(bottom = 12.dp).clip(RoundedCornerShape(12.dp)).background(Ink.surface).padding(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Artwork(row.job.poster, row.job.label, Modifier.width(52.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(6.dp)))
             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
