@@ -23,6 +23,7 @@ import com.torrentviewer.core.Profiles
 import com.torrentviewer.core.SettingsStore
 import com.torrentviewer.core.TorrentStream
 import com.torrentviewer.core.Watch
+import com.torrentviewer.core.preferHighRefreshRate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -75,11 +76,17 @@ class MainActivity : FragmentActivity() {
         applyTheme(darkFor(SettingsStore.value.value.themeMode, systemDark))
         incoming.value = intent?.data
         setContent { App(Services.watch, incoming) }
+        preferHighRefreshRate()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         incoming.value = intent.data
+    }
+
+    override fun onResume() {
+        super.onResume()
+        preferHighRefreshRate()
     }
 
     /** Home while a film plays shrinks it to a window. Android 12+ does this itself from the params' auto-enter. */

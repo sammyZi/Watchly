@@ -299,3 +299,19 @@ fun Avatar(profile: Profile, size: Dp, modifier: Modifier = Modifier) {
         else Text(profile.name.take(1).uppercase(), style = Type.hero.copy(fontSize = (size.value * 0.42f).sp))
     }
 }
+
+/**
+ * The panel's highest mode up to 120Hz at the current resolution. Without it Android keeps an
+ * app at 60Hz on most phones and TVs, whatever the screen can do. Call again on resume.
+ */
+fun android.app.Activity.preferHighRefreshRate() {
+    runCatching {
+        @Suppress("DEPRECATION")
+        val display = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) display ?: return else windowManager.defaultDisplay
+        val current = display.mode
+        val best = display.supportedModes
+            .filter { it.physicalWidth == current.physicalWidth && it.physicalHeight == current.physicalHeight && it.refreshRate <= 120.5f }
+            .maxByOrNull { it.refreshRate } ?: return
+        window.attributes = window.attributes.apply { preferredDisplayModeId = best.modeId }
+    }
+}
