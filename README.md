@@ -35,7 +35,7 @@ Watchly is built on open-source projects:
 - [Jetpack Compose](https://developer.android.com/jetpack/compose), [Coil](https://github.com/coil-kt/coil) and [Lucide](https://lucide.dev) icons — the look
 
 Titles, artwork and episode lists come from [Cinemeta](https://v3-cinemeta.strem.io), Stremio's public catalogue,
-intro timings from [IntroDB](https://introdb.app) and subtitles from [SubDL](https://subdl.com).
+intro timings from [IntroDB](https://introdb.app) and subtitles from [OpenSubtitles](https://www.opensubtitles.org) (through Stremio's add-on, no key needed) and [SubDL](https://subdl.com).
 
 ## Screenshots
 

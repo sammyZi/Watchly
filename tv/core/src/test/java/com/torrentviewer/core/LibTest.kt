@@ -272,6 +272,36 @@ class LibTest {
         assertNull(subs[0].season)
     }
 
+    @Test fun openSubtitlesRows() {
+        val subs = OpenSubs.toSubs(
+            JSONObject("""{"subtitles":[
+                {"id":"1","url":"https://subs5.strem.io/a","lang":"eng","subtitleFileName":"Show.S01E01.720p.BluRay.x264-DEMAND.srt","movieReleaseName":"Show.S01E01.720p.BluRay.x264-DEMAND","season":1,"episode":1},
+                {"id":"2","url":"https://subs5.strem.io/b","lang":"ger","subtitleFileName":"film_ger.srt","season":0,"episode":0},
+                {"id":"3","lang":"eng"}
+            ]}"""),
+        )
+        assertEquals(2, subs.size)
+        assertEquals("EN", subs[0].language)
+        assertEquals(1, subs[0].episode)
+        // Three letters map to the app's codes; a film's 0/0 is no episode.
+        assertEquals("DE", subs[1].language)
+        assertEquals("film_ger", subs[1].release)
+        assertNull(subs[1].season)
+    }
+
+    @Test fun subtitlesRanked() {
+        fun sub(release: String, lang: String = "EN") = Sub(release, release, lang, "u/$release", null, null)
+        val ranked = rankSubtitles(
+            listOf(sub("Show.S01E01.1080p.WEB-NTb"), sub("Show.S01E01.720p.BluRay.x264-DEMAND"), sub("show.s01e01.720p.bluray.x264-demand"), sub("Show.S01E01.FR", "FR")),
+            "en",
+            "Show.S01E01.720p.BluRay.x264-DEMAND.mkv",
+        )
+        // English only, one per release, the release that matches the file first.
+        assertEquals(listOf("Show.S01E01.720p.BluRay.x264-DEMAND", "Show.S01E01.1080p.WEB-NTb"), ranked.map { it.release })
+        // None in the chosen language: every language, rather than nothing.
+        assertEquals(listOf("FR", "EN"), rankSubtitles(listOf(sub("Film.WEB", "EN"), sub("Film.1080p.BluRay", "FR")), "HI", "Film.1080p.BluRay.mkv").map { it.language })
+    }
+
     @Test fun historyRoundTrip() {
         val item = Item(
             uri = "magnet:?xt=urn:btih:abc", title = "Show.S01E02", at = 5, torrentName = "Show",
