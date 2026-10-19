@@ -275,8 +275,9 @@ private fun EpisodeCard(ep: Episode, fallback: String?, selected: Boolean, busy:
             Artwork(ep.thumbnail ?: fallback, ep.name, Modifier.fillMaxSize())
             if (busy) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) { Spinner(size = 30.dp) }
             if (selected && !busy) Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Ink.accent))
-            // How far it got, as on Continue watching; watched through gets a tick instead.
-            else if (seen > 0.02 && seen < 0.95) Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Color.White.copy(alpha = 0.3f))) {
+            // How far it got, as on Continue watching; watched through, the bar runs green end to end.
+            else if (seen >= 0.95) Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Ink.good))
+            else if (seen > 0.02) Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Color.White.copy(alpha = 0.3f))) {
                 Box(Modifier.fillMaxWidth(seen.toFloat()).fillMaxHeight().background(Ink.accent))
             }
         }
