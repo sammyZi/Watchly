@@ -78,6 +78,8 @@ fun Field(
     secret: Boolean = false,
     digits: Boolean = false,
     onSubmit: () -> Unit = {},
+    /** The keyboard's action key: Done, or Search on the search page. */
+    imeAction: ImeAction = ImeAction.Done,
     leading: Int? = null,
     trailing: @Composable () -> Unit = {},
 ) {
@@ -100,8 +102,9 @@ fun Field(
                 textStyle = Type.title.copy(fontWeight = FontWeight.Medium, letterSpacing = if (secret) 8.sp else 0.sp),
                 cursorBrush = SolidColor(Ink.accent),
                 visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
-                keyboardOptions = KeyboardOptions(keyboardType = if (digits) KeyboardType.NumberPassword else KeyboardType.Text, imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onAny = { onSubmit() }),
+                keyboardOptions = KeyboardOptions(keyboardType = if (digits) KeyboardType.NumberPassword else KeyboardType.Text, imeAction = imeAction),
+                // Then what the key does anyway: Done puts the keyboard away.
+                keyboardActions = KeyboardActions(onAny = { onSubmit(); defaultKeyboardAction(imeAction) }),
                 modifier = Modifier.fillMaxWidth()
                     .then(if (requester != null) Modifier.focusRequester(requester) else Modifier)
                     .onFocusChanged { focused = it.isFocused },
@@ -186,6 +189,7 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
                         requester = field,
                         leading = L.drawable.lucide_ic_search,
                         onSubmit = { recents = Searches.remember(query) },
+                        imeAction = ImeAction.Search,
                         trailing = { if (busy) Spinner(size = 22.dp) },
                     )
                     Spacer(Modifier.width(14.dp))
