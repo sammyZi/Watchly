@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/banner.jpg" alt="Watchly on Android: Home, a film's page, a series, its episodes, search and settings">
+  <img src="docs/images/banner.jpg" alt="Watchly on Android: Home, a film, a series, search and the episode list">
 </p>
 
 # Watchly
