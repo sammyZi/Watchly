@@ -42,6 +42,7 @@ public sealed class Icon : FrameworkElement
         ("x-circle", Circle(12, 12, 10) + "M15,9 L9,15 M9,9 L15,15"),
         ("star", "M12,2 L15.09,8.26 L22,9.27 L17,14.14 L18.18,21.02 L12,17.77 L5.82,21.02 L7,14.14 L2,9.27 L8.91,8.26 Z"),
         ("chevron-right", "M9,18 L15,12 L9,6"),
+        ("chevrons-right", "M6,17 L11,12 L6,7 M13,17 L18,12 L13,7"),
         ("chevron-left", "M15,18 L9,12 L15,6"),
         ("chevron-down", "M6,9 L12,15 L18,9"),
         ("chevron-up", "M18,15 L12,9 L6,15"),

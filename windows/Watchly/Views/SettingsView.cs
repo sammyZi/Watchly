@@ -64,6 +64,10 @@ public sealed class SettingsView : UserControl
             Row("Add public trackers", "Bare magnet links resolve much faster than over DHT alone",
                 Toggle(S.AddTrackers, v => Set(S with { AddTrackers = v })))));
 
+        page.Children.Add(Group("Playback",
+            Row("Skip intros automatically", "Where an episode's intro is known, jump past it instead of showing the Skip intro button. Once per episode — seek back to watch it.",
+                Toggle(S.AutoSkipIntro, v => Set(S with { AutoSkipIntro = v })))));
+
         var folder = Ui.Button(Ui.Text("Change", "Label", "Accent", 13, FontWeights.SemiBold), () =>
         {
             var dialog = new OpenFolderDialog { Title = "Where should downloads go?", InitialDirectory = Directory.Exists(S.DownloadDir) ? S.DownloadDir : null };

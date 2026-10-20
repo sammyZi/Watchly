@@ -115,6 +115,10 @@ public sealed class PlayerView : UserControl, IDisposable
     bool SheetOpen => picking || searchingSubs || more;
     void CloseSheets() => picking = searchingSubs = more = false;
     bool dismissedNext;
+    /// <summary>IntroDB's window for this episode, once it answers.</summary>
+    Intro? intro;
+    /// <summary>Once per intro: seeking back into it to watch it is not undone.</summary>
+    bool autoSkipped;
     bool fullscreen;
     bool pip;
     string? failure;
@@ -257,6 +261,15 @@ public sealed class PlayerView : UserControl, IDisposable
         Render();
         _ = Start();
         _ = LoadTitleMeta();
+        _ = LoadIntro();
+    }
+
+    /// <summary>This episode's intro, from IntroDB. A film has no recurring titles.</summary>
+    async Task LoadIntro()
+    {
+        if (request.Imdb is not { Length: > 0 } imdb || Search.ParseEpisode(request.Title) is not { } at) return;
+        intro = await IntroDb.Find(imdb, at.Season, at.Episode);
+        if (!disposed && intro is not null) Render();
     }
 
     /// <summary>The pause card's rating, facts and plot — Cinemeta's, cached, so usually already here.</summary>
@@ -507,7 +520,7 @@ public sealed class PlayerView : UserControl, IDisposable
     void OnTracksChanged()
     {
         if (pendingSub is null) return;
-        // A SubDL pick lands as a new track; select it once libVLC lists it.
+        // An online pick lands as a new track; select it once libVLC lists it.
         var tracks = player.SpuDescription.Where(t => t.Id >= 0).ToList();
         if (tracks.Count == 0) return;
         var stem = Path.GetFileNameWithoutExtension(pendingSub);
@@ -544,6 +557,13 @@ public sealed class PlayerView : UserControl, IDisposable
         {
             stalled = false;
             Render();
+        }
+
+        if (intro is { } skipping && !autoSkipped && shell.Settings.AutoSkipIntro && duration > 0 && IsPlayingSafe && skipping.Covers(current / 1000.0))
+        {
+            autoSkipped = true;
+            SeekTo((long)(skipping.End * 1000));
+            ShowHud("Skipped intro");
         }
 
         if (session is not null)
@@ -585,7 +605,7 @@ public sealed class PlayerView : UserControl, IDisposable
     /// </summary>
     string Signature() => string.Join('|',
         started, Preparing, showUi, locked, buffering || stalled, started && IsPlayingSafe, PauseCard,
-        picking, more, searchingSubs, hud, UpNextVisible,
+        picking, more, searchingSubs, hud, UpNextVisible, SkipIntroVisible,
         failure, failureFatal, scaleIdx, rate, fullscreen, pip, showInfo,
         userMuted, tracksVersion,
         stats != null, subLoading, subResults.Count);
@@ -666,6 +686,8 @@ public sealed class PlayerView : UserControl, IDisposable
 
     /// <summary>Paused with the controls away: what you are watching and how much is left.</summary>
     bool PauseCard => started && !Preparing && !showUi && !locked && !pip && !buffering && !stalled && SafeState == VLCState.Paused;
+
+    bool SkipIntroVisible => intro is { } i && started && duration > 0 && !Preparing && !locked && !SheetOpen && !UpNextVisible && i.Covers(current / 1000.0);
 
     bool UpNextVisible =>request.Next is not null && !dismissedNext && duration > 0 && duration - current <= UpNextSeconds * 1000;
 
@@ -1446,13 +1468,6 @@ public sealed class PlayerView : UserControl, IDisposable
     async void SearchSubs(string? typed = null)
     {
         var q = (typed ?? subQuery).Trim();
-        if (SubDL.Key is null)
-        {
-            Warn("This build has no SubDL key");
-            searchingSubs = false;
-            Render();
-            return;
-        }
         if (q.Length == 0) q = request.MetaTitle ?? TitleText.SearchableName(request.Title);
         if (q.Length == 0 && request.Imdb is null) return;
         subLoading = true;
@@ -1462,9 +1477,11 @@ public sealed class PlayerView : UserControl, IDisposable
         {
             var at = Search.ParseEpisode(request.Title);
             var useImdb = request.Imdb is not null && (typed is null || typed.Trim().Length == 0 || typed.Trim() == request.MetaTitle);
-            var results = await SubDL.Search(useImdb ? "" : q, useImdb ? request.Imdb : null, at?.Season, at?.Episode,
-                at is not null || request.Kind == "tv" ? "tv" : request.Kind == "movie" ? "movie" : null);
-            subResults = results.Take(20).ToList();
+            // OpenSubtitles needs no key; SubDL joins in when this build has one.
+            var results = await Subtitles.Find(q, useImdb ? request.Imdb : null, at?.Season, at?.Episode,
+                at is not null || request.Kind == "tv" ? "tv" : request.Kind == "movie" ? "movie" : null,
+                request.Title);
+            subResults = results.Take(25).ToList();
         }
         catch (Exception e)
         {
@@ -1890,6 +1907,7 @@ public sealed class PlayerView : UserControl, IDisposable
             });
         }
 
+        if (SkipIntroVisible) chrome.Children.Add(SkipIntroButton());
         if (UpNextVisible) chrome.Children.Add(UpNextCard());
         RenderFailure();
     }
@@ -2218,7 +2236,7 @@ public sealed class PlayerView : UserControl, IDisposable
         }
         if (tracks.Count == 0)
         {
-            var none = WText(SubDL.Key is not null ? "No subtitles found. Use More → Find subtitles to search online." : "No subtitles found.", 12, White(0x70));
+            var none = WText("No subtitles found. Use More → Find subtitles to search online.", 12, White(0x70));
             none.TextWrapping = TextWrapping.Wrap;
             none.Margin = new Thickness(10, 8, 10, 8);
             subs.Children.Add(none);
@@ -2322,6 +2340,31 @@ public sealed class PlayerView : UserControl, IDisposable
         subQuery = subBox.Text;
         SearchSubs(subBox.Text);
         e.Handled = true;
+    }
+
+    /// <summary>Skip intro, bottom-right, where Up next sits later.</summary>
+    FrameworkElement SkipIntroButton()
+    {
+        var ink = new SolidColorBrush(Color.FromRgb(0x0b, 0x0e, 0x14));
+        var skip = Controls.Ui.Button(new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Children = { WIcon("chevrons-right", 16, ink), Pad(WText("Skip intro", 14, ink, FontWeights.Bold), 8, 0) },
+        }, SkipIntro, "Bare");
+        skip.Background = Brushes.White;
+        skip.Tag = 8;
+        skip.Padding = new Thickness(18, 10, 18, 10);
+        skip.HorizontalAlignment = HorizontalAlignment.Right;
+        skip.VerticalAlignment = VerticalAlignment.Bottom;
+        skip.Margin = new Thickness(0, 0, 16, showUi ? 110 : 24);
+        return skip;
+    }
+
+    void SkipIntro()
+    {
+        if (intro is not { } i) return;
+        SeekTo((long)(i.End * 1000));
+        Render();
     }
 
     FrameworkElement UpNextCard()

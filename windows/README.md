@@ -8,7 +8,7 @@ catalogue and release search, plus a BitTorrent-style download manager.
 | App / UI | .NET 8 + WPF |
 | Player | [LibVLCSharp](https://code.videolan.org/videolan/LibVLCSharp) (VideoLAN's official libVLC binding) — every format VLC plays: HEVC, 10-bit, AV1, EAC3, AC-3, DTS, TrueHD, MKV, AVI; all audio tracks and subtitle formats, GPU decoding |
 | Torrents | [MonoTorrent](https://github.com/alanmcgovern/monotorrent) — streaming (serves the file over a loopback HTTP server with range support, fetching around wherever the player reads) and downloading, one engine for both |
-| Search, titles, subtitles | Plain HTTP: Cinemeta, apibay / torrents-csv / YTS / EZTV / Torrentio, SubDL — ported from `src/lib` |
+| Search, titles, subtitles | Plain HTTP: Cinemeta, apibay / torrents-csv / YTS / EZTV / Torrentio, OpenSubtitles, SubDL, IntroDB — ported from `src/lib` |
 
 ## Build and run
 
@@ -36,8 +36,8 @@ Publish doesn't clear old files, so delete `windows/dist` before re-publishing,
 and close the app first — a running `Watchly.exe` can't be overwritten.
 Wrap it with Inno Setup or similar for a single installer.
 
-The SubDL key is read from `mobile/.env` (`SUBDL_KEY` or `EXPO_PUBLIC_SUBDL_KEY`) at build
-time, like the phone app; without it online subtitle search is off.
+Online subtitles come from OpenSubtitles (no key needed); SubDL's join in when a key is read
+from `mobile/.env` (`SUBDL_KEY` or `EXPO_PUBLIC_SUBDL_KEY`) at build time, like the phone app.
 
 ### Self-check
 
