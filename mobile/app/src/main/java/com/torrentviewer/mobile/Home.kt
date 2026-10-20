@@ -43,6 +43,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -246,6 +248,7 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
         // page itself, eased in and ending in a soft fade rather than a hard edge across the art.
         val scrolled by remember { derivedStateOf { state.list.firstVisibleItemIndex > 0 || state.list.firstVisibleItemScrollOffset > 240 } }
         val solid by animateFloatAsState(if (scrolled) 1f else 0f, tween(260), label = "bar")
+        StatusIconsOverArt(!scrolled)
         Box(Modifier.fillMaxWidth()) {
             Box(Modifier.matchParentSize().graphicsLayer { alpha = 1f - solid }.background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent))))
             Column(Modifier.matchParentSize().graphicsLayer { alpha = solid }) {
@@ -360,8 +363,10 @@ private fun Hero(pager: PagerState, titles: List<Title>, onOpen: (Title) -> Unit
             val t by produceState(start, start.imdb) { Meta.title(start.imdb, start.kind)?.let { value = it } }
             val saved by SavedStore.items.collectAsState()
             val inList = saved.any { it.imdb == t.imdb && it.list == "later" }
+            // The whole billboard opens the title, as Watch does; the buttons keep their own taps.
+            val open = Modifier.fillMaxSize().clickable(remember { MutableInteractionSource() }, indication = null) { onOpen(t) }
             if (wide) {
-                Box(Modifier.fillMaxSize()) {
+                Box(open) {
                     Artwork(t.wide, t.title, Modifier.align(Alignment.TopEnd).fillMaxWidth(0.72f).fillMaxHeight().heroScrims(), fill = false)
                     Column(Modifier.align(Alignment.CenterStart).padding(start = EDGE + 8.dp, top = 40.dp).widthIn(max = 380.dp)) {
                         TitleMark(t, Modifier.widthIn(max = 300.dp), maxHeight = 72.dp, style = Type.display)
@@ -371,7 +376,7 @@ private fun Hero(pager: PagerState, titles: List<Title>, onOpen: (Title) -> Unit
                     }
                 }
             } else {
-                Box(Modifier.fillMaxSize()) {
+                Box(open) {
                     Artwork(t.wide, t.title, Modifier.fillMaxSize().bottomScrim(0.35f), fill = false)
                     Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = EDGE, vertical = 18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(Modifier.widthIn(max = 280.dp), contentAlignment = Alignment.Center) {
@@ -394,7 +399,8 @@ private fun Hero(pager: PagerState, titles: List<Title>, onOpen: (Title) -> Unit
 @Composable
 private fun HeroButtons(t: Title, inList: Boolean, onOpen: (Title) -> Unit, modifier: Modifier) {
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Button("Watch", { onOpen(t) }, Modifier.width(132.dp), icon = L.drawable.lucide_ic_play, primary = true)
-        Button(if (inList) "In My List" else "My List", { SavedStore.toggle(t) }, Modifier.width(132.dp), icon = if (inList) L.drawable.lucide_ic_check else L.drawable.lucide_ic_plus)
+        Button("Watch", { onOpen(t) }, Modifier.widthIn(min = 132.dp), icon = L.drawable.lucide_ic_play, primary = true)
+        // Wide enough for "In My List", and the details screen's toggle: a green disc springs in behind the tick.
+        Button(if (inList) "In My List" else "My List", { SavedStore.toggle(t) }, Modifier.widthIn(min = 132.dp), icon = if (inList) L.drawable.lucide_ic_check else L.drawable.lucide_ic_plus, on = inList)
     }
 }

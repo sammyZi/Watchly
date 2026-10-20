@@ -2,6 +2,8 @@
 
 package com.torrentviewer.mobile
 
+import android.app.Activity
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedVisibility
@@ -61,6 +63,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -73,11 +76,15 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -139,7 +146,25 @@ fun Tap(
 
 /** The TV's buttons, on touch: red for the main action, translucent grey for the rest. */
 @Composable
-fun Button(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, @DrawableRes icon: Int? = null, primary: Boolean = false) {
+fun Button(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    @DrawableRes icon: Int? = null,
+    primary: Boolean = false,
+    /** A toggle (My List): switched on, the icon gets [Action]'s disc and pop. */
+    on: Boolean? = null,
+    onColor: Color = Ink.good,
+) {
+    val filled = on == true
+    val disc by animateFloatAsState(if (filled) 1f else 0f, if (filled) spring(dampingRatio = 0.55f, stiffness = 420f) else tween(180), label = "disc")
+    val pop = remember { Animatable(1f) }
+    var seen by remember { mutableStateOf(on) }
+    LaunchedEffect(on) {
+        if (on == null || on == seen) return@LaunchedEffect
+        seen = on
+        pop.animateTo(1f, keyframes { durationMillis = 360; 0.72f at 100; 1.15f at 230; 1f at 360 })
+    }
     Tap(onClick, modifier, RoundedCornerShape(8.dp)) { pressed ->
         val bg by animateColorAsState(
             when {
@@ -157,8 +182,20 @@ fun Button(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, @D
             horizontalArrangement = Arrangement.Center,
         ) {
             if (icon != null) {
-                Lc(icon, tint = fg, size = 18.dp)
-                Spacer(Modifier.width(10.dp))
+                Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                    if (on != null) Box(
+                        Modifier.size(24.dp).graphicsLayer {
+                            scaleX = disc
+                            scaleY = disc
+                            alpha = disc.coerceIn(0f, 1f)
+                        }.clip(CircleShape).background(onColor),
+                    )
+                    Lc(icon, Modifier.graphicsLayer {
+                        scaleX = pop.value
+                        scaleY = pop.value
+                    }, tint = lerp(fg, Color.White, disc.coerceIn(0f, 1f)), size = if (on != null) 16.dp else 18.dp)
+                }
+                Spacer(Modifier.width(8.dp))
             }
             Text(label, style = Type.label.copy(fontWeight = FontWeight.SemiBold, color = fg), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
@@ -409,17 +446,48 @@ fun BottomSheet(title: String, onDismiss: () -> Unit, content: @Composable () ->
     }
 }
 
-/** Fades artwork into the page at the bottom, and darkens the top for the status bar. */
-fun Modifier.bottomScrim(from: Float = 0.45f): Modifier = drawWithContent {
+/**
+ * Fades artwork into the page at the bottom, and darkens the top for the status bar.
+ * The art itself fades out, eased, rather than a flat page colour being painted over it:
+ * that colour has none of the page's grain, and showed as a band where the hero ended.
+ */
+fun Modifier.bottomScrim(from: Float = 0.45f): Modifier = graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }.drawWithContent {
     drawContent()
-    val top = size.height * 0.22f
-    drawRect(Brush.verticalGradient(0f to Color.Black.copy(alpha = 0.55f), 1f to Color.Transparent, endY = top), size = Size(size.width, top))
+    val top = size.height * 0.28f
+    drawRect(Brush.verticalGradient(0f to Color.Black.copy(alpha = 0.7f), 0.5f to Color.Black.copy(alpha = 0.3f), 1f to Color.Transparent, endY = top), size = Size(size.width, top))
     val start = size.height * from
     drawRect(
-        Brush.verticalGradient(0f to Color.Transparent, 1f to Ink.bg, startY = start, endY = size.height),
+        Brush.verticalGradient(
+            0f to Color.Black, 0.3f to Color.Black.copy(alpha = 0.85f), 0.55f to Color.Black.copy(alpha = 0.5f),
+            0.8f to Color.Black.copy(alpha = 0.15f), 1f to Color.Transparent,
+            startY = start, endY = size.height,
+        ),
         topLeft = Offset(0f, start),
         size = Size(size.width, size.height - start),
+        blendMode = BlendMode.DstIn,
     )
+}
+
+/**
+ * Status bar icons light while dark artwork sits under them — the light page's dark icons
+ * were lost on the hero, and some phones washed a pale scrim over it for contrast — and the
+ * page's own again once the art has scrolled away or the screen goes.
+ */
+@Composable
+fun StatusIconsOverArt(overArt: Boolean) {
+    val view = LocalView.current
+    val dark = Ink.isDark
+    LaunchedEffect(overArt, dark) {
+        val window = (view.context as? Activity)?.window ?: return@LaunchedEffect
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) window.isStatusBarContrastEnforced = false
+        WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !dark && !overArt
+    }
+    DisposableEffect(view) {
+        onDispose {
+            val window = (view.context as? Activity)?.window ?: return@onDispose
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !Ink.isDark
+        }
+    }
 }
 
 /** Posters, for search results, lists and whole shelves. */
