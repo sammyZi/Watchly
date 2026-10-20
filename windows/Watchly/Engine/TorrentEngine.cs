@@ -693,6 +693,7 @@ public sealed class StreamSession : IAsyncDisposable
         // (Its picker was put in when it was added — MonoTorrent only swaps pickers while stopped.)
         var window = borrowed ? null : engine.WindowOf(manager);
         window?.Watch(fileIndex);
+        engine.WindowOf(manager)?.ReadFrom(file);
         if (manager.State is TorrentState.Stopped or TorrentState.Paused or TorrentState.Error) await manager.StartAsync();
         if (!borrowed) _ = CreateSparseWhenDownloading(manager, file);
         IHttpStream http;
@@ -847,6 +848,20 @@ public sealed class WindowedRequester : IStreamingPieceRequester
         fileIndex = file;
     }
 
+    ITorrentManagerFile? reading;
+
+    /// <summary>
+    /// A new stream reads from the file's first byte. MonoTorrent's LocalStream tells the picker
+    /// only about seeks that change its position, and a new stream is already at 0, so the
+    /// picker stayed on piece 0 of the torrent — another episode, in a season pack — and the
+    /// window held none of the watched file: 0% buffered, the swarm idle. Put it at the file.
+    /// </summary>
+    public void ReadFrom(ITorrentManagerFile file)
+    {
+        reading = file;
+        inner.SeekToPosition(file, 0); // nothing before Initialise, which does it then
+    }
+
     /// <summary>Byte span of the file to keep fetching; set from any thread.</summary>
     public void SetWindow(long from, long to)
     {
@@ -866,6 +881,8 @@ public sealed class WindowedRequester : IStreamingPieceRequester
         ignoringBitfields.CopyTo(all);
         all[^1] = outside;
         inner.Initialise(torrentData, enqueuer, all);
+        if (reading is not null && (inner.HighPriorityPieceIndex < reading.StartPieceIndex || inner.HighPriorityPieceIndex > reading.EndPieceIndex))
+            inner.SeekToPosition(reading, 0);
         applied = (-1, -1, -2, -2, false);
         Apply();
     }
