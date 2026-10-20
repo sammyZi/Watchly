@@ -353,6 +353,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
         }
         // Over the art, a round back button; once the page scrolls under it, a solid bar with the name.
         val scrolled by remember { derivedStateOf { list.firstVisibleItemIndex > 0 || list.firstVisibleItemScrollOffset > 420 } }
+        StatusIconsOverArt(!wide && !scrolled)
         if (scrolled) {
             Row(Modifier.fillMaxWidth().background(Ink.bg).grain().statusBarsPadding().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 RoundIcon(L.drawable.lucide_ic_arrow_left, onBack)
