@@ -267,6 +267,8 @@ public sealed record AppSettings
     /// <summary>The player's picture mode ("Best fit", "Stretch", "Crop", …) and speed, kept for the next video.</summary>
     public string PlayerScale { get; init; } = "Best fit";
     public double PlaybackRate { get; init; } = 1;
+    /// <summary>Jump past an episode's intro by itself, rather than offer the button.</summary>
+    public bool AutoSkipIntro { get; init; }
     const string Key = "settings";
 
     public static AppSettings Load()
@@ -394,7 +396,7 @@ public static class Paths
     /// <summary>Pieces of whatever is being streamed. Cleared on stop unless the setting says keep.</summary>
     public static readonly string StreamCache = System.IO.Path.Combine(LocalRoot, "stream");
 
-    /// <summary>Subtitles fetched from SubDL.</summary>
+    /// <summary>Subtitles fetched online (OpenSubtitles, SubDL).</summary>
     public static readonly string Subtitles = System.IO.Path.Combine(LocalRoot, "subtitles");
 
     public static readonly string DefaultDownloads = System.IO.Path.Combine(

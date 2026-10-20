@@ -129,3 +129,84 @@ public static class SubDL
         return plain;
     }
 }
+
+/// <summary>OpenSubtitles through Stremio's add-on: no key, by IMDb id, and plain UTF-8 .srt files.</summary>
+public static class OpenSubs
+{
+    const string Api = "https://opensubtitles-v3.strem.io/subtitles";
+
+    /// <summary>Its languages are three letters ("eng", "ger"); SubDL's and the app's are two.</summary>
+    static readonly Dictionary<string, string> Codes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["eng"] = "EN", ["spa"] = "ES", ["fre"] = "FR", ["fra"] = "FR", ["ger"] = "DE", ["deu"] = "DE",
+        ["ita"] = "IT", ["por"] = "PT", ["pob"] = "BR_PT", ["rus"] = "RU", ["ara"] = "AR", ["hin"] = "HI",
+        ["tur"] = "TR", ["dut"] = "NL", ["nld"] = "NL", ["pol"] = "PL", ["jpn"] = "JA", ["kor"] = "KO",
+        ["chi"] = "ZH", ["zho"] = "ZH", ["ind"] = "ID", ["vie"] = "VI", ["tha"] = "TH", ["per"] = "FA",
+        ["fas"] = "FA", ["heb"] = "HE", ["gre"] = "EL", ["ell"] = "EL", ["swe"] = "SV", ["rum"] = "RO",
+        ["ron"] = "RO", ["tam"] = "TA", ["tel"] = "TE",
+    };
+
+    static int? Positive(JsonNode? n) => int.TryParse(n?.ToString(), out var v) && v > 0 ? v : null;
+
+    public static List<Sub> ToSubs(JsonNode? body) => (body?["subtitles"] as JsonArray ?? new JsonArray())
+        .Where(r => r?["url"] is not null)
+        .Select(r =>
+        {
+            var lang = r!["lang"]?.ToString() ?? "";
+            var file = r["subtitleFileName"]?.ToString();
+            var release = r["movieReleaseName"]?.ToString() ?? (file is null ? "" : System.IO.Path.GetFileNameWithoutExtension(file));
+            return new Sub(release, file ?? release, Codes.GetValueOrDefault(lang, lang.ToUpperInvariant()), r["url"]!.ToString(),
+                Positive(r["season"]), Positive(r["episode"]));
+        })
+        .ToList();
+
+    public static async Task<List<Sub>> Search(string imdb, int? season, int? episode)
+    {
+        if (!imdb.StartsWith("tt")) return new();
+        var path = season is not null && episode is not null ? $"series/{imdb}:{season}:{episode}" : $"movie/{imdb}";
+        return ToSubs(await Net.Json($"{Api}/{path}.json", quiet: true));
+    }
+}
+
+/// <summary>Both sources together, as the phone's findSubtitles.</summary>
+public static class Subtitles
+{
+    /// <summary>
+    /// OpenSubtitles always, SubDL's too when the build has a key. Without an IMDb id what was
+    /// searched for (else the file's name) is looked up first. In <paramref name="language"/> — or every language when there are
+    /// none in it — one per release, and those whose release shares the most words with
+    /// <paramref name="fileName"/> first: a subtitle cut for the same release keeps its timing.
+    /// Throws only when every source failed.
+    /// </summary>
+    public static async Task<List<Sub>> Find(string query, string? imdb, int? season, int? episode, string? type, string fileName, string language = "EN")
+    {
+        var id = string.IsNullOrEmpty(imdb) ? null : imdb;
+        if (id is null)
+        {
+            try { id = (await Meta.ResolveTitle(query.Length > 0 ? query : fileName))?.Imdb is { Length: > 0 } found ? found : null; }
+            catch { }
+        }
+        var sources = new List<(string Name, Task<List<Sub>> Task)>();
+        if (id is not null) sources.Add(("OpenSubtitles", OpenSubs.Search(id, season, episode)));
+        if (SubDL.Key is not null && (id is not null || query.Length > 0))
+            sources.Add(("SubDL", SubDL.Search(id is null ? query : "", id, season, episode, type, language)));
+        if (sources.Count == 0) return new();
+        try { await Task.WhenAll(sources.Select(s => s.Task)); } catch { }
+        foreach (var (name, task) in sources)
+            if (task.IsFaulted) Log.Warn("subs", $"{name} failed: {task.Exception?.GetBaseException().Message}");
+        if (sources.All(s => s.Task.IsFaulted)) throw sources[0].Task.Exception!.GetBaseException();
+        return Rank(sources.Where(s => s.Task.IsCompletedSuccessfully).SelectMany(s => s.Task.Result), language, fileName);
+    }
+
+    public static List<Sub> Rank(IEnumerable<Sub> subs, string language, string fileName)
+    {
+        static HashSet<string> Words(string s) => System.Text.RegularExpressions.Regex.Split(s.ToLowerInvariant(), "[^a-z0-9]+").Where(w => w.Length > 1).ToHashSet();
+        var playing = Words(fileName);
+        var all = subs.ToList();
+        var mine = all.Where(s => s.Language.Equals(language, StringComparison.OrdinalIgnoreCase)).ToList();
+        return (mine.Count > 0 ? mine : all)
+            .DistinctBy(s => (s.Language + s.Release).ToLowerInvariant() is { Length: > 0 } k ? k : s.Url)
+            .OrderByDescending(s => Words(s.Release).Intersect(playing).Count())
+            .ToList();
+    }
+}
