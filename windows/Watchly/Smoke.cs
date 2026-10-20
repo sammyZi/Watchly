@@ -101,6 +101,30 @@ static class Smoke
     {
         Ok(SubDL.Key != null && SubDL.Key.StartsWith("subdl_"), "SubDL key resolved");
 
+        // LibTest.kt: openSubtitlesRows, subtitlesRanked, IntroDB
+        var open = OpenSubs.ToSubs(JsonNode.Parse("""
+            {"subtitles":[
+                {"id":"1","url":"https://subs5.strem.io/a","lang":"eng","subtitleFileName":"Show.S01E01.720p.BluRay.x264-DEMAND.srt","movieReleaseName":"Show.S01E01.720p.BluRay.x264-DEMAND","season":1,"episode":1},
+                {"id":"2","url":"https://subs5.strem.io/b","lang":"ger","subtitleFileName":"film_ger.srt","season":0,"episode":0},
+                {"id":"3","lang":"eng"}
+            ]}
+            """));
+        Eq(open.Count, 2, "opensubs: rows with a url");
+        Eq(open[0].Language, "EN", "opensubs: three letters become the app's code");
+        Eq(open[0].Episode, (int?)1, "opensubs: episode");
+        Eq(open[1].Language, "DE", "opensubs: ger");
+        Eq(open[1].Release, "film_ger", "opensubs: release from the file name");
+        Eq(open[1].Season, (int?)null, "opensubs: a film's 0/0 is no episode");
+        static Sub Sb(string release, string lang = "EN") => new(release, release, lang, "u/" + release, null, null);
+        var ranked = Subtitles.Rank(new[] { Sb("Show.S01E01.1080p.WEB-NTb"), Sb("Show.S01E01.720p.BluRay.x264-DEMAND"), Sb("show.s01e01.720p.bluray.x264-demand"), Sb("Show.S01E01.FR", "FR") },
+            "en", "Show.S01E01.720p.BluRay.x264-DEMAND.mkv");
+        Eq(string.Join(",", ranked.Select(r => r.Release)), "Show.S01E01.720p.BluRay.x264-DEMAND,Show.S01E01.1080p.WEB-NTb", "subs: English, one per release, matching release first");
+        Eq(string.Join(",", Subtitles.Rank(new[] { Sb("Film.WEB"), Sb("Film.1080p.BluRay", "FR") }, "HI", "Film.1080p.BluRay.mkv").Select(r => r.Language)), "FR,EN", "subs: none in the language, every language");
+        Eq(IntroDb.Parse("""{"intro":{"start_sec":12.5,"end_sec":70}}"""), new Intro(12.5, 70), "introdb: seconds");
+        Eq(IntroDb.Parse("""{"intro":{"start_ms":5000,"end_ms":65000}}"""), new Intro(5, 65), "introdb: milliseconds");
+        Eq(IntroDb.Parse("""{"intro":{"start_sec":70,"end_sec":12}}"""), null, "introdb: backwards window");
+        Ok(new Intro(30, 90).Covers(29) && !new Intro(30, 90).Covers(89.5), "intro: covers with a lead, not the last second");
+
         // search.test.ts
         var rows = (JsonArray)JsonNode.Parse("""
             [{"id":"0","name":"x","info_hash":"0000000000000000000000000000000000000000","seeders":"5","leechers":"1","size":"1","category":"207"},
