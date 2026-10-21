@@ -337,7 +337,6 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     var external by remember { mutableStateOf(watch.savedSubs()) }
     var found by remember { mutableStateOf<List<Sub>?>(null) }
     var finding by remember { mutableStateOf(false) }
-    var pendingSub by remember { mutableStateOf(false) }
     var advanced by remember { mutableStateOf(false) }
     var locked by remember { mutableStateOf(false) }
     /** Fetch the whole file, or only the next few minutes past the playhead; remembered for the next video. */
@@ -845,14 +844,8 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                         v.onPlaying = { paused = !it }
                         v.onTracks = { t ->
                             tracks = t
-                            // A subtitle just downloaded comes on by itself.
-                            if (pendingSub && t.subtitles.isNotEmpty()) {
-                                subtitle = t.subtitles.last().id
-                                v.setSubtitleTrack(subtitle)
-                                pendingSub = false
-                            } else {
-                                subtitle = t.spuId.takeIf { it >= 0 }
-                            }
+                            // What is really on screen: a subtitle just downloaded is turned on by the view itself.
+                            subtitle = t.spuId.takeIf { it >= 0 }
                             // The preferred languages, once each, the first time the file lists any.
                             val prefs = SettingsStore.value.value
                             if (!langDone[0] && t.audio.isNotEmpty()) {
@@ -1181,8 +1174,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                                 external = external + SavedSub(path, sub.label)
                                 watch.saveSubs(external)
                             }
-                            pendingSub = true
-                            view.value?.addSubtitleFiles(listOf(path))
+                            view.value?.addSubtitleFiles(listOf(path), select = true)
                             say("Added ${sub.language}", L.drawable.lucide_ic_captions)
                         }.onFailure { watch.notes.tryEmit(it.message ?: "Couldn't fetch that subtitle") }
                     }
