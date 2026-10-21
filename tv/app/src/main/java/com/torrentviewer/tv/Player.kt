@@ -224,7 +224,6 @@ private fun Player(watch: Watch) {
     var external by remember { mutableStateOf(watch.savedSubs()) }
     var found by remember { mutableStateOf<List<Sub>?>(null) }
     var finding by remember { mutableStateOf(false) }
-    var pendingSub by remember { mutableStateOf(false) }
     var advanced by remember { mutableStateOf(false) }
 
     val root = remember { FocusRequester() }
@@ -548,16 +547,9 @@ private fun Player(watch: Watch) {
                     v.onPlaying = { paused = !it }
                     v.onTracks = { t ->
                         tracks = t
-                        // A subtitle just downloaded comes on by itself.
-                        if (pendingSub && t.subtitles.isNotEmpty()) {
-                            subtitle = t.subtitles.last().id
-                            v.setSubtitleTrack(subtitle)
-                            pendingSub = false
-                        } else {
-                            // libVLC turns an attached subtitle file on by itself; the panel
-                            // has to say what is really on screen, not what was last picked.
-                            subtitle = t.spuId.takeIf { it >= 0 }
-                        }
+                        // The panel says what is really on screen, not what was last picked: a
+                        // subtitle just downloaded is turned on by the view itself.
+                        subtitle = t.spuId.takeIf { it >= 0 }
                     }
                     v.onEnded = {
                         // A stream that gave up mid-film looks like the end to libVLC: reopen
@@ -773,8 +765,7 @@ private fun Player(watch: Watch) {
                                 external = external + SavedSub(path, sub.label)
                                 watch.saveSubs(external)
                             }
-                            pendingSub = true
-                            view.value?.addSubtitleFiles(listOf(path))
+                            view.value?.addSubtitleFiles(listOf(path), select = true)
                             say("Added ${sub.language}")
                         }.onFailure { watch.notes.tryEmit(it.message ?: "Couldn't fetch that subtitle") }
                     }
