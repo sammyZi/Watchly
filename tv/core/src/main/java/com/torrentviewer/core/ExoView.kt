@@ -189,8 +189,12 @@ class ExoView(context: Context) : Video(context) {
         applyScale()
     }
 
-    override fun addSubtitleFiles(paths: List<String>) {
+    /** A file to turn on once the reload lists it; see [addSubtitleFiles]. */
+    private var selectOnAttach: String? = null
+
+    override fun addSubtitleFiles(paths: List<String>, select: Boolean) {
         subtitleFiles = (subtitleFiles + paths).distinct()
+        if (select) selectOnAttach = paths.lastOrNull()
         subRetries = 0
         attachPendingSubs()
     }
@@ -282,7 +286,7 @@ class ExoView(context: Context) : Video(context) {
                     val f = File(path)
                     MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(f))
                         .setMimeType(subtitleMime(path))
-                        .setLabel(f.nameWithoutExtension.replace('_', ' '))
+                        .setLabel(labelOf(path))
                         .build()
                 },
             ).build()
@@ -302,6 +306,8 @@ class ExoView(context: Context) : Video(context) {
     }
 
     /** Sidecar files from the torrent often land after the video starts; take them as they do. */
+    private fun labelOf(path: String) = File(path).nameWithoutExtension.replace('_', ' ')
+
     private fun attachPendingSubs() {
         removeCallbacks(attachSubs)
         val p = player ?: return
@@ -424,6 +430,15 @@ class ExoView(context: Context) : Video(context) {
                 if (tracks.containsType(type) && !tracks.isTypeSupported(type, true)) {
                     giveUp(if (type == C.TRACK_TYPE_VIDEO) "No decoder for this video" else "No decoder for this audio")
                     return
+                }
+            }
+            // The file just added, found by the label it was given: chosen as the reload starts,
+            // so its selection is part of that one track setup rather than a switch after it.
+            selectOnAttach?.takeIf { it in attached }?.let { path ->
+                val at = playable(tracks, C.TRACK_TYPE_TEXT).indexOfFirst { (g, i) -> g.getFormat(i).label == labelOf(path) }
+                if (at >= 0) {
+                    wantedText = at
+                    selectOnAttach = null
                 }
             }
             applyTracks(tracks)

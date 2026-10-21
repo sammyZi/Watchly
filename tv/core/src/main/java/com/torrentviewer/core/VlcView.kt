@@ -65,7 +65,12 @@ abstract class Video(context: Context) : FrameLayout(context) {
     abstract fun setSubtitleTrack(id: Int?)
     abstract fun setAudioTrack(id: Int)
     abstract fun setScale(type: MediaPlayer.ScaleType)
-    abstract fun addSubtitleFiles(paths: List<String>)
+    /**
+     * [select]: turn the last of [paths] on once it is attached. Done here, where the new track
+     * is known, and as one switch — picking "the last track" afterwards switched twice, off and
+     * on, and could land on one of the film's own; each switch has the player resync the stream.
+     */
+    abstract fun addSubtitleFiles(paths: List<String>, select: Boolean = false)
     /** Positive shows subtitles later. False when this backend cannot shift them that way. */
     open fun setSubtitleDelay(ms: Long): Boolean = ms == 0L
     abstract fun stats(): Stats?
@@ -185,8 +190,12 @@ class VlcView(context: Context) : Video(context) {
         player?.videoScale = type
     }
 
-    override fun addSubtitleFiles(paths: List<String>) {
+    /** A file to turn on as it is attached; see [addSubtitleFiles]. */
+    private var selectOnAttach: String? = null
+
+    override fun addSubtitleFiles(paths: List<String>, select: Boolean) {
         subtitleFiles = (subtitleFiles + paths).distinct()
+        if (select) selectOnAttach = paths.lastOrNull()
         subRetries = 0
         attachPendingSubs()
     }
@@ -197,6 +206,9 @@ class VlcView(context: Context) : Video(context) {
         val pending = subtitleFiles.filter { it !in attachedSubs }
         if (pending.isEmpty()) return
         var waiting = false
+        var added = false
+        var chosen = false
+        val before = (p.spuTracks ?: emptyArray()).map { it.id }.toSet()
         for (path in pending) {
             val file = File(path)
             // Sidecar files from the torrent often land after the video starts.
@@ -204,13 +216,28 @@ class VlcView(context: Context) : Video(context) {
                 waiting = true
                 continue
             }
+            val select = path == selectOnAttach
             // MediaPlayer.addSlave works while playing; Media.addSlave after setMedia often does not.
-            if (p.addSlave(IMedia.Slave.Type.Subtitle, Uri.fromFile(file), false)) attachedSubs.add(path)
+            // Asked to select, libVLC turns the file on itself: that is the one switch.
+            if (p.addSlave(IMedia.Slave.Type.Subtitle, Uri.fromFile(file), select)) {
+                attachedSubs.add(path)
+                added = true
+                if (select) {
+                    selectOnAttach = null
+                    chosen = true
+                }
+            }
         }
-        if (attachedSubs.isNotEmpty()) {
+        if (added) {
             postDelayed({
                 val pl = player ?: return@postDelayed
-                pl.setSpuTrack(wantedSpu ?: -1)
+                if (chosen) {
+                    // Remember the new track as the choice; no switch of our own.
+                    (pl.spuTracks ?: emptyArray()).map { it.id }.firstOrNull { it >= 0 && it !in before }?.let { wantedSpu = it }
+                } else if (pl.spuTrack != (wantedSpu ?: -1)) {
+                    // A file attached unasked must not turn itself on; only switch when it did.
+                    pl.setSpuTrack(wantedSpu ?: -1)
+                }
                 sendTracks(pl)
             }, 600)
         }
