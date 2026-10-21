@@ -129,7 +129,8 @@ public sealed class PlayerView : UserControl, IDisposable
     readonly List<SavedSub> externalSubs;
     readonly HashSet<string> addedSlaves = new(StringComparer.OrdinalIgnoreCase);
     readonly Dictionary<int, string> slaveTrackLabels = new();
-    string? pendingSub;
+    /// <summary>The track each added file became, by path.</summary>
+    readonly Dictionary<string, int> slaveTracks = new(StringComparer.OrdinalIgnoreCase);
     List<Sub> subResults = new();
     bool subLoading;
     string subQuery = "";
@@ -338,7 +339,7 @@ public sealed class PlayerView : UserControl, IDisposable
             hasVout = e.Count > 0;
             if (hasVout) ApplyScale();
         });
-        p.ESAdded += (_, _) => On(() => { tracksVersion++; OnTracksChanged(); });
+        p.ESAdded += (_, _) => On(() => tracksVersion++);
         p.ESDeleted += (_, _) => On(() => tracksVersion++);
         p.ESSelected += (_, _) => On(() => tracksVersion++);
         return p;
@@ -453,6 +454,7 @@ public sealed class PlayerView : UserControl, IDisposable
             firstPlay = true;
             addedSlaves.Clear();
             slaveTrackLabels.Clear();
+            slaveTracks.Clear();
         }
         player.Play(media);
         player.SetRate((float)rate);
@@ -471,13 +473,20 @@ public sealed class PlayerView : UserControl, IDisposable
 
     void AddSlave(string path, bool select)
     {
-        if (!addedSlaves.Add(path)) return;
+        if (!addedSlaves.Add(path))
+        {
+            // Picked again: switch to the track it already is, rather than load it twice.
+            if (select && slaveTracks.TryGetValue(path, out var id) && player.Spu != id) player.SetSpu(id);
+            return;
+        }
         var label = externalSubs.FirstOrDefault(s => s.Path.Equals(path, StringComparison.OrdinalIgnoreCase))?.Label
                  ?? Path.GetFileName(path);
         try
         {
+            var before = player.SpuDescription.Select(t => t.Id).ToHashSet();
+            // libVLC selects the file itself when asked to; selecting again is a track switch.
             player.AddSlave(MediaSlaveType.Subtitle, new Uri(path).AbsoluteUri, select);
-            MapNewTracks(label, select);
+            _ = LabelNewTrack(path, label, select, before);
         }
         catch (Exception ex)
         {
@@ -485,52 +494,30 @@ public sealed class PlayerView : UserControl, IDisposable
         }
     }
 
-    void MapNewTracks(string label, bool select)
+    /// <summary>
+    /// Name the one track the file added, once libVLC lists it. Only a track that was not there
+    /// before counts: this used to name, and select, every subtitle not yet named — a film's own
+    /// tracks too — and each select is a track switch that makes libVLC resync the stream, so
+    /// adding one subtitle lagged and smeared the picture.
+    /// </summary>
+    async Task LabelNewTrack(string path, string label, bool select, HashSet<int> before)
     {
-        _ = Task.Run(async () =>
+        for (var i = 0; i < 20 && !disposed; i++)
         {
-            for (int i = 0; i < 15; i++)
+            await Task.Delay(150);
+            if (disposed) return;
+            var added = player.SpuDescription.Select(t => t.Id).FirstOrDefault(id => id >= 0 && !before.Contains(id) && !slaveTrackLabels.ContainsKey(id), -1);
+            if (added < 0) continue;
+            slaveTrackLabels[added] = label;
+            slaveTracks[path] = added;
+            if (select)
             {
-                await Task.Delay(150);
-                var found = false;
-                Ui(() =>
-                {
-                    var tracks = player.SpuDescription.Where(t => t.Id >= 0).ToList();
-                    foreach (var t in tracks)
-                    {
-                        if (!slaveTrackLabels.ContainsKey(t.Id))
-                        {
-                            slaveTrackLabels[t.Id] = label;
-                            found = true;
-                            if (select || pendingSub is not null)
-                            {
-                                player.SetSpu(t.Id);
-                                ShowHud($"Subtitles: {label}");
-                                pendingSub = null;
-                            }
-                        }
-                    }
-                    if (found && picking) Render();
-                });
-                if (found) break;
+                if (player.Spu != added) player.SetSpu(added);
+                ShowHud($"Subtitles: {label}");
             }
-        });
-    }
-
-    void OnTracksChanged()
-    {
-        if (pendingSub is null) return;
-        // An online pick lands as a new track; select it once libVLC lists it.
-        var tracks = player.SpuDescription.Where(t => t.Id >= 0).ToList();
-        if (tracks.Count == 0) return;
-        var stem = Path.GetFileNameWithoutExtension(pendingSub);
-        var match = tracks.FindIndex(t => t.Name?.Contains(stem, StringComparison.OrdinalIgnoreCase) == true);
-        var chosen = tracks[match >= 0 ? match : tracks.Count - 1];
-        player.SetSpu(chosen.Id);
-        var label = slaveTrackLabels.TryGetValue(chosen.Id, out var l) ? l : FriendlySub(chosen.Name, chosen.Id);
-        ShowHud($"Subtitles: {label}");
-        pendingSub = null;
-        if (picking) Render();
+            else if (picking) Render();
+            return;
+        }
     }
 
     void OnTick()
@@ -1499,7 +1486,6 @@ public sealed class PlayerView : UserControl, IDisposable
         try
         {
             var path = await SubDL.Save(sub);
-            pendingSub = path;
             if (!externalSubs.Any(s => s.Path == path)) externalSubs.Add(new SavedSub(path, sub.DisplayName));
             if (request.HistoryUri is not null) shell.SaveSubs(request.HistoryUri, request.FileIndex, externalSubs.ToList());
             AddSlave(path, true);
