@@ -75,16 +75,18 @@ fun DownloadsScreen(watch: Watch) {
 
     LazyColumn(state = rememberLazyListState(), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp)) {
         item { Heading("Downloads") }
-        // Settings has it too; here is where it is looked for. A change applies to running downloads.
+        // Settings has it too; here is where it is looked for. Each download can override it below.
         item {
             var sequential by remember { mutableStateOf(Downloads.sequential) }
+            Text("Default order", Modifier.padding(bottom = 8.dp), style = Type.meta.copy(color = Ink.muted, fontWeight = FontWeight.SemiBold))
             Row(Modifier.padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Chip("Fastest", !sequential, onClick = { sequential = false; Downloads.sequential = false })
                 Chip("In order", sequential, onClick = { sequential = true; Downloads.sequential = true })
             }
             Note(
-                if (sequential) "In order: each file fills from the start, so it can be watched while it downloads. Slower."
-                else "Fastest: pieces from wherever the swarm has them. Switch to In order to watch while it downloads.",
+                (if (sequential) "In order: each file fills from the start, so it can be watched while it downloads. Slower."
+                else "Fastest: pieces from wherever the swarm has them. Switch to In order to watch while it downloads.") +
+                    " Each download below can be set on its own.",
                 Modifier.padding(bottom = 8.dp),
             )
         }
@@ -99,6 +101,7 @@ fun DownloadsScreen(watch: Watch) {
                 onResume = { Downloads.resume(row.job.uri) },
                 onCancel = { cancelling = row },
                 onWanted = { index, on -> Downloads.setWanted(row.job.uri, index, on) },
+                onOrder = { Downloads.setOrder(row.job.uri, it) },
             )
         }
         if (finished.isNotEmpty()) item { Label("On this phone  ·  ${bytes(finished.sumOf { it.size })}") }
@@ -161,7 +164,7 @@ private fun Label(text: String) {
  * listed in episode order, each with its own progress and a circle to skip it or put it back.
  */
 @Composable
-private fun ActiveRow(row: LiveDownload, onPause: () -> Unit, onResume: () -> Unit, onCancel: () -> Unit, onWanted: (Int, Boolean) -> Unit) {
+private fun ActiveRow(row: LiveDownload, onPause: () -> Unit, onResume: () -> Unit, onCancel: () -> Unit, onWanted: (Int, Boolean) -> Unit, onOrder: (Boolean) -> Unit) {
     val pct = (row.ratio * 100).toInt()
     val pack = row.files.size > 1
     val wanted = row.files.filter { it.wanted }
@@ -205,6 +208,12 @@ private fun ActiveRow(row: LiveDownload, onPause: () -> Unit, onResume: () -> Un
         ProgressLine(row.ratio, height = 3.dp)
         // Waiting is a choice the viewer can overrule for this one download.
         if (row.state == DlState.WIFI) Chip("Use mobile data", false, onClick = onResume, Modifier.padding(top = 10.dp))
+        // This download's own order, over the default above.
+        val inOrder = Downloads.inOrder(row.job)
+        Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip("Fastest", !inOrder, onClick = { onOrder(false) })
+            Chip("In order", inOrder, onClick = { onOrder(true) })
+        }
 
         if (pack) {
             Tap({ open = !open }, Modifier.fillMaxWidth().padding(top = 6.dp), RoundedCornerShape(6.dp)) {
