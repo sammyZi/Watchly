@@ -1,5 +1,6 @@
 package com.torrentviewer.mobile
 
+import android.app.ActivityManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -9,10 +10,13 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
+import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Environment
 import android.os.IBinder
 import android.os.PowerManager
+import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.torrentviewer.core.History
@@ -160,6 +164,9 @@ object Downloads {
     private val errors = HashMap<String, String>()
     private var poller: Job? = null
     private var wake: PowerManager.WakeLock? = null
+    /** Wi-Fi drops to power save with the screen off — a few hundred kB/s; this keeps it at full speed. */
+    private var wifiLock: WifiManager.WifiLock? = null
+    private val sessionFile get() = File(app.filesDir, "downloads.session")
     private var lastNote = ""
 
     /* ------------------------------------------------------------ settings */
@@ -174,6 +181,37 @@ object Downloads {
     var sdCard: Boolean
         get() = prefs().getBoolean("sdCard", false)
         set(v) = prefs().edit().putBoolean("sdCard", v).apply()
+
+    /**
+     * In order: each file fills from its start, so it can be watched while it downloads — slower,
+     * since every peer is asked for the same next pieces. Off (the default), libtorrent asks for
+     * the rarest pieces first, which is how a swarm gives its full speed. Episodes of a pack
+     * still come one after another either way (file priorities).
+     */
+    var sequential: Boolean
+        get() = prefs().getBoolean("sequential", false)
+        set(v) {
+            prefs().edit().putBoolean("sequential", v).apply()
+            synchronized(lock) { handles.values.toList() }.forEach(::applyOrder)
+        }
+
+    private fun applyOrder(h: TorrentHandle) {
+        runCatching { if (sequential) h.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD) else h.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD) }
+    }
+
+    /** Battery optimisation off for the app: some phones (vivo/iQOO, Xiaomi, Oppo) otherwise kill or starve a download with the screen off. */
+    fun unrestricted(context: Context = app): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+        (context.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(context.packageName)
+
+    /** The system's "let this app run in the background" prompt. */
+    fun askUnrestricted(context: Context = app) {
+        if (unrestricted(context) || Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        runCatching {
+            context.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.onFailure {
+            runCatching { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        }
+    }
 
     /** The app's own folder on a mounted card: a real path libtorrent can write, needing no permission — gone on uninstall. */
     fun cardRoot(type: String?): File? = app.getExternalFilesDirs(type).drop(1).firstOrNull { it != null && Environment.getExternalStorageState(it) == Environment.MEDIA_MOUNTED }
@@ -263,6 +301,11 @@ object Downloads {
             _live.value = _live.value + LiveDownload(job, DlState.RESOLVING)
             writeQueue(jobs())
         }
+        // Asked once, on the first download: the viewer is right here, having just tapped it.
+        if (!prefs().getBoolean("askedBattery", false)) {
+            prefs().edit().putBoolean("askedBattery", true).apply()
+            askUnrestricted()
+        }
         begin(job)
     }
 
@@ -303,9 +346,28 @@ object Downloads {
 
     /* -------------------------------------------------------------- engine */
 
+    /**
+     * The streaming engine's tuning (see TorrentStream.ensureSession for what each one fixed):
+     * libtorrent's defaults dial 30 peers a second with a 15s timeout and keep 500 requests
+     * in flight, which left a download crawling at a fraction of what the swarm could give.
+     */
     private fun ensureSession(): SessionManager = synchronized(lock) {
         session?.takeIf { it.isRunning }?.let { return it }
+        val totalRam = runCatching {
+            ActivityManager.MemoryInfo().also { (app.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(it) }.totalMem
+        }.getOrDefault(Long.MAX_VALUE)
+        val peers = if (totalRam < 3L * 1024 * 1024 * 1024) 80 else 200
         val settings = SettingsPack()
+            .connectionsLimit(peers)
+            .activeDhtLimit(88)
+            .downloadRateLimit(0)
+            .uploadRateLimit(0)
+            .setInteger(settings_pack.int_types.torrent_connect_boost.swigValue(), peers)
+            .setInteger(settings_pack.int_types.connection_speed.swigValue(), peers)
+            .setInteger(settings_pack.int_types.peer_connect_timeout.swigValue(), 5)
+            .setInteger(settings_pack.int_types.request_timeout.swigValue(), 20)
+            .setBoolean(settings_pack.bool_types.strict_end_game_mode.swigValue(), false)
+            .setInteger(settings_pack.int_types.max_out_request_queue.swigValue(), 1500)
             .setString(settings_pack.string_types.listen_interfaces.swigValue(), "0.0.0.0:0,[::]:0")
             .setString(settings_pack.string_types.dht_bootstrap_nodes.swigValue(), BOOTSTRAP)
             .setBoolean(settings_pack.bool_types.enable_dht.swigValue(), true)
@@ -313,8 +375,12 @@ object Downloads {
             .setBoolean(settings_pack.bool_types.enable_upnp.swigValue(), true)
             .setBoolean(settings_pack.bool_types.enable_natpmp.swigValue(), true)
             .setBoolean(settings_pack.bool_types.announce_to_all_trackers.swigValue(), true)
+            .setBoolean(settings_pack.bool_types.announce_to_all_tiers.swigValue(), true)
+        // The DHT nodes from last time: a cold routing table spent the first minutes finding peers.
+        val params = runCatching { if (sessionFile.exists()) SessionParams(sessionFile).also { it.setSettings(settings) } else null }.getOrNull()
+            ?: SessionParams(settings)
         val s = SessionManager()
-        s.start(SessionParams(settings))
+        s.start(params)
         s.startDht()
         session = s
         s
@@ -355,6 +421,8 @@ object Downloads {
                 }
                 // Paused means paused: an auto-managed torrent is resumed by the session's queue.
                 runCatching { h.unsetFlags(TorrentFlags.AUTO_MANAGED) }
+                // Added in order (the only flags the add takes); rarest-first unless asked.
+                applyOrder(h)
                 synchronized(lock) { handles[job.uri] = h }
                 choose(job.uri, h)
                 poll()
@@ -521,7 +589,10 @@ object Downloads {
         stopService()
         if (synchronized(lock) { handles.isEmpty() }) {
             val s = synchronized(lock) { session.also { session = null } }
-            if (s != null) scope.launch { runCatching { s.stop() } }
+            if (s != null) scope.launch {
+                runCatching { s.saveState()?.let { sessionFile.writeBytes(it) } }
+                runCatching { s.stop() }
+            }
         }
     }
 
@@ -541,6 +612,13 @@ object Downloads {
                 acquire(6 * 60 * 60 * 1000L)
             }
         }
+        if (wifiLock?.isHeld != true) runCatching {
+            @Suppress("DEPRECATION")
+            wifiLock = (app.getSystemService(Context.WIFI_SERVICE) as WifiManager).createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "watchly:downloads").apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        }
     }
 
     private fun stopService() {
@@ -548,6 +626,7 @@ object Downloads {
         // crashes the app. One still starting sees nothing running and stops itself.
         DownloadService.instance?.stopSelf()
         runCatching { wake?.takeIf { it.isHeld }?.release() }
+        runCatching { wifiLock?.takeIf { it.isHeld }?.release() }
         (app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTE_ID)
         lastNote = ""
     }
