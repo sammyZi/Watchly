@@ -62,15 +62,14 @@ intro timings from [IntroDB](https://introdb.app) and subtitles from [OpenSubtit
     <td><img src="docs/images/tv-2-title.jpg" alt="A film's page"></td>
   </tr>
   <tr>
-    <td><img src="docs/images/tv-3-sources.jpg" alt="A film's sources"></td>
     <td><img src="docs/images/tv-4-sources-4k.jpg" alt="Sources filtered to 4K"></td>
-  </tr>
-  <tr>
     <td><img src="docs/images/tv-5-search.jpg" alt="Search"></td>
-    <td><img src="docs/images/tv-6-series.jpg" alt="A series' page"></td>
   </tr>
   <tr>
+    <td><img src="docs/images/tv-6-series.jpg" alt="A series' page"></td>
     <td><img src="docs/images/tv-7-episodes.jpg" alt="Episodes"></td>
+  </tr>
+  <tr>
     <td><img src="docs/images/tv-8-settings.jpg" alt="Settings"></td>
   </tr>
 </table>
