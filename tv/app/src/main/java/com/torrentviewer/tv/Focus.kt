@@ -51,6 +51,8 @@ import com.torrentviewer.core.Ink
 import com.torrentviewer.core.Lc
 import com.torrentviewer.core.Motion
 import com.torrentviewer.core.Type
+import com.torrentviewer.core.accentGlow
+import com.torrentviewer.core.glow
 
 // The remote's half of the theme: focus rings, D-pad scrolling and the TV-safe gutters.
 // The look itself (Ink, Type, artwork, title marks) is in :core, shared with the phone.
@@ -136,7 +138,10 @@ fun Focusable(
     ) { content(focused) }
 }
 
-/** Netflix's TV buttons: translucent grey at rest, white with black text on focus. */
+/**
+ * Netflix's TV buttons: translucent grey at rest, white with black text on focus. The
+ * primary one — Play — is the phone's grainy red glow either way, and takes a ring on focus.
+ */
 @Composable
 fun TvButton(
     label: String,
@@ -147,19 +152,11 @@ fun TvButton(
     requester: FocusRequester? = null,
     onFocus: (() -> Unit)? = null,
 ) {
-    Focusable(onClick, modifier, RoundedCornerShape(8.dp), 1.05f, ring = false, requester = requester, onFocus = onFocus) { focused ->
-        val bg by animateColorAsState(
-            when {
-                focused -> Color.White
-                // Red at rest, so the main action reads as one without looking focused.
-                primary -> Ink.accent
-                else -> Color.White.copy(alpha = 0.14f)
-            },
-            Motion.effects(), label = "bg",
-        )
-        val fg = if (focused) Color.Black else Color.White
+    Focusable(onClick, modifier, RoundedCornerShape(8.dp), 1.05f, ring = primary, requester = requester, onFocus = onFocus) { focused ->
+        val bg by animateColorAsState(if (focused) Color.White else Color.White.copy(alpha = 0.14f), Motion.effects(), label = "bg")
+        val fg = if (focused && !primary) Color.Black else Color.White
         Row(
-            Modifier.background(bg).height(44.dp).padding(horizontal = 22.dp),
+            (if (primary) Modifier.glow(accentGlow(), 0.85f, 1.1f) else Modifier.background(bg)).height(44.dp).padding(horizontal = 22.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
         ) {
