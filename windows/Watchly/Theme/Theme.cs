@@ -1,4 +1,6 @@
 using System.Windows;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using Microsoft.Win32;
 
 namespace Watchly;
@@ -57,6 +59,7 @@ public static class Theme
                     Application.Current?.Dispatcher.BeginInvoke(() => Apply("system"));
             };
         }
+        Application.Current.Resources["AccentGlow"] ??= AccentGlow();
         var light = mode == "light" || (mode == "system" && SystemLight());
         var dictionaries = Application.Current.Resources.MergedDictionaries;
         if (dictionaries.Count > 0 && IsLight == light && dictionaries[0].Source is not null) return;
@@ -65,5 +68,49 @@ public static class Theme
         if (dictionaries.Count == 0) dictionaries.Add(palette);
         else dictionaries[0] = palette;
         Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// The primary button's grainy red glow — core's Modifier.glow(accentGlow(), 0.85f, 1.1f) on the
+    /// phone and TV: a deep base, the red, and a warm light rising from below the right-hand end,
+    /// with film grain over it. The same in light and dark, like the accent.
+    /// </summary>
+    public static Brush AccentGlow()
+    {
+        static Color Lerp(Color a, Color b, double t) =>
+            Color.FromRgb((byte)(a.R + (b.R - a.R) * t), (byte)(a.G + (b.G - a.G) * t), (byte)(a.B + (b.B - a.B) * t));
+        var accent = Color.FromRgb(0xb8, 0x1d, 0x24);
+        var deep = Lerp(accent, Colors.Black, 0.45);
+        var warm = Lerp(accent, Color.FromRgb(0xff, 0x8a, 0x4c), 0.6);
+        var all = new RectangleGeometry(new Rect(0, 0, 1, 1));
+        // A circle 0.95 of the button's width across, on a button about three times as wide as tall.
+        var glow = new RadialGradientBrush(new GradientStopCollection { new(warm, 0), new(accent, 0.5), new(deep, 1) })
+        {
+            Center = new Point(0.85, 1.1), GradientOrigin = new Point(0.85, 1.1), RadiusX = 0.95, RadiusY = 2.9,
+        };
+        var layers = new DrawingGroup();
+        layers.Children.Add(new GeometryDrawing(new SolidColorBrush(deep), null, all));
+        layers.Children.Add(new GeometryDrawing(glow, null, all));
+        layers.Children.Add(new ImageDrawing(Grain(), new Rect(0, 0, 1, 1)));
+        var brush = new DrawingBrush(layers) { Stretch = Stretch.Fill };
+        brush.Freeze();
+        return brush;
+    }
+
+    /// <summary>Fine black-and-white noise, at most 22/255 opaque — about a button's size, so barely stretched.</summary>
+    static BitmapSource Grain()
+    {
+        const int w = 256, h = 80;
+        var px = new byte[w * h * 4];
+        var random = new Random(7);
+        for (var i = 0; i < px.Length; i += 4)
+        {
+            var v = (byte)(random.Next(2) * 255);
+            px[i] = px[i + 1] = px[i + 2] = v;
+            px[i + 3] = (byte)random.Next(23);
+        }
+        var bitmap = BitmapSource.Create(w, h, 96, 96, PixelFormats.Bgra32, null, px, w * 4);
+        bitmap.Freeze();
+        return bitmap;
     }
 }

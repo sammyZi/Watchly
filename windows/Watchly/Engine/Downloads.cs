@@ -27,6 +27,8 @@ public sealed record DownloadJob
     public string? Imdb { get; init; }
     public string? Kind { get; init; }
     public bool Paused { get; init; }
+    /// <summary>Episodes one after another, first first — the phone's In order — rather than all at once.</summary>
+    public bool InOrder { get; init; }
 
     [System.Text.Json.Serialization.JsonIgnore]
     public string Label => TitleName ?? Title ?? "Download";
@@ -90,6 +92,7 @@ public sealed partial class ActiveDownload : ObservableObject
     {
         Job = job;
         headline = job.Label;
+        inOrder = job.InOrder;
         foreach (var i in job.FileIndices) Wanted.Add(i);
         foreach (var i in job.SavedIndices ?? new()) SavedSet.Add(i);
     }
@@ -111,6 +114,22 @@ public sealed partial class ActiveDownload : ObservableObject
     [ObservableProperty] bool seeding;
     [ObservableProperty] bool queueOpen = true;
     [ObservableProperty] bool hasQueue;
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(Fastest))] bool inOrder;
+
+    /// <summary>The order chips: picking one switches; picking the one already on keeps it on.</summary>
+    public bool Fastest
+    {
+        get => !InOrder;
+        set { if (value) _ = Downloads.Instance.SetOrder(this, false); else OnPropertyChanged(); }
+    }
+
+    public bool OrderedChip
+    {
+        get => InOrder;
+        set { if (value) _ = Downloads.Instance.SetOrder(this, true); else OnPropertyChanged(); }
+    }
+
+    partial void OnInOrderChanged(bool value) => OnPropertyChanged(nameof(OrderedChip));
 
     public string? Poster => Job.Poster;
 }
@@ -154,6 +173,7 @@ public sealed class Downloads
         FileIndices = l.Wanted.Count > 0 || l.Meta is not null ? l.Wanted.ToList() : l.Job.FileIndices,
         SavedIndices = l.SavedSet.ToList(),
         Paused = l.Paused,
+        InOrder = l.InOrder,
     }));
 
     /// <summary>Pick up whatever was running when the app last closed.</summary>
@@ -245,6 +265,7 @@ public sealed class Downloads
                 var wanted = (row.Wanted.Contains(i) || watched) && !Pick.IsUnsafe(meta.Files[i].Path);
                 await manager.SetFilePriorityAsync(manager.Files[i], wanted ? Priority.Normal : Priority.DoNotDownload);
             }
+            await ApplyOrder(row);
             if (!row.Paused && manager.State is TorrentState.Stopped or TorrentState.Paused or TorrentState.Error)
                 await manager.StartAsync();
             Persist();
@@ -345,7 +366,11 @@ public sealed class Downloads
                 });
             }
         }
-        if (fresh) Persist();
+        if (fresh)
+        {
+            Persist();
+            await ApplyOrder(row);
+        }
 
         if (row.Wanted.Count == 0 || !row.Wanted.All(row.SavedSet.Contains) || row.Seeding) return;
         var skipped = (row.Job.QueueIndices ?? new()).Any(i => !row.Wanted.Contains(i) && !row.SavedSet.Contains(i));
@@ -466,10 +491,40 @@ public sealed class Downloads
         catch { }
     }
 
+    /// <summary>Fastest (every file at once) or In order (the next file first) for one download.</summary>
+    public async Task SetOrder(ActiveDownload row, bool inOrder)
+    {
+        if (row.InOrder == inOrder) return;
+        row.InOrder = inOrder;
+        Persist();
+        await ApplyOrder(row);
+    }
+
+    /// <summary>
+    /// In order: the first file still to come at Highest, the one after at High, so they finish
+    /// one after another — MonoTorrent picks by file priority first. Fastest: all alike.
+    /// The file being watched keeps whatever the stream gave it.
+    /// </summary>
+    static async Task ApplyOrder(ActiveDownload row)
+    {
+        if (row.Manager is not { } m) return;
+        var pending = row.Queue.Select(q => q.Index)
+            .Where(i => row.Wanted.Contains(i) && !row.SavedSet.Contains(i) && i < m.Files.Count)
+            .Where(i => !(StreamSession.Current?.Manager == m && StreamSession.Current.FileIndex == i))
+            .ToList();
+        for (var r = 0; r < pending.Count; r++)
+        {
+            var priority = !row.InOrder ? Priority.Normal : r == 0 ? Priority.Highest : r == 1 ? Priority.High : Priority.Normal;
+            var file = m.Files[pending[r]];
+            if (file.Priority != priority) try { await m.SetFilePriorityAsync(file, priority); } catch { }
+        }
+    }
+
     public async Task Skip(ActiveDownload row, int index)
     {
         row.Wanted.Remove(index);
         if (row.Manager is not null) await row.Manager.SetFilePriorityAsync(row.Manager.Files[index], Priority.DoNotDownload);
+        await ApplyOrder(row);
         Persist();
         Update(row);
     }
@@ -491,6 +546,7 @@ public sealed class Downloads
         if (row.Manager is not null)
         {
             await row.Manager.SetFilePriorityAsync(row.Manager.Files[index], Priority.Normal);
+            await ApplyOrder(row);
             if (row.Paused) await Resume(row);
         }
         Persist();

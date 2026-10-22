@@ -212,6 +212,10 @@ static class Smoke
 
         Eq(Meta.AbsoluteNumber(jjk, 2, 5), 29, "absoluteNumber skips specials");
         Eq(Meta.AbsoluteNumber(new[] { new Episode { Season = 21, Number = 892 }, new Episode { Season = 21, Number = 893 } }, 21, 893), 893, "absoluteNumber keeps running numbering");
+        Eq(string.Join(",", Meta.AbsoluteNumbers(jjk).Select(n => n.Number)), string.Join(",", jjk.Where(e => e.Season > 0).Select(e => Meta.AbsoluteNumber(jjk, e.Season, e.Number))), "absoluteNumbers matches absoluteNumber");
+        Eq(new AppSettings().Resized(1).SubSize, "large", "subtitle size up");
+        Eq(new AppSettings { SubSize = "huge" }.Resized(1).SubSize, "huge", "subtitle size stops at huge");
+        Eq(new AppSettings { SubSize = "small" }.Resized(-1).SubRel, 20, "subtitle size stops at small");
         Eq(jjk[Meta.IndexOfEpisode(jjk, "[SubsPlease] Jujutsu Kaisen - 29 (1080p).mkv", "JJK/[SubsPlease] Jujutsu Kaisen - 29 (1080p).mkv")].Id, "tt:2:5", "indexOfEpisode running number");
         Eq(jjk[Meta.IndexOfEpisode(jjk, "Show - 05.mkv", "Show Season 2/Show - 05.mkv")].Id, "tt:2:5", "indexOfEpisode season folder");
 

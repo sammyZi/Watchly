@@ -489,13 +489,13 @@ public static class Ui
         return row;
     }
 
-    /// <summary>The TV's button: an icon and a word, red for the main action (mobile Ui.kt Button).</summary>
+    /// <summary>The TV's button: an icon and a word, the red glow for the main action (mobile Ui.kt Button).</summary>
     public static Button Action(string label, string icon, Action onClick, bool primary = false, double width = double.NaN)
     {
         var fg = primary ? "OnAccent" : "Text";
         var words = Text(label, "Label", fg, 15, FontWeights.SemiBold);
         words.Margin = new Thickness(10, 0, 0, 0);
-        var b = Button(new StackPanel { Orientation = Orientation.Horizontal, Children = { Glyph(icon, 18, fg), words } }, onClick, primary ? "PillAccent" : "Pill");
+        var b = Button(new StackPanel { Orientation = Orientation.Horizontal, Children = { Glyph(icon, 18, fg), words } }, onClick, primary ? "PillGlow" : "Pill");
         b.Width = width;
         return b;
     }

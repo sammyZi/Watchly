@@ -124,6 +124,14 @@
             </Button>
           </Grid>
 
+          <!-- The phone's per-download order: everything at once, or episode by episode. -->
+          <StackPanel Orientation="Horizontal" Margin="0,12,0,0" Visibility="{Binding HasQueue, Converter={StaticResource Vis}}">
+            <ToggleButton Style="{StaticResource ChoiceChip}" Height="32" IsChecked="{Binding Fastest}" Content="Fastest"
+                          ToolTip="Every file at once — done soonest overall" />
+            <ToggleButton Style="{StaticResource ChoiceChip}" Height="32" IsChecked="{Binding OrderedChip}" Content="In order" Margin="8,0,0,0"
+                          ToolTip="The next episode first, so you can start watching while the rest come" />
+          </StackPanel>
+
           <StackPanel Visibility="{Binding HasQueue, Converter={StaticResource Vis}}">
             <Border Height="1" Background="{DynamicResource Line}" Margin="0,14,0,0" />
             <ToggleButton Style="{StaticResource Bare}" IsChecked="{Binding QueueOpen}" Margin="0,10,0,4">
