@@ -39,6 +39,8 @@ intro timings from [IntroDB](https://introdb.app) and subtitles from [OpenSubtit
 
 ## Screenshots
 
+### Phone
+
 <table>
   <tr>
     <td><img src="docs/images/screen-1-home.jpg" alt="Home"></td>
@@ -49,6 +51,27 @@ intro timings from [IntroDB](https://introdb.app) and subtitles from [OpenSubtit
     <td><img src="docs/images/screen-4-episodes.jpg" alt="Episodes and downloads"></td>
     <td><img src="docs/images/screen-5-search.jpg" alt="Search"></td>
     <td><img src="docs/images/screen-6-settings.jpg" alt="Settings"></td>
+  </tr>
+</table>
+
+### TV
+
+<table>
+  <tr>
+    <td><img src="docs/images/tv-1-home.jpg" alt="Home"></td>
+    <td><img src="docs/images/tv-2-title.jpg" alt="A film's page"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/tv-3-sources.jpg" alt="A film's sources"></td>
+    <td><img src="docs/images/tv-4-sources-4k.jpg" alt="Sources filtered to 4K"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/tv-5-search.jpg" alt="Search"></td>
+    <td><img src="docs/images/tv-6-series.jpg" alt="A series' page"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/tv-7-episodes.jpg" alt="Episodes"></td>
+    <td><img src="docs/images/tv-8-settings.jpg" alt="Settings"></td>
   </tr>
 </table>
 
