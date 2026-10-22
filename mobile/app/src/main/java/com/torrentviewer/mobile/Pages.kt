@@ -6,6 +6,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.torrentviewer.core.Backup
 import androidx.compose.ui.unit.sp
 import com.torrentviewer.core.Artwork
@@ -601,6 +602,29 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Chip("Wi-Fi only", wifiOnly, onClick = { wifiOnly = true; Downloads.wifiOnly = true })
                 Chip("Any network", !wifiOnly, onClick = { wifiOnly = false; Downloads.wifiOnly = false })
+            }
+            var sequential by remember { mutableStateOf(Downloads.sequential) }
+            Text(
+                "Fastest takes pieces from wherever the swarm has them. In order fills each file from the start, so you can watch it while it downloads — but it is slower.",
+                Modifier.padding(top = 14.dp, bottom = 8.dp), style = Type.meta.copy(color = Ink.faint),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Chip("Fastest", !sequential, onClick = { sequential = false; Downloads.sequential = false })
+                Chip("In order", sequential, onClick = { sequential = true; Downloads.sequential = true })
+            }
+            // Re-read on return from the system prompt.
+            val context = LocalContext.current
+            var unrestricted by remember { mutableStateOf(Downloads.unrestricted(context)) }
+            LifecycleResumeEffect(Unit) {
+                unrestricted = Downloads.unrestricted(context)
+                onPauseOrDispose { }
+            }
+            if (!unrestricted) {
+                Text(
+                    "Battery saving can slow or stop downloads with the screen off. Let Watchly run in the background to keep them going.",
+                    Modifier.padding(top = 14.dp, bottom = 8.dp), style = Type.meta.copy(color = Ink.faint),
+                )
+                Chip("Allow background downloads", false, onClick = { Downloads.askUnrestricted(context) })
             }
             if (Downloads.hasCard) {
                 Text(
