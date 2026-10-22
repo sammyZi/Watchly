@@ -81,6 +81,7 @@ import com.torrentviewer.core.Profile
 import com.torrentviewer.core.Profiles
 import com.torrentviewer.core.SavedStore
 import com.torrentviewer.core.Searches
+import com.torrentviewer.core.Secrets
 import com.torrentviewer.core.Settings
 import com.torrentviewer.core.SettingsStore
 import com.torrentviewer.core.Sort
@@ -470,6 +471,9 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
     var current by remember { mutableStateOf("") }
     /** "audio" or "subs" while that language list is up. */
     var picking by remember { mutableStateOf<String?>(null) }
+    val subdl by Secrets.subdl.collectAsState()
+    /** A SubDL key being typed or pasted, until Save. */
+    var key by remember { mutableStateOf("") }
     fun set(next: Settings) = SettingsStore.save(next)
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = EDGE).padding(bottom = 32.dp)) {
@@ -594,6 +598,29 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
                 Chip("Yellow", style.yellow, onClick = { set(settings.copy(subtitles = style.copy(yellow = true))) })
                 Chip("Box behind", style.box, onClick = { set(settings.copy(subtitles = style.copy(box = !style.box))) })
             }
+        }
+
+        Section(
+            "SubDL key",
+            if (subdl.isNotEmpty()) "Saved, encrypted on this phone — Find subtitles searches SubDL too. Enter another to replace it."
+            else "A free key from subdl.com adds its subtitles to Find subtitles. It stays encrypted on this phone.",
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Field(key, { key = it.trim() }, if (subdl.isNotEmpty()) "••••••••••••" else "Your SubDL API key", Modifier.weight(1f), secret = true)
+                Spacer(Modifier.width(10.dp))
+                Button("Save", {
+                    if (key.isEmpty()) watch.notes.tryEmit("Paste your SubDL key first")
+                    else {
+                        Secrets.setSubdl(key)
+                        key = ""
+                        watch.notes.tryEmit("SubDL key saved")
+                    }
+                }, icon = L.drawable.lucide_ic_key)
+            }
+            if (subdl.isNotEmpty()) Button("Remove key", {
+                Secrets.setSubdl("")
+                watch.notes.tryEmit("SubDL key removed")
+            }, Modifier.padding(top = 10.dp))
         }
 
         Section("Downloads", "Wi-Fi only holds a download on mobile data — it waits, and carries on when Wi-Fi is back. Use mobile data on a waiting download to let that one through.") {

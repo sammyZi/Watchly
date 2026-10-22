@@ -111,6 +111,7 @@ import com.torrentviewer.core.Ep
 import com.torrentviewer.core.Episode
 import com.torrentviewer.core.ExoView
 import com.torrentviewer.core.Facts
+import com.torrentviewer.core.Secrets
 import com.torrentviewer.core.Ink
 import com.torrentviewer.core.IntroDb
 import com.torrentviewer.core.Intros
@@ -1077,7 +1078,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                     found = null
                     scope.launch {
                         found = runCatching {
-                            // OpenSubtitles needs no key; SubDL joins in when this build has one.
+                            // OpenSubtitles needs no key; SubDL joins in once the viewer has given theirs.
                             val ep = parseEpisode(file?.name.orEmpty())
                             findSubtitles(
                                 query = title?.title ?: searchableName(file?.name.orEmpty()),
@@ -1086,9 +1087,9 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                                 episode = ep?.episode,
                                 type = if (ep != null || title?.isSeries == true) "tv" else "movie",
                                 language = SettingsStore.value.value.subLang,
-                                subdlKey = BuildConfig.SUBDL_KEY,
+                                subdlKey = Secrets.subdl.value.ifBlank { BuildConfig.SUBDL_KEY },
                                 fileName = file?.name.orEmpty(),
-                            ).take(25)
+                            )
                         }.getOrElse {
                             watch.notes.tryEmit(it.message ?: "Subtitle search failed")
                             emptyList()

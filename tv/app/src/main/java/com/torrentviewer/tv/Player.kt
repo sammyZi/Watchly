@@ -710,7 +710,7 @@ private fun Player(watch: Watch) {
                     found = null
                     scope.launch {
                         found = runCatching {
-                            // OpenSubtitles needs no key; SubDL joins in when this build has one.
+                            // OpenSubtitles needs no key; SubDL joins in once the viewer has given theirs.
                             val ep = parseEpisode(file?.name.orEmpty())
                             val series = ep != null || title?.isSeries == true
                             findSubtitles(
@@ -720,9 +720,9 @@ private fun Player(watch: Watch) {
                                 episode = ep?.episode,
                                 type = if (series) "tv" else "movie",
                                 language = SettingsStore.value.value.subLang,
-                                subdlKey = BuildConfig.SUBDL_KEY,
+                                subdlKey = Secrets.subdl.value.ifBlank { BuildConfig.SUBDL_KEY },
                                 fileName = file?.name.orEmpty(),
-                            ).take(25)
+                            )
                         }.getOrElse {
                             watch.notes.tryEmit(it.message ?: "Subtitle search failed")
                             emptyList()

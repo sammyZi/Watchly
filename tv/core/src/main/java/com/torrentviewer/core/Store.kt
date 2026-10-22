@@ -40,6 +40,7 @@ object Kv {
         if (::prefs.isInitialized) return
         prefs = context.getSharedPreferences("watchly", Context.MODE_PRIVATE)
         importExpo(context)
+        Secrets.init(context)
     }
 
     fun useProfile(id: String, isGuest: Boolean) {
@@ -190,6 +191,61 @@ object SettingsStore {
             .put("playbackRate", next.playbackRate.toDouble()).put("playerScale", next.playerScale).put("streamWholeFile", next.wholeFile).put("themeMode", next.themeMode).put("autoSkipIntro", next.autoSkipIntro)
         Kv.setGlobal("settings", o.toString())
     }
+}
+
+/**
+ * What the viewer types in that is theirs alone — their SubDL key. AES-GCM under a key that
+ * is made in the Android Keystore and never leaves it; only the ciphertext is stored, in a
+ * prefs file of its own, out of the settings. If it ever stops decrypting it reads as unset.
+ */
+object Secrets {
+    private const val ALIAS = "watchly-secrets"
+    private const val IV = 12
+    private lateinit var prefs: SharedPreferences
+    private val _subdl = MutableStateFlow("")
+    val subdl: StateFlow<String> = _subdl
+
+    fun init(context: Context) {
+        if (::prefs.isInitialized) return
+        prefs = context.getSharedPreferences("watchly-secrets", Context.MODE_PRIVATE)
+        _subdl.value = read("subdl").orEmpty()
+    }
+
+    /** Blank forgets it. */
+    fun setSubdl(key: String) {
+        val k = key.trim()
+        write("subdl", k.ifEmpty { null })
+        _subdl.value = k
+    }
+
+    private fun keystoreKey(): javax.crypto.SecretKey {
+        val store = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        (store.getKey(ALIAS, null) as? javax.crypto.SecretKey)?.let { return it }
+        val spec = android.security.keystore.KeyGenParameterSpec.Builder(
+            ALIAS, android.security.keystore.KeyProperties.PURPOSE_ENCRYPT or android.security.keystore.KeyProperties.PURPOSE_DECRYPT,
+        ).setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
+            .build()
+        return javax.crypto.KeyGenerator.getInstance(android.security.keystore.KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+            .apply { init(spec) }.generateKey()
+    }
+
+    private fun write(name: String, value: String?) {
+        if (value == null) {
+            prefs.edit().remove(name).apply()
+            return
+        }
+        val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding").apply { init(javax.crypto.Cipher.ENCRYPT_MODE, keystoreKey()) }
+        val blob = cipher.iv + cipher.doFinal(value.toByteArray())
+        prefs.edit().putString(name, android.util.Base64.encodeToString(blob, android.util.Base64.NO_WRAP)).apply()
+    }
+
+    private fun read(name: String): String? = runCatching {
+        val blob = android.util.Base64.decode(prefs.getString(name, null) ?: return null, android.util.Base64.NO_WRAP)
+        val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+            .apply { init(javax.crypto.Cipher.DECRYPT_MODE, keystoreKey(), javax.crypto.spec.GCMParameterSpec(128, blob, 0, IV)) }
+        String(cipher.doFinal(blob, IV, blob.size - IV))
+    }.getOrNull()
 }
 
 /* -------------------------------------------------------------- profiles */

@@ -302,6 +302,8 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
     val profiles by Profiles.list.collectAsState()
     val me = profiles.find { it.id == who.id } ?: who
     var pin by remember { mutableStateOf("") }
+    val subdl by Secrets.subdl.collectAsState()
+    var key by remember { mutableStateOf("") }
     val first = remember { FocusRequester() }
     fun set(next: Settings) = SettingsStore.save(next)
 
@@ -378,6 +380,27 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Chip("Automatically", settings.autoSkipIntro, onClick = { set(settings.copy(autoSkipIntro = true)) })
                 Chip("Show the button", !settings.autoSkipIntro, onClick = { set(settings.copy(autoSkipIntro = false)) })
+            }
+        }
+
+        Section(
+            "SubDL key",
+            if (subdl.isNotEmpty()) "Saved, encrypted on this TV — Find subtitles searches SubDL too. Enter another to replace it."
+            else "A free key from subdl.com adds its subtitles to Find subtitles. It stays encrypted on this TV.",
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Field(key, { key = it.trim() }, if (subdl.isNotEmpty()) "••••••••••••" else "Your SubDL API key", Modifier.width(420.dp), secret = true)
+                Spacer(Modifier.width(14.dp))
+                TvButton(if (key.isNotEmpty()) "Save key" else "Enter a key", {
+                    if (key.isNotEmpty()) {
+                        Secrets.setSubdl(key)
+                        key = ""
+                    }
+                }, icon = L.drawable.lucide_ic_key)
+                if (subdl.isNotEmpty()) {
+                    Spacer(Modifier.width(10.dp))
+                    TvButton("Remove", { Secrets.setSubdl("") })
+                }
             }
         }
 
