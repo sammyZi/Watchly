@@ -159,7 +159,7 @@ private fun ShowGroup(episodes: List<Finished>, onPlay: (Finished) -> Unit, onDe
                 Lc(if (open) L.drawable.lucide_ic_chevron_up else L.drawable.lucide_ic_chevron_down, Modifier.padding(10.dp), tint = Ink.muted, size = 20.dp)
             }
         }
-        if (open) Column(Modifier.padding(start = 60.dp, top = 8.dp)) {
+        if (open) Column(Modifier.padding(top = 8.dp)) {
             episodes.forEach { f -> FinishedRow(f, f.label.substringAfter(" · "), poster = false, { onPlay(f) }, { onDelete(f) }) }
         }
     }
