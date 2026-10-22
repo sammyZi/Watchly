@@ -193,9 +193,9 @@ private fun Player(watch: Watch) {
     val progressState = engine.progress.collectAsState()
     val title = watch.title
     val file = watch.playingFile
-    val episode = watch.episodeOf(file)
+    val episode = remember(file) { watch.episodeOf(file) }
     val next = watch.next
-    val nextEpisode = watch.episodeOf(next)
+    val nextEpisode = remember(next) { watch.episodeOf(next) }
     val startAt = remember { watch.startAt() }
     val bitrate = remember { file?.size?.let { size -> watch.item?.durations?.get(watch.playingIndex)?.takeIf { it > 0 }?.let { size / it } } ?: 0.0 }
 
@@ -511,6 +511,8 @@ private fun Player(watch: Watch) {
                 (if (vlc) VlcView(context) else ExoView(context)).also { v ->
                     // A fallback keeps the viewer's speed and picture.
                     v.setRate(rate)
+                    // The TV never applied the Settings style: Media3 drew its own default.
+                    v.subtitleStyle = SettingsStore.value.value.subtitles
                     v.setScale(SCALES[scale].first)
                     if (!vlc) v.onUnsupported = { message ->
                         Log.w("Player", "Media3 gave up ($message), falling back to VLC")
@@ -588,7 +590,8 @@ private fun Player(watch: Watch) {
             }
         }
 
-        PausedCard(paused && !controls && panel == null && !waiting, title, episode, watch, at, duration)
+        // The clock as a lambda: read here, every libVLC tick recomposed the whole player.
+        PausedCard(paused && !controls && panel == null && !waiting, title, episode, watch, { at }, duration)
 
         // Controls: a scrim top and bottom, title up top, the bar and buttons below.
         val barUp = (controls || scrub != null) && !offerNext && !waiting
@@ -691,6 +694,8 @@ private fun Player(watch: Watch) {
                 tracks = tracks,
                 subtitle = subtitle,
                 audio = audio ?: tracks?.defaultAudio,
+                subSize = SettingsStore.value.collectAsState().value.subtitles.size,
+                onSubSize = { step -> view.value?.subtitleStyle = SettingsStore.resizeSubtitles(step) },
                 onSubtitle = {
                     subtitle = it
                     view.value?.setSubtitleTrack(it)
@@ -1016,7 +1021,7 @@ private fun SeekFlash(flash: Flash?, modifier: Modifier = Modifier) {
 
 /** Paused for a while: what you are watching, over a dimmed frame — Netflix's pause screen. */
 @Composable
-private fun PausedCard(visible: Boolean, title: Title?, episode: Episode?, watch: Watch, at: Double, duration: Double) {
+private fun PausedCard(visible: Boolean, title: Title?, episode: Episode?, watch: Watch, playhead: () -> Double, duration: Double) {
     var shown by remember { mutableStateOf(false) }
     LaunchedEffect(visible) {
         shown = false
@@ -1039,6 +1044,7 @@ private fun PausedCard(visible: Boolean, title: Title?, episode: Episode?, watch
                 plot?.let { Text(it, Modifier.padding(top = 12.dp), style = Type.body.copy(color = Ink.text.copy(alpha = 0.8f)), maxLines = 4, overflow = TextOverflow.Ellipsis) }
                 // Where the film is, and how much is left of it — the reason to glance at a paused screen.
                 if (duration > 0) {
+                    val at = playhead()
                     val left = (duration - at).coerceAtLeast(0.0)
                     Column(Modifier.padding(top = 28.dp).width(460.dp)) {
                         ProgressLine((at / duration).toFloat(), height = 4.dp)
@@ -1062,8 +1068,8 @@ private fun Loading(title: Title?, episode: Episode?, file: TorrentFile?, starti
     val percent = if (starting) 100 else progress?.buffer ?: 0
     val ring by animateFloatAsState(percent / 100f, Motion.spatial(), label = "ring")
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        (episode?.thumbnail ?: title?.art)?.let {
-            Artwork(it, title?.title.orEmpty(), Modifier.fillMaxSize().then(if (Build.VERSION.SDK_INT >= 31) Modifier.blur(10.dp) else Modifier))
+        (episode?.thumbnail ?: title?.art)?.let { art ->
+            Artwork(art, title?.title.orEmpty(), Modifier.fillMaxSize().then(if (Build.VERSION.SDK_INT >= 31) Modifier.blur(10.dp) else Modifier), fallback = title?.art)
         }
         Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Color.Black.copy(alpha = 0.92f), 0.7f to Color.Black.copy(alpha = 0.6f), 1f to Color.Black.copy(alpha = 0.45f))))
         Row(Modifier.align(Alignment.CenterStart).padding(start = Safe.x + 24.dp, end = Safe.x), verticalAlignment = Alignment.CenterVertically) {
@@ -1143,6 +1149,8 @@ private fun TracksPanel(
     tracks: Tracks?,
     subtitle: Int?,
     audio: Int?,
+    subSize: String,
+    onSubSize: (Int) -> Unit,
     onSubtitle: (Int?) -> Unit,
     onAudio: (Int) -> Unit,
     onFind: () -> Unit,
@@ -1167,10 +1175,27 @@ private fun TracksPanel(
                     Spacer(Modifier.height(10.dp))
                     TrackRow("Find subtitles online…", false, null, icon = L.drawable.lucide_ic_search, onClick = onFind)
                 }
+                item {
+                    Row(Modifier.padding(start = 14.dp, top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Size", Modifier.width(64.dp), style = Type.title.copy(color = Ink.muted, fontWeight = FontWeight.Medium))
+                        SizeStep(L.drawable.lucide_ic_a_arrow_down) { onSubSize(-1) }
+                        Text(subSize.replaceFirstChar(Char::uppercase), Modifier.width(96.dp), style = Type.title.copy(fontWeight = FontWeight.Bold), textAlign = TextAlign.Center)
+                        SizeStep(L.drawable.lucide_ic_a_arrow_up) { onSubSize(1) }
+                    }
+                }
             }
         }
     }
     first.claim()
+}
+
+@Composable
+private fun SizeStep(@DrawableRes icon: Int, onClick: () -> Unit) {
+    Focusable(onClick, shape = CircleShape, scale = 1.1f, ring = false) { focused ->
+        Box(Modifier.size(44.dp).background(if (focused) Color.White else Color.White.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
+            Lc(icon, tint = if (focused) Color.Black else Color.White, size = 22.dp)
+        }
+    }
 }
 
 @Composable

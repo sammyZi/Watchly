@@ -95,6 +95,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -126,6 +127,7 @@ import com.torrentviewer.core.Progress
 import com.torrentviewer.core.ProgressLine
 import com.torrentviewer.core.SavedSub
 import com.torrentviewer.core.SettingsStore
+import com.torrentviewer.core.resizeSubtitles
 import com.torrentviewer.core.Spinner
 import com.torrentviewer.core.Stats
 import com.torrentviewer.core.Sub
@@ -289,14 +291,14 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     val progressState = engine.progress.collectAsState()
     val title = watch.title
     val file = watch.playingFile
-    val episode = watch.episodeOf(file)
+    val episode = remember(file) { watch.episodeOf(file) }
     val next = watch.next
     /** No next file in this torrent: the show's next episode, found online when asked for. */
     val onlineNext = remember(title, episode, next) {
         if (next != null || title == null || episode == null) null
         else title.episodes.indexOfFirst { it.id == episode.id }.takeIf { it >= 0 }?.let { title.episodes.getOrNull(it + 1) }
     }
-    val nextEpisode = watch.episodeOf(next) ?: onlineNext
+    val nextEpisode = remember(next) { watch.episodeOf(next) } ?: onlineNext
     val startAt = remember { watch.startAt() }
     val bitrate = remember { file?.size?.let { size -> watch.item?.durations?.get(watch.playingIndex)?.takeIf { it > 0 }?.let { size / it } } ?: 0.0 }
     /** Intros are per show; a film has no recurring titles. */
@@ -904,7 +906,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         // In PiP the window is the picture and nothing else.
         if (pip) return@Box
 
-        PausedCard(paused && !controls && panel == null && !waiting && !locked, title, episode, watch.item?.label.orEmpty(), at, duration)
+        PausedCard(paused && !controls && panel == null && !waiting && !locked, title, episode, watch.item?.label.orEmpty(), { at }, duration)
 
         AnimatedVisibility(controls && !waiting && !locked, enter = fadeIn(tween(200)), exit = fadeOut(tween(300))) {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f))) {
@@ -1056,6 +1058,8 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                     }
                 },
                 audio = audio ?: tracks?.defaultAudio,
+                subSize = SettingsStore.value.collectAsState().value.subtitles.size,
+                onSubSize = { step -> view.value?.subtitleStyle = SettingsStore.resizeSubtitles(step) },
                 // Picking one yourself wins over the preferred language.
                 onSubtitle = {
                     langDone[1] = true
@@ -1371,7 +1375,7 @@ private fun SeekFlash(flash: Flash?) {
 
 /** Paused for a while: what you are watching, over a dimmed frame — Netflix's pause screen, as on the TV. */
 @Composable
-private fun PausedCard(visible: Boolean, title: Title?, episode: Episode?, label: String, at: Double, duration: Double) {
+private fun PausedCard(visible: Boolean, title: Title?, episode: Episode?, label: String, playhead: () -> Double, duration: Double) {
     var shown by remember { mutableStateOf(false) }
     LaunchedEffect(visible) {
         shown = false
@@ -1391,6 +1395,7 @@ private fun PausedCard(visible: Boolean, title: Title?, episode: Episode?, label
                 (episode?.overview ?: title?.plot)?.let { Text(it, Modifier.padding(top = 10.dp), style = Type.body.copy(fontSize = 14.sp, color = Ink.text.copy(alpha = 0.8f)), maxLines = 3, overflow = TextOverflow.Ellipsis) }
                 // Where the film is, and how much is left of it — the reason to glance at a paused screen.
                 if (duration > 0) {
+                    val at = playhead()
                     val remaining = (duration - at).coerceAtLeast(0.0)
                     Column(Modifier.padding(top = 18.dp).fillMaxWidth()) {
                         ProgressLine((at / duration).toFloat(), height = 4.dp)
@@ -1414,8 +1419,8 @@ private fun Loading(title: Title?, episode: Episode?, file: TorrentFile?, starti
     val percent = if (starting) 100 else progress?.buffer ?: 0
     val ring by animateFloatAsState(percent / 100f, Motion.spatial(), label = "ring")
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        (episode?.thumbnail ?: title?.art)?.let {
-            Artwork(it, title?.title.orEmpty(), Modifier.fillMaxSize().then(if (Build.VERSION.SDK_INT >= 31) Modifier.blur(10.dp) else Modifier))
+        (episode?.thumbnail ?: title?.art)?.let { art ->
+            Artwork(art, title?.title.orEmpty(), Modifier.fillMaxSize().then(if (Build.VERSION.SDK_INT >= 31) Modifier.blur(10.dp) else Modifier), fallback = title?.art)
         }
         Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Color.Black.copy(alpha = 0.92f), 0.7f to Color.Black.copy(alpha = 0.6f), 1f to Color.Black.copy(alpha = 0.45f))))
         Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -1506,8 +1511,8 @@ private fun CastingCard(
 ) {
     var scrub by remember { mutableStateOf<Double?>(null) }
     Box(Modifier.fillMaxSize().background(Color.Black).pointerInput(Unit) { awaitEachGesture { awaitFirstDown().consume() } }) {
-        (episode?.thumbnail ?: title?.art)?.let {
-            Artwork(it, label, Modifier.fillMaxSize().then(if (Build.VERSION.SDK_INT >= 31) Modifier.blur(16.dp) else Modifier))
+        (episode?.thumbnail ?: title?.art)?.let { art ->
+            Artwork(art, label, Modifier.fillMaxSize().then(if (Build.VERSION.SDK_INT >= 31) Modifier.blur(16.dp) else Modifier), fallback = title?.art)
         }
         Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.7f)))
         Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -1546,6 +1551,8 @@ private fun TracksPanel(
     delay: Long,
     onDelay: (Long) -> Unit,
     audio: Int?,
+    subSize: String,
+    onSubSize: (Int) -> Unit,
     onSubtitle: (Int?) -> Unit,
     onAudio: (Int) -> Unit,
     onFind: () -> Unit,
@@ -1570,6 +1577,14 @@ private fun TracksPanel(
                             Text("%+.1f s".format(delay / 1000.0), Modifier.padding(horizontal = 10.dp, vertical = 6.dp), style = Type.label.copy(fontWeight = FontWeight.SemiBold, color = if (delay != 0L) Ink.accent else Color.White))
                         }
                         Tap({ onDelay(delay + 100) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_plus, Modifier.padding(8.dp), tint = Color.White, size = 18.dp) }
+                    }
+                }
+                item {
+                    Row(Modifier.padding(start = 14.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Size", Modifier.width(56.dp), style = Type.meta)
+                        Tap({ onSubSize(-1) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_a_arrow_down, Modifier.padding(8.dp), tint = Color.White, size = 18.dp) }
+                        Text(subSize.replaceFirstChar(Char::uppercase), Modifier.widthIn(min = 64.dp).padding(horizontal = 10.dp, vertical = 6.dp), style = Type.label.copy(fontWeight = FontWeight.SemiBold), textAlign = TextAlign.Center)
+                        Tap({ onSubSize(1) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_a_arrow_up, Modifier.padding(8.dp), tint = Color.White, size = 18.dp) }
                     }
                 }
                 item { TrackRow("Off", subtitle == null) { onSubtitle(null) } }

@@ -225,6 +225,10 @@ class LibTest {
         // Arc "seasons": S2E3 after an 8-episode S1 is the 11th.
         val eps = (1..8).map { Episode("a$it", 1, it, "", null, null, null) } + (1..5).map { Episode("b$it", 2, it, "", null, null, null) }
         assertEquals(11, absoluteNumber(eps, 2, 3))
+        assertEquals(eps.associateWith { absoluteNumber(eps, it.season, it.episode) }, absoluteNumbers(eps))
+        assertEquals("large", SubtitleStyle().resized(1).size)
+        assertEquals("huge", SubtitleStyle(size = "huge").resized(1).size)
+        assertEquals("small", SubtitleStyle(size = "small").resized(-1).size)
         assertEquals(true, namesEpisode("[Erai-raws] One Piece - 11 [1080p]", 2, 3, 11))
         assertEquals(false, namesEpisode("[Erai-raws] One Piece - 3 [1080p]", 2, 3, 11))
         assertEquals("S02E03#11", pickTag(2, 3, 11))

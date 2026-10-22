@@ -87,7 +87,7 @@ import com.torrentviewer.core.quickest
 import com.torrentviewer.core.reviewLinks
 import com.torrentviewer.core.runtimeSeconds
 import com.torrentviewer.core.searchEpisode
-import com.torrentviewer.core.absoluteNumber
+import com.torrentviewer.core.absoluteNumbers
 import com.torrentviewer.core.parseEpisode
 import com.torrentviewer.core.seasonsIn
 import com.torrentviewer.core.searchTorrents
@@ -134,7 +134,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
     // Long-running anime: every episode by its number through the show, a hundred at a time.
     val through = title.numberedThrough
     val numbered = remember(title.episodes) {
-        if (!through) emptyList() else title.episodes.filter { it.season > 0 }.map { it to (absoluteNumber(title.episodes, it.season, it.episode) ?: it.episode) }
+        if (!through) emptyList() else absoluteNumbers(title.episodes).toList()
     }
     val blocks = remember(numbered) { numbered.chunked(100) }
     var block by rememberSaveable(title.imdb) { mutableStateOf(0) }
@@ -329,23 +329,23 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                         )
                     }
                 }
-                val tiles = if (numberQuery.isEmpty()) blocks.getOrNull(block).orEmpty() else numbered.filter { it.second.toString().startsWith(numberQuery) }.take(100)
-                // Tap plays, a long press lists the releases.
-                items(tiles.chunked(5), key = { "tiles-" + it.first().first.id }) { row ->
-                    Row(Modifier.padding(horizontal = EDGE, vertical = 4.dp).widthIn(max = 720.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        row.forEach { (ep, n) ->
-                            EpisodeTile(
-                                n, selected = episode?.id == ep.id, busy = busy && episode?.id == ep.id, seen = progress[Ep(ep.season, ep.episode)] ?: 0.0,
-                                modifier = Modifier.weight(1f),
-                                onPlay = { playEpisode(ep) },
-                                onSources = {
-                                    if (episode?.id != ep.id || hits == null) findSources(ep)
-                                    sheet = true
-                                },
-                            )
-                        }
-                        repeat(5 - row.size) { Spacer(Modifier.weight(1f)) }
-                    }
+                val shown = if (numberQuery.isEmpty()) blocks.getOrNull(block).orEmpty() else numbered.filter { it.second.toString().startsWith(numberQuery) }.take(100)
+                items(shown, key = { "ep-" + it.first.id }) { (ep, n) ->
+                    EpisodeRow(
+                        ep,
+                        number = n,
+                        fallback = title.wide,
+                        busy = busy && episode?.id == ep.id,
+                        selected = episode?.id == ep.id,
+                        seen = progress[Ep(ep.season, ep.episode)] ?: 0.0,
+                        modifier = Modifier.widthIn(max = 720.dp),
+                        onPlay = { playEpisode(ep) },
+                        onSources = {
+                            if (episode?.id != ep.id || hits == null) findSources(ep)
+                            sheet = true
+                        },
+                        onDownload = { downloadEpisode(ep) },
+                    )
                 }
             } else if (title.isSeries && seasons.isNotEmpty()) {
                 item(key = "seasons") {
@@ -562,31 +562,12 @@ private fun Pill(text: String, tint: Color) {
 
 /** Netflix's phone episode row: still on the left, number and name beside it, the synopsis under both. */
 @Composable
-private fun EpisodeTile(number: Int, selected: Boolean, busy: Boolean, seen: Double, modifier: Modifier, onPlay: () -> Unit, onSources: () -> Unit) {
-    Tap(onPlay, modifier.height(44.dp), RoundedCornerShape(6.dp), onLongClick = onSources) { pressed ->
-        val bg = when {
-            selected -> Ink.accent
-            pressed -> Ink.text.copy(alpha = 0.18f)
-            else -> Ink.text.copy(alpha = 0.08f)
-        }
-        val fg = when {
-            selected -> Color.White
-            seen > 0.9 -> Ink.faint
-            else -> Ink.text
-        }
-        Box(Modifier.fillMaxSize().background(bg), contentAlignment = Alignment.Center) {
-            Text(if (busy) "…" else "$number", style = Type.label.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = fg))
-        }
-    }
-}
-
-@Composable
-private fun EpisodeRow(ep: Episode, fallback: String?, busy: Boolean, selected: Boolean, seen: Double, modifier: Modifier, onPlay: () -> Unit, onSources: () -> Unit, onDownload: () -> Unit) {
+private fun EpisodeRow(ep: Episode, number: Int = ep.episode, fallback: String?, busy: Boolean, selected: Boolean, seen: Double, modifier: Modifier, onPlay: () -> Unit, onSources: () -> Unit, onDownload: () -> Unit) {
     Column(modifier.padding(horizontal = EDGE, vertical = 10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Tap(onPlay, Modifier.width(132.dp).aspectRatio(16f / 9f), RoundedCornerShape(6.dp)) {
                 Box {
-                    Artwork(ep.thumbnail ?: fallback, ep.name, Modifier.fillMaxSize())
+                    Artwork(ep.thumbnail ?: fallback, ep.name, Modifier.fillMaxSize(), fallback = fallback)
                     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = if (busy) 0.5f else 0.2f)), contentAlignment = Alignment.Center) {
                         if (busy) Spinner(size = 26.dp)
                         else Box(Modifier.clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)).padding(8.dp)) { Lc(L.drawable.lucide_ic_play, tint = Color.White, size = 16.dp) }
@@ -599,7 +580,7 @@ private fun EpisodeRow(ep: Episode, fallback: String?, busy: Boolean, selected: 
                 }
             }
             Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                Text("${ep.episode}. ${ep.name}", style = Type.label.copy(fontWeight = FontWeight.SemiBold), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("$number. ${ep.name}", style = Type.label.copy(fontWeight = FontWeight.SemiBold), maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (seen >= 0.95) {
                         Lc(L.drawable.lucide_ic_check, tint = Ink.good, size = 13.dp)

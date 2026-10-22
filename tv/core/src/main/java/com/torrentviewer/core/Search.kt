@@ -96,10 +96,31 @@ fun pickTag(season: Int, episode: Int, absolute: Int?) =
 
 /** Which episode a file name belongs to, or null. Up to four digits: long-running anime is released as S01E1071. */
 fun parseEpisode(name: String): Ep? {
-    val found = Regex("""\bs(\d{1,2})[ ._-]*e(\d{1,4})\b""", RegexOption.IGNORE_CASE).find(name)
-        ?: Regex("""\b(\d{1,2})x(\d{1,2})\b""", RegexOption.IGNORE_CASE).find(name)
+    val found = SXE.find(name) ?: NXN.find(name)
     return found?.let { Ep(it.groupValues[1].toInt(), it.groupValues[2].toInt()) }
 }
+
+// Compiled once: these run per release, hundreds of times a search, and a compile each
+// time held the TV's main thread past the five-second ANR.
+private val SXE = Regex("""\bs(\d{1,2})[ ._-]*e(\d{1,4})\b""", RegexOption.IGNORE_CASE)
+private val NXN = Regex("""\b(\d{1,2})x(\d{1,2})\b""", RegexOption.IGNORE_CASE)
+private val ABSOLUTE = listOf(
+    Regex("""(?:^|[\s_\])])-[\s_]*(\d{1,4})(?:v\d)?(?=[\s_.\[(]|$)""", RegexOption.IGNORE_CASE),
+    Regex("""\b(?:episode|ep|e)[ ._-]?(\d{1,4})(?:v\d)?\b""", RegexOption.IGNORE_CASE),
+    Regex("""(?:^|[\s_])\[(\d{1,4})(?:v\d)?]"""), // "Jujutsu Kaisen S2 [29]"
+    // "[yibis]_One_Piece_588_[720p]": a bare number right before the tags (not "Season 12 [1080p]").
+    Regex("""(?<!season[\s_]{0,3})[\s_](\d{2,4})(?:v\d)?[\s_]*(?=[\[(]|$)""", RegexOption.IGNORE_CASE),
+)
+private const val SPAN_MARK = """(?:s\d{1,2}[ ._-]*e|ep?)?"""
+private val SPAN = Regex("""(?<![\w.])$SPAN_MARK(\d{1,4})\s*[-~–]\s*$SPAN_MARK(\d{1,4})(?![\w.])""", RegexOption.IGNORE_CASE)
+private val SEASON_RANGES = listOf(
+    Regex("""\bs(\d{1,2})\s*[-–]\s*s?(\d{1,2})\b""", RegexOption.IGNORE_CASE),
+    Regex("""\bseasons?[ ._-]*(\d{1,2})\s*[-–]\s*s?(\d{1,2})\b""", RegexOption.IGNORE_CASE),
+)
+private val SEASON_ONES = listOf(
+    Regex("""\bs(\d{1,2})(?=e\d{1,4}\b|\b)""", RegexOption.IGNORE_CASE),
+    Regex("""\bseasons?[ ._-]*(\d{1,2})\b""", RegexOption.IGNORE_CASE),
+)
 
 /**
  * The episode number of a release that names no season — how anime is released:
@@ -108,20 +129,13 @@ fun parseEpisode(name: String): Ep? {
  */
 fun parseAbsolute(name: String): Int? {
     if (parseEpisode(name) != null) return null
-    val i = RegexOption.IGNORE_CASE
-    val m = Regex("""(?:^|[\s_\])])-[\s_]*(\d{1,4})(?:v\d)?(?=[\s_.\[(]|$)""", i).find(name)
-        ?: Regex("""\b(?:episode|ep|e)[ ._-]?(\d{1,4})(?:v\d)?\b""", i).find(name)
-        ?: Regex("""(?:^|[\s_])\[(\d{1,4})(?:v\d)?]""").find(name) // "Jujutsu Kaisen S2 [29]"
-        // "[yibis]_One_Piece_588_[720p]": a bare number right before the tags (not "Season 12 [1080p]").
-        ?: Regex("""(?<!season[\s_]{0,3})[\s_](\d{2,4})(?:v\d)?[\s_]*(?=[\[(]|$)""", i).find(name)
-        ?: return null
+    val m = ABSOLUTE.firstNotNullOfOrNull { it.find(name) } ?: return null
     return m.groupValues[1].toInt().takeIf { it in 1..1899 }
 }
 
 /** "Show (01-24) [Batch]", "Show EP1144-EP1155", "Show S01E1144-E1155": the episodes a batch claims. */
 fun episodeSpan(name: String): IntRange? {
-    val mark = """(?:s\d{1,2}[ ._-]*e|ep?)?"""
-    val m = Regex("""(?<![\w.])$mark(\d{1,4})\s*[-~–]\s*$mark(\d{1,4})(?![\w.])""", RegexOption.IGNORE_CASE).find(name) ?: return null
+    val m = SPAN.find(name) ?: return null
     val from = m.groupValues[1].toInt()
     val to = m.groupValues[2].toInt()
     return if (from < to && to < 1900) from..to else null
@@ -155,22 +169,14 @@ fun namesEpisode(name: String, season: Int, episode: Int, absolute: Int?, folder
 /** Which seasons a release name claims; ranges first, then single tokens. */
 fun seasonsIn(name: String): List<Int> {
     val out = sortedSetOf<Int>()
-    val ranges = listOf(
-        Regex("""\bs(\d{1,2})\s*[-–]\s*s?(\d{1,2})\b""", RegexOption.IGNORE_CASE),
-        Regex("""\bseasons?[ ._-]*(\d{1,2})\s*[-–]\s*s?(\d{1,2})\b""", RegexOption.IGNORE_CASE),
-    )
-    for (r in ranges) for (m in r.findAll(name)) {
+    for (r in SEASON_RANGES) for (m in r.findAll(name)) {
         val a = m.groupValues[1].toInt()
         val b = m.groupValues[2].toInt()
         for (i in minOf(a, b)..maxOf(a, b)) out.add(i)
     }
     if (out.isNotEmpty()) return out.toList()
     // The bare token allows no separator, so "Ocean's 8" is not season 8.
-    val ones = listOf(
-        Regex("""\bs(\d{1,2})(?=e\d{1,4}\b|\b)""", RegexOption.IGNORE_CASE),
-        Regex("""\bseasons?[ ._-]*(\d{1,2})\b""", RegexOption.IGNORE_CASE),
-    )
-    for (r in ones) for (m in r.findAll(name)) out.add(m.groupValues[1].toInt())
+    for (r in SEASON_ONES) for (m in r.findAll(name)) out.add(m.groupValues[1].toInt())
     return out.toList()
 }
 
@@ -489,7 +495,8 @@ suspend fun searchTorrents(
     // The alias is a looser question; its answers have to carry the year to count.
     fun addAliased(hits: List<Hit>) = add(if (year != null) hits.filter { year in it.name } else hits)
 
-    coroutineScope {
+    // Off the main thread: ranking reruns on every source that lands, and on a TV that froze the remote.
+    withContext(Dispatchers.Default) {
         launch { add(source("apibay", SOURCE_MS) { fromApibay(full) }) }
         launch { add(source("csv", SOURCE_MS) { fromCsv(full) }) }
         launch { add(source("knaben", KNABEN_MS) { fromKnaben(full) }) }
@@ -503,7 +510,7 @@ suspend fun searchTorrents(
             if (imdb != null) launch { add(source("torrentio", SOURCE_MS) { fromTorrentio("movie/$imdb", "movie") }) }
         }
     }
-    return now()
+    return withContext(Dispatchers.Default) { now() }
 }
 
 private val episodeMemo = java.util.concurrent.ConcurrentHashMap<String, List<Hit>>()
@@ -542,7 +549,7 @@ suspend fun searchEpisode(
         if (anime) ranked.filter { it.nyaa && it.seeders > 0 } + ranked.filterNot { it.nyaa && it.seeders > 0 } else ranked
     }
     val tag = episodeTag(season, episode)
-    coroutineScope {
+    withContext(Dispatchers.Default) {
         // Anime is indexed by its running number, not S02E05.
         launch {
             val hits = searchTorrents(show, imdb, suffix = "%02d".format(absolute ?: episode)) { synchronized(lock) { numbered = it }; onHits?.invoke(current()) }
@@ -568,7 +575,7 @@ suspend fun searchEpisode(
             }
         }
     }
-    return current().also { if (it.isNotEmpty()) episodeMemo[key] = it }
+    return withContext(Dispatchers.Default) { current() }.also { if (it.isNotEmpty()) episodeMemo[key] = it }
 }
 
 /**
