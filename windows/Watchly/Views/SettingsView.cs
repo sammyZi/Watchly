@@ -35,6 +35,8 @@ public sealed class SettingsView : UserControl
     {
         page.Children.Clear();
 
+        if (shell.Who is { } me) page.Children.Add(ProfileGroup(me));
+
         page.Children.Add(Group("Appearance",
             ChoiceRow("Theme", "Match Windows, or lock light or dark",
                 new[] { ("system", "System"), ("light", "Light"), ("dark", "Dark") }, S.ThemeMode, v => Set(S with { ThemeMode = v }))));
@@ -145,6 +147,48 @@ public sealed class SettingsView : UserControl
     }
 
     /// <summary>A section as the phone sets one (mobile Pages.kt Section): a bold title, then its rows — no card.</summary>
+    /// <summary>The TV's Profile and Profile PIN sections: who is watching, switch, and a lock.</summary>
+    FrameworkElement ProfileGroup(Profile me)
+    {
+        var face = ProfilesView.Avatar(me, 40);
+        face.Margin = new Thickness(0, 0, 14, 0);
+        var who = Row($"Watching as {me.Name}",
+            me.IsGuest ? "Guest keeps nothing — history and My List go when the app closes." : "Library, My List and resume points belong to this profile.",
+            Ui.Button(Ui.Text("Switch", "Label", "Accent", 13, FontWeights.SemiBold), shell.ShowProfiles));
+        var rows = new StackPanel { Children = { new DockPanel { Children = { face, who } } } };
+        DockPanel.SetDock(face, Dock.Left);
+        if (!me.IsGuest)
+        {
+            var box = ProfilesView.PinBox();
+            box.FontSize = 18;
+            box.Width = 90;
+            var set = Ui.Button(Ui.Text("Set PIN", "Label", "Accent", 13, FontWeights.SemiBold), () =>
+            {
+                if (box.Password.Length != 4) { shell.Toast("A PIN is four digits", true); return; }
+                shell.ProfileEdited(Profiles.SetPin(me.Id, box.Password));
+                shell.Toast($"{me.Name} now asks for a PIN");
+                Render();
+            });
+            set.Margin = new Thickness(14, 0, 0, 0);
+            var controls = new StackPanel { Orientation = Orientation.Horizontal, Children = { Ui.Card(box, "SurfaceAlt", 6, new Thickness(8, 2, 8, 2)), set } };
+            if (me.Pin is not null)
+            {
+                var remove = Ui.Button(Ui.Text("Remove", "Label", "Muted", 13), () =>
+                {
+                    shell.ProfileEdited(Profiles.SetPin(me.Id, ""));
+                    Render();
+                });
+                remove.Margin = new Thickness(16, 0, 0, 0);
+                controls.Children.Add(remove);
+            }
+            rows.Children.Add(Divider());
+            rows.Children.Add(Row("Profile PIN",
+                me.Pin is not null ? "Asked for before this profile opens. Remove it to unlock." : "Four digits, asked for before this profile opens. A lock for a shared PC — not a password.",
+                controls));
+        }
+        return Group("Profile", rows);
+    }
+
     static FrameworkElement Group(string title, UIElement content)
     {
         var heading = Ui.Text(title, "TitleText", "Text", 18, FontWeights.Bold);

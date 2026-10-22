@@ -80,6 +80,71 @@ public static class Store
         }
     }
 
+    // ── Per profile ─────────────────────────────────────────────────────────
+    // What a viewer accumulates — history, lists, searches — is namespaced by profile, as the
+    // phone's and TV's Kv is; the first profile keeps the bare keys, so a library from before
+    // profiles is still there. The guest writes to memory only and is forgotten on exit.
+
+    static string profile = "";
+    static bool guest;
+    static readonly Dictionary<string, string> Memory = new();
+
+    public static void UseProfile(string id, bool isGuest)
+    {
+        lock (Gate)
+        {
+            profile = id;
+            guest = isGuest;
+            if (isGuest) Memory.Clear();
+        }
+    }
+
+    static string Own(string key) => profile.Length > 0 ? $"{key}@{profile}" : key;
+
+    public static T LoadOwn<T>(string key, T fallback)
+    {
+        if (!guest) return Load(Own(key), fallback);
+        lock (Gate)
+        {
+            try { return Memory.TryGetValue(Own(key), out var json) ? JsonSerializer.Deserialize<T>(json, Json) ?? fallback : fallback; }
+            catch { return fallback; }
+        }
+    }
+
+    public static void SaveOwn<T>(string key, T value)
+    {
+        if (!guest)
+        {
+            Save(Own(key), value);
+            return;
+        }
+        lock (Gate) Memory[Own(key)] = JsonSerializer.Serialize(value, Json);
+    }
+
+    public static void RemoveOwn(string key)
+    {
+        if (!guest)
+        {
+            Remove(Own(key));
+            return;
+        }
+        lock (Gate) Memory.Remove(Own(key));
+    }
+
+    /// <summary>Everything a deleted profile kept ("key@id", which is "key_id" on disk).</summary>
+    public static void WipeProfile(string id)
+    {
+        if (id.Length == 0) return;
+        lock (Gate)
+        {
+            if (!Directory.Exists(Root)) return;
+            foreach (var file in Directory.GetFiles(Root, $"*_{id}.json"))
+            {
+                try { File.Delete(file); } catch { }
+            }
+        }
+    }
+
     public static T Clone<T>(T value) =>
         JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(value, Json), Json)!;
 

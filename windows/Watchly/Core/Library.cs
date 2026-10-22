@@ -61,12 +61,12 @@ public static class History
 
     public static event Action<List<HistoryItem>>? Changed;
 
-    public static List<HistoryItem> Load() => Store.Load(Key, new List<HistoryItem>());
+    public static List<HistoryItem> Load() => Store.LoadOwn(Key, new List<HistoryItem>());
 
     static List<HistoryItem> Write(List<HistoryItem> items)
     {
         var capped = items.Take(Max).ToList();
-        Store.Save(Key, capped);
+        Store.SaveOwn(Key, capped);
         Changed?.Invoke(capped);
         return capped;
     }
@@ -224,7 +224,7 @@ public static class Saved
 
     public static event Action<List<SavedTitle>>? Changed;
 
-    public static List<SavedTitle> Load() => Store.Load(Key, new List<SavedTitle>()).OrderByDescending(s => s.At).ToList();
+    public static List<SavedTitle> Load() => Store.LoadOwn(Key, new List<SavedTitle>()).OrderByDescending(s => s.At).ToList();
 
     public static bool OnList(IEnumerable<SavedTitle> saved, string imdb, string list) => saved.Any(s => s.Imdb == imdb && s.List == list);
 
@@ -241,7 +241,7 @@ public static class Saved
                 Year = title.Year, Rating = title.Rating, List = list, At = Store.Now,
             }).ToList()
             : without;
-        Store.Save(Key, next);
+        Store.SaveOwn(Key, next);
         Changed?.Invoke(next);
         return next;
     }
@@ -306,13 +306,13 @@ public static class EpisodeLinks
     /// <summary>Anything past this counts as watched.</summary>
     public const double Watched = 92;
 
-    public static Dictionary<string, string> Load() => Store.Load(Key, new Dictionary<string, string>());
+    public static Dictionary<string, string> Load() => Store.LoadOwn(Key, new Dictionary<string, string>());
 
     public static Dictionary<string, string> Link(string id, string uri)
     {
         var links = Load();
         links[id] = uri;
-        Store.Save(Key, links);
+        Store.SaveOwn(Key, links);
         return links;
     }
 }
@@ -323,20 +323,20 @@ public static class Searches
     const string Key = "searches";
     const int Max = 8;
 
-    public static List<string> Load() => Store.Load(Key, new List<string>()).Take(Max).ToList();
+    public static List<string> Load() => Store.LoadOwn(Key, new List<string>()).Take(Max).ToList();
 
     public static List<string> Remember(string query)
     {
         var q = query.Trim();
         if (q.Length == 0) return Load();
         var next = Load().Where(old => !old.Equals(q, StringComparison.OrdinalIgnoreCase)).Prepend(q).Take(Max).ToList();
-        Store.Save(Key, next);
+        Store.SaveOwn(Key, next);
         return next;
     }
 
     public static List<string> Clear()
     {
-        Store.Remove(Key);
+        Store.RemoveOwn(Key);
         return new();
     }
 }
@@ -397,6 +397,73 @@ public static class SavedDownloads
             Store.Save(Key, Store.Load(Key, new List<SavedDownload>()).Where(d => !drop.Contains(d.Path)).ToList());
         }
         Changed?.Invoke();
+    }
+}
+
+/// <summary>One person's library: history, My List, resume points and searches are theirs. See tv/core Store.kt.</summary>
+public sealed record Profile
+{
+    public string Id { get; init; } = "";
+    public string Name { get; init; } = "";
+    public string Colour { get; init; } = Profiles.Colours[0];
+    /// <summary>Four digits asked for before it opens — a lock for a shared PC, not a password.</summary>
+    public string? Pin { get; init; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsGuest => Id == Profiles.Guest.Id;
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string Initial => Name.Trim() is { Length: > 0 } n ? char.ToUpperInvariant(n[0]).ToString() : "?";
+}
+
+/// <summary>The profile list, shared by everyone on this PC — with the settings, not inside a profile.</summary>
+public static class Profiles
+{
+    const string Key = "profiles";
+
+    /// <summary>A fixed set, so profiles are told apart by colour as much as by name.</summary>
+    public static readonly string[] Colours = { "#e50914", "#2b8cff", "#f5a623", "#3ecf8e", "#a855f7", "#ff6b6b" };
+
+    public static readonly Profile Guest = new() { Id = "guest", Name = "Guest", Colour = "#5b6472" };
+
+    public const int Most = 6;
+
+    public static List<Profile> Load() => Store.Load(Key, new List<Profile>());
+
+    static List<Profile> Write(List<Profile> next)
+    {
+        Store.Save(Key, next);
+        return next;
+    }
+
+    /// <summary>The very first takes the bare keys, so a library from before profiles survives.</summary>
+    public static Profile Add(string name, string colour)
+    {
+        var list = Load();
+        var profile = new Profile
+        {
+            Id = list.Count == 0 ? "" : "p" + Store.Now.ToString("x"),
+            Name = name.Trim() is { Length: > 0 } n ? n : "Me",
+            Colour = colour,
+        };
+        Write(list.Append(profile).ToList());
+        return profile;
+    }
+
+    public static void Edit(string id, string name, string colour) =>
+        Write(Load().Select(p => p.Id == id ? p with { Name = name.Trim() is { Length: > 0 } n ? n : p.Name, Colour = colour } : p).ToList());
+
+    /// <summary>Four digits sets a lock; anything else clears it.</summary>
+    public static Profile? SetPin(string id, string pin)
+    {
+        var clean = new string(pin.Where(char.IsDigit).Take(4).ToArray());
+        return Write(Load().Select(p => p.Id == id ? p with { Pin = clean.Length == 4 ? clean : null } : p).ToList()).FirstOrDefault(p => p.Id == id);
+    }
+
+    public static void Remove(string id)
+    {
+        Write(Load().Where(p => p.Id != id).ToList());
+        Store.WipeProfile(id);
     }
 }
 

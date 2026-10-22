@@ -213,6 +213,11 @@ static class Smoke
         Eq(Meta.AbsoluteNumber(jjk, 2, 5), 29, "absoluteNumber skips specials");
         Eq(Meta.AbsoluteNumber(new[] { new Episode { Season = 21, Number = 892 }, new Episode { Season = 21, Number = 893 } }, 21, 893), 893, "absoluteNumber keeps running numbering");
         Eq(string.Join(",", Meta.AbsoluteNumbers(jjk).Select(n => n.Number)), string.Join(",", jjk.Where(e => e.Season > 0).Select(e => Meta.AbsoluteNumber(jjk, e.Season, e.Number))), "absoluteNumbers matches absoluteNumber");
+        Store.UseProfile(Profiles.Guest.Id, true);
+        Store.SaveOwn("smoke-guest-only", 5);
+        Eq(Store.LoadOwn("smoke-guest-only", 0), 5, "guest keeps things in memory");
+        Store.UseProfile("", false);
+        Eq(Store.LoadOwn("smoke-guest-only", 0), 0, "guest's things never reach the disk");
         Eq(new AppSettings().Resized(1).SubSize, "large", "subtitle size up");
         Eq(new AppSettings { SubSize = "huge" }.Resized(1).SubSize, "huge", "subtitle size stops at huge");
         Eq(new AppSettings { SubSize = "small" }.Resized(-1).SubRel, 20, "subtitle size stops at small");
@@ -412,6 +417,12 @@ static class Smoke
         {
             ("detail film", () => new DetailView(film)),
             ("detail series", () => new DetailView(show)),
+            ("detail long anime", () => new DetailView(show with
+            {
+                Genres = new() { "Animation" },
+                Episodes = Enumerable.Range(1, 230).Select(i => new Episode { Id = $"tt0000001:{1 + i / 100}:{i}", Season = 1 + i / 100, Number = i, Name = $"Episode {i}" }).ToList(),
+            })),
+            ("profiles", () => new ProfilesView(_ => { }, () => { }, _ => { })),
             ("catalog", () => new CatalogView(new Shelf("Trending films", "movie"))),
             ("files", () => new FilesView(new TorrentMeta("Some.Show.S01.1080p", new() { F(0, "Some.Show.S01E01.mkv", 1_000_000), F(1, "Some.Show.S01E02.mkv", 1_000_000), F(2, "info.nfo", 10, false) }), "stream", _ => { }, _ => { }, () => { }, () => { })),
             ("mode picker", () => new ModePickerView(new TorrentMeta("x", new() { F(0, "a.mkv", 1) }), () => { }, () => { }, () => { })),

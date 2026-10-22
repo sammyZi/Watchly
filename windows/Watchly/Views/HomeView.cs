@@ -41,7 +41,7 @@ public sealed class HomeView : UserControl
 
     const string TasteKey = "home-taste";
     /// <summary>The genres you watch (see Meta.Taste), from last time until this session's is worked out.</summary>
-    Dictionary<string, double> taste = Store.Load(TasteKey, new Dictionary<string, double>());
+    Dictionary<string, double> taste = Store.LoadOwn(TasteKey, new Dictionary<string, double>());
 
     /// <summary>A shelf's titles for today — see Recommend. Genre shelves share titles out between them.</summary>
     List<Title> Today(Shelf shelf, List<Title> pool, HashSet<string?> watched) =>
@@ -172,7 +172,7 @@ public sealed class HomeView : UserControl
             if (mine != version) return;
             // Kept for the next build of the shelves; changing rails already on screen would make them jump.
             taste = await Meta.Taste(identified);
-            try { Store.Save(TasteKey, taste); } catch { }
+            try { Store.SaveOwn(TasteKey, taste); } catch { }
             if (mine != version) return;
             var next = genres.Select((g, i) => new Shelf(i == 0 ? $"Because you watched {g.Genre.ToLowerInvariant()}" : $"More {g.Genre.ToLowerInvariant()}", g.Kind, g.Genre)).ToList();
             if (!next.SequenceEqual(picks))
