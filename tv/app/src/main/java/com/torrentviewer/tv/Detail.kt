@@ -71,7 +71,7 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
     // Long-running anime: every episode by its number through the show, a hundred at a time.
     val through = title.numberedThrough
     val numbered = remember(title.episodes) {
-        if (!through) emptyMap() else title.episodes.filter { it.season > 0 }.associate { it.id to (absoluteNumber(title.episodes, it.season, it.episode) ?: it.episode) }
+        if (!through) emptyMap() else absoluteNumbers(title.episodes).mapKeys { it.key.id }
     }
     val blocks = remember(title.episodes, through) { if (through) title.episodes.filter { it.season > 0 }.chunked(100) else emptyList() }
     var block by rememberSaveable(title.imdb) { mutableStateOf(0) }
@@ -290,7 +290,7 @@ private fun EpisodeCard(ep: Episode, number: Int, fallback: String?, selected: B
             1.07f,
             requester = requester,
         ) {
-            Artwork(ep.thumbnail ?: fallback, ep.name, Modifier.fillMaxSize())
+            Artwork(ep.thumbnail ?: fallback, ep.name, Modifier.fillMaxSize(), fallback = fallback)
             if (busy) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) { Spinner(size = 30.dp) }
             if (selected && !busy) Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Ink.accent))
             // How far it got, as on Continue watching; watched through, the bar runs green end to end.

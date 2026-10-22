@@ -77,7 +77,7 @@ object Meta {
     /** A day: charts move slowly and ratings slower. */
     private const val TTL = 24 * 60 * 60 * 1000L
     /** Bumped whenever Title gains a field, so old snapshots are never read back. */
-    private const val STORE = "meta:tv5:"
+    private const val STORE = "meta:tv6:"
 
     private val memory = ConcurrentHashMap<String, Any>()
 
@@ -124,9 +124,27 @@ object Meta {
             val type = if (kind == "tv") "series" else "movie"
             val meta = JSONObject(Net.get("$BASE/$type/$imdb.json")).getJSONObject("meta")
             meta.put("imdb_id", imdb)
-            toTitles(JSONArray().put(meta), kind, withEpisodes = true).first()
+            toTitles(JSONArray().put(meta), kind, withEpisodes = true).first().let { if (it.numberedThrough) withStills(it) else it }
         }
     }.getOrNull()
+
+    /**
+     * Long anime: Cinemeta's episode stills are mostly 404s, TVmaze has nearly every one.
+     * TVmaze counts seasons by year and recaps as episodes, so they pair up by air date
+     * (a day either way: Cinemeta's is UTC, TVmaze's local) — 1165 of One Piece's 1179.
+     */
+    private suspend fun withStills(t: Title): Title = runCatching {
+        val show = JSONObject(Net.get("https://api.tvmaze.com/lookup/shows?imdb=${t.imdb}", quiet = true)).getInt("id")
+        val byDay = JSONArray(Net.get("https://api.tvmaze.com/shows/$show/episodes", quiet = true)).objects()
+            .mapNotNull { o -> o.optJSONObject("image")?.str("medium")?.let { o.optString("airdate") to it } }
+            .groupBy({ it.first }, { it.second }).mapValues { ArrayDeque(it.value) }
+        val day = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+        t.copy(episodes = t.episodes.map { e ->
+            val aired = e.released?.take(10)?.takeIf { e.season > 0 }?.let { runCatching { day.parse(it) }.getOrNull() } ?: return@map e
+            listOf(0, 1, -1).firstNotNullOfOrNull { byDay[day.format(java.util.Date(aired.time + it * 86_400_000L))]?.removeFirstOrNull() }
+                ?.let { e.copy(thumbnail = it) } ?: e
+        })
+    }.getOrDefault(t)
 
     /** Not persisted: queries are one-off. */
     suspend fun search(query: String, kind: String): List<Title> = runCatching {
@@ -298,6 +316,16 @@ fun absoluteNumber(episodes: List<Episode>, season: Int, number: Int): Int? {
     val inSeason = episodes.filter { it.season == season }
     if (inSeason.isEmpty()) return null
     return if (inSeason.minOf { it.episode } > 1) number else episodes.count { it.season in 1 until season } + number
+}
+
+/** [absoluteNumber] for every regular episode in one pass: per episode it is quadratic, a second a call on One Piece. */
+fun absoluteNumbers(episodes: List<Episode>): Map<Episode, Int> {
+    var before = 0
+    return episodes.filter { it.season > 0 }.groupBy { it.season }.toSortedMap().flatMap { (_, inSeason) ->
+        val offset = if (inSeason.minOf { it.episode } > 1) 0 else before
+        before += inSeason.size
+        inSeason.map { it to offset + it.episode }
+    }.toMap()
 }
 
 /** Broadcast order. Season 0 (specials) keeps its own group. */

@@ -150,15 +150,18 @@ fun Lc(@DrawableRes icon: Int, modifier: Modifier = Modifier, tint: Color = Ink.
 /** A network image over a placeholder tinted from the name. */
 @Composable
 /** [fill]: a placeholder under the picture — skipped where the picture covers it anyway and the fill is pure GPU cost. */
-fun Artwork(url: String?, name: String, modifier: Modifier = Modifier, scale: ContentScale = ContentScale.Crop, fill: Boolean = true) {
+fun Artwork(url: String?, name: String, modifier: Modifier = Modifier, scale: ContentScale = ContentScale.Crop, fill: Boolean = true, fallback: String? = null) {
     val hue = remember(name) { hueOf(name).toFloat() }
     // The placeholder is a painter Coil draws only until the picture lands, not a fill
     // that stays painted underneath it forever after.
     Box(modifier.then(if (url == null) Modifier.background(Color.hsv(hue, 0.45f, 0.28f)) else Modifier)) {
         if (url != null) {
             val context = LocalContext.current
+            // Episode stills 404 for much of anime: then the title's own art.
+            var src by remember(url) { mutableStateOf(url) }
             AsyncImage(
-                model = remember(url) { ImageRequest.Builder(context).data(url).crossfade(300).build() },
+                model = remember(src) { ImageRequest.Builder(context).data(src).crossfade(300).build() },
+                onError = { if (fallback != null && src != fallback) src = fallback },
                 placeholder = if (fill) remember { ColorPainter(Ink.surface) } else null,
                 contentDescription = name,
                 contentScale = scale,

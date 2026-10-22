@@ -138,6 +138,16 @@ data class SubtitleStyle(val size: String = "normal", val yellow: Boolean = fals
 /** libVLC's relative font size: the screen height divided by this, so smaller is bigger. */
 val SUB_SIZES = linkedMapOf("small" to 20, "normal" to 16, "large" to 12, "huge" to 9)
 
+/** One size up (+1) or down (−1), stopping at the ends. */
+fun SubtitleStyle.resized(step: Int): SubtitleStyle {
+    val sizes = SUB_SIZES.keys.toList()
+    return copy(size = sizes[(sizes.indexOf(size) + step).coerceIn(0, sizes.lastIndex)])
+}
+
+/** A size step from the player, kept for the next film too. */
+fun SettingsStore.resizeSubtitles(step: Int): SubtitleStyle =
+    value.value.let { s -> s.subtitles.resized(step).also { save(s.copy(subtitles = it)) } }
+
 val CACHE_CAPS = listOf(2048, 4096, 8192, 16384)
 
 object SettingsStore {

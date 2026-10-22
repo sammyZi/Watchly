@@ -242,7 +242,7 @@ class Watch(val engine: TorrentStream) {
         parseEpisode(name)?.let { at -> return list.find { it.season == at.season && it.episode == at.episode } }
         // "One Piece - 1071": the running number.
         val n = parseAbsolute(name) ?: return null
-        return list.find { absoluteNumber(list, it.season, it.episode) == n }
+        return absoluteNumbers(list).entries.find { it.value == n }?.key
     }
 
     val playingFile: TorrentFile? get() = meta?.files?.find { it.index == playingIndex }
