@@ -269,7 +269,22 @@ public sealed record AppSettings
     public double PlaybackRate { get; init; } = 1;
     /// <summary>Jump past an episode's intro by itself, rather than offer the button.</summary>
     public bool AutoSkipIntro { get; init; }
+    /// <summary>Subtitle text: one of <see cref="SubSizes"/>' keys, as on the phone and TV.</summary>
+    public string SubSize { get; init; } = "normal";
     const string Key = "settings";
+
+    /// <summary>libVLC's freetype-rel-fontsize per size — a fraction of the picture's height, so smaller is bigger.</summary>
+    public static readonly (string Key, int Rel)[] SubSizes = { ("small", 20), ("normal", 16), ("large", 12), ("huge", 9) };
+
+    /// <summary>One size up or down from the current, held at the ends.</summary>
+    public AppSettings Resized(int step)
+    {
+        var i = Array.FindIndex(SubSizes, s => s.Key == SubSize);
+        return this with { SubSize = SubSizes[Math.Clamp((i < 0 ? 1 : i) + step, 0, SubSizes.Length - 1)].Key };
+    }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public int SubRel => SubSizes.FirstOrDefault(s => s.Key == SubSize, SubSizes[1]).Rel;
 
     public static AppSettings Load()
     {

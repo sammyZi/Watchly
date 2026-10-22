@@ -443,6 +443,7 @@ public sealed class PlayerView : UserControl, IDisposable
             ":file-caching=300",
             ":live-caching=300",
             ":clock-jitter=0",
+            $":freetype-rel-fontsize={shell.Settings.SubRel}",
             $":start-time={startSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
         started = true;
         buffering = true;
@@ -463,13 +464,49 @@ public sealed class PlayerView : UserControl, IDisposable
     }
 
     bool firstPlay = true;
+    /// <summary>The subtitle to pick again after a reload for a new size: an external file's path, else a track id.</summary>
+    (string? Path, int Id)? restoreSub;
 
     void OnPlaying()
     {
         if (!firstPlay) return;
         firstPlay = false;
-        foreach (var sub in externalSubs) AddSlave(sub.Path, false);
+        var restore = restoreSub;
+        restoreSub = null;
+        foreach (var sub in externalSubs) AddSlave(sub.Path, restore?.Path is { } p && p.Equals(sub.Path, StringComparison.OrdinalIgnoreCase));
+        if (restore is { Path: null, Id: var id }) _ = PickAgain(id);
     }
+
+    /// <summary>The film's own track, once libVLC lists it again — or none, if subtitles were off.</summary>
+    async Task PickAgain(int id)
+    {
+        for (var i = 0; i < 20 && !disposed; i++)
+        {
+            if (id < 0 || player.SpuDescription.Any(t => t.Id == id))
+            {
+                if (player.Spu != id) player.SetSpu(id);
+                return;
+            }
+            await Task.Delay(150);
+        }
+    }
+
+    /// <summary>
+    /// A size up or down. libVLC sizes subtitle text when a video opens, so it reopens where it is,
+    /// with the same subtitle picked.
+    /// </summary>
+    void ResizeSubs(int step)
+    {
+        var next = shell.Settings.Resized(step);
+        if (next.SubSize == shell.Settings.SubSize || media is null) return;
+        shell.ChangeSettings(next);
+        var spu = player.Spu;
+        restoreSub = (slaveTracks.FirstOrDefault(kv => kv.Value == spu).Key, spu);
+        ShowHud($"Subtitle size: {SizeName(next.SubSize)}");
+        Load(media.Mrl, current / 1000.0);
+    }
+
+    static string SizeName(string key) => char.ToUpperInvariant(key[0]) + key[1..];
 
     void AddSlave(string path, bool select)
     {
@@ -2227,7 +2264,35 @@ public sealed class PlayerView : UserControl, IDisposable
             none.Margin = new Thickness(10, 8, 10, 8);
             subs.Children.Add(none);
         }
+        subs.Children.Add(SizeRow());
         return subs;
+    }
+
+    /// <summary>Text size, as the phone's and the TV's Audio &amp; Subtitles panel has it: smaller, the size, bigger.</summary>
+    FrameworkElement SizeRow()
+    {
+        var size = shell.Settings.SubSize;
+        FrameworkElement Step(string glyph, int step, string tip)
+        {
+            var at = Array.FindIndex(AppSettings.SubSizes, s => s.Key == size) + step;
+            var b = Controls.Ui.Button(WIcon(glyph, 16), () => { ResizeSubs(step); Bump(); }, "Bare", tip);
+            b.Padding = new Thickness(8);
+            b.Tag = 8;
+            b.Opacity = at >= 0 && at < AppSettings.SubSizes.Length ? 1 : 0.35;
+            return b;
+        }
+        var row = new DockPanel { Margin = new Thickness(10, 10, 4, 4) };
+        var name = WText(SizeName(size), 12);
+        name.Width = 56;
+        name.TextAlignment = TextAlignment.Center;
+        name.VerticalAlignment = VerticalAlignment.Center;
+        var steps = new StackPanel { Orientation = Orientation.Horizontal, Children = { Step("minus", -1, "Smaller subtitles"), name, Step("plus", 1, "Bigger subtitles") } };
+        DockPanel.SetDock(steps, Dock.Right);
+        row.Children.Add(steps);
+        var label = WText("Size", 12, White(0x90));
+        label.VerticalAlignment = VerticalAlignment.Center;
+        row.Children.Add(label);
+        return new StackPanel { Children = { new Border { Height = 1, Background = White(0x1a), Margin = new Thickness(6, 8, 6, 0) }, row } };
     }
 
     string FriendlySub(string? raw, int id)

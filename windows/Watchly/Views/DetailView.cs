@@ -375,8 +375,60 @@ public sealed class DetailView : UserControl, IDisposable
         return card;
     }
 
+    /// <summary>Which hundred of a long anime is listed; null follows the picked episode.</summary>
+    int? hundred;
+    string numberQuery = "";
+
+    /// <summary>
+    /// Long-running anime, as the phone lists it: every episode by its number through the show,
+    /// a hundred at a time, with a box to jump to a number — TVmaze's stills, Cinemeta's are 404s.
+    /// </summary>
+    void RenderNumbered(Dictionary<string, double> progress)
+    {
+        var numbered = Meta.AbsoluteNumbers(title.Episodes);
+        var blocks = numbered.Chunk(100).ToList();
+        var at = hundred ?? Math.Max(0, numbered.FindIndex(n => n.Episode.Id == picked?.Id) / 100);
+        var block = new StackPanel { Margin = new Thickness(0, 26, 0, 0), Width = ListWidth, HorizontalAlignment = HorizontalAlignment.Left };
+        block.Children.Add(Heading("Episodes"));
+
+        var chips = new WrapPanel();
+        for (var b = 0; b < blocks.Count; b++)
+        {
+            var captured = b;
+            var chip = Ui.Chip($"{blocks[b][0].Number}–{blocks[b][^1].Number}", b == at && numberQuery.Length == 0, () => { hundred = captured; numberQuery = ""; Render(); });
+            chip.Margin = new Thickness(0, 0, 8, 8);
+            chips.Children.Add(chip);
+        }
+        block.Children.Add(chips);
+
+        // Rows are refilled in place as a number is typed, so the box keeps its focus.
+        var rows = new StackPanel();
+        void Fill()
+        {
+            rows.Children.Clear();
+            var shown = numberQuery.Length == 0 ? blocks.ElementAtOrDefault(at) ?? Array.Empty<(Episode, int)>()
+                : numbered.Where(n => n.Number.ToString().StartsWith(numberQuery)).Take(100).ToArray();
+            foreach (var (ep, n) in shown) rows.Children.Add(EpisodeRow(ep, progress.GetValueOrDefault(ep.Id), n));
+            if (shown.Length == 0) rows.Children.Add(Ui.Text($"No episode {numberQuery}", "Meta", "Faint", 13));
+        }
+        var (box, input, _) = Ui.SearchField("Episode number", 44);
+        box.Margin = new Thickness(0, 2, 0, 10);
+        input.Text = numberQuery;
+        input.PreviewTextInput += (_, e) => e.Handled = !e.Text.All(char.IsDigit) || input.Text.Length >= 4;
+        input.TextChanged += (_, _) => { numberQuery = new string(input.Text.Where(char.IsDigit).ToArray()); Fill(); };
+        block.Children.Add(box);
+        Fill();
+        block.Children.Add(rows);
+        content.Children.Add(block);
+    }
+
     void RenderEpisodes(Dictionary<string, double> progress)
     {
+        if (title.NumberedThrough)
+        {
+            RenderNumbered(progress);
+            return;
+        }
         var episodes = title.Episodes;
         var seasons = episodes.Count > 0 ? episodes.Select(e => e.Season).Distinct().ToList() : season is not null ? new List<int> { season.Value } : new();
         if (seasons.Count == 0) return;
@@ -427,7 +479,7 @@ public sealed class DetailView : UserControl, IDisposable
     }
 
     /// <summary>Netflix's episode row (mobile Detail.kt): the still, number and name beside it, the synopsis under both.</summary>
-    FrameworkElement EpisodeRow(Episode ep, double seen)
+    FrameworkElement EpisodeRow(Episode ep, double seen, int? number = null)
     {
         var done = seen >= EpisodeLinks.Watched;
         var on = picked?.Id == ep.Id;
@@ -454,7 +506,7 @@ public sealed class DetailView : UserControl, IDisposable
         if (done)
             still.Children.Add(Ui.Brushed(new Border { Width = 18, Height = 18, CornerRadius = new CornerRadius(9), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(4), Child = Ui.Glyph("check", 11, "OnAccent") }, "Accent"));
 
-        var name = Ui.Text($"{ep.Number}. {ep.Name}", "Label", "Text", 15, FontWeights.SemiBold);
+        var name = Ui.Text($"{number ?? ep.Number}. {ep.Name}", "Label", "Text", 15, FontWeights.SemiBold);
         name.TextWrapping = TextWrapping.Wrap;
         name.MaxHeight = 40;
         var when = Ui.Text(done ? "Watched" : seen > 0 ? $"{Math.Round(seen)}% watched" : ep.Released is { Length: >= 10 } rel ? rel[..10] : "", "Meta", "Faint", 12);

@@ -113,6 +113,10 @@
     <Setter Property="Foreground" Value="{DynamicResource OnAccent}" />
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
+  <!-- The primary one — Play, Watch — the phone's grainy red glow (Theme.AccentGlow). -->
+  <Style x:Key="PillGlow" TargetType="Button" BasedOn="{StaticResource PillAccent}">
+    <Setter Property="Background" Value="{DynamicResource AccentGlow}" />
+  </Style>
   <Style x:Key="PillDanger" TargetType="Button" BasedOn="{StaticResource Pill}">
     <Setter Property="Background" Value="{DynamicResource Danger}" />
     <Setter Property="Foreground" Value="{DynamicResource OnAccent}" />

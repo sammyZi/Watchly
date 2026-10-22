@@ -36,6 +36,10 @@ public sealed record Title
     public string? Logo { get; init; }
     public string? Runtime { get; init; }
     public List<Episode> Episodes { get; init; } = new();
+
+    /// <summary>Long-running anime, listed by each episode's number through the show rather than by season.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool NumberedThrough => Genres.Any(g => g is Meta.AnimeGenre or "Animation") && Episodes.Count(e => e.Season > 0) > 100;
 }
 
 public sealed record Shelf(string Heading, string Kind, string? Genre = null)
@@ -63,7 +67,7 @@ public static class Meta
 
     static readonly ConcurrentDictionary<string, Task<object?>> Cache = new();
     static readonly TimeSpan Ttl = TimeSpan.FromDays(1);
-    const string StorePrefix = "meta3-";
+    const string StorePrefix = "meta4-";
 
     sealed record Stored<T>(long At, T Value);
 
@@ -149,8 +153,60 @@ public static class Meta
             var body = JsonNode.Parse(await res.Content.ReadAsStringAsync());
             if (body?["meta"] is not JsonObject meta) return null;
             meta["imdb_id"] = imdb;
-            return ToTitles(new JsonArray(meta.DeepClone()), kind, true).FirstOrDefault();
+            var title = ToTitles(new JsonArray(meta.DeepClone()), kind, true).FirstOrDefault();
+            return title is { NumberedThrough: true } ? await WithStills(title) : title;
         }), null);
+
+    /// <summary>
+    /// Long anime: Cinemeta's episode stills are mostly 404s, TVmaze has nearly every one.
+    /// TVmaze counts seasons by year and recaps as episodes, so they pair up by air date
+    /// (a day either way: Cinemeta's is UTC, TVmaze's local) — 1165 of One Piece's 1179.
+    /// </summary>
+    static async Task<Title> WithStills(Title t)
+    {
+        try
+        {
+            if ((await Net.Json($"https://api.tvmaze.com/lookup/shows?imdb={t.Imdb}", quiet: true))?["id"] is not JsonValue id) return t;
+            var byDay = ((await Net.Json($"https://api.tvmaze.com/shows/{id}/episodes", quiet: true)) as JsonArray ?? new JsonArray())
+                .Where(o => S(o?["airdate"]) is not null && S(o?["image"]?["medium"]) is not null)
+                .GroupBy(o => S(o!["airdate"])!, o => S(o!["image"]!["medium"])!)
+                .ToDictionary(g => g.Key, g => new Queue<string>(g));
+            string? Take(DateTime day) =>
+                byDay.TryGetValue(day.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture), out var q) && q.Count > 0 ? q.Dequeue() : null;
+            var episodes = new List<Episode>();
+            foreach (var e in t.Episodes)
+            {
+                var aired = e.Season > 0 && e.Released is { Length: >= 10 } r &&
+                            DateTime.TryParseExact(r[..10], "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var d)
+                    ? d : (DateTime?)null;
+                var still = aired is { } a ? Take(a) ?? Take(a.AddDays(1)) ?? Take(a.AddDays(-1)) : null;
+                episodes.Add(still is null ? e : e with { Thumbnail = still });
+            }
+            return t with { Episodes = episodes };
+        }
+        catch
+        {
+            return t;
+        }
+    }
+
+    /// <summary>
+    /// Every regular episode's number through the show, in one pass — <see cref="AbsoluteNumber"/>
+    /// for the lot, for the episode list of a show a thousand episodes long.
+    /// </summary>
+    public static List<(Episode Episode, int Number)> AbsoluteNumbers(IEnumerable<Episode> episodes)
+    {
+        var before = 0;
+        var @out = new List<(Episode, int)>();
+        foreach (var season in episodes.Where(e => e.Season > 0).GroupBy(e => e.Season).OrderBy(g => g.Key))
+        {
+            var list = season.ToList();
+            var offset = list.Min(e => e.Number) > 1 ? 0 : before;
+            before += list.Count;
+            @out.AddRange(list.Select(e => (e, offset + e.Number)));
+        }
+        return @out;
+    }
 
     /// <summary>
     /// Cast photos by name, from Wikipedia (Cinemeta has names only). One request for the
