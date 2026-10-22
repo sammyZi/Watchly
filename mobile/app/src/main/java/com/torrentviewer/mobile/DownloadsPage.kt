@@ -75,6 +75,19 @@ fun DownloadsScreen(watch: Watch) {
 
     LazyColumn(state = rememberLazyListState(), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp)) {
         item { Heading("Downloads") }
+        // Settings has it too; here is where it is looked for. A change applies to running downloads.
+        item {
+            var sequential by remember { mutableStateOf(Downloads.sequential) }
+            Row(Modifier.padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Chip("Fastest", !sequential, onClick = { sequential = false; Downloads.sequential = false })
+                Chip("In order", sequential, onClick = { sequential = true; Downloads.sequential = true })
+            }
+            Note(
+                if (sequential) "In order: each file fills from the start, so it can be watched while it downloads. Slower."
+                else "Fastest: pieces from wherever the swarm has them. Switch to In order to watch while it downloads.",
+                Modifier.padding(bottom = 8.dp),
+            )
+        }
         if (live.isEmpty() && finished.isEmpty()) item {
             Note("Nothing downloaded yet. Download from a title's page, and it plays here without a connection.")
         }
