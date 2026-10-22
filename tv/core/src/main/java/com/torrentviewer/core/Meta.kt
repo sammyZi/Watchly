@@ -46,6 +46,12 @@ data class Title(
     /** 16:9 art for a landscape card; MetaHub carries a background for nearly every id. */
     val wide get() = backdrop ?: "https://images.metahub.space/background/medium/$imdb/img"
 
+    /** Cinemeta files anime under "Animation"; nyaa answers nothing for a Western cartoon anyway. */
+    val isAnime get() = genres.any { it == ANIME_GENRE || it == "Animation" }
+
+    /** One Piece's thousand episodes in arc "seasons": listed by the number everyone knows them by instead. */
+    val numberedThrough get() = isAnime && episodes.count { it.season > 0 } > 100
+
     /** "2021 · 2h 35m · Sci-Fi · Drama" */
     fun facts(): List<String> = listOfNotNull(year?.take(9), runtime) + genres.take(3)
 }
@@ -280,6 +286,18 @@ fun reviewLinks(title: Title): List<Pair<String, String>> {
         "Metacritic" to "https://www.metacritic.com/search/$q/",
         "Letterboxd" to "https://letterboxd.com/search/$q/",
     )
+}
+
+/**
+ * The episode's number counted straight through the show, the way anime is released:
+ * Jujutsu Kaisen S2E5 is "- 29". Specials don't count. A season whose numbers already
+ * carry on from the last one (not starting at 1) is taken as is.
+ */
+fun absoluteNumber(episodes: List<Episode>, season: Int, number: Int): Int? {
+    if (season <= 0) return null
+    val inSeason = episodes.filter { it.season == season }
+    if (inSeason.isEmpty()) return null
+    return if (inSeason.minOf { it.episode } > 1) number else episodes.count { it.season in 1 until season } + number
 }
 
 /** Broadcast order. Season 0 (specials) keeps its own group. */

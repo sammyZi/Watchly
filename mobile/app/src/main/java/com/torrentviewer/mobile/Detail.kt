@@ -40,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -86,6 +87,7 @@ import com.torrentviewer.core.quickest
 import com.torrentviewer.core.reviewLinks
 import com.torrentviewer.core.runtimeSeconds
 import com.torrentviewer.core.searchEpisode
+import com.torrentviewer.core.absoluteNumber
 import com.torrentviewer.core.parseEpisode
 import com.torrentviewer.core.seasonsIn
 import com.torrentviewer.core.searchTorrents
@@ -125,12 +127,24 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
     val liked = saved.any { it.imdb == title.imdb && it.list == "favorite" }
 
     val seasons = remember(title.episodes) { title.episodes.map { it.season }.filter { it > 0 }.distinct().sorted() }
-    var season by remember(title.imdb) { mutableStateOf<Int?>(null) }
-    LaunchedEffect(seasons) { if (season == null || season !in seasons) season = seasons.firstOrNull() }
+    var season by rememberSaveable(title.imdb) { mutableStateOf<Int?>(null) }
+    // Not while the episode list is still loading: that would throw away the season being come back to.
+    LaunchedEffect(seasons) { if (seasons.isNotEmpty() && (season == null || season !in seasons)) season = seasons.first() }
     val episodes = title.episodes.filter { it.season == season }
+    // Long-running anime: every episode by its number through the show, a hundred at a time.
+    val through = title.numberedThrough
+    val numbered = remember(title.episodes) {
+        if (!through) emptyList() else title.episodes.filter { it.season > 0 }.map { it to (absoluteNumber(title.episodes, it.season, it.episode) ?: it.episode) }
+    }
+    val blocks = remember(numbered) { numbered.chunked(100) }
+    var block by rememberSaveable(title.imdb) { mutableStateOf(0) }
+    var numberQuery by rememberSaveable(title.imdb) { mutableStateOf("") }
     val progress = remember(history, title.imdb) { episodeProgress(history, title.imdb) }
 
     var episode by remember(title.imdb) { mutableStateOf<Episode?>(null) }
+    // Back from the player: the episode that was picked, once the list is in.
+    var episodeId by rememberSaveable(title.imdb) { mutableStateOf<String?>(null) }
+    LaunchedEffect(title.episodes) { if (episode == null) episode = title.episodes.find { it.id == episodeId } }
     var hits by remember(title.imdb) { mutableStateOf<List<Hit>?>(null) }
     var busy by remember(title.imdb) { mutableStateOf(false) }
     var quality by remember(title.imdb) { mutableStateOf<String?>(null) }
@@ -140,7 +154,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
     var sheet by remember { mutableStateOf(false) }
     var reviews by remember { mutableStateOf(false) }
     var expanded by remember(title.imdb) { mutableStateOf(false) }
-    var allEpisodes by remember(title.imdb, season) { mutableStateOf(false) }
+    var allEpisodes by rememberSaveable(title.imdb, season) { mutableStateOf(false) }
     /** "Download season" open: the season, and its packs (null while still looking). */
     var seasonPacks by remember(title.imdb) { mutableStateOf<Pair<Int, List<Hit>?>?>(null) }
     val list = rememberLazyListState()
@@ -151,9 +165,10 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
         hits = null
         quality = null
         episode = ep
+        episodeId = ep?.id
         val run: suspend (OnHits) -> List<Hit> = { onHits ->
             try {
-                if (ep != null) searchEpisode(title.title, ep.season, ep.episode, title.imdb, onHits)
+                if (ep != null) searchEpisode(title, ep.season, ep.episode, onHits)
                 else searchTorrents(title.title, title.imdb, title.year?.take(4), onHits = onHits)
             } finally {
                 if (mine == ticket) busy = false
@@ -190,7 +205,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
         scope.launch {
             val first = title.episodes.firstOrNull { it.season == s }?.episode ?: 1
             val all = runCatching {
-                searchEpisode(title.title, s, first, title.imdb) { partial -> if (seasonPacks?.first == s) seasonPacks = s to packsOf(partial, s) }
+                searchEpisode(title, s, first) { partial -> if (seasonPacks?.first == s) seasonPacks = s to packsOf(partial, s) }
             }.getOrDefault(emptyList())
             if (seasonPacks?.first == s) seasonPacks = s to packsOf(all, s)
         }
@@ -209,7 +224,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
     LaunchedEffect(title.imdb, title.kind) { if (!title.isSeries) findSources(null) }
 
     /** What the big button plays: the episode last looked at, or the first of the season. */
-    val upNext = episode ?: episodes.firstOrNull()
+    val upNext = episode ?: if (through) numbered.firstOrNull()?.first else episodes.firstOrNull()
 
     fun playEpisode(ep: Episode) = scope.launch {
         val ready = if (episode?.id == ep.id && shown.isNotEmpty()) shown else findSources(ep).await()
@@ -266,7 +281,9 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                             primary = true,
                         )
                         upNext != null -> Button(
-                            label = if (busy && episode?.id == upNext.id && shown.isEmpty()) "Finding sources…" else "Play S${upNext.season}:E${upNext.episode}",
+                            label = if (busy && episode?.id == upNext.id && shown.isEmpty()) "Finding sources…"
+                                else if (through) "Play episode ${numbered.find { it.first.id == upNext.id }?.second ?: upNext.episode}"
+                                else "Play S${upNext.season}:E${upNext.episode}",
                             onClick = { playEpisode(upNext) },
                             modifier = Modifier.fillMaxWidth(),
                             icon = L.drawable.lucide_ic_play,
@@ -296,7 +313,41 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                 }
             }
 
-            if (title.isSeries && seasons.isNotEmpty()) {
+            if (title.isSeries && through) {
+                item(key = "numbered") {
+                    Column(Modifier.padding(top = 22.dp).widthIn(max = 720.dp)) {
+                        Text("Episodes", Modifier.padding(start = EDGE, bottom = 12.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
+                        LazyRow(contentPadding = PaddingValues(horizontal = EDGE), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(blocks.indices.toList()) { b ->
+                                Chip("${blocks[b].first().second}–${blocks[b].last().second}", b == block && numberQuery.isEmpty(), onClick = { block = b; numberQuery = "" })
+                            }
+                        }
+                        Field(
+                            numberQuery, { numberQuery = it.filter(Char::isDigit).take(4) }, "Episode number",
+                            Modifier.padding(horizontal = EDGE).padding(top = 10.dp, bottom = 6.dp).fillMaxWidth(),
+                            digits = true, leading = L.drawable.lucide_ic_search,
+                        )
+                    }
+                }
+                val tiles = if (numberQuery.isEmpty()) blocks.getOrNull(block).orEmpty() else numbered.filter { it.second.toString().startsWith(numberQuery) }.take(100)
+                // Tap plays, a long press lists the releases.
+                items(tiles.chunked(5), key = { "tiles-" + it.first().first.id }) { row ->
+                    Row(Modifier.padding(horizontal = EDGE, vertical = 4.dp).widthIn(max = 720.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEach { (ep, n) ->
+                            EpisodeTile(
+                                n, selected = episode?.id == ep.id, busy = busy && episode?.id == ep.id, seen = progress[Ep(ep.season, ep.episode)] ?: 0.0,
+                                modifier = Modifier.weight(1f),
+                                onPlay = { playEpisode(ep) },
+                                onSources = {
+                                    if (episode?.id != ep.id || hits == null) findSources(ep)
+                                    sheet = true
+                                },
+                            )
+                        }
+                        repeat(5 - row.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
+            } else if (title.isSeries && seasons.isNotEmpty()) {
                 item(key = "seasons") {
                     Column(Modifier.padding(top = 22.dp)) {
                         Text("Episodes", Modifier.padding(start = EDGE, bottom = 12.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
@@ -510,6 +561,25 @@ private fun Pill(text: String, tint: Color) {
 }
 
 /** Netflix's phone episode row: still on the left, number and name beside it, the synopsis under both. */
+@Composable
+private fun EpisodeTile(number: Int, selected: Boolean, busy: Boolean, seen: Double, modifier: Modifier, onPlay: () -> Unit, onSources: () -> Unit) {
+    Tap(onPlay, modifier.height(44.dp), RoundedCornerShape(6.dp), onLongClick = onSources) { pressed ->
+        val bg = when {
+            selected -> Ink.accent
+            pressed -> Ink.text.copy(alpha = 0.18f)
+            else -> Ink.text.copy(alpha = 0.08f)
+        }
+        val fg = when {
+            selected -> Color.White
+            seen > 0.9 -> Ink.faint
+            else -> Ink.text
+        }
+        Box(Modifier.fillMaxSize().background(bg), contentAlignment = Alignment.Center) {
+            Text(if (busy) "…" else "$number", style = Type.label.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = fg))
+        }
+    }
+}
+
 @Composable
 private fun EpisodeRow(ep: Episode, fallback: String?, busy: Boolean, selected: Boolean, seen: Double, modifier: Modifier, onPlay: () -> Unit, onSources: () -> Unit, onDownload: () -> Unit) {
     Column(modifier.padding(horizontal = EDGE, vertical = 10.dp)) {

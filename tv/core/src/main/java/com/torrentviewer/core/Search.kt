@@ -87,11 +87,69 @@ data class Ep(val season: Int, val episode: Int)
 
 fun episodeTag(season: Int, episode: Int) = "S%02dE%02d".format(season, episode)
 
-/** Which episode a file name belongs to, or null. */
+/**
+ * What picks a file in a pack: the tag, plus the number counted through the
+ * show when that differs ("S02E05#29") — see [pickFile].
+ */
+fun pickTag(season: Int, episode: Int, absolute: Int?) =
+    if (absolute != null && absolute != episode) "${episodeTag(season, episode)}#$absolute" else episodeTag(season, episode)
+
+/** Which episode a file name belongs to, or null. Up to four digits: long-running anime is released as S01E1071. */
 fun parseEpisode(name: String): Ep? {
-    val found = Regex("""\bs(\d{1,2})[ ._-]*e(\d{1,2})\b""", RegexOption.IGNORE_CASE).find(name)
+    val found = Regex("""\bs(\d{1,2})[ ._-]*e(\d{1,4})\b""", RegexOption.IGNORE_CASE).find(name)
         ?: Regex("""\b(\d{1,2})x(\d{1,2})\b""", RegexOption.IGNORE_CASE).find(name)
     return found?.let { Ep(it.groupValues[1].toInt(), it.groupValues[2].toInt()) }
+}
+
+/**
+ * The episode number of a release that names no season — how anime is released:
+ * "[SubsPlease] One Piece - 1071 (1080p)", "One Piece E1071", "Naruto Shippuden Episode 145".
+ * Usually counted straight through the show; see [absoluteNumber].
+ */
+fun parseAbsolute(name: String): Int? {
+    if (parseEpisode(name) != null) return null
+    val i = RegexOption.IGNORE_CASE
+    val m = Regex("""(?:^|[\s_\])])-[\s_]*(\d{1,4})(?:v\d)?(?=[\s_.\[(]|$)""", i).find(name)
+        ?: Regex("""\b(?:episode|ep|e)[ ._-]?(\d{1,4})(?:v\d)?\b""", i).find(name)
+        ?: Regex("""(?:^|[\s_])\[(\d{1,4})(?:v\d)?]""").find(name) // "Jujutsu Kaisen S2 [29]"
+        // "[yibis]_One_Piece_588_[720p]": a bare number right before the tags (not "Season 12 [1080p]").
+        ?: Regex("""(?<!season[\s_]{0,3})[\s_](\d{2,4})(?:v\d)?[\s_]*(?=[\[(]|$)""", i).find(name)
+        ?: return null
+    return m.groupValues[1].toInt().takeIf { it in 1..1899 }
+}
+
+/** "Show (01-24) [Batch]", "Show EP1144-EP1155", "Show S01E1144-E1155": the episodes a batch claims. */
+fun episodeSpan(name: String): IntRange? {
+    val mark = """(?:s\d{1,2}[ ._-]*e|ep?)?"""
+    val m = Regex("""(?<![\w.])$mark(\d{1,4})\s*[-~–]\s*$mark(\d{1,4})(?![\w.])""", RegexOption.IGNORE_CASE).find(name) ?: return null
+    val from = m.groupValues[1].toInt()
+    val to = m.groupValues[2].toInt()
+    return if (from < to && to < 1900) from..to else null
+}
+
+/**
+ * Does a batch hold this episode? Null when it is no batch. Without a season label the
+ * span counts through the show; "S01E1144-E1155" is either that season's or, as season 1
+ * of a show listed in arcs, the running number.
+ */
+fun spanHolds(name: String, season: Int, episode: Int, absolute: Int?): Boolean? {
+    val span = episodeSpan(name) ?: return null
+    val claims = seasonsIn(name)
+    if (claims.isEmpty()) return (absolute ?: episode) in span
+    return season in claims && episode in span || 1 in claims && absolute != null && absolute in span
+}
+
+/**
+ * Is [name] episode [episode] of [season] ([absolute] counting through the show)?
+ * Null when it names no single episode. [folder] is where season labels may live instead.
+ */
+fun namesEpisode(name: String, season: Int, episode: Int, absolute: Int?, folder: String = ""): Boolean? {
+    parseEpisode(name)?.let { return it.season == season && it.episode == episode || it.season == 1 && it.episode == absolute }
+    val n = parseAbsolute(name) ?: return null
+    // "- 29" is the 29th of the show. A season label decides which season:
+    // "Season 2 - 05" is the fifth of season 2, "S2 [29]" the 29th overall.
+    val claims = seasonsIn("$folder $name")
+    return if (claims.isEmpty()) n == (absolute ?: episode) else season in claims && (n == episode || n == absolute)
 }
 
 /** Which seasons a release name claims; ranges first, then single tokens. */
@@ -109,7 +167,7 @@ fun seasonsIn(name: String): List<Int> {
     if (out.isNotEmpty()) return out.toList()
     // The bare token allows no separator, so "Ocean's 8" is not season 8.
     val ones = listOf(
-        Regex("""\bs(\d{1,2})(?=e\d{1,2}\b|\b)""", RegexOption.IGNORE_CASE),
+        Regex("""\bs(\d{1,2})(?=e\d{1,4}\b|\b)""", RegexOption.IGNORE_CASE),
         Regex("""\bseasons?[ ._-]*(\d{1,2})\b""", RegexOption.IGNORE_CASE),
     )
     for (r in ones) for (m in r.findAll(name)) out.add(m.groupValues[1].toInt())
@@ -121,7 +179,9 @@ enum class Scope(val label: String) { EPISODE("Episode"), SEASON("Season pack"),
 fun scopeOf(name: String): Scope {
     val i = RegexOption.IGNORE_CASE
     if (Regex("""\bs\d{1,2}\s?e\d{1,2}\s*[-–]\s*e?\d{1,2}\b""", i).containsMatchIn(name)) return Scope.SEASON
-    if (Regex("""\bs\d{1,2}\s?e\d{1,2}\b|\b\d{1,2}x\d{2}\b""", i).containsMatchIn(name)) return Scope.EPISODE
+    if (Regex("""\bs\d{1,2}\s?e\d{1,4}\b|\b\d{1,2}x\d{2}\b""", i).containsMatchIn(name)) return Scope.EPISODE
+    // "Show S2 [29]", "Show Season 2 - 05": one anime episode, not the season pack its label suggests.
+    if (parseAbsolute(name) != null) return Scope.EPISODE
     if (Regex("""\bseasons?\s*\d{1,2}\s*[-–]\s*\d{1,2}\b|\ball seasons\b|\bcomplete series\b""", i).containsMatchIn(name)) return Scope.COMPLETE
     Regex("""\bs(\d{1,2})\s*[-–]\s*s?(\d{1,2})\b""", i).find(name)?.let {
         if (it.groupValues[1].toInt() != it.groupValues[2].toInt()) return Scope.COMPLETE
@@ -146,6 +206,8 @@ data class Hit(
     val imdb: String?,
     /** Torrentio's size is the one file it found, even inside a pack. */
     val perFileSize: Boolean = false,
+    /** From nyaa.si: for anime, the releases to try first. */
+    val nyaa: Boolean = false,
 )
 
 private val HASH = Regex("^[0-9a-fA-F]{40}$")
@@ -277,7 +339,7 @@ fun toNyaaHits(xml: String): List<Hit> = Regex("<item>([\\s\\S]*?)</item>").find
     Hit(
         hash, name, magnetFor(hash, name), field("nyaa:seeders").toIntOrNull() ?: 0, field("nyaa:leechers").toIntOrNull() ?: 0,
         size?.let { (it.groupValues[1].toDouble() * (UNIT["${it.groupValues[2].lowercase()}b"] ?: 0.0)).roundToLong() } ?: 0L,
-        quality(name), "tv", scopeOf(name), null,
+        quality(name), "tv", scopeOf(name), null, nyaa = true,
     )
 }.toList()
 
@@ -295,6 +357,7 @@ fun merge(lists: List<List<Hit>>): List<Hit> {
             seeders = maxOf(hit.seeders, seen.seeders),
             size = bigger.size,
             perFileSize = bigger.perFileSize,
+            nyaa = hit.nyaa || seen.nyaa,
         )
     }
     return best.values.toList()
@@ -350,10 +413,11 @@ fun releaseTitle(release: String): List<String> = tokens(release).takeWhile { !R
 fun sameTitle(release: String, title: String): Boolean {
     val want = tokens(title)
     if (want.isEmpty()) return true
-    val got = releaseTitle(release)
+    // Anime leads with the group — "[SubsPlease] One Piece - 1071" — and ends the title with the episode.
+    val got = releaseTitle(release.replace(Regex("""^\s*(?:\[[^\]]*]\s*)+"""), ""))
     if (got.size < want.size) return false
     for (i in want.indices) if (got[i] != want[i]) return false
-    return got.drop(want.size).all { it.length <= 2 }
+    return got.drop(want.size).all { it.length <= 2 || it.all(Char::isDigit) }
 }
 
 typealias OnHits = (List<Hit>) -> Unit
@@ -383,7 +447,7 @@ private suspend fun fromCsv(q: String) = JSONObject(Net.get("$CSV?q=${enc(q)}&si
 private suspend fun fromYts(q: String) = JSONObject(Net.get("$YTS?query_term=${enc(q)}&limit=50", quiet = true)).optJSONObject("data")?.optJSONArray("movies")?.let(::toYtsHits).orEmpty()
 private suspend fun fromEztv(imdb: String) = JSONObject(Net.get("$EZTV?imdb_id=${imdb.removePrefix("tt")}&limit=100", quiet = true)).optJSONArray("torrents")?.let(::toEztvHits).orEmpty()
 private suspend fun fromTorrentio(path: String, kind: String) = toTorrentioHits(JSONObject(Net.get("$TORRENTIO/$path.json", quiet = true)).optJSONArray("streams") ?: JSONArray(), kind)
-private suspend fun fromNyaa(q: String) = toNyaaHits(Net.get("$NYAA?page=rss&c=1_0&f=0&q=${enc(q)}", quiet = true))
+private suspend fun fromNyaa(q: String) = toNyaaHits(Net.get("$NYAA?page=rss&c=1_2&f=0&q=${enc(q)}", quiet = true))
 private suspend fun fromKnaben(q: String): List<Hit> {
     val body = JSONObject().put("search_type", "100%").put("search_field", "title").put("query", q).put("order_by", "seeders")
         .put("order_direction", "desc").put("size", 100).put("hide_unsafe", true).put("hide_xxx", true)
@@ -448,21 +512,42 @@ private val episodeMemo = java.util.concurrent.ConcurrentHashMap<String, List<Hi
  * Every release that can play one episode, packs included: a pack streams just as
  * well (only the one file is fetched) and usually has far more seeders.
  */
-suspend fun searchEpisode(show: String, season: Int, episode: Int, imdb: String?, onHits: OnHits? = null): List<Hit> {
+suspend fun searchEpisode(title: Title, season: Int, episode: Int, onHits: OnHits? = null) =
+    searchEpisode(title.title, season, episode, title.imdb, onHits, absoluteNumber(title.episodes, season, episode), title.isAnime)
+
+/**
+ * [absolute] is the episode counted through the show, the number anime is released under.
+ * For [anime], nyaa.si's releases lead: they are the ones named that way, and best seeded.
+ */
+suspend fun searchEpisode(
+    show: String, season: Int, episode: Int, imdb: String?, onHits: OnHits? = null,
+    absolute: Int? = null, anime: Boolean = false,
+): List<Hit> {
     val key = "${imdb ?: show}:$season:$episode"
     episodeMemo[key]?.let { return it }
     fun plays(h: Hit): Boolean {
-        parseEpisode(h.name)?.let { return it.season == season && it.episode == episode }
+        // A batch first: its first episode alone would otherwise decide.
+        spanHolds(h.name, season, episode, absolute)?.let { return it }
+        namesEpisode(h.name, season, episode, absolute)?.let { return it }
         val claims = seasonsIn(h.name)
         return claims.isEmpty() || season in claims
     }
     var loose = emptyList<Hit>()
     var packs = emptyList<Hit>()
+    var numbered = emptyList<Hit>()
     var byId = emptyList<Hit>()
     val lock = Any()
-    fun current() = synchronized(lock) { rankEpisode(merge(listOf(loose, packs, byId)).filter(::plays), show, season) }
+    fun current() = synchronized(lock) {
+        val ranked = rankEpisode(merge(listOf(loose, numbered, packs, byId)).filter(::plays), show, season)
+        if (anime) ranked.filter { it.nyaa && it.seeders > 0 } + ranked.filterNot { it.nyaa && it.seeders > 0 } else ranked
+    }
     val tag = episodeTag(season, episode)
     coroutineScope {
+        // Anime is indexed by its running number, not S02E05.
+        launch {
+            val hits = searchTorrents(show, imdb, suffix = "%02d".format(absolute ?: episode)) { synchronized(lock) { numbered = it }; onHits?.invoke(current()) }
+            synchronized(lock) { numbered = hits }
+        }
         launch {
             val hits = searchTorrents(show, imdb, suffix = tag) { synchronized(lock) { loose = it }; onHits?.invoke(current()) }
             synchronized(lock) { loose = hits }
@@ -516,35 +601,44 @@ fun CoroutineScope.quickest(run: suspend (OnHits) -> List<Hit>, onHits: OnHits):
 /** Sample, trailer and extras folders sit beside the feature in a lot of releases. */
 private val JUNK = Regex("""\b(sample|trailer|extras?|featurette|behind[. _-]?the[. _-]?scenes)\b""", RegexOption.IGNORE_CASE)
 
-private fun episodePattern(tag: String): Regex? {
-    val m = Regex("^s(\\d+)e(\\d+)$", RegexOption.IGNORE_CASE).find(tag) ?: return null
-    val s = m.groupValues[1].toInt()
-    val e = m.groupValues[2].toInt()
-    return Regex("(?:s0*$s[ ._-]*e0*$e|\\b0*${s}x0*$e)\\b", RegexOption.IGNORE_CASE)
-}
+/** "Show/Season 2/Show - 05.mkv" → "Show/Season 2": where a pack's season labels live. */
+private fun folderOf(f: TorrentFile) = f.path.removeSuffix(f.name).trimEnd('/', '\\')
 
 /**
- * The one file a viewer meant: the tagged episode inside a pack, else the biggest
- * video. Null when there is no video, or a pack's names cannot say which episode.
+ * The one file a viewer meant: the tagged episode inside a pack ("S02E05", or
+ * "S02E05#29" from [pickTag]), else the biggest video. Null when there is no
+ * video, or a pack's names cannot say which episode.
  */
 fun pickFile(files: List<TorrentFile>, tag: String? = null): Int? {
     val videos = files.filter { it.isVideo && !JUNK.containsMatchIn(it.name) }
     if (videos.isEmpty()) return null
     if (tag != null) {
-        val wanted = episodePattern(tag)
-        val match = if (wanted != null) videos.filter { wanted.containsMatchIn(it.name) } else emptyList()
+        val m = Regex("^s(\\d+)e(\\d+)(?:#(\\d+))?$", RegexOption.IGNORE_CASE).find(tag)
+        var match = emptyList<TorrentFile>()
+        if (m != null) {
+            val season = m.groupValues[1].toInt()
+            val episode = m.groupValues[2].toInt()
+            val absolute = m.groupValues[3].toIntOrNull()
+            match = videos.filter { namesEpisode(it.name, season, episode, absolute, folderOf(it)) == true }
+            // A pack of one season numbered from 1 with no season label anywhere: "- 05" is the fifth.
+            if (match.isEmpty() && videos.all { seasonsIn(it.path).isEmpty() }) match = videos.filter { parseAbsolute(it.name) == episode }
+        }
         if (match.isNotEmpty()) return match.maxBy { it.size }.index
         if (videos.size > 1) return null
     }
     return videos.maxBy { it.size }.index
 }
 
+/** Where a file sits in the show: SxxEyy, else its running number (in its folder's season, if labelled). */
+private fun episodeKey(f: TorrentFile): Ep? =
+    parseEpisode(f.name) ?: parseAbsolute(f.name)?.let { Ep(seasonsIn(f.path).firstOrNull() ?: 0, it) }
+
 /** The episode [step] places from the one playing, in broadcast order, same torrent only. */
 fun siblingEpisode(files: List<TorrentFile>, index: Int, step: Int): TorrentFile? {
     val playing = files.find { it.index == index } ?: return null
-    if (parseEpisode(playing.name) == null) return null
+    if (episodeKey(playing) == null) return null
     val ordered = files.filter { it.isVideo && !JUNK.containsMatchIn(it.name) }
-        .mapNotNull { f -> parseEpisode(f.name)?.let { f to it } }
+        .mapNotNull { f -> episodeKey(f)?.let { f to it } }
         .sortedWith(compareBy({ it.second.season }, { it.second.episode }))
     val at = ordered.indexOfFirst { it.first.index == index }
     if (at < 0) return null

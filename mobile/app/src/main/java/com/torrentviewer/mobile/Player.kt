@@ -386,7 +386,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         val tag = episodeTag(ep.season, ep.episode)
         say("Finding $tag…")
         scope.launch {
-            val hit = runCatching { searchEpisode(t.title, ep.season, ep.episode, t.imdb) }.getOrNull()?.firstOrNull()
+            val hit = runCatching { searchEpisode(t, ep.season, ep.episode) }.getOrNull()?.firstOrNull()
             if (hit == null) {
                 watch.notes.tryEmit("No sources found for $tag.")
                 advanced = false

@@ -106,7 +106,9 @@ class Watch(val engine: TorrentStream) {
         )
         val found = inspect(fresh) ?: return@launch
         if (found.files.none { it.isVideo }) return@launch fail("This torrent holds no video.")
-        val index = pickFile(found.files, tag)
+        // A pack of anime names its files by the number through the show: let that pick too.
+        val pick = if (episode != null && from != null) pickTag(episode.season, episode.episode, absoluteNumber(from.episodes, episode.season, episode.episode)) else tag
+        val index = pickFile(found.files, pick)
         if (index == null) {
             phase = Phase.IDLE
             choose = fresh to found
@@ -235,8 +237,12 @@ class Watch(val engine: TorrentStream) {
 
     /** The Cinemeta episode a file in this pack is, for its name and still. */
     fun episodeOf(file: TorrentFile?): Episode? {
-        val at = parseEpisode(file?.name ?: return null) ?: return null
-        return title?.episodes?.find { it.season == at.season && it.episode == at.episode }
+        val name = file?.name ?: return null
+        val list = title?.episodes ?: return null
+        parseEpisode(name)?.let { at -> return list.find { it.season == at.season && it.episode == at.episode } }
+        // "One Piece - 1071": the running number.
+        val n = parseAbsolute(name) ?: return null
+        return list.find { absoluteNumber(list, it.season, it.episode) == n }
     }
 
     val playingFile: TorrentFile? get() = meta?.files?.find { it.index == playingIndex }
