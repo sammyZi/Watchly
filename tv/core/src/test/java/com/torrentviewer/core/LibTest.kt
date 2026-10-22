@@ -200,6 +200,39 @@ class LibTest {
         assertNull(prevEpisode(season, 2))
     }
 
+    @Test fun anime() {
+        assertEquals(1071, parseAbsolute("[SubsPlease] One Piece - 1071 (1080p) [ABCD1234].mkv"))
+        assertEquals(145, parseAbsolute("Naruto Shippuden Episode 145"))
+        assertEquals(29, parseAbsolute("Jujutsu Kaisen S2 [29]"))
+        assertEquals(588, parseAbsolute("[yibis]_One_Piece_588_[720p]"))
+        assertNull(parseAbsolute("Show Season 12 [1080p]"))
+        assertNull(parseAbsolute("Show.S01E02.mkv"))
+        assertEquals(Ep(1, 1071), parseEpisode("One.Piece.S01E1071.1080p"))
+        assertEquals(1..24, episodeSpan("[Group] Show (01-24) [Batch]"))
+        assertEquals(1144..1155, episodeSpan("[ToonsHub] One Piece EP1144-EP1155 1080p CR WEB-DL DUAL AAC2.0 H.264 [BATCH]"))
+        assertEquals(1144..1155, episodeSpan("One Piece S01E1144-E1155 1080p CR WEB-DL DUAL AAC2.0 H 264-VARYG"))
+        assertNull(episodeSpan("Show S01-S03 1080p"))
+        // One Piece 1150 is Cinemeta's S22E... — absolute 1150.
+        assertEquals(true, spanHolds("[ToonsHub] One Piece EP1144-EP1155 [BATCH]", 22, 1, 1150))
+        assertEquals(true, spanHolds("One Piece S01E1144-E1155 1080p", 22, 1, 1150))
+        assertEquals(false, spanHolds("One Piece S01E1144-E1155 1080p", 22, 1, 1160))
+        assertEquals(true, spanHolds("Show S02E01-E10 1080p", 2, 5, 15))
+        assertEquals(false, spanHolds("[Group] Show (01-24) [Batch]", 2, 5, 29))
+        assertNull(spanHolds("[Erai-raws] One Piece - 1100 [1080p]", 21, 10, 1100))
+        assertEquals(Scope.EPISODE, scopeOf("[SubsPlease] One Piece - 1071 (1080p)"))
+        assertTrue(sameTitle("[SubsPlease] One Piece - 1071 (1080p)", "One Piece"))
+
+        // Arc "seasons": S2E3 after an 8-episode S1 is the 11th.
+        val eps = (1..8).map { Episode("a$it", 1, it, "", null, null, null) } + (1..5).map { Episode("b$it", 2, it, "", null, null, null) }
+        assertEquals(11, absoluteNumber(eps, 2, 3))
+        assertEquals(true, namesEpisode("[Erai-raws] One Piece - 11 [1080p]", 2, 3, 11))
+        assertEquals(false, namesEpisode("[Erai-raws] One Piece - 3 [1080p]", 2, 3, 11))
+        assertEquals("S02E03#11", pickTag(2, 3, 11))
+        val pack = listOf(f(0, "One Piece - 10.mkv", 5), f(1, "One Piece - 11.mkv", 5), f(2, "One Piece - 12.mkv", 5))
+        assertEquals(1, pickFile(pack, "S02E03#11"))
+        assertEquals("One Piece - 12.mkv", nextEpisode(pack, 1)?.name)
+    }
+
     @Test fun titles() {
         assertEquals("Big Buck Bunny 2008", titleOf("magnet:?xt=urn:btih:ABC123&dn=Big+Buck+Bunny%202008"))
         assertEquals("abcdef0123456789", titleOf("magnet:?xt=urn:btih:abcdef0123456789aabb"))

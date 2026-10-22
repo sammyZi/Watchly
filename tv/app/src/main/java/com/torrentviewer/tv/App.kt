@@ -43,6 +43,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -103,6 +104,8 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     var switching by remember { mutableStateOf(false) }
     var tab by remember { mutableStateOf(Tab.HOME) }
     var detail by remember { mutableStateOf<Title?>(null) }
+    // A detail page keeps its season and episode while the player is up, and when gone back to.
+    val pages = rememberSaveableStateHolder()
     val home = remember { HomeState() }
 
     fun enter(profile: Profile) {
@@ -176,7 +179,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
             ) {
                 val open = detail
                 if (open != null) {
-                    DetailScreen(open, watch, onOpen = { detail = it })
+                    pages.SaveableStateProvider(open.imdb) { DetailScreen(open, watch, onOpen = { detail = it }) }
                 } else {
                     when (tab) {
                         Tab.HOME -> HomeScreen(home, watch, onOpen = { detail = it })

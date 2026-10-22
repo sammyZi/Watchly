@@ -47,7 +47,9 @@ import com.torrentviewer.core.Type
 import com.torrentviewer.core.Watch
 import com.torrentviewer.core.ago
 import com.torrentviewer.core.bytes
+import com.torrentviewer.core.absoluteNumber
 import com.torrentviewer.core.episodeTag
+import com.torrentviewer.core.pickTag
 import com.torrentviewer.core.parseEpisode
 import com.torrentviewer.core.speed
 import com.composables.icons.lucide.R as L
@@ -60,7 +62,7 @@ fun downloadJob(hit: Hit, from: Title?, episode: Episode? = null) = DownloadJob(
     poster = from?.poster,
     imdb = from?.imdb,
     kind = from?.kind,
-    tags = listOfNotNull(episode?.let { episodeTag(it.season, it.episode) }),
+    tags = listOfNotNull(episode?.let { pickTag(it.season, it.episode, from?.let { t -> absoluteNumber(t.episodes, it.season, it.episode) }) }),
 )
 
 /** What is downloading, and what is kept on this phone to watch without a connection. */

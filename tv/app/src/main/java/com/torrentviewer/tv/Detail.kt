@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.key
@@ -64,13 +65,24 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
     val inList = saved.any { it.imdb == title.imdb && it.list == "later" }
 
     val seasons = remember(title.episodes) { title.episodes.map { it.season }.filter { it > 0 }.distinct().sorted() }
-    var season by remember(title.imdb) { mutableStateOf<Int?>(null) }
-    LaunchedEffect(seasons) { if (season == null || season !in seasons) season = seasons.firstOrNull() }
-    val episodes = title.episodes.filter { it.season == season }
+    var season by rememberSaveable(title.imdb) { mutableStateOf<Int?>(null) }
+    // Not while the episode list is still loading: that would throw away the season being come back to.
+    LaunchedEffect(seasons) { if (seasons.isNotEmpty() && (season == null || season !in seasons)) season = seasons.first() }
+    // Long-running anime: every episode by its number through the show, a hundred at a time.
+    val through = title.numberedThrough
+    val numbered = remember(title.episodes) {
+        if (!through) emptyMap() else title.episodes.filter { it.season > 0 }.associate { it.id to (absoluteNumber(title.episodes, it.season, it.episode) ?: it.episode) }
+    }
+    val blocks = remember(title.episodes, through) { if (through) title.episodes.filter { it.season > 0 }.chunked(100) else emptyList() }
+    var block by rememberSaveable(title.imdb) { mutableStateOf(0) }
+    val episodes = if (through) blocks.getOrNull(block).orEmpty() else title.episodes.filter { it.season == season }
     val history by History.items.collectAsState()
     val progress = remember(history, title.imdb) { episodeProgress(history, title.imdb) }
 
     var episode by remember(title.imdb) { mutableStateOf<Episode?>(null) }
+    // Back from the player: the episode that was picked, once the list is in.
+    var episodeId by rememberSaveable(title.imdb) { mutableStateOf<String?>(null) }
+    LaunchedEffect(title.episodes) { if (episode == null) episode = title.episodes.find { it.id == episodeId } }
     var hits by remember(title.imdb) { mutableStateOf<List<Hit>?>(null) }
     var busy by remember(title.imdb) { mutableStateOf(false) }
     var quality by remember(title.imdb) { mutableStateOf<String?>(null) }
@@ -88,9 +100,10 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
         hits = null
         quality = null
         episode = ep
+        episodeId = ep?.id
         val run: suspend (OnHits) -> List<Hit> = { onHits ->
             try {
-                if (ep != null) searchEpisode(title.title, ep.season, ep.episode, title.imdb, onHits)
+                if (ep != null) searchEpisode(title, ep.season, ep.episode, onHits)
                 else searchTorrents(title.title, title.imdb, title.year?.take(4), onHits = onHits)
             } finally {
                 if (mine == ticket) busy = false
@@ -156,7 +169,9 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
                             )
                         } else if (upNext != null) {
                             TvButton(
-                                label = if (busy && episode?.id == upNext.id && shown.isEmpty()) "Finding sources…" else "Play S${upNext.season}:E${upNext.episode}",
+                                label = if (busy && episode?.id == upNext.id && shown.isEmpty()) "Finding sources…"
+                                    else if (through) "Play episode ${numbered[upNext.id] ?: upNext.episode}"
+                                    else "Play S${upNext.season}:E${upNext.episode}",
                                 onClick = { playEpisode(upNext) },
                                 icon = L.drawable.lucide_ic_play,
                                 primary = true,
@@ -182,18 +197,20 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
                     Column(Modifier.onFocusEnter { pin(1) }.padding(top = Safe.y)) {
                         Text("Episodes", Modifier.padding(start = Safe.x + 12.dp, bottom = 14.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
                         LazyRow(contentPadding = PaddingValues(start = Safe.x + 12.dp, end = Safe.x), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            items(seasons) { s ->
-                                Chip("Season $s", s == season, onClick = {
-                                    season = s
-                                    // Retire whatever search is out: it belongs to the season being left.
-                                    ticket++
-                                    busy = false
-                                    hits = null
-                                    episode = null
-                                })
+                            // Retire whatever search is out: it belongs to the season being left.
+                            fun leave() {
+                                ticket++
+                                busy = false
+                                hits = null
+                                episode = null
+                            }
+                            if (through) items(blocks.indices.toList()) { b ->
+                                Chip("${numbered[blocks[b].first().id]}–${numbered[blocks[b].last().id]}", b == block, onClick = { block = b; leave() })
+                            } else items(seasons) { s ->
+                                Chip("Season $s", s == season, onClick = { season = s; leave() })
                             }
                         }
-                        key(season) {
+                        key(season, block) {
                             val fallback = remember { FocusRequester() }
                             LazyRow(
                                 Modifier.padding(top = 18.dp).focusRestorer(fallback),
@@ -203,6 +220,7 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
                                 itemsIndexed(episodes, key = { _, e -> e.id }) { i, ep ->
                                     EpisodeCard(
                                         ep,
+                                        number = numbered[ep.id] ?: ep.episode,
                                         fallback = title.wide,
                                         selected = episode?.id == ep.id,
                                         busy = busy && episode?.id == ep.id,
@@ -263,7 +281,7 @@ private fun People(label: String, value: String) {
 
 /** Netflix's episode tile: the still, a number and name, and the synopsis under it. */
 @Composable
-private fun EpisodeCard(ep: Episode, fallback: String?, selected: Boolean, busy: Boolean, seen: Double, requester: FocusRequester?, onClick: () -> Unit) {
+private fun EpisodeCard(ep: Episode, number: Int, fallback: String?, selected: Boolean, busy: Boolean, seen: Double, requester: FocusRequester?, onClick: () -> Unit) {
     Column(Modifier.width(240.dp)) {
         Focusable(
             onClick,
@@ -282,7 +300,7 @@ private fun EpisodeCard(ep: Episode, fallback: String?, selected: Boolean, busy:
             }
         }
         Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("${ep.episode}", style = Type.title.copy(color = Ink.muted, fontWeight = FontWeight.Bold))
+            Text("$number", style = Type.title.copy(color = Ink.muted, fontWeight = FontWeight.Bold))
             Spacer(Modifier.width(10.dp))
             Text(ep.name, Modifier.weight(1f, fill = false), style = Type.label.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (seen >= 0.95) Lc(L.drawable.lucide_ic_circle_check, Modifier.padding(start = 8.dp), tint = Ink.good, size = 18.dp)
