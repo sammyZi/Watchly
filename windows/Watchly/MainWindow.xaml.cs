@@ -80,12 +80,19 @@ public partial class MainWindow : Window
     readonly Dictionary<string, (TextBlock Label, Icon Icon, Border Tick)> tabParts = new();
     string tab = "home";
 
+    /// <summary>Who is watching. Null until someone is picked at launch.</summary>
+    public Profile? Who { get; private set; }
+    /// <summary>A torrent handed in at launch, opened once a profile is picked.</summary>
+    string? waitingToOpen;
+    ProfilesView? picker;
+
     public MainWindow(string? openOnStart)
     {
         Shell = this;
         InitializeComponent();
         BuildTabBar();
-        ShowTab("home");
+        waitingToOpen = openOnStart;
+        ShowProfiles();
 
         History.Changed += items => Dispatcher.BeginInvoke(() => { HistoryList = items; LibraryChanged?.Invoke(); });
         Saved.Changed += items => Dispatcher.BeginInvoke(() => { SavedList = items; LibraryChanged?.Invoke(); });
@@ -95,8 +102,6 @@ public partial class MainWindow : Window
         Loaded += (_, _) =>
         {
             Downloads.Instance.Restore();
-            _ = BackfillPosters();
-            if (openOnStart is not null) OpenIncoming(openOnStart);
         };
         SourceInitialized += (_, _) => Theme.TitleBar(this);
         Theme.Changed += () => Theme.TitleBar(this);
@@ -106,6 +111,73 @@ public partial class MainWindow : Window
         {
             if (e.ChangedButton == MouseButton.XButton1) { GoBack(); e.Handled = true; }
         };
+    }
+
+    // ── Profiles ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Who's watching, over everything — at every launch, as on the TV, since whoever sits
+    /// down at a shared PC is not necessarily whoever got up. Back only once someone is in.
+    /// </summary>
+    public void ShowProfiles()
+    {
+        if (picker is not null) Root.Children.Remove(picker);
+        picker = new ProfilesView(Enter, Who is null ? null : ClosePicker, removed =>
+        {
+            // The profile in use is gone: someone has to be picked before going on.
+            if (Who?.Id == removed.Id)
+            {
+                Who = null;
+                ShowProfiles();
+            }
+        });
+        Grid.SetColumnSpan(picker, 2);
+        Panel.SetZIndex(picker, 50);
+        Root.Children.Add(picker);
+    }
+
+    void ClosePicker()
+    {
+        if (picker is null) return;
+        Root.Children.Remove(picker);
+        picker = null;
+    }
+
+    void OnProfileButton(object sender, RoutedEventArgs e) => ShowProfiles();
+
+    /// <summary>Everything read from here on is this profile's: the library, lists, searches.</summary>
+    void Enter(Profile profile)
+    {
+        var same = Who is not null && Who.Id == profile.Id && !profile.IsGuest;
+        Who = profile;
+        ClosePicker();
+        ProfileButton.Content = ProfilesView.Avatar(profile, 40);
+        ProfileButton.ToolTip = $"{profile.Name} — switch profile";
+        if (same) return;
+        Store.UseProfile(profile.Id, profile.IsGuest);
+        HistoryList = History.Load();
+        SavedList = Saved.Load();
+        Links = EpisodeLinks.Load();
+        // Pages built for the last profile read its library; start again from Home.
+        // ponytail: the old tab views stay subscribed to the shell's events; switching is rare, unhook them if it ever shows.
+        foreach (var page in Layers.Children.OfType<FrameworkElement>().ToList()) CloseLayer(page);
+        foreach (var view in tabViews.Values) (view as IDisposable)?.Dispose();
+        tabViews.Clear();
+        Tabs.Children.Clear();
+        ShowTab("home");
+        LibraryChanged?.Invoke();
+        _ = BackfillPosters();
+        if (waitingToOpen is { } source)
+        {
+            waitingToOpen = null;
+            OpenIncoming(source);
+        }
+    }
+
+    /// <summary>A PIN set or removed in Settings, for the profile in use.</summary>
+    public void ProfileEdited(Profile? next)
+    {
+        if (next is not null && Who?.Id == next.Id) Who = next;
     }
 
     // ── Tabs ────────────────────────────────────────────────────────────────
@@ -223,6 +295,8 @@ public partial class MainWindow : Window
 
     void OnKey(object sender, KeyEventArgs e)
     {
+        // Who's watching takes its own keys: Escape steps back through it.
+        if (picker is not null) return;
         if (PlayerHost.Content is PlayerView player)
         {
             player.HandleKey(e);

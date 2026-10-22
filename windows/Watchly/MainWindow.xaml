@@ -23,7 +23,12 @@
     <!-- The phone's NavRail on a wide screen (the TV's collapsed rail): the tabs down the
          left, the one you are on white with a red tick. -->
     <Border x:Name="TabDock" Width="76" Background="{DynamicResource TabBar}">
-      <StackPanel x:Name="TabButtons" VerticalAlignment="Center" Margin="0,0,0,40" />
+      <Grid>
+        <!-- Who is watching, at the top of the rail as on the TV: click to switch. -->
+        <Button x:Name="ProfileButton" Style="{StaticResource Bare}" VerticalAlignment="Top" HorizontalAlignment="Center"
+                Margin="0,22,0,0" Click="OnProfileButton" Tag="8" />
+        <StackPanel x:Name="TabButtons" VerticalAlignment="Center" Margin="0,0,0,40" />
+      </Grid>
     </Border>
 
     <!-- Tabs: built on first visit, then kept and only hidden (App.tsx's TabPage). -->
