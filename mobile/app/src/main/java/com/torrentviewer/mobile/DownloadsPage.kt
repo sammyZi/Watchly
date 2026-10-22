@@ -75,21 +75,6 @@ fun DownloadsScreen(watch: Watch) {
 
     LazyColumn(state = rememberLazyListState(), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp)) {
         item { Heading("Downloads") }
-        // Settings has it too; here is where it is looked for. Each download can override it below.
-        item {
-            var sequential by remember { mutableStateOf(Downloads.sequential) }
-            Text("Default order", Modifier.padding(bottom = 8.dp), style = Type.meta.copy(color = Ink.muted, fontWeight = FontWeight.SemiBold))
-            Row(Modifier.padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Chip("Fastest", !sequential, onClick = { sequential = false; Downloads.sequential = false })
-                Chip("In order", sequential, onClick = { sequential = true; Downloads.sequential = true })
-            }
-            Note(
-                (if (sequential) "In order: each file fills from the start, so it can be watched while it downloads. Slower."
-                else "Fastest: pieces from wherever the swarm has them. Switch to In order to watch while it downloads.") +
-                    " Each download below can be set on its own.",
-                Modifier.padding(bottom = 8.dp),
-            )
-        }
         if (live.isEmpty() && finished.isEmpty()) item {
             Note("Nothing downloaded yet. Download from a title's page, and it plays here without a connection.")
         }
@@ -105,26 +90,15 @@ fun DownloadsScreen(watch: Watch) {
             )
         }
         if (finished.isNotEmpty()) item { Label("On this phone  ·  ${bytes(finished.sumOf { it.size })}") }
-        items(finished, key = { "done-" + it.path }) { f ->
-            Tap(
-                {
-                    val from = f.imdb?.let { Title(it, f.kind ?: "movie", f.label.substringBefore(" · "), poster = f.poster) }
-                    watch.playFile(f.path, f.label, from, f.poster)
-                },
-                Modifier.fillMaxWidth().padding(bottom = 10.dp),
-                RoundedCornerShape(8.dp),
-                onLongClick = { deleting = f },
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Artwork(f.poster, f.label, Modifier.width(48.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(4.dp)))
-                    Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                        Text(f.label, style = Type.label.copy(fontWeight = FontWeight.SemiBold), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text("${bytes(f.size)}  ·  ${ago(f.at)}", Modifier.padding(top = 2.dp), style = Type.meta.copy(fontSize = 12.sp))
-                    }
-                    Lc(L.drawable.lucide_ic_play, tint = Ink.text, size = 20.dp)
-                    Tap({ deleting = f }, shape = CircleShape) { Lc(L.drawable.lucide_ic_trash_2, Modifier.padding(10.dp), tint = Ink.muted, size = 20.dp) }
-                }
+        // A show's episodes fold under one card; the most recently finished show first.
+        val shows = finished.groupBy { it.imdb ?: it.label.substringBefore(" · ") }.values.sortedByDescending { g -> g.maxOf { it.at } }
+        items(shows, key = { "done-" + it.first().path }) { group ->
+            val play: (Finished) -> Unit = { f ->
+                val from = f.imdb?.let { Title(it, f.kind ?: "movie", f.label.substringBefore(" · "), poster = f.poster) }
+                watch.playFile(f.path, f.label, from, f.poster)
             }
+            if (group.size == 1) FinishedRow(group[0], group[0].label, poster = true, { play(group[0]) }, { deleting = group[0] })
+            else ShowGroup(group.sortedBy { it.label }, play) { deleting = it }
         }
     }
 
@@ -151,6 +125,43 @@ fun DownloadsScreen(watch: Watch) {
             },
             onDismiss = { deleting = null },
         )
+    }
+}
+
+@Composable
+private fun FinishedRow(f: Finished, name: String, poster: Boolean, onPlay: () -> Unit, onDelete: () -> Unit) {
+    Tap(onPlay, Modifier.fillMaxWidth().padding(bottom = 10.dp), RoundedCornerShape(8.dp), onLongClick = onDelete) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (poster) Artwork(f.poster, f.label, Modifier.width(48.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(4.dp)))
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text(name, style = Type.label.copy(fontWeight = FontWeight.SemiBold), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("${bytes(f.size)}  ·  ${ago(f.at)}", Modifier.padding(top = 2.dp), style = Type.meta.copy(fontSize = 12.sp))
+            }
+            Lc(L.drawable.lucide_ic_play, tint = Ink.text, size = 20.dp)
+            Tap(onDelete, shape = CircleShape) { Lc(L.drawable.lucide_ic_trash_2, Modifier.padding(10.dp), tint = Ink.muted, size = 20.dp) }
+        }
+    }
+}
+
+/** A show's downloaded episodes under one card, folded until tapped. */
+@Composable
+private fun ShowGroup(episodes: List<Finished>, onPlay: (Finished) -> Unit, onDelete: (Finished) -> Unit) {
+    val first = episodes.first()
+    var open by rememberSaveable(first.imdb ?: first.label) { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
+        Tap({ open = !open }, Modifier.fillMaxWidth(), RoundedCornerShape(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Artwork(first.poster, first.label, Modifier.width(48.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(4.dp)))
+                Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                    Text(first.label.substringBefore(" · "), style = Type.label.copy(fontWeight = FontWeight.SemiBold), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text("${episodes.size} episodes  ·  ${bytes(episodes.sumOf { it.size })}", Modifier.padding(top = 2.dp), style = Type.meta.copy(fontSize = 12.sp))
+                }
+                Lc(if (open) L.drawable.lucide_ic_chevron_up else L.drawable.lucide_ic_chevron_down, Modifier.padding(10.dp), tint = Ink.muted, size = 20.dp)
+            }
+        }
+        if (open) Column(Modifier.padding(start = 60.dp, top = 8.dp)) {
+            episodes.forEach { f -> FinishedRow(f, f.label.substringAfter(" · "), poster = false, { onPlay(f) }, { onDelete(f) }) }
+        }
     }
 }
 
