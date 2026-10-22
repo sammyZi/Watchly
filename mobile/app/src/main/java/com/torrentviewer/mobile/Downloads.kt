@@ -80,12 +80,14 @@ data class DownloadJob(
     val paused: Boolean = false,
     /** Resume pressed while waiting for Wi-Fi: carry on over mobile data. */
     val mobileData: Boolean = false,
+    /** This download's own order; null follows the default in Settings. */
+    val sequential: Boolean? = null,
 ) {
     val label get() = titleName ?: title
 
     fun toJson(): JSONObject = JSONObject().put("uri", uri).put("title", title).put("titleName", titleName).put("poster", poster)
         .put("imdb", imdb).put("kind", kind).put("tags", JSONArray(tags)).put("season", season)
-        .put("fileIndices", JSONArray(files)).put("savedIndices", JSONArray(saved)).put("paused", paused).put("mobileData", mobileData)
+        .put("fileIndices", JSONArray(files)).put("savedIndices", JSONArray(saved)).put("paused", paused).put("mobileData", mobileData).put("sequential", sequential)
 
     companion object {
         fun from(o: JSONObject): DownloadJob {
@@ -104,6 +106,7 @@ data class DownloadJob(
                 saved = ints("savedIndices"),
                 paused = o.optBoolean("paused"),
                 mobileData = o.optBoolean("mobileData"),
+                sequential = if (o.has("sequential") && !o.isNull("sequential")) o.optBoolean("sequential") else null,
             )
         }
     }
@@ -192,11 +195,21 @@ object Downloads {
         get() = prefs().getBoolean("sequential", false)
         set(v) {
             prefs().edit().putBoolean("sequential", v).apply()
-            synchronized(lock) { handles.values.toList() }.forEach(::applyOrder)
+            // Downloads given their own order keep it.
+            synchronized(lock) { handles.toList() }.forEach { (uri, h) -> applyOrder(uri, h) }
         }
 
-    private fun applyOrder(h: TorrentHandle) {
-        runCatching { if (sequential) h.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD) else h.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD) }
+    /** One download in order or fastest, whatever the default. */
+    fun setOrder(uri: String, inOrder: Boolean) {
+        update(uri) { it.copy(job = it.job.copy(sequential = inOrder)) }
+        synchronized(lock) { handles[uri] }?.let { applyOrder(uri, it) }
+    }
+
+    fun inOrder(job: DownloadJob) = job.sequential ?: sequential
+
+    private fun applyOrder(uri: String, h: TorrentHandle) {
+        val on = _live.value.find { it.job.uri == uri }?.job?.let(::inOrder) ?: sequential
+        runCatching { if (on) h.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD) else h.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD) }
     }
 
     /** Battery optimisation off for the app: some phones (vivo/iQOO, Xiaomi, Oppo) otherwise kill or starve a download with the screen off. */
@@ -422,7 +435,7 @@ object Downloads {
                 // Paused means paused: an auto-managed torrent is resumed by the session's queue.
                 runCatching { h.unsetFlags(TorrentFlags.AUTO_MANAGED) }
                 // Added in order (the only flags the add takes); rarest-first unless asked.
-                applyOrder(h)
+                applyOrder(job.uri, h)
                 synchronized(lock) { handles[job.uri] = h }
                 choose(job.uri, h)
                 poll()
