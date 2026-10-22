@@ -82,12 +82,15 @@ data class DownloadJob(
     val mobileData: Boolean = false,
     /** This download's own order; null follows the default in Settings. */
     val sequential: Boolean? = null,
+    /** Episodes of a pack unticked by hand: kept out when the files are chosen again on restart. */
+    val skipped: List<Int> = emptyList(),
 ) {
     val label get() = titleName ?: title
 
     fun toJson(): JSONObject = JSONObject().put("uri", uri).put("title", title).put("titleName", titleName).put("poster", poster)
         .put("imdb", imdb).put("kind", kind).put("tags", JSONArray(tags)).put("season", season)
         .put("fileIndices", JSONArray(files)).put("savedIndices", JSONArray(saved)).put("paused", paused).put("mobileData", mobileData).put("sequential", sequential)
+        .put("skipped", JSONArray(skipped))
 
     companion object {
         fun from(o: JSONObject): DownloadJob {
@@ -104,6 +107,7 @@ data class DownloadJob(
                 season = if (o.has("season") && !o.isNull("season")) o.optInt("season") else null,
                 files = ints("fileIndices"),
                 saved = ints("savedIndices"),
+                skipped = ints("skipped"),
                 paused = o.optBoolean("paused"),
                 mobileData = o.optBoolean("mobileData"),
                 sequential = if (o.has("sequential") && !o.isNull("sequential")) o.optBoolean("sequential") else null,
@@ -307,7 +311,16 @@ object Downloads {
         val existing = _live.value.find { it.job.uri == job.uri }
         if (existing != null) {
             update(job.uri) { it.copy(job = it.job.copy(tags = (it.job.tags + job.tags).distinct(), season = it.job.season ?: job.season)) }
-            scope.launch { synchronized(lock) { handles[job.uri] }?.let { h -> choose(job.uri, h) } }
+            scope.launch {
+                val h = synchronized(lock) { handles[job.uri] } ?: return@launch
+                // Asked for again from its page: an episode skipped earlier is wanted after all.
+                runCatching { h.torrentFile() }.getOrNull()?.let { ti ->
+                    val files = filesOf(ti)
+                    val asked = (job.tags.mapNotNull { pickFile(files, it) } + seasonVideos(job, files)).toSet()
+                    update(job.uri) { it.copy(job = it.job.copy(skipped = it.job.skipped - asked)) }
+                }
+                choose(job.uri, h)
+            }
             return
         }
         synchronized(lock) {
@@ -486,7 +499,10 @@ object Downloads {
         // The tick shows at once; the next poll would otherwise be up to two seconds away.
         update(uri) {
             it.copy(
-                job = it.job.copy(files = if (on) (it.job.files + index).distinct() else it.job.files - index),
+                job = it.job.copy(
+                    files = if (on) (it.job.files + index).distinct() else it.job.files - index,
+                    skipped = if (on) it.job.skipped - index else (it.job.skipped + index).distinct(),
+                ),
                 files = it.files.map { f -> if (f.index == index) f.copy(wanted = on) else f },
             )
         }
@@ -505,11 +521,13 @@ object Downloads {
         val files = filesOf(ti)
         val season = seasonVideos(job, files)
         val tagged = job.tags.mapNotNull { pickFile(files, it) }
-        val wanted = (job.files + season + tagged).distinct().ifEmpty { listOfNotNull(pickFile(files)) }
-        if (wanted.isEmpty()) {
+        val asked = (job.files + season + tagged).distinct().ifEmpty { listOfNotNull(pickFile(files)) }
+        if (asked.isEmpty()) {
             update(uri) { it.copy(state = DlState.FAILED, error = "No video in this torrent") }
             return
         }
+        // The season and tags would bring back what was unticked; on a restart they did.
+        val wanted = asked - job.skipped.toSet()
         prioritize(h, job.copy(files = wanted), files)
         if (job.paused) runCatching { h.pause() } else runCatching { h.resume() }
         update(uri) { it.copy(job = it.job.copy(files = wanted), state = if (job.paused) DlState.PAUSED else DlState.DOWNLOADING) }
