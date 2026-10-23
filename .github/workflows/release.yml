@@ -1,0 +1,138 @@
+# Builds every app and publishes them as one GitHub release:
+#   phone and TV APKs, release and debug, per ABI and universal; the Windows exe.
+# Runs on a pushed v* tag, or by hand from the Actions tab with a tag to create.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to release (created on this commit if it doesn't exist)
+        required: true
+        default: v2.0.0
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  android:
+    name: Android (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: phone
+            dir: mobile
+          - app: tv
+            dir: tv
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # AGP fetches the compileSdk platform and build tools itself once the licences are accepted.
+      - name: Accept Android SDK licences
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+
+      - name: Build release and debug APKs
+        working-directory: ${{ matrix.dir }}
+        run: ./gradlew --no-daemon -PuniversalApk assembleRelease assembleDebug
+
+      - name: Name the APKs
+        run: |
+          mkdir out
+          for type in release debug; do
+            suffix=$([ "$type" = debug ] && echo "-debug" || true)
+            for apk in ${{ matrix.dir }}/app/build/outputs/apk/$type/app-*-$type.apk; do
+              abi=$(basename "$apk" "-$type.apk"); abi=${abi#app-}
+              cp "$apk" "out/Watchly-${{ matrix.app }}-$TAG-$abi$suffix.apk"
+            done
+          done
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-${{ matrix.app }}
+          path: out/*.apk
+          if-no-files-found: error
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish the single-file exe
+        run: dotnet publish windows/Watchly -c Release -r win-x64 --self-contained -o windows/dist
+
+      - name: Name the exe
+        shell: bash
+        run: |
+          mkdir out
+          cp windows/dist/Watchly.exe "out/Watchly-windows-$TAG-x64.exe"
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: out/*.exe
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: [android, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cat > notes.md <<EOF
+          ## Which file?
+
+          | Device | File |
+          |---|---|
+          | Most Android phones (64-bit) | \`Watchly-phone-$TAG-arm64-v8a.apk\` |
+          | Older 32-bit phones | \`Watchly-phone-$TAG-armeabi-v7a.apk\` |
+          | Most Android TVs and TV boxes (32-bit ARM) | \`Watchly-tv-$TAG-armeabi-v7a.apk\` |
+          | 64-bit Android TVs (Shield, Chromecast with Google TV, newer boxes) | \`Watchly-tv-$TAG-arm64-v8a.apk\` |
+          | Emulators / x86 devices | \`…-x86.apk\` |
+          | Not sure | \`…-universal.apk\` (every ABI, larger) |
+          | Windows 10/11 (x64) | \`Watchly-windows-$TAG-x64.exe\` |
+
+          The phone release is \`com.torrentviewer.app\` and the TV release \`com.torrentviewer.tv\`; both install over
+          earlier builds in place. The \`-debug\` APKs are debug builds: the phone's installs beside the release as
+          **Watchly Next**, the TV's replaces the release.
+
+          The Windows exe is self-contained (no .NET install needed). Its first launch unpacks libVLC and takes a few
+          seconds; allow the Windows Firewall prompt so peers can connect.
+          EOF
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" out/* --clobber
+          else
+            gh release create "$TAG" out/* --title "Watchly ${TAG#v}" --notes-file notes.md --target "$GITHUB_SHA"
+          fi
