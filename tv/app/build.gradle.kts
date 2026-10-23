@@ -25,12 +25,13 @@ android {
 
     // libtorrent4j and libVLC each ship a large .so per ABI: one APK per ABI.
     // x86 is the television emulator.
+    // -PuniversalApk adds one APK with every ABI, for the release page.
     splits {
         abi {
             isEnable = true
             reset()
             include("armeabi-v7a", "arm64-v8a", "x86")
-            isUniversalApk = false
+            isUniversalApk = providers.gradleProperty("universalApk").isPresent
         }
     }
 
