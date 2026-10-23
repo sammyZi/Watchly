@@ -1,5 +1,5 @@
 # Builds every app and publishes them as one GitHub release:
-#   phone and TV APKs, release and debug, per ABI and universal; the Windows exe.
+#   phone and TV release APKs, per ABI and universal; the Windows exe.
 # Runs on a pushed v* tag, or by hand from the Actions tab with a tag to create.
 name: Release
 
@@ -48,19 +48,16 @@ jobs:
       - name: Accept Android SDK licences
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
 
-      - name: Build release and debug APKs
+      - name: Build release APKs
         working-directory: ${{ matrix.dir }}
-        run: ./gradlew --no-daemon -PuniversalApk assembleRelease assembleDebug
+        run: ./gradlew --no-daemon -PuniversalApk assembleRelease
 
       - name: Name the APKs
         run: |
           mkdir out
-          for type in release debug; do
-            suffix=$([ "$type" = debug ] && echo "-debug" || true)
-            for apk in ${{ matrix.dir }}/app/build/outputs/apk/$type/app-*-$type.apk; do
-              abi=$(basename "$apk" "-$type.apk"); abi=${abi#app-}
-              cp "$apk" "out/Watchly-${{ matrix.app }}-$TAG-$abi$suffix.apk"
-            done
+          for apk in ${{ matrix.dir }}/app/build/outputs/apk/release/app-*-release.apk; do
+            abi=$(basename "$apk" -release.apk); abi=${abi#app-}
+            cp "$apk" "out/Watchly-${{ matrix.app }}-$TAG-$abi.apk"
           done
           ls -l out
 
@@ -124,15 +121,19 @@ jobs:
           | Not sure | \`…-universal.apk\` (every ABI, larger) |
           | Windows 10/11 (x64) | \`Watchly-windows-$TAG-x64.exe\` |
 
-          The phone release is \`com.torrentviewer.app\` and the TV release \`com.torrentviewer.tv\`; both install over
-          earlier builds in place. The \`-debug\` APKs are debug builds: the phone's installs beside the release as
-          **Watchly Next**, the TV's replaces the release.
+          The phone app is \`com.torrentviewer.app\` and the TV app \`com.torrentviewer.tv\`; both install over
+          earlier builds in place.
 
           The Windows exe is self-contained (no .NET install needed). Its first launch unpacks libVLC and takes a few
           seconds; allow the Windows Firewall prompt so peers can connect.
           EOF
+          # Re-releasing a tag replaces its files and notes, and drops files this run didn't build.
           if gh release view "$TAG" > /dev/null 2>&1; then
+            for name in $(gh release view "$TAG" --json assets -q '.assets[].name'); do
+              [ -e "out/$name" ] || gh release delete-asset "$TAG" "$name" --yes
+            done
             gh release upload "$TAG" out/* --clobber
+            gh release edit "$TAG" --notes-file notes.md
           else
             gh release create "$TAG" out/* --title "Watchly ${TAG#v}" --notes-file notes.md --target "$GITHUB_SHA"
           fi
