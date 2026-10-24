@@ -1,9 +1,9 @@
 # Watchly — phone
 
-Movies and series for Android phones, streamed from torrents while they
-download. Native Kotlin + Jetpack Compose, with the TV app's look: the dark Ink
-palette, hero art under scrims, title logos, the facts row, the player's
-loading screen and its "You're watching" pause card.
+Stream or download movies and series from torrents on Android phones. Native
+Kotlin + Jetpack Compose, with the TV app's look: the dark Ink palette, hero art
+under scrims, title logos, the facts row, the player's loading screen and its
+"You're watching" pause card.
 
 Browse a catalogue, open a title, pick a release, watch it. Magnet links and
 `.torrent` files shared in from other apps land in the same player.
