@@ -4,16 +4,16 @@
 
 # Watchly
 
-Movies and series streamed from torrents while they download — on Android
-phones, Android TV and Windows.
+Stream or download movies and series from torrents — on Android phones,
+Android TV and Windows.
 
 **[Download the latest release](https://github.com/sammyZi/Watchly/releases/latest)** —
 phone and TV APKs and the Windows exe.
 
-- **Stream instantly** — a film starts playing while it downloads, and resumes where you left off
+- **Stream instantly** — press play and watch right away, and resume where you left off
 - **Every detail** — ratings, cast, trailers and awards on every title
 - **Binge-ready series** — seasons and episodes, with what you've watched marked and Skip intro
-- **Download & go** — save an episode or a whole season to watch offline
+- **Download & go** — download an episode or a whole season to watch offline
 - **Find anything** — search titles, or torrents by name
 - **Made yours** — profiles with PINs, light and dark themes, Media3 or VLC, subtitles in your language
 
