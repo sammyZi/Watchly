@@ -43,14 +43,16 @@ intro timings from [IntroDB](https://introdb.app) and subtitles from [OpenSubtit
 
 <table>
   <tr>
-    <td><img src="docs/images/screen-1-home.jpg" alt="Home"></td>
-    <td><img src="docs/images/screen-2-title.jpg" alt="A film's page"></td>
-    <td><img src="docs/images/screen-3-series.jpg" alt="A series' page"></td>
+    <td><img src="docs/images/screen-1-home.jpg" alt="Home" width="400"></td>
+    <td><img src="docs/images/screen-2-title.jpg" alt="A film's page" width="400"></td>
   </tr>
   <tr>
-    <td><img src="docs/images/screen-4-episodes.jpg" alt="Episodes and downloads"></td>
-    <td><img src="docs/images/screen-5-search.jpg" alt="Search"></td>
-    <td><img src="docs/images/screen-6-settings.jpg" alt="Settings"></td>
+    <td><img src="docs/images/screen-3-series.jpg" alt="A series' page" width="400"></td>
+    <td><img src="docs/images/screen-4-episodes.jpg" alt="Episodes and downloads" width="400"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/screen-5-search.jpg" alt="Search" width="400"></td>
+    <td><img src="docs/images/screen-6-settings.jpg" alt="Settings" width="400"></td>
   </tr>
 </table>
 
@@ -58,20 +60,28 @@ intro timings from [IntroDB](https://introdb.app) and subtitles from [OpenSubtit
 
 <table>
   <tr>
-    <td><img src="docs/images/tv-0-profiles.jpg" alt="Who's watching"></td>
-    <td><img src="docs/images/tv-1-home.jpg" alt="Home"></td>
+    <td align="center"><img src="docs/images/tv-0-profiles.jpg" alt="Who's watching" width="800"></td>
   </tr>
   <tr>
-    <td><img src="docs/images/tv-2-title.jpg" alt="A film's page"></td>
-    <td><img src="docs/images/tv-4-sources-4k.jpg" alt="Sources filtered to 4K"></td>
+    <td align="center"><img src="docs/images/tv-1-home.jpg" alt="Home" width="800"></td>
   </tr>
   <tr>
-    <td><img src="docs/images/tv-5-search.jpg" alt="Search"></td>
-    <td><img src="docs/images/tv-6-series.jpg" alt="A series' page"></td>
+    <td align="center"><img src="docs/images/tv-2-title.jpg" alt="A film's page" width="800"></td>
   </tr>
   <tr>
-    <td><img src="docs/images/tv-7-episodes.jpg" alt="Episodes"></td>
-    <td><img src="docs/images/tv-8-settings.jpg" alt="Settings"></td>
+    <td align="center"><img src="docs/images/tv-4-sources-4k.jpg" alt="Sources filtered to 4K" width="800"></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/images/tv-5-search.jpg" alt="Search" width="800"></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/images/tv-6-series.jpg" alt="A series' page" width="800"></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/images/tv-7-episodes.jpg" alt="Episodes" width="800"></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/images/tv-8-settings.jpg" alt="Settings" width="800"></td>
   </tr>
 </table>
 
