@@ -220,6 +220,22 @@ static class Smoke
         Eq(Store.LoadOwn("smoke-guest-only", 0), 5, "guest keeps things in memory");
         Store.UseProfile("", false);
         Eq(Store.LoadOwn("smoke-guest-only", 0), 0, "guest's things never reach the disk");
+        var silo = new List<TorrentFileInfo>
+        {
+            new() { Index = 0, Path = "Silo S02/Silo.S02E03.1080p.mkv", Name = "Silo.S02E03.1080p.mkv", IsVideo = true },
+            new() { Index = 1, Path = "Silo S02/Silo.S02E04.1080p.mkv", Name = "Silo.S02E04.1080p.mkv", IsVideo = true },
+            new() { Index = 2, Path = "Silo S02/Silo.S02E03.1080p.srt", Name = "Silo.S02E03.1080p.srt", IsSubtitle = true },
+            new() { Index = 3, Path = "Silo S02/Silo.S02E04.1080p.srt", Name = "Silo.S02E04.1080p.srt", IsSubtitle = true },
+            new() { Index = 4, Path = "Silo S02/Subs/Silo.S02E04.1080p/2_English.srt", Name = "2_English.srt", IsSubtitle = true },
+        };
+        Eq(string.Join(",", Pick.SubtitlesFor(silo, 1)), "3,4", "a pack's episode gets only its own subtitles");
+        var film = new List<TorrentFileInfo>
+        {
+            new() { Index = 0, Path = "Film/Film.2024.mkv", Name = "Film.2024.mkv", IsVideo = true },
+            new() { Index = 1, Path = "Film/English.srt", Name = "English.srt", IsSubtitle = true },
+            new() { Index = 2, Path = "Film/Subs/French.srt", Name = "French.srt", IsSubtitle = true },
+        };
+        Eq(string.Join(",", Pick.SubtitlesFor(film, 0)), "1,2", "a single film keeps every subtitle");
         Eq(new AppSettings().Resized(1).SubSize, "large", "subtitle size up");
         Eq(new AppSettings { SubSize = "huge" }.Resized(1).SubSize, "huge", "subtitle size stops at huge");
         Eq(new AppSettings { SubSize = "small" }.Resized(-1).SubRel, 20, "subtitle size stops at small");

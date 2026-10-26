@@ -206,4 +206,31 @@ public static class Pick
         chosen.Sort(FileOrder);
         return chosen.Select(f => f.Index).ToList();
     }
+
+    /// <summary>
+    /// The subtitle files that go with one video — core TorrentStream's rule, as the phone and TV
+    /// play: beside it (or in a folder under it) named after it, "Show.S02E04.mkv" → "Show.S02E04.en.srt";
+    /// in a folder named after it ("Subs/Show.S02E04/English.srt"); or the same SxxEyy. A season
+    /// pack carries one per episode, and every one of them used to be attached to each episode.
+    /// A torrent with a single video keeps all its subtitles: they can only be that video's.
+    /// </summary>
+    public static List<int> SubtitlesFor(IReadOnlyList<TorrentFileInfo> files, int videoIndex)
+    {
+        var subs = files.Where(f => f.IsSubtitle && f.Index != videoIndex && !IsUnsafe(f.Path)).ToList();
+        if (files.Count(f => f.IsVideo && !Junk.IsMatch(f.Name)) <= 1) return subs.Select(f => f.Index).ToList();
+        static string Dir(string path) => path.Replace('\\', '/') is var p && p.LastIndexOf('/') is var i and >= 0 ? p[..i] : "";
+        var video = files[videoIndex];
+        var dir = Dir(video.Path);
+        var stem = System.IO.Path.GetFileNameWithoutExtension(video.Name).ToLowerInvariant();
+        var episode = Search.ParseEpisode(video.Name);
+        return subs.Where(f =>
+        {
+            var subDir = Dir(f.Path);
+            var name = System.IO.Path.GetFileNameWithoutExtension(f.Name).ToLowerInvariant();
+            var near = subDir == dir || (dir.Length > 0 && subDir.StartsWith(dir + "/"));
+            return (near && (name == stem || name.StartsWith(stem + ".")))
+                || subDir.ToLowerInvariant().EndsWith("/" + stem) || subDir.Equals(stem, StringComparison.OrdinalIgnoreCase)
+                || (episode is not null && (Search.ParseEpisode(f.Name) ?? Search.ParseEpisode(f.Path)) == episode);
+        }).Select(f => f.Index).ToList();
+    }
 }

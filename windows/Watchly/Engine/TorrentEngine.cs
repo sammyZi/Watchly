@@ -651,42 +651,21 @@ public sealed class StreamSession : IAsyncDisposable
         var manager = await engine.Manager(torrent, Path.Combine(Paths.StreamCache, hex), sourceUri);
         var meta = TorrentEngine.MetaOf(torrent);
         var file = manager.Files[fileIndex];
+        // This video's own subtitles only — a season pack has one per episode, and attaching them all
+        // filled the list with every other episode's. Tiny, so at Highest they are there in seconds.
+        var subs = Pick.SubtitlesFor(meta.Files, fileIndex).Where(i => meta.Files[i].Size < 10_000_000).ToHashSet();
 
         if (!borrowed)
         {
-            // Only the file being watched, plus ALL subtitles in the torrent.
-            // Subtitles are tiny (a few KB); downloading at Priority.Highest finishes them
-            // in seconds so LibVLC can attach them immediately.
             for (var i = 0; i < manager.Files.Count; i++)
-            {
-                var info = meta.Files[i];
-                if (i == fileIndex)
-                {
-                    await manager.SetFilePriorityAsync(manager.Files[i], Priority.Normal);
-                }
-                else if (info.IsSubtitle && info.Size < 10_000_000 && !Pick.IsUnsafe(info.Path))
-                {
-                    await manager.SetFilePriorityAsync(manager.Files[i], Priority.Highest);
-                }
-                else
-                {
-                    await manager.SetFilePriorityAsync(manager.Files[i], Priority.DoNotDownload);
-                }
-            }
+                await manager.SetFilePriorityAsync(manager.Files[i], i == fileIndex ? Priority.Normal : subs.Contains(i) ? Priority.Highest : Priority.DoNotDownload);
         }
         else
         {
             if (file.Priority == Priority.DoNotDownload)
                 await manager.SetFilePriorityAsync(file, Priority.Normal);
-            // Boost all subtitles in borrowed sessions as well
-            for (var i = 0; i < manager.Files.Count; i++)
-            {
-                var info = meta.Files[i];
-                if (info.IsSubtitle && info.Size < 10_000_000 && manager.Files[i].Priority != Priority.Highest)
-                {
-                    await manager.SetFilePriorityAsync(manager.Files[i], Priority.Highest);
-                }
-            }
+            foreach (var i in subs.Where(i => manager.Files[i].Priority != Priority.Highest))
+                await manager.SetFilePriorityAsync(manager.Files[i], Priority.Highest);
         }
 
         // Our own torrent: fetch only the window around the playhead, never the whole film.
@@ -803,10 +782,10 @@ public sealed class StreamSession : IAsyncDisposable
         return Task.CompletedTask;
     }
 
-    /// <summary>Subtitle files from this torrent that have finished downloading.</summary>
-    public IEnumerable<string> ReadySubtitles() => Meta.Files
-        .Where(f => f.IsSubtitle && Manager.Files[f.Index].Priority != Priority.DoNotDownload && Manager.Files[f.Index].BitField.AllTrue)
-        .Select(f => Manager.Files[f.Index].DownloadCompleteFullPath)
+    /// <summary>This video's own subtitle files from the torrent (Pick.SubtitlesFor) that have finished downloading.</summary>
+    public IEnumerable<string> ReadySubtitles() => Pick.SubtitlesFor(Meta.Files, FileIndex)
+        .Where(i => Manager.Files[i].Priority != Priority.DoNotDownload && Manager.Files[i].BitField.AllTrue)
+        .Select(i => Manager.Files[i].DownloadCompleteFullPath)
         .Where(File.Exists);
 
     public async ValueTask DisposeAsync()
