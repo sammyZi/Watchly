@@ -6,7 +6,7 @@
   <UserControl.Resources>
     <!-- One file in a season download: DownloadsScreen's queue row. -->
     <DataTemplate x:Key="QueueRow" DataType="{x:Type e:QueueFile}">
-      <DockPanel Margin="0,6">
+      <DockPanel Margin="0,6,18,6">
         <Border x:Name="Mark" DockPanel.Dock="Left" Width="36" Height="36" CornerRadius="8" Background="{DynamicResource Control}">
           <TextBlock x:Name="Num" Text="{Binding Mark}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Faint}"
                      HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -142,8 +142,15 @@
                 </TextBlock>
               </DockPanel>
             </ToggleButton>
+            <!-- A season's episodes in as many columns as the card is wide. -->
             <ItemsControl ItemsSource="{Binding Queue}" ItemTemplate="{StaticResource QueueRow}" Focusable="False"
-                          Visibility="{Binding QueueOpen, Converter={StaticResource Vis}}" />
+                          Visibility="{Binding QueueOpen, Converter={StaticResource Vis}}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <c:ColumnWrap MinColumn="340" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+            </ItemsControl>
           </StackPanel>
         </StackPanel>
       </Border>
@@ -206,7 +213,7 @@
         <ItemsControl x:Name="ActiveList" ItemTemplate="{StaticResource ActiveCard}" Focusable="False">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
-              <c:ColumnWrap MinColumn="560" />
+              <c:ColumnWrap MinColumn="560" FillRow="True" />
             </ItemsPanelTemplate>
           </ItemsControl.ItemsPanel>
         </ItemsControl>

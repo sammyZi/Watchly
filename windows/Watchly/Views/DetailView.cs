@@ -455,15 +455,17 @@ public sealed class DetailView : UserControl, IDisposable
         if (season is not null)
         {
             var name = season == 0 ? "specials" : $"season {season}";
-            var words = Ui.Text(saving ? "Starting download…" : $"Download {name}", "Meta", "Muted", 13, FontWeights.SemiBold);
-            words.Margin = new Thickness(8, 0, 0, 0);
-            var link = Ui.Button(new StackPanel { Orientation = Orientation.Horizontal, Children = { saving ? Ui.Spinner(16, "Muted") : Ui.Glyph("download", 16, "Muted"), words } }, SaveSeason);
+            var open = packSeason == season;
+            var words = Ui.Text(saving ? "Starting download…" : $"Download {name}", "Meta", open ? "Text" : "Muted", 13, FontWeights.SemiBold);
+            words.Margin = new Thickness(8, 0, 6, 0);
+            var link = Ui.Button(new StackPanel { Orientation = Orientation.Horizontal, Children = { saving ? Ui.Spinner(16, "Muted") : Ui.Glyph("download", 16, "Muted"), words, Ui.Glyph(open ? "chevron-up" : "chevron-down", 14, "Faint") } }, SaveSeason);
             link.HorizontalAlignment = HorizontalAlignment.Left;
             link.Padding = new Thickness(4, 6, 6, 6);
             link.Margin = new Thickness(-4, 0, 0, 4);
             link.Tag = 6;
             link.IsEnabled = !shell.IsOpening && !saving;
             block.Children.Add(link);
+            if (open) block.Children.Add(PackList(season.Value));
         }
 
         foreach (var ep in listed) block.Children.Add(EpisodeRow(ep, progress.GetValueOrDefault(ep.Id)));
@@ -723,10 +725,25 @@ public sealed class DetailView : UserControl, IDisposable
         });
     }
 
+    /// <summary>The season whose packs are listed under its Download link, and those packs (null while searching).</summary>
+    int? packSeason;
+    List<Hit>? packs;
+
+    /// <summary>
+    /// Download season: the season packs to choose from — quality, size and how well each is seeded —
+    /// rather than the first one found. Clicked again, it closes.
+    /// </summary>
     async void SaveSeason()
     {
         if (season is not int which) return;
-        saving = true;
+        if (packSeason == which)
+        {
+            packSeason = null;
+            Render();
+            return;
+        }
+        packSeason = which;
+        packs = null;
         Render();
         bool IsPack(Hit h)
         {
@@ -734,19 +751,62 @@ public sealed class DetailView : UserControl, IDisposable
             var claims = Search.SeasonsIn(h.Name);
             return claims.Count == 0 || claims.Contains(which);
         }
-        var pack = (wanted is not null ? sources?.Where(h => h.Quality == wanted) : sources)?.FirstOrDefault(IsPack) ?? sources?.FirstOrDefault(IsPack);
-        if (pack is null)
+        var found = await Search.SearchTorrents(title.Name, suffix: $"S{which:00}").ContinueWith(t => t.IsCompletedSuccessfully ? t.Result : new List<Hit>());
+        if (packSeason != which) return;
+        packs = (sources ?? new()).Concat(found).Where(IsPack).DistinctBy(h => h.Id).OrderByDescending(h => h.Seeders).ToList();
+        Render();
+    }
+
+    /// <summary>The packs for <see cref="packSeason"/>, under its Download link.</summary>
+    FrameworkElement PackList(int which)
+    {
+        var list = new StackPanel { Margin = new Thickness(0, 4, 0, 12) };
+        if (packs is null)
         {
-            var hits = await Search.SearchTorrents(title.Name, suffix: $"S{which:00}").ContinueWith(t => t.IsCompletedSuccessfully ? t.Result : new List<Hit>());
-            pack = hits.FirstOrDefault(IsPack);
+            var words = Ui.Text($"Finding season {which} packs…", "Body");
+            words.Margin = new Thickness(12, 0, 0, 0);
+            list.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Children = { Ui.Spinner(22), words } });
+            return list;
         }
-        if (pack is null)
+        if (packs.Count == 0)
         {
-            saving = false;
-            shell.Toast($"No season pack found for season {which}", true);
-            Render();
-            return;
+            list.Children.Add(Ui.Text($"No pack for season {which} — download its episodes one by one below.", "Body", "Faint"));
+            return list;
         }
+        foreach (var hit in packs.Take(MaxSources))
+        {
+            var tone = Ui.HealthTone(hit.Seeders);
+            var dock = new DockPanel();
+            if (hit.Quality is not null)
+            {
+                var tag = Ui.Brushed(new Border { CornerRadius = new CornerRadius(4), Padding = new Thickness(7, 3, 7, 3), Margin = new Thickness(0, 0, 12, 0), VerticalAlignment = VerticalAlignment.Center, Child = Ui.Text(hit.Quality, "Overline", "Text") }, "Tint");
+                DockPanel.SetDock(tag, Dock.Left);
+                dock.Children.Add(tag);
+            }
+            var go = Ui.Glyph("download", 18, "Muted");
+            go.Margin = new Thickness(12, 0, 6, 0);
+            DockPanel.SetDock(go, Dock.Right);
+            dock.Children.Add(go);
+            var grade = Ui.Text(tone.Label, "Meta", tone.Fg, 13, FontWeights.Bold);
+            grade.VerticalAlignment = VerticalAlignment.Center;
+            DockPanel.SetDock(grade, Dock.Right);
+            dock.Children.Add(grade);
+            var name = Ui.Text(hit.Name, "Label", "Text", 14);
+            name.ToolTip = hit.Name;
+            var meta = Ui.Text(string.Join("  ·  ", hit.Scope == "complete" ? "Complete series" : "Season pack", Format.Bytes(TorrentBytes(hit)), $"{hit.Seeders} seeds"), "Meta", "Faint", 12);
+            meta.Margin = new Thickness(0, 2, 0, 0);
+            dock.Children.Add(new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { name, meta } });
+            var captured = hit;
+            var row = Ui.Button(Ui.Card(dock, "Surface", 8, new Thickness(14, 11, 8, 11)), () => DownloadPack(captured, which), tooltip: $"Download season {which} from this release");
+            row.Margin = new Thickness(0, 0, 0, 8);
+            list.Children.Add(row);
+        }
+        return list;
+    }
+
+    void DownloadPack(Hit pack, int which)
+    {
+        packSeason = null;
         shell.BeginDownload(new DownloadJob
         {
             Uri = pack.Magnet,

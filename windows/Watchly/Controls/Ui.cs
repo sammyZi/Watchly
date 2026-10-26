@@ -557,10 +557,25 @@ public sealed class ColumnWrap : WrapPanel
         set => SetValue(MinColumnProperty, value);
     }
 
+    public static readonly DependencyProperty FillRowProperty = DependencyProperty.Register(nameof(FillRow), typeof(bool), typeof(ColumnWrap),
+        new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.AffectsMeasure));
+
+    /// <summary>Fewer items than fit across: they share the whole width instead of leaving it empty.</summary>
+    public bool FillRow
+    {
+        get => (bool)GetValue(FillRowProperty);
+        set => SetValue(FillRowProperty, value);
+    }
+
     protected override Size MeasureOverride(Size available)
     {
         if (!double.IsInfinity(available.Width) && available.Width > 0)
-            ItemWidth = Math.Floor(available.Width / Math.Max(1, Math.Floor(available.Width / MinColumn)));
+        {
+            var columns = Math.Max(1, Math.Floor(available.Width / MinColumn));
+            var items = InternalChildren.Cast<UIElement>().Count(c => c.Visibility != Visibility.Collapsed);
+            if (FillRow && items > 0) columns = Math.Min(columns, items);
+            ItemWidth = Math.Floor(available.Width / columns);
+        }
         return base.MeasureOverride(available);
     }
 }
