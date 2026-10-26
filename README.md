@@ -45,11 +45,17 @@ Every file is on the **[latest release](https://github.com/sammyZi/Watchly/relea
 
 | Device | File |
 |---|---|
-| 🪟 Windows 10 / 11 | `Watchly-windows-…-x64-setup.exe` |
-| 📱 Most Android phones | `Watchly-phone-…-arm64-v8a.apk` |
-| 📺 Most Android TVs and boxes | `Watchly-tv-…-armeabi-v7a.apk` |
-| 📺 Shield, Chromecast with Google TV | `Watchly-tv-…-arm64-v8a.apk` |
-| ❓ Not sure | `…-universal.apk` (larger, runs everywhere) |
+| 🪟 Windows 10 / 11 (64-bit) | `Watchly-windows-…-x64-setup.exe` |
+| 📱 Android phones and tablets from the last several years — Samsung, Pixel, OnePlus, Xiaomi, vivo, Oppo, Motorola… | `Watchly-phone-…-arm64-v8a.apk` |
+| 📱 Older or entry-level 32-bit phones and tablets | `Watchly-phone-…-armeabi-v7a.apk` |
+| 💻 Android emulators, x86 tablets and Chromebooks | `Watchly-phone-…-x86.apk` |
+| 📺 Android TVs and Google TVs — Sony BRAVIA, TCL, Philips, Hisense, Xiaomi — and TV boxes / sticks such as Mi Box and Chromecast with Google TV | `Watchly-tv-…-armeabi-v7a.apk` |
+| 📺 64-bit TV boxes such as NVIDIA Shield TV | `Watchly-tv-…-arm64-v8a.apk` (the `armeabi-v7a` one runs there too) |
+| 📺 Android TV emulator, x86 TV boxes | `Watchly-tv-…-x86.apk` |
+| 📦 Any Android phone, tablet or TV — one file that has every version inside | `Watchly-phone-…-universal.apk` / `Watchly-tv-…-universal.apk` (about 3× larger) |
+
+Almost every phone sold in the last several years takes `arm64-v8a`; on a TV, the `armeabi-v7a` file works everywhere ARM.
+The `universal` APKs fit every device at once, at a bigger download.
 
 ### 🪟 Windows 10 / 11
 
