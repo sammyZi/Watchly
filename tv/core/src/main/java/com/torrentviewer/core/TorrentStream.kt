@@ -255,6 +255,8 @@ class TorrentStream(
             zoneWidth = -1
         }
     private var zoneRushedTail = false
+    /** Whether the last zone wanted the rest of the file too (Download ahead → Whole file). */
+    private var zoneWhole = false
     private var windowPieces = 4
     private var prepareBytes = 3L * 1024 * 1024
     private var readaheadBytes = READAHEAD_BYTES
@@ -830,6 +832,7 @@ class TorrentStream(
         zoneIgnored = -1
         zoneWidth = -1
         zoneRushedTail = false
+        zoneWhole = false
         lately.clear()
         blockingPiece = -1
         lastKickAt = 0L
@@ -1098,15 +1101,22 @@ class TorrentStream(
         }
         val back = if (!announcedReady || starving) 0 else maxOf(8, (REWIND_BYTES / pieceLen).toInt())
 
+        // Download ahead → Whole file: the rest of the film at LOW — but not during pre-roll, nor
+        // while the player waits on a piece. With it on from the first tick every peer had LOW
+        // pieces queued, so none was idle to take over a slow peer's last blocks: a resume on the
+        // phone pulled 12MB/s for 50s (~600MB) while pieces 0 and 1791 sat at 29 of 32 blocks for
+        // 20s each, re-asked every 4s.
+        val whole = wholeFile && announcedReady && !starving
         // Re-aim with hysteresis: a rewind inside the band already covered is not a new zone.
         val stale = zoneWidth != width ||
             zoneRushedTail != announcedReady ||
+            zoneWhole != whole ||
             zoneStarts.size != targets.size ||
             targets.any { t -> zoneStarts.none { t >= it - back && t <= it + width / 2 } }
         val clobbered = !stale && zoneIgnored >= 0 &&
             runCatching { h.piecePriority(zoneIgnored) != Priority.IGNORE }.getOrDefault(false)
         if (clobbered) log("zone: priorities were rewritten (piece $zoneIgnored wanted again) — re-applying")
-        if (stale || clobbered) applyZone(h, targets, width, back, rushTail = announcedReady)
+        if (stale || clobbered) applyZone(h, targets, width, back, rushTail = announcedReady, whole = whole)
 
         val keep = mutableSetOf<Int>()
         targets.forEachIndexed { rank, target ->
@@ -1247,6 +1257,7 @@ class TorrentStream(
             zoneIgnored = -1
             zoneWidth = -1
             zoneRushedTail = false
+            zoneWhole = false
             if (readers.isEmpty()) {
                 seekAfter = server?.connections() ?: 0L
                 seekSetAt = System.currentTimeMillis()
@@ -1272,7 +1283,7 @@ class TorrentStream(
      * One zone per reader (DEFAULT), a band behind it and spare work past it (LOW),
      * the tail (DEFAULT), everything else in the file IGNORE.
      */
-    private fun applyZone(h: TorrentHandle, targets: List<Int>, width: Int, back: Int, rushTail: Boolean) {
+    private fun applyZone(h: TorrentHandle, targets: List<Int>, width: Int, back: Int, rushTail: Boolean, whole: Boolean) {
         val prios = runCatching { h.piecePriorities() }.getOrNull() ?: return
         // A re-added magnet without its metadata drops every priority: try again next tick.
         if (prios.size <= lastPiece) return
@@ -1288,7 +1299,7 @@ class TorrentStream(
             prios[p] = when {
                 p in tailPiece..tailEnd || zones.any { p in it } -> Priority.DEFAULT
                 spare.any { p in it } || behind.any { p in it } -> Priority.LOW
-                wholeFile -> Priority.LOW
+                whole -> Priority.LOW
                 else -> Priority.IGNORE
             }
         }
@@ -1302,6 +1313,7 @@ class TorrentStream(
         zoneStarts = targets
         zoneWidth = width
         zoneRushedTail = rushTail
+        zoneWhole = whole
         log("zone: ${zones.joinToString(", ") { "${it.first}..${it.last}" }} (back $back, tail $tailPiece..$tailEnd)")
     }
 
@@ -1416,6 +1428,7 @@ class TorrentStream(
         zoneIgnored = -1
         zoneWidth = -1
         zoneRushedTail = false
+        zoneWhole = false
         subtitleFiles = emptyList()
         wantedFiles = intArrayOf()
         handle = null
