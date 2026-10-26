@@ -176,7 +176,7 @@ private fun delta(seconds: Double): String {
 
 private enum class Band { SLIDER, TRANSPORT }
 
-private enum class Panel { TRACKS, SPEED, ASPECT, FIND }
+private enum class Panel { TRACKS, SPEED, ASPECT, FIND, LANG }
 
 @Composable
 fun PlayerScreen(watch: Watch) {
@@ -689,6 +689,34 @@ private fun Player(watch: Watch) {
             Loading(title, episode, file, ready != null, progressState.value)
         }
 
+        /** Online subtitles in the chosen language — again whenever it is changed from the sheet. */
+        fun findSubs() {
+            panel = Panel.FIND
+            finding = true
+            found = null
+            scope.launch {
+                found = runCatching {
+                    // OpenSubtitles needs no key; SubDL joins in once the viewer has given theirs.
+                    val ep = parseEpisode(file?.name.orEmpty())
+                    val series = ep != null || title?.isSeries == true
+                    findSubtitles(
+                        query = title?.title ?: searchableName(file?.name.orEmpty()),
+                        imdb = title?.imdb ?: watch.item?.imdb,
+                        season = ep?.season,
+                        episode = ep?.episode,
+                        type = if (series) "tv" else "movie",
+                        language = SettingsStore.value.value.subLang,
+                        subdlKey = Secrets.subdl.value.ifBlank { BuildConfig.SUBDL_KEY },
+                        fileName = file?.name.orEmpty(),
+                    )
+                }.getOrElse {
+                    watch.notes.tryEmit(it.message ?: "Subtitle search failed")
+                    emptyList()
+                }
+                finding = false
+            }
+        }
+
         when (panel) {
             Panel.TRACKS -> TracksPanel(
                 tracks = tracks,
@@ -704,32 +732,7 @@ private fun Player(watch: Watch) {
                     audio = it
                     view.value?.setAudioTrack(it)
                 },
-                onFind = {
-                    panel = Panel.FIND
-                    finding = true
-                    found = null
-                    scope.launch {
-                        found = runCatching {
-                            // OpenSubtitles needs no key; SubDL joins in once the viewer has given theirs.
-                            val ep = parseEpisode(file?.name.orEmpty())
-                            val series = ep != null || title?.isSeries == true
-                            findSubtitles(
-                                query = title?.title ?: searchableName(file?.name.orEmpty()),
-                                imdb = title?.imdb ?: watch.item?.imdb,
-                                season = ep?.season,
-                                episode = ep?.episode,
-                                type = if (series) "tv" else "movie",
-                                language = SettingsStore.value.value.subLang,
-                                subdlKey = Secrets.subdl.value.ifBlank { BuildConfig.SUBDL_KEY },
-                                fileName = file?.name.orEmpty(),
-                            )
-                        }.getOrElse {
-                            watch.notes.tryEmit(it.message ?: "Subtitle search failed")
-                            emptyList()
-                        }
-                        finding = false
-                    }
-                },
+                onFind = ::findSubs,
                 onDismiss = { panel = null },
             )
             Panel.SPEED -> Sheet(
@@ -756,11 +759,14 @@ private fun Player(watch: Watch) {
             )
             Panel.FIND -> Sheet(
                 title = "Find subtitles",
-                options = found.orEmpty().mapIndexed { i, s -> Option(i, s.language, s.release.ifEmpty { s.name }) },
+                // First, the language searched in — the Settings one — to change it right here.
+                options = listOf(Option(-1, "Language: " + SettingsStore.value.value.subLang.ifEmpty { "EN" }.let(::langName), "Change")) +
+                    found.orEmpty().mapIndexed { i, s -> Option(i, s.language, s.release.ifEmpty { s.name }) } +
+                    listOfNotNull(Option(-2, if (finding) "Searching…" else "Nothing found in this language").takeIf { found.isNullOrEmpty() }),
                 selected = null,
-                busy = finding,
-                empty = "Nothing found for this title.",
                 onPick = { i ->
+                    if (i == -1) panel = Panel.LANG
+                    if (i < 0) return@Sheet
                     val sub = found?.getOrNull(i) ?: return@Sheet
                     panel = null
                     scope.launch {
@@ -776,6 +782,17 @@ private fun Player(watch: Watch) {
                     }
                 },
                 onDismiss = { panel = null },
+            )
+            // The same list as Settings → Subtitles, and the same setting: it sticks for the next film.
+            Panel.LANG -> Sheet(
+                title = "Subtitle language",
+                options = LANGS.map { Option(it.code, it.name) },
+                selected = SettingsStore.value.value.subLang.ifEmpty { "EN" },
+                onPick = { code ->
+                    SettingsStore.save(SettingsStore.value.value.copy(subLang = code))
+                    findSubs()
+                },
+                onDismiss = { panel = Panel.FIND },
             )
             null -> Unit
         }

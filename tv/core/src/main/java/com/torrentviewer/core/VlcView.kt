@@ -86,7 +86,21 @@ class VlcView(context: Context) : Video(context) {
     private var vlc: LibVLC? = null
     /** The buffer [vlc] was made with — a reload at the same one keeps the instance. */
     private var vlcCacheMs = -1
+    /** The subtitle look [vlc] was made with: libVLC reads it only as an instance starts. */
+    private var vlcStyle: SubtitleStyle? = null
     private var player: MediaPlayer? = null
+
+    /**
+     * A new size or colour mid-film reopens where it is, on a libVLC made with it — the size
+     * steps changed nothing before, nor did the next film, as the instance was kept.
+     * The picked subtitle comes back with [wantedSpu].
+     */
+    override var subtitleStyle: SubtitleStyle? = null
+        set(value) {
+            val changed = field != value
+            field = value
+            if (changed && player != null && source != null) reload(time)
+        }
 
     private var source: String? = null
     private var startMs = 0L
@@ -313,7 +327,7 @@ class VlcView(context: Context) : Video(context) {
     }
 
     private fun restart() {
-        release(keepVlc = vlcCacheMs == cacheMs)
+        release(keepVlc = vlcCacheMs == cacheMs && vlcStyle == subtitleStyle)
         val uri = source?.takeIf { it.isNotBlank() } ?: return
         try {
             val instance = vlc ?: LibVLC(
@@ -333,7 +347,10 @@ class VlcView(context: Context) : Video(context) {
                         "--freetype-background-opacity=${if (s.box) 160 else 0}",
                     )
                 }.orEmpty()),
-            ).also { vlcCacheMs = cacheMs }
+            ).also {
+                vlcCacheMs = cacheMs
+                vlcStyle = subtitleStyle
+            }
             val mediaPlayer = MediaPlayer(instance)
             mediaPlayer.attachViews(videoLayout, null, true, false)
             mediaPlayer.videoScale = scale
