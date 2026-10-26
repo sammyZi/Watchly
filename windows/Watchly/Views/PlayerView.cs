@@ -29,19 +29,32 @@ namespace Watchly.Views;
 /// </summary>
 static class VlcLibrary
 {
+    // No metadata lookups on the internet and no Lua scripts (which do such lookups): what is
+    // played stays on this machine. The Lua plugin isn't shipped either — see Watchly.csproj.
+    static readonly string[] Args = { "--no-video-title-show", "--no-osd", "--quiet", "--no-metadata-network-access", "--no-lua" };
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<int, Lazy<LibVLC>> sized = new();
+
     public static readonly Lazy<LibVLC> Instance = new(() =>
     {
         var clock = System.Diagnostics.Stopwatch.StartNew();
         LibVLCSharp.Shared.Core.Initialize();
         var plugins = Path.Combine(AppContext.BaseDirectory, "libvlc", "win-x64", "plugins");
-        // No metadata lookups on the internet and no Lua scripts (which do such lookups): what is
-        // played stays on this machine. The Lua plugin isn't shipped either — see Watchly.csproj.
-        var args = new List<string> { "--no-video-title-show", "--no-osd", "--quiet", "--no-metadata-network-access", "--no-lua" };
+        var args = Args.ToList();
         if (!File.Exists(Path.Combine(plugins, "plugins.dat"))) args.Add("--reset-plugins-cache");
         var made = new LibVLC(args.ToArray());
         Log.Player($"libVLC ready in {clock.ElapsedMilliseconds} ms");
         return made;
     });
+
+    /// <summary>
+    /// libVLC reads the subtitle size only when an instance starts — not from a media option —
+    /// so each size gets its own instance, made once (milliseconds, after Instance cached the plugins).
+    /// </summary>
+    public static LibVLC For(int subRel) => sized.GetOrAdd(subRel, rel => new(() =>
+    {
+        _ = Instance.Value;
+        return new LibVLC(Args.Append($"--freetype-rel-fontsize={rel}").ToArray());
+    })).Value;
 
     public static void Warm() => _ = Task.Run(() => Instance.Value);
 }
@@ -75,8 +88,8 @@ public sealed class PlayerView : UserControl, IDisposable
     readonly PlaybackRequest request;
     readonly MainWindow shell = MainWindow.Shell;
     readonly VideoView video = new();
-    readonly MediaPlayer player;
-    readonly LibVLC vlc = VlcLibrary.Instance.Value;
+    MediaPlayer player;
+    LibVLC vlc = VlcLibrary.For(MainWindow.Shell.Settings.SubRel);
     readonly Grid overlay = new() { Background = Brushes.Black };
     readonly DispatcherTimer tick = new() { Interval = TimeSpan.FromMilliseconds(300) };
     readonly DispatcherTimer hideTimer = new() { Interval = TimeSpan.FromSeconds(3.5) };
@@ -294,7 +307,8 @@ public sealed class PlayerView : UserControl, IDisposable
     MediaPlayer NewPlayer()
     {
         var p = new MediaPlayer(vlc) { EnableHardwareDecoding = true, EnableKeyInput = false, EnableMouseInput = false };
-        void On(Action action) => Ui(action);
+        // A player swapped out for a new subtitle size still reports while it stops: ignored.
+        void On(Action action) => Ui(() => { if (p == player) action(); });
 
         p.Playing += (_, _) => On(() =>
         {
@@ -446,7 +460,6 @@ public sealed class PlayerView : UserControl, IDisposable
             ":file-caching=300",
             ":live-caching=300",
             ":clock-jitter=0",
-            $":freetype-rel-fontsize={shell.Settings.SubRel}",
             $":start-time={startSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
         started = true;
         buffering = true;
@@ -495,8 +508,8 @@ public sealed class PlayerView : UserControl, IDisposable
     }
 
     /// <summary>
-    /// A size up or down. libVLC sizes subtitle text when a video opens, so it reopens where it is,
-    /// with the same subtitle picked.
+    /// A size up or down. libVLC sizes subtitle text when its instance starts, so the video reopens
+    /// where it is in a player on that size's instance, with the same subtitle picked.
     /// </summary>
     void ResizeSubs(int step)
     {
@@ -506,6 +519,12 @@ public sealed class PlayerView : UserControl, IDisposable
         var spu = player.Spu;
         restoreSub = (slaveTracks.FirstOrDefault(kv => kv.Value == spu).Key, spu);
         ShowHud($"Subtitle size: {SizeName(next.SubSize)}");
+        var old = player;
+        // Stop waits for libVLC's threads: off the UI thread, like Close.
+        _ = Task.Run(() => { try { old.Stop(); old.Dispose(); } catch { } });
+        vlc = VlcLibrary.For(next.SubRel);
+        player = NewPlayer();
+        video.MediaPlayer = player;
         Load(media.Mrl, current / 1000.0);
     }
 
