@@ -99,7 +99,9 @@ static class Smoke
 
     static void Logic()
     {
-        Ok(SubDL.Key != null && SubDL.Key.StartsWith("subdl_"), "SubDL key resolved");
+        var sealedKey = Secrets.Protect(System.Text.Encoding.UTF8.GetBytes("subdl_smoke"));
+        Ok(!System.Text.Encoding.UTF8.GetString(sealedKey).Contains("subdl_smoke"), "SubDL key stored encrypted");
+        Eq(System.Text.Encoding.UTF8.GetString(Secrets.Unprotect(sealedKey)), "subdl_smoke", "SubDL key reads back");
 
         // LibTest.kt: openSubtitlesRows, subtitlesRanked, IntroDB
         var open = OpenSubs.ToSubs(JsonNode.Parse("""

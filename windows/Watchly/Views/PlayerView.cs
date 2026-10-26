@@ -1501,7 +1501,7 @@ public sealed class PlayerView : UserControl, IDisposable
         {
             var at = Search.ParseEpisode(request.Title);
             var useImdb = request.Imdb is not null && (typed is null || typed.Trim().Length == 0 || typed.Trim() == request.MetaTitle);
-            // OpenSubtitles needs no key; SubDL joins in when this build has one.
+            // OpenSubtitles needs no key; SubDL joins in once the viewer has given theirs in Settings.
             var results = await Subtitles.Find(q, useImdb ? request.Imdb : null, at?.Season, at?.Episode,
                 at is not null || request.Kind == "tv" ? "tv" : request.Kind == "movie" ? "movie" : null,
                 request.Title);

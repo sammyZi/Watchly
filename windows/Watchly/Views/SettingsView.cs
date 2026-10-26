@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using Microsoft.Win32;
 using Watchly.Controls;
 using Watchly.Core;
@@ -69,6 +70,8 @@ public sealed class SettingsView : UserControl
         page.Children.Add(Group("Playback",
             Row("Skip intros automatically", "Where an episode's intro is known, jump past it instead of showing the Skip intro button. Once per episode — seek back to watch it.",
                 Toggle(S.AutoSkipIntro, v => Set(S with { AutoSkipIntro = v })))));
+
+        page.Children.Add(SubdlGroup());
 
         var folder = Ui.Button(Ui.Text("Change", "Label", "Accent", 13, FontWeights.SemiBold), () =>
         {
@@ -147,6 +150,52 @@ public sealed class SettingsView : UserControl
     }
 
     /// <summary>A section as the phone sets one (mobile Pages.kt Section): a bold title, then its rows — no card.</summary>
+    /// <summary>The phone's and TV's SubDL key: the viewer's own, encrypted on this PC (Secrets).</summary>
+    FrameworkElement SubdlGroup()
+    {
+        var saved = Secrets.Subdl.Length > 0;
+        var box = new PasswordBox { Background = Brushes.Transparent, BorderThickness = new Thickness(0), FontSize = 14, Width = 260, VerticalContentAlignment = VerticalAlignment.Center };
+        box.SetResourceReference(ForegroundProperty, "Text");
+        box.SetResourceReference(PasswordBox.CaretBrushProperty, "Accent");
+        void Save()
+        {
+            if (box.Password.Trim().Length == 0) { shell.Toast("Paste your SubDL key first", true); return; }
+            Secrets.SetSubdl(box.Password);
+            shell.Toast("SubDL key saved");
+            Render();
+        }
+        box.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) Save(); };
+        var save = Ui.Button(Ui.Text("Save", "Label", "Accent", 13, FontWeights.SemiBold), Save);
+        save.Margin = new Thickness(14, 0, 0, 0);
+        var controls = new StackPanel { Orientation = Orientation.Horizontal, Children = { Ui.Card(box, "SurfaceAlt", 6, new Thickness(10, 6, 10, 6)), save } };
+        if (saved)
+        {
+            var remove = Ui.Button(Ui.Text("Remove", "Label", "Muted", 13), () =>
+            {
+                Secrets.SetSubdl("");
+                shell.Toast("SubDL key removed");
+                Render();
+            });
+            remove.Margin = new Thickness(16, 0, 0, 0);
+            controls.Children.Add(remove);
+        }
+        var get = Ui.Button(Ui.Text("Get a free key at subdl.com", "Meta", "Accent", 12), () =>
+            Process.Start(new ProcessStartInfo("https://subdl.com/panel/api") { UseShellExecute = true }));
+        get.HorizontalAlignment = HorizontalAlignment.Left;
+        get.Margin = new Thickness(0, 10, 0, 0);
+        return Group("Subtitles", new StackPanel
+        {
+            Children =
+            {
+                Row("SubDL key",
+                    saved ? "Saved, encrypted on this PC — Find subtitles searches SubDL too. Enter another to replace it."
+                          : "A free key from subdl.com adds its subtitles to Find subtitles. It stays encrypted on this PC.",
+                    controls),
+                get,
+            },
+        });
+    }
+
     /// <summary>The TV's Profile and Profile PIN sections: who is watching, switch, and a lock.</summary>
     FrameworkElement ProfileGroup(Profile me)
     {

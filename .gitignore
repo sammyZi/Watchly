@@ -22,6 +22,8 @@ dist/
 # Windows app build output.
 windows/**/bin/
 windows/**/obj/
+windows/installer/Output/
+*.pfx
 
 # The phone screenshots the README images are made from, as captured: kept locally, not in git.
 docs/images/raw/

@@ -34,10 +34,47 @@ building its plugin cache. At startup the app deletes earlier builds' folders
 (≈240 MB each), skipping any whose build is still running.
 Publish doesn't clear old files, so delete `windows/dist` before re-publishing,
 and close the app first — a running `Watchly.exe` can't be overwritten.
-Wrap it with Inno Setup or similar for a single installer.
 
-Online subtitles come from OpenSubtitles (no key needed); SubDL's join in when a key is read
-from `mobile/.env` (`SUBDL_KEY` or `EXPO_PUBLIC_SUBDL_KEY`) at build time, like the phone app.
+### Installer
+
+```powershell
+powershell -ExecutionPolicy Bypass -File windows/build-installer.ps1
+```
+
+Publishes `windows/dist`, then builds `windows/installer/Output/Watchly-Setup-<version>-x64.exe`
+with [Inno Setup 6](https://jrsoftware.org/isdl.php) from `windows/installer/Watchly.iss`:
+installs for the current Windows account (no administrator prompt; everyone, if chosen),
+a Start menu entry and an optional desktop shortcut, and closes a running Watchly
+before replacing it. Uninstall from Settings → Apps: it removes the app and what it
+unpacked to `%TEMP%\.net\Watchly`, then asks before deleting profiles, history and
+settings (`%APPDATA%\Watchly`, `%LOCALAPPDATA%\Watchly`). Downloaded videos stay.
+
+### Signing — the "Unknown publisher" / SmartScreen warning
+
+Windows warns about any exe or installer without an Authenticode signature from a
+certificate it trusts. Only a real code-signing certificate makes the warning go away
+on other PCs — a self-signed one doesn't:
+
+| Option | Roughly | Notes |
+|---|---|---|
+| [Azure Trusted Signing](https://learn.microsoft.com/azure/trusted-signing/) | ~$10/month | Cheapest; needs identity validation (individuals in some countries, else an organisation). |
+| OV code-signing certificate (Sectigo, SSL.com, DigiCert…) | ~$200–400/year | Ships on a hardware token or cloud HSM; SmartScreen trust builds up over downloads. |
+| EV code-signing certificate | ~$300–600/year | Organisations only; on a hardware token. |
+
+With a certificate, set it before running the build and both the exe and the
+installer (and its uninstaller) are signed and timestamped:
+
+```powershell
+$env:WATCHLY_SIGN_PFX = 'C:\path\cert.pfx'; $env:WATCHLY_SIGN_PASSWORD = '…'   # a .pfx file
+$env:WATCHLY_SIGN_THUMBPRINT = 'AB12…'                                         # or one in the certificate store / on a token
+```
+
+`signtool.exe` comes from the Windows SDK.
+
+Online subtitles come from OpenSubtitles (no key needed); SubDL's join in once a SubDL key is
+pasted into Settings → Subtitles, as on the phone and TV. It is kept encrypted with Windows'
+DPAPI in `%APPDATA%\Watchly\secrets.bin`. A key in `mobile/.env` (`SUBDL_KEY` or
+`EXPO_PUBLIC_SUBDL_KEY`) at build time still works as a fallback.
 
 ### Self-check
 
