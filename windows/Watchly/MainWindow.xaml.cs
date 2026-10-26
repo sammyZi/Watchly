@@ -92,7 +92,12 @@ public partial class MainWindow : Window
         InitializeComponent();
         BuildTabBar();
         waitingToOpen = openOnStart;
-        ShowProfiles();
+        // A PC is mostly one person's: straight back into whoever was last in. Who's watching
+        // only when there was nobody, it was the guest, or that profile is locked with a PIN.
+        if (Store.Load<string?>(LastProfileKey, null) is { } last && Profiles.Load().FirstOrDefault(p => p.Id == last && p.Pin is null) is { } again)
+            Enter(again);
+        else
+            ShowProfiles();
 
         History.Changed += items => Dispatcher.BeginInvoke(() => { HistoryList = items; LibraryChanged?.Invoke(); });
         Saved.Changed += items => Dispatcher.BeginInvoke(() => { SavedList = items; LibraryChanged?.Invoke(); });
@@ -145,11 +150,15 @@ public partial class MainWindow : Window
 
     void OnProfileButton(object sender, RoutedEventArgs e) => ShowProfiles();
 
+    const string LastProfileKey = "last-profile";
+
     /// <summary>Everything read from here on is this profile's: the library, lists, searches.</summary>
     void Enter(Profile profile)
     {
         var same = Who is not null && Who.Id == profile.Id && !profile.IsGuest;
         Who = profile;
+        if (profile.IsGuest) Store.Remove(LastProfileKey);
+        else Store.Save(LastProfileKey, profile.Id);
         ClosePicker();
         ProfileButton.Content = ProfilesView.Avatar(profile, 40);
         ProfileButton.ToolTip = $"{profile.Name} — switch profile";
