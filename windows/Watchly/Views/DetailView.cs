@@ -44,7 +44,7 @@ public sealed class DetailView : UserControl, IDisposable
     string? backdropUrl;
     CancellationTokenSource? searching;
     int searchGen;
-    FrameworkElement? actionsAnchor;
+    FrameworkElement? sourcesAnchor;
 
     public Title Current => title;
 
@@ -231,7 +231,6 @@ public sealed class DetailView : UserControl, IDisposable
         var play = Ui.Action(label, "play", () => { if (best is not null) Start(best.Magnet, false); }, primary: true);
         play.IsHitTestVisible = live;
         play.Opacity = live ? 1 : 0.6;
-        actionsAnchor = play;
         head.Children.Add(play);
         if (canResume)
         {
@@ -543,12 +542,13 @@ public sealed class DetailView : UserControl, IDisposable
             picked = captured;
             FindReleases(debounce: true);
             Render();
-            // Bring the Play button — which now refers to this episode — into view.
-            if (actionsAnchor is not null)
+            // Move down to this episode's torrents — after Render's own scroll restore, once laid out.
+            Dispatcher.BeginInvoke(() =>
             {
-                var y = actionsAnchor.TransformToAncestor(content).Transform(new Point(0, 0)).Y;
-                scroll.ScrollToVerticalOffset(Math.Max(0, y - 80));
-            }
+                if (sourcesAnchor is null) return;
+                var y = sourcesAnchor.TransformToAncestor(content).Transform(new Point(0, 0)).Y;
+                scroll.ScrollToVerticalOffset(Math.Max(0, y - 20));
+            }, DispatcherPriority.Loaded);
         });
         row.Padding = new Thickness(8, 10, 8, 10);
         row.Margin = new Thickness(-8, 0, -8, 0);
@@ -560,6 +560,7 @@ public sealed class DetailView : UserControl, IDisposable
     void RenderSources(bool fresh, List<Hit>? shown, bool wait)
     {
         var block = new StackPanel { Margin = new Thickness(0, 26, 0, 0), Width = ListWidth, HorizontalAlignment = HorizontalAlignment.Left };
+        sourcesAnchor = block;
         block.Children.Add(Heading(picked is null ? "Sources" : $"Sources  ·  {Short(picked)}"));
 
         var qualities = Qualities.Where(q => sources?.Any(h => h.Quality == q) == true).ToList();
