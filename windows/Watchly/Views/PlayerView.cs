@@ -137,7 +137,8 @@ public sealed class PlayerView : UserControl, IDisposable
     string? failure;
     bool failureFatal;
     string? hud;
-    DateTime hudUntil;
+    /// <summary>Clears the HUD on its own: left to the tick, anything that failed earlier in it kept the HUD up for good.</summary>
+    readonly DispatcherTimer hudTimer = new(DispatcherPriority.Normal);
     DateTime lastSave = DateTime.UtcNow;
     readonly List<SavedSub> externalSubs;
     readonly HashSet<string> addedSlaves = new(StringComparer.OrdinalIgnoreCase);
@@ -272,6 +273,7 @@ public sealed class PlayerView : UserControl, IDisposable
             }
         };
         clickTimer.Tick += (_, _) => { clickTimer.Stop(); ToggleUi(); };
+        hudTimer.Tick += (_, _) => { hudTimer.Stop(); hud = null; Render(); };
 
         Loaded += (_, _) => { Focus(); Keyboard.Focus(this); };
         tick.Start();
@@ -637,7 +639,6 @@ public sealed class PlayerView : UserControl, IDisposable
             SavePosition();
         }
 
-        if (hud is not null && DateTime.UtcNow > hudUntil) hud = null;
         Refresh();
     }
 
@@ -1086,7 +1087,9 @@ public sealed class PlayerView : UserControl, IDisposable
     void ShowHud(string text, int durationMs = 1200)
     {
         hud = text;
-        hudUntil = DateTime.UtcNow.AddMilliseconds(durationMs);
+        hudTimer.Stop();
+        hudTimer.Interval = TimeSpan.FromMilliseconds(durationMs);
+        hudTimer.Start();
         Render();
     }
 
@@ -2535,6 +2538,7 @@ public sealed class PlayerView : UserControl, IDisposable
         tick.Stop();
         hideTimer.Stop();
         clickTimer.Stop();
+        hudTimer.Stop();
         preview?.Dispose();
         // The controls live in LibVLCSharp's own see-through window over the video, which
         // only hides when the VideoView unloads — and that waits for libVLC and the torrent
