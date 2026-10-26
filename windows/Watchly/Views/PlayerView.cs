@@ -184,7 +184,9 @@ public sealed class PlayerView : UserControl, IDisposable
     public PlayerView(PlaybackRequest request)
     {
         this.request = request;
-        externalSubs = request.SavedSubs.Where(s => File.Exists(s.Path)).ToList();
+        // Subtitles found online and kept for this file. The torrent's own come fresh from the
+        // stream each time: ones stored before were every episode's of a pack, not just this one's.
+        externalSubs = request.SavedSubs.Where(s => File.Exists(s.Path) && !s.Path.StartsWith(Paths.StreamCache, StringComparison.OrdinalIgnoreCase)).ToList();
         if (request.LocalPath is not null)
         {
             try
@@ -192,10 +194,11 @@ public sealed class PlayerView : UserControl, IDisposable
                 var dir = Path.GetDirectoryName(request.LocalPath);
                 if (dir is not null && Directory.Exists(dir))
                 {
-                    var files = Directory.GetFiles(dir, "*.srt")
-                        .Concat(Directory.GetFiles(dir, "*.vtt"))
-                        .Concat(Directory.GetFiles(dir, "*.sub"));
-                    foreach (var f in files)
+                    // A season's folder holds every episode's subtitles; only this video's go on.
+                    var names = Directory.GetFiles(dir).Select(Path.GetFileName).OfType<string>().Where(n => Pick.IsSubtitleName(n) || Pick.IsVideoName(n)).ToList();
+                    var files = names.Select((n, i) => new TorrentFileInfo { Index = i, Path = n, Name = n, IsVideo = Pick.IsVideoName(n), IsSubtitle = Pick.IsSubtitleName(n) }).ToList();
+                    var me = files.FindIndex(f => f.Name.Equals(Path.GetFileName(request.LocalPath), StringComparison.OrdinalIgnoreCase));
+                    foreach (var f in me < 0 ? Enumerable.Empty<string>() : Pick.SubtitlesFor(files, me).Select(i => Path.Combine(dir, files[i].Name)))
                     {
                         if (!externalSubs.Any(s => s.Path.Equals(f, StringComparison.OrdinalIgnoreCase)))
                             externalSubs.Add(new SavedSub(f, Path.GetFileName(f)));
@@ -1524,7 +1527,8 @@ public sealed class PlayerView : UserControl, IDisposable
         {
             var path = await SubDL.Save(sub);
             if (!externalSubs.Any(s => s.Path == path)) externalSubs.Add(new SavedSub(path, sub.DisplayName));
-            if (request.HistoryUri is not null) shell.SaveSubs(request.HistoryUri, request.FileIndex, externalSubs.ToList());
+            if (request.HistoryUri is not null)
+                shell.SaveSubs(request.HistoryUri, request.FileIndex, externalSubs.Where(s => !s.Path.StartsWith(Paths.StreamCache, StringComparison.OrdinalIgnoreCase)).ToList());
             AddSlave(path, true);
             searchingSubs = false;
             picking = true;
