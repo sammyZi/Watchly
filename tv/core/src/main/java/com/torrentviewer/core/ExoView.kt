@@ -128,6 +128,9 @@ class ExoView(context: Context) : Video(context) {
         addView(frame, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, Gravity.CENTER))
         subtitleView.setUserDefaultStyle()
         subtitleView.setUserDefaultTextSize()
+        // A subtitle file's own text size wins over ours by default — most .srt / .ass cues carry
+        // one — so the player's size steps changed nothing. Ours always; its colours and italics stay.
+        subtitleView.setApplyEmbeddedFontSizes(false)
         addView(subtitleView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         keepScreenOn = true
     }
