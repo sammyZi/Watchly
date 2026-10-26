@@ -56,8 +56,6 @@ A TV has no browser to download with, so send the APK to it from your phone or P
    go back, and press **Install**.
 6. Open Watchly from the TV's apps row. Later updates install the same way, over the old one.
 
-Prefer to watch it done? [Send an APK to Android TV / Google TV and install it](https://www.youtube.com/watch?v=f3TDtpFK_-g) (YouTube).
-
 ## Disclaimer
 
 Watchly is only a player. It does not host, upload, share or own any videos or
