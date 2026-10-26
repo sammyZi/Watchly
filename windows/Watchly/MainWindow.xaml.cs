@@ -698,7 +698,7 @@ public partial class MainWindow : Window
     {
         foreach (var page in Layers.Children.OfType<FrameworkElement>().ToList()) CloseLayer(page);
         ShowTab("downloads");
-        if (Downloads.Instance.IsLive(job.Uri)) Toast("Already downloading — see below");
+        if (Downloads.Instance.IsLive(job.Uri)) Toast("Added to the download already running");
         Downloads.Instance.Start(job);
     }
 

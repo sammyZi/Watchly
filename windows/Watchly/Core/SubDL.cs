@@ -26,8 +26,10 @@ public static class SubDL
     const string Api = "https://api.subdl.com/api/v1/subtitles";
     const string Files = "https://dl.subdl.com";
 
-    /// <summary>SubDL API key resolved from metadata, environment, or .env file.</summary>
-    public static readonly string? Key = ResolveKey();
+    /// <summary>The viewer's own key from Settings; else one this build was given (mobile/.env, or the environment).</summary>
+    public static string? Key => Secrets.Subdl is { Length: > 0 } mine ? mine : BuildKey;
+
+    static readonly string? BuildKey = ResolveKey();
 
     static string? ResolveKey()
     {
@@ -57,17 +59,15 @@ public static class SubDL
             }
         }
         catch { }
-
-        // Fallback default from repository configuration
-        return "subdl_nZSjDITxHtHgPx-WDY53GZK8E8gZYYPNbuDjuvoX2gs";
+        return null;
     }
 
     static int? Num(JsonNode? n) => int.TryParse(n?.ToString(), out var v) ? v : null;
 
     public static async Task<List<Sub>> Search(string query, string? imdb = null, int? season = null, int? episode = null, string? type = null, string language = "EN")
     {
-        if (Key is null) throw new InvalidOperationException("This build has no SubDL key");
-        var q = new List<string> { $"api_key={Key}", $"languages={language}", "subs_per_page=30" };
+        if (Key is not { } key) throw new InvalidOperationException("No SubDL key — add yours in Settings");
+        var q = new List<string> { $"api_key={Uri.EscapeDataString(key)}", $"languages={language}", "subs_per_page=30" };
         if (imdb is not null) q.Add($"imdb_id={imdb}");
         else if (query.Length > 0) q.Add($"film_name={Uri.EscapeDataString(query)}");
         else return new();

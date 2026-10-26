@@ -190,7 +190,11 @@ public sealed class Downloads
     {
         var settings = AppSettings.Load();
         var uri = settings.AddTrackers ? TitleText.WithTrackers(job.Uri) : job.Uri;
-        if (IsLive(uri)) return;
+        if (Live.FirstOrDefault(l => HashKey(l.Job.Uri) == HashKey(uri)) is { } running)
+        {
+            _ = Widen(running, job);
+            return;
+        }
         var row = new ActiveDownload(job with { Uri = uri }) { Paused = job.Paused };
         Live.Add(row);
         if (persist) Persist();
@@ -282,6 +286,46 @@ public sealed class Downloads
             row.Stage = "Couldn't start";
             Persist();
         }
+    }
+
+    /// <summary>
+    /// The phone's add(): another episode or season out of a torrent already downloading widens
+    /// that download rather than being dropped — and one skipped earlier is wanted after all.
+    /// </summary>
+    async Task Widen(ActiveDownload row, DownloadJob job)
+    {
+        if (row.Meta is not { } meta)
+        {
+            // Still reading the file list: Begin picks these up with the rest.
+            row.Job = row.Job with
+            {
+                FileIndices = row.Job.FileIndices.Union(job.FileIndices).ToList(),
+                Season = row.Job.Season ?? job.Season,
+                Auto = row.Job.Auto ?? job.Auto,
+                All = row.Job.All || job.All,
+            };
+            Persist();
+            return;
+        }
+        var asked = job.FileIndices.Where(i => i >= 0 && i < meta.Files.Count).ToList();
+        if (job.All) asked.AddRange(meta.Files.Select(f => f.Index));
+        if (job.Season is not null) asked.AddRange(Pick.SeasonFiles(meta.Files, job.Season));
+        if (job.Auto is not null && Pick.PickFile(meta.Files, job.Auto == "best" ? null : job.Auto) is int picked) asked.Add(picked);
+        var fresh = asked.Distinct().Where(i => !Pick.IsUnsafe(meta.Files[i].Path) && !row.SavedSet.Contains(i)).ToList();
+        if (fresh.Count == 0) return;
+
+        // Into the queue the card lists, in episode order, if this file was not in it yet.
+        var queue = (row.Job.QueueIndices ?? row.Job.FileIndices).Union(fresh).ToList();
+        row.Job = row.Job with { QueueIndices = queue };
+        foreach (var i in fresh.Where(i => row.Queue.All(q => q.Index != i)))
+        {
+            var f = meta.Files[i];
+            var item = new QueueFile { Index = f.Index, Name = f.Name, Size = f.Size };
+            var at = row.Queue.TakeWhile(q => Pick.FileOrder(meta.Files[q.Index], f) < 0).Count();
+            row.Queue.Insert(at, item);
+        }
+        row.HasQueue = row.Queue.Count > 1;
+        foreach (var i in fresh) await Include(row, i);
     }
 
     /// <summary>Try a failed download again, from scratch — picking up a download folder changed since.</summary>
