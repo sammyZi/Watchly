@@ -8,7 +8,7 @@ Stream or download movies and series from torrents — on Android phones,
 Android TV and Windows.
 
 **[Download the latest release](https://github.com/sammyZi/Watchly/releases/latest)** —
-phone and TV APKs and the Windows exe.
+phone and TV APKs and the Windows installer. How to install each is [below](#install).
 
 - **Stream instantly** — press play and watch right away, and resume where you left off
 - **Every detail** — ratings, cast, trailers and awards on every title
@@ -16,6 +16,47 @@ phone and TV APKs and the Windows exe.
 - **Download & go** — download an episode or a whole season to watch offline
 - **Find anything** — search titles, or torrents by name
 - **Made yours** — profiles with PINs, light and dark themes, Media3 or VLC, subtitles in your language
+
+## Install
+
+Every file is on the [latest release](https://github.com/sammyZi/Watchly/releases/latest).
+
+### Windows 10 / 11
+
+1. Download `Watchly-windows-…-x64-setup.exe` and run it.
+2. Windows may say **"Windows protected your PC"** — the installer isn't code-signed yet. Click
+   **More info → Run anyway**.
+3. Follow the setup. Watchly lands in the Start menu (and on the desktop, if you tick it).
+   Allow the Windows Firewall prompt on first launch so other peers can connect.
+
+To remove it: **Settings → Apps → Watchly → Uninstall**. It asks before deleting your profiles
+and history; downloaded videos are never deleted.
+
+### Android phone
+
+Download the phone APK (`…-phone-…-arm64-v8a.apk` on most phones) in the phone's browser, open
+it, and allow your browser to install apps when Android asks.
+
+### Android TV / Google TV — with LocalSend
+
+A TV has no browser to download with, so send the APK to it from your phone or PC with
+[LocalSend](https://localsend.org) — free, over your own Wi-Fi, nothing uploaded anywhere.
+
+1. **On the TV:** install [LocalSend from Google Play](https://play.google.com/store/apps/details?id=org.localsend.localsend_app)
+   and open it. It waits on the **Receive** tab.
+2. **On your phone or PC:** install LocalSend too ([Play Store](https://play.google.com/store/apps/details?id=org.localsend.localsend_app),
+   or [localsend.org](https://localsend.org) for Windows / Mac / iPhone) and download the TV APK from the release —
+   `…-tv-…-armeabi-v7a.apk` for most TVs and boxes, `…-tv-…-arm64-v8a.apk` for Shield and
+   Chromecast with Google TV, or `…-tv-…-universal.apk` if unsure.
+3. Keep both on the **same Wi-Fi**. In LocalSend on the phone or PC: **Send → File**, pick the APK,
+   then pick your TV from the nearby devices.
+4. **On the TV:** accept the file. When it arrives, open it from LocalSend.
+5. The first time, Android asks to let LocalSend install apps: choose **Settings**, switch
+   **LocalSend** on (on Google TV it's under **Settings → Apps → Security & restrictions → Unknown sources**),
+   go back, and press **Install**.
+6. Open Watchly from the TV's apps row. Later updates install the same way, over the old one.
+
+Prefer to watch it done? [Send an APK to Android TV / Google TV and install it](https://www.youtube.com/watch?v=f3TDtpFK_-g) (YouTube).
 
 ## Disclaimer
 
