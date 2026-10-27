@@ -13,7 +13,7 @@ $project = Join-Path $here 'Watchly\Watchly.csproj'
 $dist = Join-Path $here 'dist'
 
 $version = ([xml](Get-Content $project)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
-if (-not $version) { $version = '2.0.0' }
+if (-not $version) { $version = '2.1.0' }
 
 $iscc = @(
     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
