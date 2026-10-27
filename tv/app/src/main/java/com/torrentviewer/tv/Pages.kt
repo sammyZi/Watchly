@@ -353,10 +353,10 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
 
         Section(
             "Storage for one film",
-            "How much of a film may sit on this TV at once. A 4K film is far larger, so when the cap is reached the stream restarts from where you are — a pause of a few seconds. Pick the largest that fits.",
+            "How much of a film may sit on this TV at once. When it fills, what you've watched is let go to make room. Auto uses the free space, keeping a few GB spare.",
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                CACHE_CAPS.forEach { mb -> Chip("${mb / 1024} GB", settings.cacheCapMb == mb, onClick = { set(settings.copy(cacheCapMb = mb)) }) }
+                CACHE_CAPS.forEach { mb -> Chip(cacheCapLabel(mb), settings.cacheCapMb == mb, onClick = { set(settings.copy(cacheCapMb = mb)) }) }
             }
         }
 
