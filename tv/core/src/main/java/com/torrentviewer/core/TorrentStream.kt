@@ -537,8 +537,10 @@ class TorrentStream(
             .setInteger(settings_pack.int_types.peer_connect_timeout.swigValue(), 5)
             // Slow peers must not book a whole piece the player is about to block on.
             .setInteger(settings_pack.int_types.whole_pieces_threshold.swigValue(), 10)
-            // Re-request an unanswered block after 20s, not 60.
-            .setInteger(settings_pack.int_types.request_timeout.swigValue(), 20)
+            // Re-request an unanswered block after 6s, not 60. A ceiling: libtorrent times each
+            // peer by its own replies. At 20s the phone sat on 255 of 256 blocks for 20s, twice
+            // in one start, at 150kB/s with fifteen seeds idle.
+            .setInteger(settings_pack.int_types.request_timeout.swigValue(), 6)
             // An idle peer may also ask for the last blocks of a piece another peer is
             // sitting on. With strict end-game a 16MB piece of a 4K remux waited 20s on one
             // block (141 of 142 done) while seventy peers had nothing to do — the stalls,
