@@ -80,11 +80,14 @@ jobs:
       - name: Publish the single-file exe
         run: dotnet publish windows/Watchly -c Release -r win-x64 --self-contained -o windows/dist
 
-      - name: Name the exe
+      # The release offers the installer, not the bare exe it packs.
+      - name: Build the installer
         shell: bash
         run: |
+          choco install innosetup --no-progress -y > /dev/null
+          MSYS_NO_PATHCONV=1 "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" /DAppVersion=${TAG#v} windows/installer/Watchly.iss
           mkdir out
-          cp windows/dist/Watchly.exe "out/Watchly-windows-$TAG-x64.exe"
+          cp windows/installer/Output/Watchly-Setup-${TAG#v}-x64.exe "out/Watchly-windows-$TAG-x64-setup.exe"
           ls -l out
 
       - uses: actions/upload-artifact@v4
@@ -119,13 +122,14 @@ jobs:
           | 64-bit Android TVs (Shield, Chromecast with Google TV, newer boxes) | \`Watchly-tv-$TAG-arm64-v8a.apk\` |
           | Emulators / x86 devices | \`…-x86.apk\` |
           | Not sure | \`…-universal.apk\` (every ABI, larger) |
-          | Windows 10/11 (x64) | \`Watchly-windows-$TAG-x64.exe\` |
+          | Windows 10/11 (x64) | \`Watchly-windows-$TAG-x64-setup.exe\` |
 
           The phone app is \`com.torrentviewer.app\` and the TV app \`com.torrentviewer.tv\`; both install over
           earlier builds in place.
 
-          The Windows exe is self-contained (no .NET install needed). Its first launch unpacks libVLC and takes a few
-          seconds; allow the Windows Firewall prompt so peers can connect.
+          On Windows, run the setup: it installs Watchly (no .NET needed) over any earlier version, with a Start menu
+          entry and an uninstaller. It isn't code-signed yet, so Windows may say "Windows protected your PC" — click
+          More info → Run anyway. Allow the Windows Firewall prompt on first launch so peers can connect.
           EOF
           # Re-releasing a tag replaces its files and notes, and drops files this run didn't build.
           if gh release view "$TAG" > /dev/null 2>&1; then
