@@ -137,8 +137,12 @@ private const val READER_LINGER_MS = 10_000L
 /** After start, rush only as many pieces as the swarm finishes in this long. */
 private const val REACH_SECONDS = 16L
 
-/** Blocked on one piece this long with peers connected: re-ask the swarm (VLC gives up at ~40s). */
-private const val STUCK_PIECE_MS = 20_000L
+/**
+ * Blocked on one piece this long with peers connected: re-ask the swarm. At 20s the TV sat
+ * out 20s more than once on a 4K film with 70 seeds, the piece one 16KB block short and that
+ * block out with a single slow peer; the player's buffer holds only ~8s of 4K.
+ */
+private const val STUCK_PIECE_MS = 5_000L
 /** The same during pre-roll, once the piece waits only on blocks already out with peers. */
 private const val PREROLL_STUCK_MS = 4_000L
 /** Waiting this long on a piece narrows the fetch to the rushed pieces alone. */
