@@ -110,8 +110,8 @@ data class Settings(
     val prepareMb: Int = 1,
     /** Attach public trackers to bare magnets so metadata resolves faster. */
     val addTrackers: Boolean = true,
-    /** MB of the film allowed on disk before it rolls over at the playhead. */
-    val cacheCapMb: Int = 4096,
+    /** MB of the film allowed on disk before it rolls over at the playhead; 0 is Auto, the free space. */
+    val cacheCapMb: Int = 0,
     /** Genres to lead the home page with, in Cinemeta's spelling. */
     val genres: List<String> = emptyList(),
     /** libVLC from the start instead of Media3, which falls back to it on its own anyway. */
@@ -149,7 +149,10 @@ fun SubtitleStyle.resized(step: Int): SubtitleStyle {
 fun SettingsStore.resizeSubtitles(step: Int): SubtitleStyle =
     value.value.let { s -> s.subtitles.resized(step).also { save(s.copy(subtitles = it)) } }
 
-val CACHE_CAPS = listOf(2048, 4096, 8192, 16384)
+/** 0 is Auto. */
+val CACHE_CAPS = listOf(0, 2048, 4096, 8192, 16384)
+
+fun cacheCapLabel(mb: Int) = if (mb == 0) "Auto" else "${mb / 1024} GB"
 
 object SettingsStore {
     private val _value = MutableStateFlow(Settings())
@@ -163,7 +166,8 @@ object SettingsStore {
     fun fromJson(o: JSONObject) = Settings(
         prepareMb = o.optInt("prepareMb", 1).coerceAtLeast(1),
         addTrackers = o.optBoolean("addTrackers", true),
-        cacheCapMb = o.optInt("cacheCapMb", 4096).takeIf { it > 0 } ?: 4096,
+        // Renamed from cacheCapMb so the fixed 4 GB everyone had saved gives way to Auto once.
+        cacheCapMb = o.optInt("cacheMb", 0).takeIf { it in CACHE_CAPS } ?: 0,
         genres = o.strings("genres"),
         vlcPlayer = o.optBoolean("vlcPlayer", false),
         subLang = o.optString("subLang", ""),
@@ -185,7 +189,7 @@ object SettingsStore {
         _value.value = next
         val o = runCatching { JSONObject(Kv.global("settings") ?: "{}") }.getOrDefault(JSONObject())
         o.put("prepareMb", next.prepareMb).put("addTrackers", next.addTrackers)
-            .put("cacheCapMb", next.cacheCapMb).put("genres", JSONArray(next.genres)).put("vlcPlayer", next.vlcPlayer)
+            .put("cacheMb", next.cacheCapMb).put("genres", JSONArray(next.genres)).put("vlcPlayer", next.vlcPlayer)
             .put("subLang", next.subLang).put("audioLang", next.audioLang)
             .put("subSize", next.subtitles.size).put("subColor", if (next.subtitles.yellow) "yellow" else "white").put("subBackground", next.subtitles.box)
             .put("playbackRate", next.playbackRate.toDouble()).put("playerScale", next.playerScale).put("streamWholeFile", next.wholeFile).put("themeMode", next.themeMode).put("autoSkipIntro", next.autoSkipIntro)

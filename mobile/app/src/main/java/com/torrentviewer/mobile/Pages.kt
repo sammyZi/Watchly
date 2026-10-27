@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import com.torrentviewer.core.AVATARS
 import com.torrentviewer.core.Avatar
 import com.torrentviewer.core.CACHE_CAPS
+import com.torrentviewer.core.cacheCapLabel
 import com.torrentviewer.core.COLOURS
 import com.torrentviewer.core.GENRES
 import com.torrentviewer.core.GUEST
@@ -547,10 +548,10 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
 
         Section(
             "Storage for one film",
-            "How much of a film may sit on this phone at once. When the cap is reached the stream restarts from where you are — a pause of a few seconds.",
+            "How much of a film may sit on this phone at once. When it fills, what you've watched is let go to make room. Auto uses the free space, keeping a few GB spare.",
         ) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                CACHE_CAPS.forEach { mb -> Chip("${mb / 1024} GB", settings.cacheCapMb == mb, onClick = { set(settings.copy(cacheCapMb = mb)) }) }
+                CACHE_CAPS.forEach { mb -> Chip(cacheCapLabel(mb), settings.cacheCapMb == mb, onClick = { set(settings.copy(cacheCapMb = mb)) }) }
             }
         }
 

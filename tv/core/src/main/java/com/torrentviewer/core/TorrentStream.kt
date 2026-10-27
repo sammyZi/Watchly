@@ -816,11 +816,11 @@ class TorrentStream(
                 "${ti.pieceLength() / 1024 / 1024}MB pieces — prepare ${prepareBytes / 1024 / 1024}MB, readahead ${readaheadBytes / 1024 / 1024}MB",
         )
 
-        // A cap the volume cannot honour is not a cap: clamp it to the room there is.
+        // No cap (Auto) is the room there is; a cap the volume cannot honour is clamped to it.
         val room = saveDir.usableSpace - FREE_SPACE_MIN * 3
         cacheCapBytes = options.cacheCapMb.toLong() * 1024 * 1024
         if (room > 0 && (cacheCapBytes <= 0L || cacheCapBytes > room)) {
-            log("cache cap ${cacheCapBytes / 1024 / 1024}MB exceeds the free space — using ${room / 1024 / 1024}MB")
+            log("cache cap ${if (cacheCapBytes <= 0L) "auto" else "${cacheCapBytes / 1024 / 1024}MB"} — using the free space, ${room / 1024 / 1024}MB")
             cacheCapBytes = room
         }
         // A roll deletes the readahead too; never fetch further ahead than the cap keeps.
