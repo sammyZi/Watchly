@@ -1182,11 +1182,12 @@ class TorrentStream(
     }
 
     /**
-     * Free the disk by starting the file over from where the viewer is: remove the
-     * torrent, delete its data, add it again. The player's connection survives — the
-     * server blocks until the pieces under the playhead arrive again.
-     *
-     * ponytail: one rebuffer per roll; continuous eviction needs FALLOC_FL_PUNCH_HOLE via JNI.
+     * Free the disk by dropping what has been watched: remove the torrent, punch the file
+     * out up to a little behind the viewer (libholes), and add it again holding every piece
+     * it still has — the readahead under the playhead included, so playback carries on while
+     * peers reconnect. Re-adding is also what tells peers those pieces are gone; left alone,
+     * the torrent would serve zeros from the holes. Where a hole cannot be punched it falls
+     * back to deleting the file and starting over, one rebuffer per roll.
      *
      * @return true when the handle was replaced.
      */
@@ -1215,6 +1216,7 @@ class TorrentStream(
         val peers = loadPeers(infoHashHex ?: ti.infoHash().toHex())
         runCatching { h.clearPieceDeadlines() }
         deadlined.clear()
+        val had = (0 until own.numPieces()).filter { runCatching { h.havePiece(it) }.getOrDefault(false) }
 
         try {
             val hash = own.infoHash()
@@ -1231,20 +1233,26 @@ class TorrentStream(
             }
             info = own
             val files = own.files()
-            runCatching {
-                File(saveDir, own.name()).deleteRecursively()
-                for (i in 0 until files.numFiles()) File(saveDir, files.filePath(i)).delete()
+            val (cut, gone) = rollCut(files.fileOffset(fileIndex), at, REWIND_BYTES, own.pieceLength().toLong())
+            val err = if (cut > 0) Holes.punch(File(saveDir, files.filePath(fileIndex)), 0, cut) else -1
+            val kept = if (err == 0) had.filterNot { it in gone } else emptyList()
+            if (err != 0) {
+                if (cut > 0) log("roll: could not free in place (error $err) — starting the file over")
+                runCatching {
+                    File(saveDir, own.name()).deleteRecursively()
+                    for (i in 0 until files.numFiles()) File(saveDir, files.filePath(i)).delete()
+                }
             }
             val free = saveDir.usableSpace
             if (free < FREE_SPACE_MIN) {
                 failStream("Out of storage space. The stream has been stopped.")
                 return true
             }
-            log("roll: freed ${(free - freeBefore) / 1024 / 1024}MB")
+            log("roll: freed ${(free - freeBefore) / 1024 / 1024}MB, kept ${kept.size} piece(s)")
 
             val priorities = Array(files.numFiles()) { Priority.IGNORE }
             wantedFiles.forEach { if (it in priorities.indices) priorities[it] = Priority.DEFAULT }
-            session.download(own, saveDir, null, priorities, peers, TorrentFlags.SEQUENTIAL_DOWNLOAD)
+            addKeeping(own, priorities, peers, kept)
             val next = awaitHandle(own) ?: throw IllegalStateException("torrent did not come back after re-adding")
             next.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
             val existing = runCatching { next.trackers().map { it.url() } }.getOrDefault(emptyList())
@@ -1270,6 +1278,21 @@ class TorrentStream(
             failStream("The stream could not be restarted after freeing space.")
             return true
         }
+    }
+
+    /**
+     * SessionManager.download, plus the pieces already on disk ([have]): the torrent comes back
+     * owning them without hashing the file again — a 50GB film would take minutes.
+     */
+    private fun addKeeping(ti: TorrentInfo, priorities: Array<Priority>, peers: List<TcpEndpoint>, have: List<Int>) {
+        val p = add_torrent_params()
+        p.set_ti(ti.swig())
+        p.setSave_path(saveDir.absolutePath)
+        p.set_file_priorities(org.libtorrent4j.swig.byte_vector().apply { priorities.forEach { add(it.swig()) } })
+        if (peers.isNotEmpty()) p.setPeers(org.libtorrent4j.swig.tcp_endpoint_vector().apply { peers.forEach { add(it.swig()) } })
+        if (have.isNotEmpty()) p.set_have_pieces(org.libtorrent4j.swig.bitfield(ti.numPieces()).apply { have.forEach(::set_bit) })
+        p.setFlags(p.getFlags().or_(TorrentFlags.SEQUENTIAL_DOWNLOAD))
+        session.swig().async_add_torrent(p)
     }
 
     private fun failStream(message: String) {

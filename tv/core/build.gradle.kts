@@ -19,6 +19,10 @@ android {
 
     buildFeatures { compose = true }
 
+    // libholes: frees what has been watched from a streamed file in place (TorrentStream's roll).
+    ndkVersion = "27.1.12297006"
+    externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
+
     // android.util.Log in shared code answers quietly on the JVM.
     testOptions { unitTests.isReturnDefaultValues = true }
 }

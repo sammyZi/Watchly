@@ -297,6 +297,16 @@ class LibTest {
         assertEquals("Drama", toGenres.first().first)
     }
 
+    @Test fun rollCutFreesWatchedPiecesOnly() {
+        val mb = 1024L * 1024
+        // 16MB pieces, file from torrent byte 0, reader at 100MB, 32MB kept behind: pieces 0-3 go (64MB).
+        assertEquals(64 * mb to (0 until 4), rollCut(0, 100 * mb, 32 * mb, 16 * mb))
+        // A file starting mid-piece: the piece it shares is gone too, the cut ends on a piece boundary.
+        assertEquals(56 * mb to (0 until 4), rollCut(8 * mb, 92 * mb, 32 * mb, 16 * mb))
+        // Too near the start to free anything.
+        assertEquals(0L to IntRange.EMPTY, rollCut(0, 20 * mb, 32 * mb, 16 * mb))
+    }
+
     @Test fun subdlRows() {
         val subs = SubDl.toSubs(
             JSONArray()
