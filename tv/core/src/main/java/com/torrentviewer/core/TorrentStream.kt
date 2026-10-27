@@ -298,11 +298,13 @@ class TorrentStream(
     private var warm: TorrentHandle? = null
 
     /**
-     * Piece data. App-specific external storage, not cacheDir: Android sweeps cache
-     * directories when space runs low, which would truncate the film mid-playback.
+     * Piece data. Not cacheDir: Android sweeps cache directories when space runs low,
+     * which would truncate the film mid-playback. Not external storage either: on phones
+     * that is FUSE, which can't punch holes (EOPNOTSUPP), so the rolling cache couldn't
+     * free in place. Same partition, so the same free space.
      */
     private val saveDir: File
-        get() = File(context.getExternalFilesDir(null) ?: context.filesDir, "torrents").apply { mkdirs() }
+        get() = File(context.filesDir, "torrents").apply { mkdirs() }
 
     /** Survives stop/restart: .torrent bytes, peer endpoints, DHT routing table. */
     private val cacheRoot: File get() = File(context.filesDir, "torrent-cache").apply { mkdirs() }
@@ -1478,6 +1480,7 @@ class TorrentStream(
     /** Never throws: teardown calls it partway through. */
     private fun wipeStreamCache() {
         runCatching { File(context.cacheDir, "torrents").takeIf { it.exists() }?.deleteRecursively() }
+        runCatching { context.getExternalFilesDir(null)?.let { File(it, "torrents") }?.takeIf { it.exists() }?.deleteRecursively() }
         val dir = runCatching { saveDir }.getOrNull() ?: return
         runCatching { if (dir.exists()) dir.deleteRecursively() }
         runCatching { dir.mkdirs() }
