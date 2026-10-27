@@ -137,8 +137,12 @@ private const val READER_LINGER_MS = 10_000L
 /** After start, rush only as many pieces as the swarm finishes in this long. */
 private const val REACH_SECONDS = 16L
 
-/** Blocked on one piece this long with peers connected: re-ask the swarm (VLC gives up at ~40s). */
-private const val STUCK_PIECE_MS = 20_000L
+/**
+ * Blocked on one piece this long with peers connected: re-ask the swarm. At 20s the TV sat
+ * out 20s more than once on a 4K film with 70 seeds, the piece one 16KB block short and that
+ * block out with a single slow peer; the player's buffer holds only ~8s of 4K.
+ */
+private const val STUCK_PIECE_MS = 5_000L
 /** The same during pre-roll, once the piece waits only on blocks already out with peers. */
 private const val PREROLL_STUCK_MS = 4_000L
 /** Waiting this long on a piece narrows the fetch to the rushed pieces alone. */
@@ -294,11 +298,13 @@ class TorrentStream(
     private var warm: TorrentHandle? = null
 
     /**
-     * Piece data. App-specific external storage, not cacheDir: Android sweeps cache
-     * directories when space runs low, which would truncate the film mid-playback.
+     * Piece data. Not cacheDir: Android sweeps cache directories when space runs low,
+     * which would truncate the film mid-playback. Not external storage either: on phones
+     * that is FUSE, which can't punch holes (EOPNOTSUPP), so the rolling cache couldn't
+     * free in place. Same partition, so the same free space.
      */
     private val saveDir: File
-        get() = File(context.getExternalFilesDir(null) ?: context.filesDir, "torrents").apply { mkdirs() }
+        get() = File(context.filesDir, "torrents").apply { mkdirs() }
 
     /** Survives stop/restart: .torrent bytes, peer endpoints, DHT routing table. */
     private val cacheRoot: File get() = File(context.filesDir, "torrent-cache").apply { mkdirs() }
@@ -531,8 +537,10 @@ class TorrentStream(
             .setInteger(settings_pack.int_types.peer_connect_timeout.swigValue(), 5)
             // Slow peers must not book a whole piece the player is about to block on.
             .setInteger(settings_pack.int_types.whole_pieces_threshold.swigValue(), 10)
-            // Re-request an unanswered block after 20s, not 60.
-            .setInteger(settings_pack.int_types.request_timeout.swigValue(), 20)
+            // Re-request an unanswered block after 6s, not 60. A ceiling: libtorrent times each
+            // peer by its own replies. At 20s the phone sat on 255 of 256 blocks for 20s, twice
+            // in one start, at 150kB/s with fifteen seeds idle.
+            .setInteger(settings_pack.int_types.request_timeout.swigValue(), 6)
             // An idle peer may also ask for the last blocks of a piece another peer is
             // sitting on. With strict end-game a 16MB piece of a 4K remux waited 20s on one
             // block (141 of 142 done) while seventy peers had nothing to do — the stalls,
@@ -810,11 +818,11 @@ class TorrentStream(
                 "${ti.pieceLength() / 1024 / 1024}MB pieces — prepare ${prepareBytes / 1024 / 1024}MB, readahead ${readaheadBytes / 1024 / 1024}MB",
         )
 
-        // A cap the volume cannot honour is not a cap: clamp it to the room there is.
+        // No cap (Auto) is the room there is; a cap the volume cannot honour is clamped to it.
         val room = saveDir.usableSpace - FREE_SPACE_MIN * 3
         cacheCapBytes = options.cacheCapMb.toLong() * 1024 * 1024
         if (room > 0 && (cacheCapBytes <= 0L || cacheCapBytes > room)) {
-            log("cache cap ${cacheCapBytes / 1024 / 1024}MB exceeds the free space — using ${room / 1024 / 1024}MB")
+            log("cache cap ${if (cacheCapBytes <= 0L) "auto" else "${cacheCapBytes / 1024 / 1024}MB"} — using the free space, ${room / 1024 / 1024}MB")
             cacheCapBytes = room
         }
         // A roll deletes the readahead too; never fetch further ahead than the cap keeps.
@@ -1182,11 +1190,13 @@ class TorrentStream(
     }
 
     /**
-     * Free the disk by starting the file over from where the viewer is: remove the
-     * torrent, delete its data, add it again. The player's connection survives — the
-     * server blocks until the pieces under the playhead arrive again.
-     *
-     * ponytail: one rebuffer per roll; continuous eviction needs FALLOC_FL_PUNCH_HOLE via JNI.
+     * Free the disk by dropping what has been watched: remove the torrent, punch the file
+     * out bar a little behind the viewer, the readahead and the tail (libholes, [rollCuts]),
+     * and add it again holding every piece
+     * it still has — the readahead under the playhead included, so playback carries on while
+     * peers reconnect. Re-adding is also what tells peers those pieces are gone; left alone,
+     * the torrent would serve zeros from the holes. Where a hole cannot be punched it falls
+     * back to deleting the file and starting over, one rebuffer per roll.
      *
      * @return true when the handle was replaced.
      */
@@ -1215,6 +1225,7 @@ class TorrentStream(
         val peers = loadPeers(infoHashHex ?: ti.infoHash().toHex())
         runCatching { h.clearPieceDeadlines() }
         deadlined.clear()
+        val had = (0 until own.numPieces()).filter { runCatching { h.havePiece(it) }.getOrDefault(false) }
 
         try {
             val hash = own.infoHash()
@@ -1231,20 +1242,28 @@ class TorrentStream(
             }
             info = own
             val files = own.files()
-            runCatching {
-                File(saveDir, own.name()).deleteRecursively()
-                for (i in 0 until files.numFiles()) File(saveDir, files.filePath(i)).delete()
+            val far = readers.values.filter { pieceAt(it) < tailPiece }.maxOrNull() ?: at
+            val cuts = rollCuts(files.fileOffset(fileIndex), files.fileSize(fileIndex), at - REWIND_BYTES, maxOf(at, far) + readaheadBytes, tailPiece, own.pieceLength().toLong())
+            val file = File(saveDir, files.filePath(fileIndex))
+            val err = if (cuts.isEmpty()) -1 else cuts.firstNotNullOfOrNull { c -> Holes.punch(file, c.from, c.to - c.from).takeIf { it != 0 } } ?: 0
+            val kept = if (err == 0) had.filterNot { p -> cuts.any { p in it.pieces } } else emptyList()
+            if (err != 0) {
+                if (cuts.isNotEmpty()) log("roll: could not free in place (error $err) — starting the file over")
+                runCatching {
+                    File(saveDir, own.name()).deleteRecursively()
+                    for (i in 0 until files.numFiles()) File(saveDir, files.filePath(i)).delete()
+                }
             }
             val free = saveDir.usableSpace
             if (free < FREE_SPACE_MIN) {
                 failStream("Out of storage space. The stream has been stopped.")
                 return true
             }
-            log("roll: freed ${(free - freeBefore) / 1024 / 1024}MB")
+            log("roll: freed ${(free - freeBefore) / 1024 / 1024}MB, kept ${kept.size} piece(s)")
 
             val priorities = Array(files.numFiles()) { Priority.IGNORE }
             wantedFiles.forEach { if (it in priorities.indices) priorities[it] = Priority.DEFAULT }
-            session.download(own, saveDir, null, priorities, peers, TorrentFlags.SEQUENTIAL_DOWNLOAD)
+            addKeeping(own, priorities, peers, kept)
             val next = awaitHandle(own) ?: throw IllegalStateException("torrent did not come back after re-adding")
             next.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
             val existing = runCatching { next.trackers().map { it.url() } }.getOrDefault(emptyList())
@@ -1270,6 +1289,21 @@ class TorrentStream(
             failStream("The stream could not be restarted after freeing space.")
             return true
         }
+    }
+
+    /**
+     * SessionManager.download, plus the pieces already on disk ([have]): the torrent comes back
+     * owning them without hashing the file again — a 50GB film would take minutes.
+     */
+    private fun addKeeping(ti: TorrentInfo, priorities: Array<Priority>, peers: List<TcpEndpoint>, have: List<Int>) {
+        val p = add_torrent_params()
+        p.set_ti(ti.swig())
+        p.setSave_path(saveDir.absolutePath)
+        p.set_file_priorities(org.libtorrent4j.swig.byte_vector().apply { priorities.forEach { add(it.swig()) } })
+        if (peers.isNotEmpty()) p.setPeers(org.libtorrent4j.swig.tcp_endpoint_vector().apply { peers.forEach { add(it.swig()) } })
+        if (have.isNotEmpty()) p.set_have_pieces(org.libtorrent4j.swig.bitfield(ti.numPieces()).apply { have.forEach(::set_bit) })
+        p.setFlags(p.getFlags().or_(TorrentFlags.SEQUENTIAL_DOWNLOAD))
+        session.swig().async_add_torrent(p)
     }
 
     private fun failStream(message: String) {
@@ -1451,6 +1485,7 @@ class TorrentStream(
     /** Never throws: teardown calls it partway through. */
     private fun wipeStreamCache() {
         runCatching { File(context.cacheDir, "torrents").takeIf { it.exists() }?.deleteRecursively() }
+        runCatching { context.getExternalFilesDir(null)?.let { File(it, "torrents") }?.takeIf { it.exists() }?.deleteRecursively() }
         val dir = runCatching { saveDir }.getOrNull() ?: return
         runCatching { if (dir.exists()) dir.deleteRecursively() }
         runCatching { dir.mkdirs() }

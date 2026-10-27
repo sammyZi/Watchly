@@ -47,6 +47,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -1336,9 +1337,11 @@ private fun SeekBar(at: () -> Double, playing: () -> Double, duration: Double, s
                 drawCircle(red, knob, Offset(size.width * shown, size.height / 2))
             }
             // Qualified: inside the Row the RowScope overload would be picked and refused.
+            // Unbounded: the bubble is taller than the 40dp bar, which squashed its last line.
             androidx.compose.animation.AnimatedVisibility(
                 scrubbing,
-                Modifier.align(Alignment.BottomStart).offset(x = (width * shown - 55.dp).coerceIn(0.dp, width - 110.dp), y = (-44).dp).width(110.dp),
+                Modifier.align(Alignment.BottomStart).offset(x = (width * shown - 55.dp).coerceIn(0.dp, width - 110.dp), y = (-44).dp).width(110.dp)
+                    .wrapContentHeight(Alignment.Bottom, unbounded = true),
                 enter = fadeIn(tween(140)) + scaleIn(tween(180, easing = FastOutSlowInEasing), 0.8f, TransformOrigin(0.5f, 1f)),
                 exit = fadeOut(tween(220)) + scaleOut(tween(220), 0.9f, TransformOrigin(0.5f, 1f)),
             ) {

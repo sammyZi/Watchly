@@ -297,6 +297,19 @@ class LibTest {
         assertEquals("Drama", toGenres.first().first)
     }
 
+    @Test fun rollCutsKeepOnlyTheWindowAndTail() {
+        val mb = 1024L * 1024
+        // 16MB pieces, a 1600MB file (pieces 0-99, tail from 98), keeping 68..200MB: pieces 0-3 go behind, 13-97 ahead.
+        assertEquals(
+            listOf(Cut(0, 64 * mb, 0 until 4), Cut(208 * mb, 1568 * mb, 13 until 98)),
+            rollCuts(0, 1600 * mb, 68 * mb, 200 * mb, 98, 16 * mb),
+        )
+        // A file starting mid-piece: the piece it shares is gone too, the cut ends on a piece boundary.
+        assertEquals(listOf(Cut(0, 56 * mb, 0 until 4)), rollCuts(8 * mb, 1592 * mb, 60 * mb, 1560 * mb, 98, 16 * mb))
+        // Too near the start, the window reaching the tail: nothing to free.
+        assertEquals(emptyList<Cut>(), rollCuts(0, 1600 * mb, -12 * mb, 1590 * mb, 98, 16 * mb))
+    }
+
     @Test fun subdlRows() {
         val subs = SubDl.toSubs(
             JSONArray()

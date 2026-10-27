@@ -161,11 +161,13 @@ class Watch(val engine: TorrentStream) {
     }
 
     /** Continue watching: the stored file list goes straight to the engine. */
-    fun resume(target: Item) = AppScope.launch {
-        if (isLocalVideo(target.uri)) {
-            playFile(target.uri, target.label, poster = target.poster)
+    fun resume(picked: Item) = AppScope.launch {
+        if (isLocalVideo(picked.uri)) {
+            playFile(picked.uri, picked.label, poster = picked.poster)
             return@launch
         }
+        // Played again: to the front of Continue watching.
+        val target = History.put(picked.copy(at = System.currentTimeMillis()))
         // Art and synopsis for the player, without holding up the stream.
         title = null
         item = target
