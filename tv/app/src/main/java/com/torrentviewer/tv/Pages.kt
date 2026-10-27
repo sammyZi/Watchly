@@ -46,7 +46,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -81,6 +84,8 @@ fun Field(
     /** The keyboard's action key: Done, or Search on the search page. */
     imeAction: ImeAction = ImeAction.Done,
     leading: Int? = null,
+    /** False: landing on it leaves the keyboard down until OK — for boxes passed on the way down a page. */
+    keyboardOnFocus: Boolean = true,
     trailing: @Composable () -> Unit = {},
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -102,7 +107,7 @@ fun Field(
                 textStyle = Type.title.copy(fontWeight = FontWeight.Medium, letterSpacing = if (secret) 8.sp else 0.sp),
                 cursorBrush = SolidColor(Ink.accent),
                 visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
-                keyboardOptions = KeyboardOptions(keyboardType = if (digits) KeyboardType.NumberPassword else KeyboardType.Text, imeAction = imeAction),
+                keyboardOptions = KeyboardOptions(keyboardType = if (digits) KeyboardType.NumberPassword else KeyboardType.Text, imeAction = imeAction, showKeyboardOnFocus = keyboardOnFocus),
                 // Then what the key does anyway: Done puts the keyboard away.
                 keyboardActions = KeyboardActions(onAny = { onSubmit(); defaultKeyboardAction(imeAction) }),
                 modifier = Modifier.fillMaxWidth()
@@ -308,7 +313,11 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
     fun set(next: Settings) = SettingsStore.save(next)
 
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+        Modifier.fillMaxSize()
+            // In from the rail: the PIN box is leftmost, so it won the focus search and opened the keyboard.
+            .focusProperties { onEnter = { first.requestFocus() } }
+            .focusGroup()
+            .verticalScroll(rememberScrollState())
             .padding(start = GUTTER, end = Safe.x, top = Safe.y, bottom = 120.dp),
     ) {
         Text("Settings", style = Type.display)
@@ -335,7 +344,7 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
                 else "Four digits, asked for before this profile opens. A lock for a shared TV — not a password.",
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Field(pin, { pin = it.filter(Char::isDigit).take(4) }, if (me.pin != null) "••••" else "– – – –", Modifier.width(180.dp), secret = true, digits = true)
+                    Field(pin, { pin = it.filter(Char::isDigit).take(4) }, if (me.pin != null) "••••" else "– – – –", Modifier.width(180.dp), secret = true, digits = true, keyboardOnFocus = false)
                     Spacer(Modifier.width(14.dp))
                     TvButton(if (pin.length == 4) "Set PIN" else "Enter 4 digits", {
                         if (pin.length == 4) {
@@ -353,10 +362,10 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
 
         Section(
             "Storage for one film",
-            "How much of a film may sit on this TV at once. A 4K film is far larger, so when the cap is reached the stream restarts from where you are — a pause of a few seconds. Pick the largest that fits.",
+            "How much of a film may sit on this TV at once. When it fills, what you've watched is let go to make room. Auto uses the free space, keeping a few GB spare.",
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                CACHE_CAPS.forEach { mb -> Chip("${mb / 1024} GB", settings.cacheCapMb == mb, onClick = { set(settings.copy(cacheCapMb = mb)) }) }
+                CACHE_CAPS.forEach { mb -> Chip(cacheCapLabel(mb), settings.cacheCapMb == mb, onClick = { set(settings.copy(cacheCapMb = mb)) }) }
             }
         }
 
@@ -389,7 +398,7 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             else "A free key from subdl.com adds its subtitles to Find subtitles. It stays encrypted on this TV.",
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Field(key, { key = it.trim() }, if (subdl.isNotEmpty()) "••••••••••••" else "Your SubDL API key", Modifier.width(420.dp), secret = true)
+                Field(key, { key = it.trim() }, if (subdl.isNotEmpty()) "••••••••••••" else "Your SubDL API key", Modifier.width(420.dp), secret = true, keyboardOnFocus = false)
                 Spacer(Modifier.width(14.dp))
                 TvButton(if (key.isNotEmpty()) "Save key" else "Enter a key", {
                     if (key.isNotEmpty()) {
@@ -430,7 +439,12 @@ private fun Section(title: String, hint: String, content: @Composable () -> Unit
     Column(Modifier.padding(bottom = 34.dp)) {
         Text(title, style = Type.title.copy(fontWeight = FontWeight.Bold))
         Text(hint, Modifier.padding(top = 4.dp, bottom = 14.dp).widthIn(max = 760.dp), style = Type.meta.copy(color = Ink.faint))
-        content()
+        // Right off a row's end found the section below; left still reaches the rail by the page's own key handler.
+        Box(
+            Modifier.focusProperties {
+                onExit = { if (requestedFocusDirection == FocusDirection.Left || requestedFocusDirection == FocusDirection.Right) cancelFocusChange() }
+            }.focusGroup(),
+        ) { content() }
     }
 }
 
