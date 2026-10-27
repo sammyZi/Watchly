@@ -46,7 +46,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -308,7 +310,11 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
     fun set(next: Settings) = SettingsStore.save(next)
 
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+        Modifier.fillMaxSize()
+            // In from the rail: the PIN box is leftmost, so it won the focus search and opened the keyboard.
+            .focusProperties { onEnter = { first.requestFocus() } }
+            .focusGroup()
+            .verticalScroll(rememberScrollState())
             .padding(start = GUTTER, end = Safe.x, top = Safe.y, bottom = 120.dp),
     ) {
         Text("Settings", style = Type.display)
