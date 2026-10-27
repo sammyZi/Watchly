@@ -1189,7 +1189,8 @@ class TorrentStream(
 
     /**
      * Free the disk by dropping what has been watched: remove the torrent, punch the file
-     * out up to a little behind the viewer (libholes), and add it again holding every piece
+     * out bar a little behind the viewer, the readahead and the tail (libholes, [rollCuts]),
+     * and add it again holding every piece
      * it still has — the readahead under the playhead included, so playback carries on while
      * peers reconnect. Re-adding is also what tells peers those pieces are gone; left alone,
      * the torrent would serve zeros from the holes. Where a hole cannot be punched it falls
@@ -1239,11 +1240,13 @@ class TorrentStream(
             }
             info = own
             val files = own.files()
-            val (cut, gone) = rollCut(files.fileOffset(fileIndex), at, REWIND_BYTES, own.pieceLength().toLong())
-            val err = if (cut > 0) Holes.punch(File(saveDir, files.filePath(fileIndex)), 0, cut) else -1
-            val kept = if (err == 0) had.filterNot { it in gone } else emptyList()
+            val far = readers.values.filter { pieceAt(it) < tailPiece }.maxOrNull() ?: at
+            val cuts = rollCuts(files.fileOffset(fileIndex), files.fileSize(fileIndex), at - REWIND_BYTES, maxOf(at, far) + readaheadBytes, tailPiece, own.pieceLength().toLong())
+            val file = File(saveDir, files.filePath(fileIndex))
+            val err = if (cuts.isEmpty()) -1 else cuts.firstNotNullOfOrNull { c -> Holes.punch(file, c.from, c.to - c.from).takeIf { it != 0 } } ?: 0
+            val kept = if (err == 0) had.filterNot { p -> cuts.any { p in it.pieces } } else emptyList()
             if (err != 0) {
-                if (cut > 0) log("roll: could not free in place (error $err) — starting the file over")
+                if (cuts.isNotEmpty()) log("roll: could not free in place (error $err) — starting the file over")
                 runCatching {
                     File(saveDir, own.name()).deleteRecursively()
                     for (i in 0 until files.numFiles()) File(saveDir, files.filePath(i)).delete()
