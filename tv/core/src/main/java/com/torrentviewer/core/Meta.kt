@@ -318,6 +318,15 @@ fun absoluteNumber(episodes: List<Episode>, season: Int, number: Int): Int? {
     return if (inSeason.minOf { it.episode } > 1) number else episodes.count { it.season in 1 until season } + number
 }
 
+/** An episode as the player names it: long anime by its number through the show ("Episode 1071"), else "S21:E5". */
+fun episodeLabel(title: Title?, season: Int, episode: Int): String =
+    title?.takeIf { it.numberedThrough }?.let { absoluteNumber(it.episodes, season, episode) }?.let { "Episode $it" } ?: "S$season:E$episode"
+
+/** [episodeLabel] from a file's name; an anime release that names no season ("One Piece - 1071") goes by its bare number. */
+fun fileEpisodeLabel(title: Title?, name: String): String? =
+    parseEpisode(name)?.let { episodeLabel(title, it.season, it.episode) }
+        ?: parseAbsolute(name)?.takeIf { title?.isSeries != false }?.let { "Episode $it" }
+
 /** [absoluteNumber] for every regular episode in one pass: per episode it is quadratic, a second a call on One Piece. */
 fun absoluteNumbers(episodes: List<Episode>): Map<Episode, Int> {
     var before = 0

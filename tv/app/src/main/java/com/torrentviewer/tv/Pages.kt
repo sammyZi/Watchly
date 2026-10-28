@@ -556,7 +556,7 @@ private fun Tile(name: String, onClick: () -> Unit, requester: FocusRequester? =
 @Composable
 private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, String, String) -> Unit, onDelete: () -> Unit, onCancel: () -> Unit) {
     var name by remember { mutableStateOf(profile?.name.orEmpty()) }
-    var icon by remember { mutableStateOf(profile?.icon ?: AVATARS[0]) }
+    var icon by remember { mutableStateOf(profile?.let { Avatars.of(it).id } ?: AVATARS[0]) }
     var colour by remember { mutableStateOf(profile?.colour ?: COLOURS[0]) }
     val field = remember { FocusRequester() }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = Safe.x)) {
@@ -569,10 +569,9 @@ private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, Strin
             Text("ICON", Modifier.padding(top = 22.dp, bottom = 10.dp), style = Type.overline)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 AVATARS.forEach { a ->
-                    Focusable({ icon = a }, Modifier.size(50.dp), CircleShape, 1.12f) {
-                        Box(Modifier.fillMaxSize().background(if (a == icon) Ink.accent else Ink.surface2), contentAlignment = Alignment.Center) {
-                            Lc(avatarIcon(a), tint = Color.White, size = 24.dp)
-                        }
+                    Focusable({ icon = a }, Modifier.size(56.dp), RoundedCornerShape(12.dp), 1.12f) {
+                        AvatarTile(Avatars.art(a), colorOf(colour), 56.dp)
+                        if (a == icon) Box(Modifier.fillMaxSize().border(3.dp, Ink.accent, RoundedCornerShape(12.dp)))
                     }
                 }
             }

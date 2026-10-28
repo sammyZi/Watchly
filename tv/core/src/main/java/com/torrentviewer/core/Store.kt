@@ -263,8 +263,8 @@ val GUEST = Profile("guest", "Guest", "#5b6472")
 /** A fixed set, so profiles are told apart by colour as much as by name. */
 val COLOURS = listOf("#e50914", "#2b8cff", "#f5a623", "#3ecf8e", "#a855f7", "#ff6b6b")
 
-/** Names kept from the Expo build's icon set; each maps to a drawn glyph. */
-val AVATARS = listOf("emoticon-happy", "emoticon-cool", "emoticon-excited", "emoticon-wink", "emoticon-tongue", "robot", "cat", "dog", "alien", "penguin")
+/** The faces a profile can pick, by id, in the picker's order; see [Avatars]. */
+val AVATARS: List<String> get() = Avatars.pickable.map { it.id }
 
 object Profiles {
     private val _list = MutableStateFlow<List<Profile>>(emptyList())
@@ -431,16 +431,46 @@ fun latestPerTitle(items: List<Item>): List<Item> =
  * seconds, with that release's duration. By time, not bytes — releases differ in size.
  */
 fun carryOver(items: List<Item>, target: Item, fileName: String): Pair<Double, Double?>? {
-    val ep = parseEpisode(fileName)
+    // Anime goes by its bare number ("One Piece - 1125"): without it, every such file was
+    // "no episode" alike, and 1125 opened where 1124 was left.
+    fun episodeOf(name: String): Any? = parseEpisode(name) ?: parseAbsolute(name)
+    val ep = episodeOf(fileName)
+    // A series file that says no episode can't be matched to anything.
+    if (ep == null && target.kind == "tv") return null
     val donor = items.filter { it.uri != target.uri && it.titleKey == target.titleKey }.sortedByDescending { it.at }.firstOrNull { d ->
         val i = d.lastFileIndex ?: return@firstOrNull false
-        (d.positions[i] ?: 0.0) > 0.0 && d.files?.find { it.index == i }?.name?.let(::parseEpisode) == ep
+        (d.positions[i] ?: 0.0) > 0.0 && d.files?.find { it.index == i }?.name?.let(::episodeOf) == ep
     } ?: return null
     val i = donor.lastFileIndex!!
     val duration = donor.durations[i]
     // Watched through is not a place to start a new copy from.
     if (duration != null && donor.positions[i]!! >= duration * 0.95) return null
     return donor.positions[i]!! to duration
+}
+
+/** The episode a file in [list] is: by its S/E, else by the number counted through the show ("One Piece - 1071"). */
+fun episodeOfFile(list: List<Episode>, name: String): Episode? {
+    parseEpisode(name)?.let { at -> return list.find { it.season == at.season && it.episode == at.episode } }
+    val n = parseAbsolute(name) ?: return null
+    return absoluteNumbers(list).entries.find { it.value == n }?.key
+}
+
+/**
+ * What a series' Play button offers: the episode last played if it was left part-way,
+ * else the one after it. Null when nothing of [title] was played, or it was the last.
+ */
+fun continueEpisode(title: Title, items: List<Item>): Episode? {
+    val last = items.filter { it.imdb == title.imdb }.sortedByDescending { it.at }.firstNotNullOfOrNull { item ->
+        val i = item.lastFileIndex ?: return@firstNotNullOfOrNull null
+        val name = item.files?.find { it.index == i }?.name ?: item.title
+        episodeOfFile(title.episodes, name)?.let { it to item }
+    } ?: return null
+    val (ep, item) = last
+    val i = item.lastFileIndex!!
+    val done = item.durations[i]?.let { d -> d > 0 && (item.positions[i] ?: 0.0) >= d * 0.95 } ?: false
+    if (!done) return ep
+    val inOrder = title.episodes.filter { it.season > 0 }.sortedWith(compareBy({ it.season }, { it.episode }))
+    return inOrder.getOrNull(inOrder.indexOf(ep) + 1)
 }
 
 /** How far through each episode of [imdb] anyone got, 0–1, by its file name — the furthest of every release it was played from. */

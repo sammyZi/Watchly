@@ -453,6 +453,11 @@ class LibTest {
         val pack = Item("d", "Show.S01", at = 2, imdb = "tt6")
         assertEquals(300.0 to null, carryOver(listOf(ep1, pack), pack, "Show.S01E01.1080p.mkv"))
         assertNull(carryOver(listOf(ep1, pack), pack, "Show.S01E02.mkv"))
+        // Anime by its bare number: 1125 does not start where 1124 was left; another copy of 1124 does.
+        val e1124 = Item("e", "[SubsPlease] One Piece - 1124 (1080p)", at = 3, imdb = "tt8", kind = "tv", files = f("[SubsPlease] One Piece - 1124 (1080p).mkv"), lastFileIndex = 0, positions = mapOf(0 to 1300.0))
+        val next = Item("g", "[Erai-raws] One Piece - 1125", at = 4, imdb = "tt8", kind = "tv")
+        assertNull(carryOver(listOf(e1124, next), next, "[Erai-raws] One Piece - 1125 [1080p].mkv"))
+        assertEquals(1300.0 to null, carryOver(listOf(e1124, next), next, "[Erai-raws] One Piece - 1124 [1080p].mkv"))
         // Watched through: start the new copy from the top.
         assertNull(carryOver(listOf(first.copy(positions = mapOf(0 to 5900.0)), second), second, "Film.1080p.mkv"))
     }
@@ -482,5 +487,33 @@ class LibTest {
         assertNull(parseIntroDb("""{"recap":{"start_sec":0,"end_sec":79}}"""))
         assertNull(parseIntroDb("""{"intro":{"start_sec":90,"end_sec":90}}"""))
         assertNull(parseIntroDb("not json"))
+    }
+
+    @Test fun continuesFromLastWatched() {
+        val eps = (1..3).flatMap { s -> (1..4).map { e -> Episode("x:$s:$e", s, e, "", null, null, null) } }
+        val show = Title("tt9", "tv", "Show", episodes = eps)
+        fun played(name: String, at: Double, of: Double, time: Long) =
+            Item(name, name, at = time, imdb = "tt9", files = listOf(StoredFile(0, "$name.mkv", 1, true, false, null)), lastFileIndex = 0, positions = mapOf(0 to at), durations = mapOf(0 to of))
+        // Seasons 1 and 2 seen, S3E3 finished last: S3E4 is next, not S1E1.
+        val seen = listOf(played("Show.S01E02", 1000.0, 1000.0, 1), played("Show.S03E03", 990.0, 1000.0, 3), played("Show.S02E04", 1000.0, 1000.0, 2))
+        assertEquals("x:3:4", continueEpisode(show, seen)?.id)
+        // Left part-way: that one again.
+        assertEquals("x:3:3", continueEpisode(show, listOf(played("Show.S03E03", 300.0, 1000.0, 5)))?.id)
+        // A season's last episode leads into the next season; the show's last leads nowhere.
+        assertEquals("x:3:1", continueEpisode(show, listOf(played("Show.S02E04", 1000.0, 1000.0, 1)))?.id)
+        assertNull(continueEpisode(show, listOf(played("Show.S03E04", 1000.0, 1000.0, 1))))
+        assertNull(continueEpisode(show, emptyList()))
+    }
+
+    @Test fun episodeLabels() {
+        // Two seasons of 60: S2E5 is episode 65 through the show.
+        val eps = (1..2).flatMap { s -> (1..60).map { e -> Episode("x:$s:$e", s, e, "", null, null, null) } }
+        val anime = Title("x", "tv", "Long Show", genres = listOf(ANIME_GENRE), episodes = eps)
+        assertEquals("Episode 65", episodeLabel(anime, 2, 5))
+        assertEquals("S2:E5", episodeLabel(anime.copy(genres = listOf("Drama")), 2, 5))
+        assertEquals("S2:E5", episodeLabel(null, 2, 5))
+        assertEquals("Episode 65", fileEpisodeLabel(anime, "Long.Show.S02E05.1080p.mkv"))
+        assertEquals("Episode 1071", fileEpisodeLabel(null, "[SubsPlease] One Piece - 1071 (1080p).mkv"))
+        assertNull(fileEpisodeLabel(Title("y", "movie", "Film"), "[SubsPlease] One Piece - 1071 (1080p).mkv"))
     }
 }

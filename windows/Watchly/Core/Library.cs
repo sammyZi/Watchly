@@ -171,10 +171,16 @@ public static class History
     /// </summary>
     public static (double At, double? Duration)? CarryOver(IEnumerable<HistoryItem> items, HistoryItem target, string fileName)
     {
-        var ep = Search.ParseEpisode(fileName);
+        // Anime goes by its bare number ("One Piece - 1125"): without it, every such file was
+        // "no episode" alike, and 1125 opened where 1124 was left.
+        static string? EpisodeOf(string? name) =>
+            Search.ParseEpisode(name) is { } at ? $"S{at.Season}E{at.Episode}" : Search.ParseAbsolute(name) is int n ? $"#{n}" : null;
+        var ep = EpisodeOf(fileName);
+        // A series file that says no episode can't be matched to anything.
+        if (ep is null && target.Kind == "tv") return null;
         var donor = items.Where(x => x.Uri != target.Uri && x.TitleKey == target.TitleKey).OrderByDescending(x => x.At)
             .FirstOrDefault(d => d.LastFileIndex is int i && d.PositionOf(i) is > 0 &&
-                                 Search.ParseEpisode(d.Files?.FirstOrDefault(f => f.Index == i)?.Name) == ep);
+                                 EpisodeOf(d.Files?.FirstOrDefault(f => f.Index == i)?.Name) == ep);
         if (donor?.LastFileIndex is not int at || donor.PositionOf(at) is not double position) return null;
         var duration = donor.DurationOf(at);
         if (duration is > 0 && position >= duration.Value * 0.95) return null;
@@ -406,14 +412,13 @@ public sealed record Profile
     public string Id { get; init; } = "";
     public string Name { get; init; } = "";
     public string Colour { get; init; } = Profiles.Colours[0];
+    /// <summary>The face picked, an avatars.json id; none picked, <see cref="Avatars.Of"/> picks a steady one.</summary>
+    public string? Icon { get; init; }
     /// <summary>Four digits asked for before it opens — a lock for a shared PC, not a password.</summary>
     public string? Pin { get; init; }
 
     [System.Text.Json.Serialization.JsonIgnore]
     public bool IsGuest => Id == Profiles.Guest.Id;
-
-    [System.Text.Json.Serialization.JsonIgnore]
-    public string Initial => Name.Trim() is { Length: > 0 } n ? char.ToUpperInvariant(n[0]).ToString() : "?";
 }
 
 /// <summary>The profile list, shared by everyone on this PC — with the settings, not inside a profile.</summary>
@@ -437,7 +442,7 @@ public static class Profiles
     }
 
     /// <summary>The very first takes the bare keys, so a library from before profiles survives.</summary>
-    public static Profile Add(string name, string colour)
+    public static Profile Add(string name, string colour, string icon)
     {
         var list = Load();
         var profile = new Profile
@@ -445,13 +450,15 @@ public static class Profiles
             Id = list.Count == 0 ? "" : "p" + Store.Now.ToString("x"),
             Name = name.Trim() is { Length: > 0 } n ? n : "Me",
             Colour = colour,
+            Icon = icon,
         };
         Write(list.Append(profile).ToList());
         return profile;
     }
 
-    public static void Edit(string id, string name, string colour) =>
-        Write(Load().Select(p => p.Id == id ? p with { Name = name.Trim() is { Length: > 0 } n ? n : p.Name, Colour = colour } : p).ToList());
+    public static Profile? Edit(string id, string name, string colour, string icon) =>
+        Write(Load().Select(p => p.Id == id ? p with { Name = name.Trim() is { Length: > 0 } n ? n : p.Name, Colour = colour, Icon = icon } : p).ToList())
+            .FirstOrDefault(p => p.Id == id);
 
     /// <summary>Four digits sets a lock; anything else clears it.</summary>
     public static Profile? SetPin(string id, string pin)

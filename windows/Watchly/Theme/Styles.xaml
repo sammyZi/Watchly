@@ -266,10 +266,56 @@
     <Setter Property="FontSize" Value="12" />
   </Style>
 
+  <!-- A menu as the app's own card: rounded, no icon gutter, long lists scroll. -->
   <Style TargetType="ContextMenu">
     <Setter Property="Background" Value="{DynamicResource SurfaceAlt}" />
     <Setter Property="Foreground" Value="{DynamicResource Text}" />
     <Setter Property="BorderBrush" Value="{DynamicResource Line}" />
+    <Setter Property="HasDropShadow" Value="False" />
+    <Setter Property="MinWidth" Value="220" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ContextMenu">
+          <Border Margin="0,0,10,10" Padding="6" CornerRadius="10" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
+            <Border.Effect>
+              <DropShadowEffect BlurRadius="18" ShadowDepth="4" Opacity="0.45" />
+            </Border.Effect>
+            <ScrollViewer MaxHeight="440" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+              <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle" />
+            </ScrollViewer>
+          </Border>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style TargetType="MenuItem">
+    <Setter Property="Foreground" Value="{DynamicResource Text}" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="MenuItem">
+          <Border x:Name="Row" Padding="12,8" CornerRadius="6" Background="Transparent">
+            <DockPanel>
+              <Path x:Name="Tick" DockPanel.Dock="Right" Width="14" Height="14" Margin="12,0,0,0" Stretch="Uniform" Visibility="Collapsed"
+                    Data="M20,6 L9,17 L4,12" Stroke="{DynamicResource Accent}" StrokeThickness="2.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
+              <ContentPresenter ContentSource="Header" VerticalAlignment="Center" RecognizesAccessKey="True" />
+            </DockPanel>
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsHighlighted" Value="True">
+              <Setter TargetName="Row" Property="Background" Value="{DynamicResource Tint}" />
+            </Trigger>
+            <Trigger Property="IsChecked" Value="True">
+              <Setter TargetName="Tick" Property="Visibility" Value="Visible" />
+              <Setter Property="Foreground" Value="{DynamicResource Accent}" />
+              <Setter Property="FontWeight" Value="SemiBold" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
   </Style>
 
   <!-- Spinner: an arc that turns. -->

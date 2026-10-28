@@ -240,11 +240,7 @@ class Watch(val engine: TorrentStream) {
     /** The Cinemeta episode a file in this pack is, for its name and still. */
     fun episodeOf(file: TorrentFile?): Episode? {
         val name = file?.name ?: return null
-        val list = title?.episodes ?: return null
-        parseEpisode(name)?.let { at -> return list.find { it.season == at.season && it.episode == at.episode } }
-        // "One Piece - 1071": the running number.
-        val n = parseAbsolute(name) ?: return null
-        return absoluteNumbers(list).entries.find { it.value == n }?.key
+        return episodeOfFile(title?.episodes ?: return null, name)
     }
 
     val playingFile: TorrentFile? get() = meta?.files?.find { it.index == playingIndex }

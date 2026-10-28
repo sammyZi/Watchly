@@ -147,6 +147,8 @@ import com.torrentviewer.core.Watch
 import com.torrentviewer.core.bytes
 import com.torrentviewer.core.clock
 import com.torrentviewer.core.episodeTag
+import com.torrentviewer.core.episodeLabel
+import com.torrentviewer.core.fileEpisodeLabel
 import com.torrentviewer.core.left
 import com.torrentviewer.core.parseEpisode
 import com.torrentviewer.core.searchEpisode
@@ -407,7 +409,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         if (castSession != null) return
         MediaCard.update(
             title = title?.title ?: watch.item?.label ?: "Watchly",
-            subtitle = episode?.let { "S${it.season}:E${it.episode}  “${it.name}”" },
+            subtitle = episode?.let { "${episodeLabel(title, it.season, it.episode)}  “${it.name}”" },
             paused = paused || !loaded,
             positionMs = (at * 1000).toLong(),
             durationMs = (duration * 1000).toLong(),
@@ -1232,7 +1234,7 @@ private fun TopBar(
         RoundIcon(L.drawable.lucide_ic_arrow_left, onBack)
         Column(Modifier.weight(1f).padding(start = 12.dp)) {
             Text(title?.title ?: searchableName(file?.name.orEmpty()).ifBlank { file?.name.orEmpty() }, style = Type.title.copy(fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            val ep = episode?.let { "S${it.season}:E${it.episode}  ${it.name}" } ?: file?.let { parseEpisode(it.name) }?.let { "S${it.season}:E${it.episode}" }
+            val ep = episode?.let { "${episodeLabel(title, it.season, it.episode)}  ${it.name}" } ?: file?.let { fileEpisodeLabel(title, it.name) }
             val ends = if (duration > 0) "Ends at " + DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(System.currentTimeMillis() + ((duration - at()) / rate * 1000).toLong())) else null
             Text(listOfNotNull(ep, ends).joinToString("  ·  "), style = Type.meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
@@ -1413,7 +1415,7 @@ private fun PausedCard(visible: Boolean, title: Title?, episode: Episode?, label
                 Text("You're watching", style = Type.label.copy(color = Ink.muted, fontWeight = FontWeight.Medium))
                 Spacer(Modifier.height(8.dp))
                 if (title != null) TitleMark(title, maxHeight = 64.dp, style = Type.display) else Text(label, style = Type.display, maxLines = 2)
-                episode?.let { Text("S${it.season}:E${it.episode}  “${it.name}”", Modifier.padding(top = 10.dp), style = Type.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                episode?.let { Text("${episodeLabel(title, it.season, it.episode)}  “${it.name}”", Modifier.padding(top = 10.dp), style = Type.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                 if (title != null) Facts(title.copy(genres = title.genres.take(2)), Modifier.padding(top = 10.dp))
                 (episode?.overview ?: title?.plot)?.let { Text(it, Modifier.padding(top = 10.dp), style = Type.body.copy(fontSize = 14.sp, color = Ink.text.copy(alpha = 0.8f)), maxLines = 3, overflow = TextOverflow.Ellipsis) }
                 // Where the film is, and how much is left of it — the reason to glance at a paused screen.
@@ -1452,7 +1454,8 @@ private fun Loading(title: Title?, episode: Episode?, file: TorrentFile?, starti
                 Column(Modifier.weight(1f)) {
                     if (title != null) TitleMark(title, Modifier.widthIn(max = 380.dp), maxHeight = 76.dp, style = Type.display)
                     else Text(searchableName(file?.name.orEmpty()).ifBlank { file?.name.orEmpty() }, style = Type.display, maxLines = 2)
-                    episode?.let { Text("S${it.season}:E${it.episode}  ${it.name}", Modifier.padding(top = 10.dp), style = Type.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    (episode?.let { "${episodeLabel(title, it.season, it.episode)}  ${it.name}" } ?: file?.let { fileEpisodeLabel(title, it.name) })
+                        ?.let { Text(it, Modifier.padding(top = 10.dp), style = Type.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                     Row(Modifier.padding(top = 18.dp), verticalAlignment = Alignment.CenterVertically) {
                         val live = (progress?.peers ?: 0) > 0
                         Box(Modifier.size(8.dp).clip(CircleShape).background(if (live) Ink.good else Ink.faint))
@@ -1546,7 +1549,7 @@ private fun CastingCard(
             }
             Column(Modifier.align(Alignment.Center).padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 if (title != null) TitleMark(title, Modifier.widthIn(max = 340.dp), maxHeight = 70.dp, style = Type.display) else Text(label, style = Type.display, maxLines = 2)
-                episode?.let { Text("S${it.season}:E${it.episode}  ${it.name}", Modifier.padding(top = 8.dp), style = Type.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                episode?.let { Text("${episodeLabel(title, it.season, it.episode)}  ${it.name}", Modifier.padding(top = 8.dp), style = Type.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                 Row(Modifier.padding(top = 22.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(36.dp)) {
                     RoundIcon(L.drawable.lucide_ic_rotate_ccw, { onSeek(at - SKIP) }, size = 50.dp)
                     RoundIcon(if (paused) L.drawable.lucide_ic_play else L.drawable.lucide_ic_pause, onToggle, size = 66.dp)

@@ -183,10 +183,13 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>A PIN set or removed in Settings, for the profile in use.</summary>
+    /// <summary>The profile in use was edited — its PIN in Settings, or its name, face or colour: the header shows it at once.</summary>
     public void ProfileEdited(Profile? next)
     {
-        if (next is not null && Who?.Id == next.Id) Who = next;
+        if (next is null || Who?.Id != next.Id) return;
+        Who = next;
+        ProfileButton.Content = ProfilesView.Avatar(next, 40);
+        ProfileButton.ToolTip = $"{next.Name} — switch profile";
     }
 
     // ── Tabs ────────────────────────────────────────────────────────────────

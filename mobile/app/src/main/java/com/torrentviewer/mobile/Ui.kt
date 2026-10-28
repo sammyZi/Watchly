@@ -104,6 +104,10 @@ import com.torrentviewer.core.Lc
 import com.torrentviewer.core.Motion
 import com.torrentviewer.core.Note
 import com.torrentviewer.core.ProgressLine
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import com.torrentviewer.core.Spinner
 import com.torrentviewer.core.Title
 import com.torrentviewer.core.Type
@@ -493,27 +497,64 @@ fun StatusIconsOverArt(overArt: Boolean) {
     }
 }
 
-/** Posters, for search results, lists and whole shelves. */
+private val CARD = RoundedCornerShape(10.dp)
+
+/**
+ * A poster with its name and a line of facts under it, as the streaming apps set them:
+ * a hairline so a pale poster keeps its edge on the light page, a [badge] in the corner,
+ * and how far it was watched along the foot.
+ */
 @Composable
-fun PosterCard(title: Title, onClick: () -> Unit, modifier: Modifier = Modifier, sub: String? = null, onLongClick: (() -> Unit)? = null) {
+fun TitleCard(
+    art: String?, name: String, onClick: () -> Unit, modifier: Modifier = Modifier,
+    info: String? = null, badge: String? = null, progress: Float? = null, onLongClick: (() -> Unit)? = null,
+) {
     Column(modifier) {
-        Tap(onClick, Modifier.fillMaxWidth().aspectRatio(2f / 3f), RoundedCornerShape(6.dp), onLongClick) {
-            Artwork(title.poster, title.title, Modifier.fillMaxSize())
+        Tap(onClick, Modifier.fillMaxWidth().aspectRatio(2f / 3f), CARD, onLongClick) {
+            Artwork(art, name, Modifier.fillMaxSize())
+            Box(Modifier.matchParentSize().border(1.dp, Ink.stroke, CARD))
+            badge?.let {
+                Text(
+                    it, Modifier.align(Alignment.TopStart).padding(6.dp).background(Ink.accent, RoundedCornerShape(5.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+                    style = Type.meta.copy(fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold), maxLines = 1,
+                )
+            }
+            progress?.let { ProgressLine(it, Modifier.align(Alignment.BottomStart)) }
         }
-        Text(title.title, Modifier.padding(top = 6.dp), style = Type.meta.copy(color = Ink.text, fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        sub?.let { Text(it, style = Type.meta.copy(color = Ink.faint, fontSize = 12.sp), maxLines = 1) }
+        Text(name, Modifier.padding(top = 7.dp), style = Type.label.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        // Always a line, so cards with no facts keep the row's height.
+        Text(info.orEmpty(), Modifier.padding(top = 1.dp), style = Type.meta.copy(color = Ink.faint, fontSize = 12.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
-/** 16:9 art with the name set over a fade, the way Netflix's boxart reads. */
+/** "2019  ·  ★ 8.1": what a title's card says under its name. */
+fun cardInfo(t: Title) = listOfNotNull(t.year?.take(4), t.rating?.takeIf { it.isNotBlank() }?.let { "★ $it" }).joinToString("  ·  ")
+
+/** Posters, for search results, lists and whole shelves. */
+@Composable
+fun PosterCard(title: Title, onClick: () -> Unit, modifier: Modifier = Modifier, sub: String? = null, onLongClick: (() -> Unit)? = null) =
+    TitleCard(title.poster, title.title, onClick, modifier, info = sub, onLongClick = onLongClick)
+
+/** Cards still on their way: the same shape, gently pulsing. */
+@Composable
+fun CardPlaceholder(modifier: Modifier = Modifier) {
+    val pulse by rememberInfiniteTransition(label = "pulse").animateFloat(0.45f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "alpha")
+    Column(modifier.graphicsLayer { alpha = pulse }) {
+        Box(Modifier.fillMaxWidth().aspectRatio(2f / 3f).background(Ink.surface, CARD))
+        Box(Modifier.padding(top = 9.dp).fillMaxWidth(0.8f).height(11.dp).background(Ink.surface, RoundedCornerShape(4.dp)))
+        Box(Modifier.padding(top = 6.dp).fillMaxWidth(0.5f).height(9.dp).background(Ink.surface, RoundedCornerShape(4.dp)))
+    }
+}
+
+/** Continue watching's art: the time left and how far over a fade at its foot, a hairline round it as [TitleCard] has; the name sits under the card. */
 @Composable
 fun LandscapeCard(art: String?, name: String, stamp: String? = null, progress: Float? = null) {
     Box(Modifier.fillMaxSize()) {
         Artwork(art, name, Modifier.fillMaxSize())
         Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().fillMaxHeight(0.6f).background(Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.8f))))
+        Box(Modifier.matchParentSize().border(1.dp, Ink.stroke, RoundedCornerShape(6.dp)))
         Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = if (progress != null) 6.dp else 7.dp)) {
             // Over the artwork's dark fade: white on either page.
-            Text(name, style = Type.meta.copy(color = Color.White, fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
             stamp?.let { Text(it, style = Type.meta.copy(fontSize = 11.sp, color = Color.White.copy(alpha = 0.75f)), maxLines = 1) }
             if (progress != null) {
                 Spacer(Modifier.height(5.dp))

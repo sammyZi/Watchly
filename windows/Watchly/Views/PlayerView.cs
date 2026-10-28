@@ -133,6 +133,9 @@ public sealed class PlayerView : UserControl, IDisposable
     /// <summary>Once per intro: seeking back into it to watch it is not undone.</summary>
     bool autoSkipped;
     bool fullscreen;
+    /// <summary>Set by Play next while the episode being left was fullscreen; the next player takes it up.</summary>
+    static bool nextFullscreen;
+    readonly bool startFullscreen;
     bool pip;
     string? failure;
     bool failureFatal;
@@ -275,7 +278,14 @@ public sealed class PlayerView : UserControl, IDisposable
         clickTimer.Tick += (_, _) => { clickTimer.Stop(); ToggleUi(); };
         hudTimer.Tick += (_, _) => { hudTimer.Stop(); hud = null; Render(); };
 
-        Loaded += (_, _) => { Focus(); Keyboard.Focus(this); };
+        startFullscreen = nextFullscreen;
+        nextFullscreen = false;
+        Loaded += (_, _) =>
+        {
+            Focus();
+            Keyboard.Focus(this);
+            if (startFullscreen && !fullscreen) ToggleFullscreen();
+        };
         tick.Start();
         Render();
         _ = Start();
@@ -772,9 +782,16 @@ public sealed class PlayerView : UserControl, IDisposable
         SavePosition();
         dismissedNext = true;
         var go = next.Go;
+        var wasFullscreen = fullscreen;
         // Hand the screen back first: if the next episode has to be searched for
         // and nothing turns up, the page underneath is where that is said.
-        _ = Close().ContinueWith(_ => Dispatcher.BeginInvoke(() => { Exited?.Invoke(); go(); }));
+        _ = Close().ContinueWith(_ => Dispatcher.BeginInvoke(async () =>
+        {
+            Exited?.Invoke();
+            // Only for the player this opens; a search that finds nothing leaves no flag behind.
+            nextFullscreen = wasFullscreen;
+            try { await go(); } finally { nextFullscreen = false; }
+        }));
     }
 
     // ── Controls ────────────────────────────────────────────────────────────
@@ -1600,8 +1617,19 @@ public sealed class PlayerView : UserControl, IDisposable
         }
     }
 
-    /// <summary>"S1:E4" when the file names an episode.</summary>
-    string? EpisodeLine => Search.ParseEpisode(request.Title) is { } at ? $"S{at.Season}:E{at.Episode}" : null;
+    /// <summary>
+    /// "S1:E4" when the file names an episode; long anime by its number through the show
+    /// ("Episode 1071"), and a release that names no season ("One Piece - 1071") by its bare number.
+    /// </summary>
+    string? EpisodeLine
+    {
+        get
+        {
+            if (Search.ParseEpisode(request.Title) is { } at)
+                return titleMeta is { NumberedThrough: true } t && Meta.AbsoluteNumber(t.Episodes, at.Season, at.Episode) is int n ? $"Episode {n}" : $"S{at.Season}:E{at.Episode}";
+            return request.Kind != "movie" && Search.ParseAbsolute(request.Title) is int bare ? $"Episode {bare}" : null;
+        }
+    }
 
     static Icon WIcon(string kind, double size, Brush? brush = null) => new() { Kind = kind, Size = size, Foreground = brush ?? Brushes.White };
 
@@ -2510,6 +2538,9 @@ public sealed class PlayerView : UserControl, IDisposable
         });
         await stopped;
         // libVLC has let go of the video window: close it and the controls window for good.
+        // The app's window takes focus first: closing an active owned window hands focus to
+        // whatever app is behind, and Watchly dropped out of sight between episodes.
+        Application.Current?.MainWindow?.Activate();
         video.Dispose();
         if (s is not null) await Task.Run(async () => await s.DisposeAsync());
     }

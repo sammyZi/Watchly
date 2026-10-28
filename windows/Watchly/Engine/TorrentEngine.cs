@@ -221,7 +221,11 @@ public sealed class TorrentEngine
             var link = MagnetLink.Parse(TitleText.WithTrackers(uri));
             var hex = Hex(link.InfoHashes);
             var cached = Path.Combine(MetaDir, hex + ".torrent");
-            if (!File.Exists(cached)) await Settled(hex);
+            if (!File.Exists(cached) && leaving.ContainsKey(hex))
+            {
+                Log.Torrent($"inspect {hex}: waiting for the last copy to close");
+                await Settled(hex);
+            }
             var running = Find(hex);
             if (running is { HasMetadata: true })
             {
@@ -233,12 +237,16 @@ public sealed class TorrentEngine
             }
             else
             {
+                var sw = Stopwatch.StartNew();
+                Log.Torrent($"inspect {hex}: fetching metadata");
                 try
                 {
                     torrent = await FetchMetadata(link, hex, cached, uri).WaitAsync(timeout, ct);
+                    Log.Torrent($"inspect {hex}: metadata in {sw.ElapsedMilliseconds}ms");
                 }
                 catch (Exception e) when (e is TimeoutException or OperationCanceledException && !ct.IsCancellationRequested)
                 {
+                    Log.Warn("torrent", $"inspect {hex}: no metadata after {sw.ElapsedMilliseconds}ms");
                     throw new TimeoutException("No peers answered with this torrent's file list. Try a release with more seeders.");
                 }
             }

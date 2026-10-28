@@ -24,6 +24,49 @@ public sealed record Hit
     public bool PerFileSize { get; init; }
 }
 
+/// <summary>A language to ask releases in: its name goes in the query, <see cref="Match"/> is how a release name says it (tv/core LANGS).</summary>
+public sealed record Lang(string Code, string Name, Regex Match)
+{
+    static Lang Of(string code, string name, string words) => new(code, name, new Regex($@"\b({words})\b", RegexOptions.IgnoreCase));
+
+    public static readonly Lang[] All =
+    {
+        Of("EN", "English", "english|eng"),
+        Of("ES", "Spanish", "spanish|español|espanol|spa|castellano|latino"),
+        Of("FR", "French", "french|français|francais|fre|fra"),
+        Of("DE", "German", "german|deutsch|ger|deu"),
+        Of("IT", "Italian", "italian|italiano|ita"),
+        Of("PT", "Portuguese", "portuguese|português|portugues|por"),
+        Of("BR_PT", "Portuguese (Brazil)", @"brazil\w*|pt-br|pob"),
+        Of("RU", "Russian", "russian|rus"),
+        Of("AR", "Arabic", "arabic|ara"),
+        Of("HI", "Hindi", "hindi|hin"),
+        Of("TR", "Turkish", "turkish|tur"),
+        Of("NL", "Dutch", "dutch|nederlands|dut|nld"),
+        Of("PL", "Polish", "polish|polski|pol"),
+        Of("JA", "Japanese", "japanese|jpn"),
+        Of("KO", "Korean", "korean|kor"),
+        Of("ZH", "Chinese", "chinese|mandarin|chi|zho"),
+        Of("ID", "Indonesian", "indonesian|ind"),
+        Of("VI", "Vietnamese", "vietnamese|vie"),
+        Of("TH", "Thai", "thai|tha"),
+        Of("FA", "Persian", "persian|farsi|fas"),
+        Of("HE", "Hebrew", "hebrew|heb"),
+        Of("EL", "Greek", "greek|gre|ell"),
+        Of("SV", "Swedish", "swedish|swe"),
+        Of("RO", "Romanian", "romanian|rum|ron"),
+        Of("TA", "Tamil", "tamil|tam"),
+        Of("TE", "Telugu", "telugu|tel"),
+        Of("ML", "Malayalam", "malayalam|mal"),
+        Of("BN", "Bengali", "bengali|bangla|ben"),
+    };
+
+    /// <summary>"Portuguese (Brazil)" is asked for as "Portuguese".</summary>
+    public string Word => Name.Split(" (")[0];
+
+    public bool Says(Hit h) => Match.IsMatch(h.Name);
+}
+
 public static class Search
 {
     const string Api = "https://apibay.org/q.php";
@@ -626,9 +669,10 @@ public static class Search
     /// </summary>
     public static async Task<List<Hit>> SearchTorrents(
         string title, CancellationToken ct = default, string? imdb = null, string? year = null, string? suffix = null,
-        Action<List<Hit>>? progress = null)
+        Action<List<Hit>>? progress = null, Lang? lang = null)
     {
-        var tail = string.Join(' ', new[] { suffix, year }.Where(x => !string.IsNullOrEmpty(x)));
+        // A language is asked for by name ("Hindi"), and only releases that say it count.
+        var tail = string.Join(' ', new[] { suffix, lang?.Word, year }.Where(x => !string.IsNullOrEmpty(x)));
         var full = string.Join(' ', new[] { title, tail }.Where(x => !string.IsNullOrEmpty(x)));
         var alias = AliasOf(title);
         var sw = Stopwatch.StartNew();
@@ -671,6 +715,7 @@ public static class Search
                 ? Merge(bags).Where(h => h.Imdb is null || h.Imdb == imdb).ToList()
                 : Merge(bags);
             var found = Rank(merged, full);
+            if (lang is not null) found = found.Where(lang.Says).ToList();
             if (year is not null) found = found.Where(h => FitsYear(h.Name, title, year)).ToList();
             var exact = found.Where(h => SameTitle(h.Name, title) || (alias is not null && SameTitle(h.Name, alias))).ToList();
             var named = found.Where(h => NamesTitle(h.Name, title) || (alias is not null && NamesTitle(h.Name, alias))).ToList();
@@ -699,13 +744,13 @@ public static class Search
     static readonly Dictionary<string, Task<List<Hit>>> EpisodeMemo = new();
 
     /// <summary>Every release that can play one episode — including the packs.</summary>
-    public static Task<List<Hit>> SearchEpisode(string show, int season, int episode, CancellationToken ct = default, string? imdb = null, int? absolute = null)
+    public static Task<List<Hit>> SearchEpisode(string show, int season, int episode, CancellationToken ct = default, string? imdb = null, int? absolute = null, Lang? lang = null)
     {
-        var key = $"{imdb ?? show}:{season}:{episode}";
+        var key = $"{imdb ?? show}:{season}:{episode}:{lang?.Code}";
         lock (EpisodeMemo)
         {
             if (EpisodeMemo.TryGetValue(key, out var cached)) return cached;
-            var pending = FindEpisode(show, season, episode, ct, imdb, absolute).ContinueWith(t =>
+            var pending = FindEpisode(show, season, episode, ct, imdb, absolute, lang).ContinueWith(t =>
             {
                 var hits = t.IsCompletedSuccessfully ? t.Result : new List<Hit>();
                 if (hits.Count == 0) lock (EpisodeMemo) EpisodeMemo.Remove(key);
@@ -716,10 +761,12 @@ public static class Search
         }
     }
 
-    static async Task<List<Hit>> FindEpisode(string show, int season, int episode, CancellationToken ct, string? imdb, int? absolute)
+    static async Task<List<Hit>> FindEpisode(string show, int season, int episode, CancellationToken ct, string? imdb, int? absolute, Lang? lang)
     {
+        bool Says(Hit h) => lang is null || lang.Says(h);
         bool Plays(Hit h)
         {
+            if (!Says(h)) return false;
             if (NamesEpisode(h.Name, season, episode, absolute) is bool one) return one;
             // Filed as a film and naming no episode: "Jujutsu Kaisen 0" is not a pack of the series.
             // (Anime episodes are often filed as films too, so only the unlabelled ones go.)
@@ -738,10 +785,10 @@ public static class Search
         var tag = EpisodeTag(season, episode);
         Log($"episode start \"{show}\" {tag} abs={absolute?.ToString() ?? "-"} imdb={imdb ?? "-"}");
 
-        var looseJob = SearchTorrents(show, ct, imdb, suffix: tag);
-        var packsJob = SearchTorrents(show, ct, imdb);
+        var looseJob = SearchTorrents(show, ct, imdb, suffix: tag, lang: lang);
+        var packsJob = SearchTorrents(show, ct, imdb, lang: lang);
         // Anime is indexed by its running number, not S02E05.
-        var animeJob = SearchTorrents(show, ct, imdb, suffix: (absolute ?? episode).ToString("00"));
+        var animeJob = SearchTorrents(show, ct, imdb, suffix: (absolute ?? episode).ToString("00"), lang: lang);
         List<Hit> loose, packs, anime;
         try { loose = await looseJob; } catch { loose = new(); }
         try { packs = await packsJob; } catch { packs = new(); }
@@ -759,7 +806,7 @@ public static class Search
         {
             var tioJob = Timed("torrentio", Limited(FromTorrentio($"series/{imdb}:{season}:{episode}", "tv", ct), FastMs * 3, new List<Hit>()));
             var dbJob = Timed("torrentsdb", Limited(FromTorrentsDb($"series/{imdb}:{season}:{episode}", "tv", ct), FastMs * 3, new List<Hit>()));
-            var tio = Merge(new[] { await tioJob, await dbJob });
+            var tio = Merge(new[] { await tioJob, await dbJob }).Where(Says).ToList();
             if (tio.Count > 0) return RankEpisode(tio, show, season);
             if (ct.IsCancellationRequested) return new();
             var eztv = (await Timed("eztv", Limited(EztvFor(imdb), FastMs * 3, new List<Hit>()))).Where(Plays).ToList();

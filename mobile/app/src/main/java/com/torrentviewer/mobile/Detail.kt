@@ -65,6 +65,8 @@ import com.torrentviewer.core.Hit
 import com.torrentviewer.core.History
 import com.torrentviewer.core.latestPerTitle
 import com.torrentviewer.core.Ink
+import com.torrentviewer.core.LANGS
+import com.torrentviewer.core.langName
 import com.torrentviewer.core.grain
 import com.torrentviewer.core.Lc
 import com.torrentviewer.core.Meta
@@ -88,6 +90,7 @@ import com.torrentviewer.core.reviewLinks
 import com.torrentviewer.core.runtimeSeconds
 import com.torrentviewer.core.searchEpisode
 import com.torrentviewer.core.absoluteNumbers
+import com.torrentviewer.core.continueEpisode
 import com.torrentviewer.core.parseEpisode
 import com.torrentviewer.core.seasonsIn
 import com.torrentviewer.core.searchTorrents
@@ -127,9 +130,13 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
     val liked = saved.any { it.imdb == title.imdb && it.list == "favorite" }
 
     val seasons = remember(title.episodes) { title.episodes.map { it.season }.filter { it > 0 }.distinct().sorted() }
+    /** Where this series was left: the episode after the last one finished, or the one stopped part-way. */
+    val continueAt = remember(history, title.episodes) { continueEpisode(title, history) }
     var season by rememberSaveable(title.imdb) { mutableStateOf<Int?>(null) }
     // Not while the episode list is still loading: that would throw away the season being come back to.
-    LaunchedEffect(seasons) { if (seasons.isNotEmpty() && (season == null || season !in seasons)) season = seasons.first() }
+    LaunchedEffect(seasons) {
+        if (seasons.isNotEmpty() && (season == null || season !in seasons)) season = continueAt?.season?.takeIf { it in seasons } ?: seasons.first()
+    }
     val episodes = title.episodes.filter { it.season == season }
     // Long-running anime: every episode by its number through the show, a hundred at a time.
     val through = title.numberedThrough
@@ -138,6 +145,10 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
     }
     val blocks = remember(numbered) { numbered.chunked(100) }
     var block by rememberSaveable(title.imdb) { mutableStateOf(0) }
+    // Opens on the hundred the series was left in.
+    LaunchedEffect(blocks) {
+        if (block == 0) continueAt?.let { c -> blocks.indexOfFirst { b -> b.any { it.first.id == c.id } }.takeIf { it > 0 }?.let { block = it } }
+    }
     var numberQuery by rememberSaveable(title.imdb) { mutableStateOf("") }
     val progress = remember(history, title.imdb) { episodeProgress(history, title.imdb) }
 
@@ -153,6 +164,10 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
     val shown = hits.orEmpty().filter { quality == null || it.quality == quality }
     var sheet by remember { mutableStateOf(false) }
     var reviews by remember { mutableStateOf(false) }
+    /** The releases' language, by its code; empty is any language. */
+    var lang by rememberSaveable(title.imdb) { mutableStateOf("") }
+    fun searchLang() = LANGS.find { it.code == lang }
+    var pickingLang by remember { mutableStateOf(false) }
     var expanded by remember(title.imdb) { mutableStateOf(false) }
     var allEpisodes by rememberSaveable(title.imdb, season) { mutableStateOf(false) }
     /** "Download season" open: the season, and its packs (null while still looking). */
@@ -168,8 +183,8 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
         episodeId = ep?.id
         val run: suspend (OnHits) -> List<Hit> = { onHits ->
             try {
-                if (ep != null) searchEpisode(title, ep.season, ep.episode, onHits)
-                else searchTorrents(title.title, title.imdb, title.year?.take(4), onHits = onHits)
+                if (ep != null) searchEpisode(title, ep.season, ep.episode, onHits, searchLang())
+                else searchTorrents(title.title, title.imdb, title.year?.take(4), lang = searchLang(), onHits = onHits)
             } finally {
                 if (mine == ticket) busy = false
             }
@@ -185,9 +200,13 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
         watch.notes.tryEmit("Downloading ${ep?.let { "${title.title} · ${episodeTag(it.season, it.episode)}" } ?: title.title} — see Downloads")
     }
 
+    /** Nothing found; with a language picked, that is the likely reason, so it says so. */
+    fun noneFound(what: String) =
+        if (lang.isEmpty()) "No sources found for $what." else "No $what in ${langName(lang)} — change the language and try again."
+
     fun downloadEpisode(ep: Episode) = scope.launch {
         val ready = if (episode?.id == ep.id && shown.isNotEmpty()) shown else findSources(ep).await()
-        ready.firstOrNull()?.let { keep(it, ep) } ?: watch.notes.tryEmit("No sources found for ${episodeTag(ep.season, ep.episode)}.")
+        ready.firstOrNull()?.let { keep(it, ep) } ?: watch.notes.tryEmit(noneFound(episodeTag(ep.season, ep.episode)))
     }
 
     /**
@@ -205,7 +224,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
         scope.launch {
             val first = title.episodes.firstOrNull { it.season == s }?.episode ?: 1
             val all = runCatching {
-                searchEpisode(title, s, first) { partial -> if (seasonPacks?.first == s) seasonPacks = s to packsOf(partial, s) }
+                searchEpisode(title, s, first, { partial -> if (seasonPacks?.first == s) seasonPacks = s to packsOf(partial, s) }, searchLang())
             }.getOrDefault(emptyList())
             if (seasonPacks?.first == s) seasonPacks = s to packsOf(all, s)
         }
@@ -221,15 +240,15 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
     LaunchedEffect(title.imdb, title.episodes.size) { NewEpisodes.markSeen(title) }
 
     // A film has one thing to look for: look on arrival.
-    LaunchedEffect(title.imdb, title.kind) { if (!title.isSeries) findSources(null) }
+    LaunchedEffect(title.imdb, title.kind, lang) { if (!title.isSeries) findSources(null) }
 
-    /** What the big button plays: the episode last looked at, or the first of the season. */
-    val upNext = episode ?: if (through) numbered.firstOrNull()?.first else episodes.firstOrNull()
+    /** What the big button plays: the episode last looked at, where the series was left, or the first of the season. */
+    val upNext = episode ?: continueAt ?: if (through) numbered.firstOrNull()?.first else episodes.firstOrNull()
 
     fun playEpisode(ep: Episode) = scope.launch {
         val ready = if (episode?.id == ep.id && shown.isNotEmpty()) shown else findSources(ep).await()
         ready.firstOrNull()?.let { watch.stream(it, title, episodeTag(ep.season, ep.episode), ep) }
-            ?: watch.notes.tryEmit("No sources found for ${episodeTag(ep.season, ep.episode)}.")
+            ?: watch.notes.tryEmit(noneFound(episodeTag(ep.season, ep.episode)))
     }
 
     val wide = isWide()
@@ -240,7 +259,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
             item(key = "head") {
                 if (!wide) {
                     Box(Modifier.fillMaxWidth().aspectRatio(16f / 11f)) {
-                        Artwork(title.wide, title.title, Modifier.fillMaxSize().bottomScrim(0.4f), fill = false)
+                        Artwork(title.wide, title.title, Modifier.fillMaxSize().bottomScrim(0.6f), fill = false)
                         TitleMark(title, Modifier.align(Alignment.BottomStart).padding(horizontal = EDGE).widthIn(max = 260.dp), maxHeight = 72.dp, style = Type.display)
                     }
                 }
@@ -303,11 +322,15 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                         Action(if (inList) L.drawable.lucide_ic_check else L.drawable.lucide_ic_plus, if (inList) "In My List" else "My List", { SavedStore.toggle(title) }, modifier = share, on = inList, onColor = Ink.good)
                         Action(L.drawable.lucide_ic_heart, if (liked) "Liked" else "Like", { SavedStore.toggle(title, "favorite") }, modifier = share, on = liked, onColor = Ink.accent)
                         if (!title.isSeries) Action(L.drawable.lucide_ic_download, "Download", {
-                            shown.firstOrNull()?.let { keep(it, null) } ?: watch.notes.tryEmit(if (busy) "Still finding sources…" else "No sources to download.")
+                            shown.firstOrNull()?.let { keep(it, null) } ?: watch.notes.tryEmit(if (busy) "Still finding sources…" else noneFound(title.title))
                         }, modifier = share)
                         title.trailer?.let { id -> Action(L.drawable.lucide_ic_film, "Trailer", { openUrl(context, "https://www.youtube.com/watch?v=$id") }, modifier = share) }
                         Action(L.drawable.lucide_ic_message_square_text, "Reviews", { reviews = true }, modifier = share)
                     }
+                    Chip(
+                        "Language: " + if (lang.isEmpty()) "Any" else langName(lang), lang.isNotEmpty(),
+                        onClick = { pickingLang = true }, modifier = Modifier.padding(top = 14.dp), icon = L.drawable.lucide_ic_languages,
+                    )
                     if (title.cast.isNotEmpty()) CastRow(title.cast)
                     title.awards?.let { AwardsCard(it) }
                 }
@@ -399,7 +422,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                     )
                 }
             } else {
-                sources(title, episode, hits, shown, busy, quality, { quality = it }, Modifier.widthIn(max = 720.dp), onDownload = { keep(it, null) }) { hit -> watch.stream(hit, title) }
+                sources(title, episode, hits, shown, busy, quality, { quality = it }, Modifier.widthIn(max = 720.dp), language = searchLang()?.name, onDownload = { keep(it, null) }) { hit -> watch.stream(hit, title) }
             }
         }
         // Over the art, a round back button; once the page scrolls under it, a solid bar with the name.
@@ -420,7 +443,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
         val ep = episode
         BottomSheet(ep?.let { "S${it.season}:E${it.episode} · ${it.name}" } ?: "Sources", onDismiss = { sheet = false }) {
             LazyColumn {
-                sources(title, ep, hits, shown, busy, quality, { quality = it }, Modifier, heading = false, onDownload = { hit ->
+                sources(title, ep, hits, shown, busy, quality, { quality = it }, Modifier, heading = false, language = searchLang()?.name, onDownload = { hit ->
                     sheet = false
                     keep(hit, ep)
                 }) { hit ->
@@ -438,7 +461,10 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                     Spinner(size = 24.dp)
                     Text("   Asking every index…", style = Type.body)
                 }
-                packs.isEmpty() -> Note("No season $s pack found yet — download the episodes one by one.", Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+                packs.isEmpty() -> Note(
+                    if (lang.isEmpty()) "No season $s pack found yet — download the episodes one by one."
+                    else "No season $s pack in ${langName(lang)} — change the language and try again, or download the episodes one by one.",
+Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
                 else -> LazyColumn {
                     items(packs.take(MAX_SOURCES), key = { "pack-" + it.id }) { hit ->
                         Source(hit, Modifier.padding(start = EDGE, end = EDGE, bottom = 8.dp), onDownload = { keepSeason(hit, s) }) { keepSeason(hit, s) }
@@ -446,6 +472,21 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                 }
             }
         }
+    }
+
+    if (pickingLang) {
+        Sheet(
+            title = "Release language",
+            options = listOf(Option("", "Any language")) + LANGS.map { Option(it.code, it.name) },
+            selected = lang,
+            onPick = {
+                pickingLang = false
+                lang = it
+                // A film looks again by itself; a series, for the episode on show.
+                if (title.isSeries) episode?.let(::findSources)
+            },
+            onDismiss = { pickingLang = false },
+        )
     }
 
     if (reviews) {
@@ -475,6 +516,8 @@ private fun LazyListScope.sources(
     onQuality: (String?) -> Unit,
     modifier: Modifier,
     heading: Boolean = true,
+    /** The language picked, by name: an empty list then says to change it. */
+    language: String? = null,
     onDownload: (Hit) -> Unit,
     onPlay: (Hit) -> Unit,
 ) {
@@ -494,7 +537,10 @@ private fun LazyListScope.sources(
                     Text("   Asking every index…", style = Type.body)
                 }
                 busy -> Note("${shown.size} so far · finding more…", Modifier.padding(bottom = 8.dp))
-                hits?.isEmpty() == true -> Note("Nothing found. Try another episode, or search for the release by name.")
+                hits?.isEmpty() == true -> Note(
+                    if (language != null) "Nothing found in $language. Change the language and try again."
+                    else "Nothing found. Try another episode, or search for the release by name.",
+                )
                 hits == null && episode == null && title.isSeries -> Note("Choose an episode to see what is available.")
             }
         }
