@@ -101,6 +101,8 @@ fun App(watch: Watch, incoming: MutableState<Uri?>) {
 private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     val profiles by Profiles.list.collectAsState()
     var who by remember { mutableStateOf<Profile?>(null) }
+    // An edit to the profile in use — its name, face or colour — shows at once.
+    LaunchedEffect(profiles) { who = who?.let { w -> profiles.find { it.id == w.id } ?: w } }
     var switching by remember { mutableStateOf(false) }
     var tab by remember { mutableStateOf(Tab.HOME) }
     var detail by remember { mutableStateOf<Title?>(null) }

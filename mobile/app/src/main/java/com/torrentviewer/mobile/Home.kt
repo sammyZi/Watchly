@@ -112,9 +112,6 @@ private val SHELVES = listOf(
 /** How many titles of the lead shelf the hero swipes through. */
 private const val HEROES = 6
 
-/** How far the header's page colour fades out below its bar. */
-private val HEADER_FADE = 28.dp
-
 /** Survives opening a title, so coming back lands on the same row, same card. */
 class HomeState {
     val list = LazyListState()
@@ -150,7 +147,10 @@ fun cardWidth() = if (isWide()) 260.dp else 220.dp
 
 /** Home's rows are tall posters: a little over three across a phone held upright. */
 @Composable
-fun posterWidth() = if (isWide()) 140.dp else 116.dp
+fun posterWidth() = if (isWide()) 140.dp else 108.dp
+
+/** Between the cards of a row: three and a bit across a phone, the next one peeking in. */
+private val CARD_GAP = 12.dp
 
 @Composable
 fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> Unit, onShelf: (Shelf) -> Unit, onProfile: () -> Unit) {
@@ -211,12 +211,15 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
                 Rail("Continue Watching") {
                     LazyRow(state = state.row("resume"), contentPadding = PaddingValues(horizontal = EDGE), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         items(resumable, key = { it.uri }) { item ->
-                            Tap({
-                                // Played from more than one release: ask which, each resuming where it was left.
-                                val all = history.filter { it.titleKey == item.titleKey }.sortedByDescending { it.at }
-                                if (all.size > 1) releases = all else watch.resume(item)
-                            }, Modifier.width(posterWidth()).aspectRatio(2f / 3f), RoundedCornerShape(6.dp), onLongClick = { menu = item }) {
-                                LandscapeCard(remoteArt(item.poster) ?: item.art(), item.label, resumeStamp(item), item.ratio.toFloat())
+                            Column(Modifier.width(posterWidth())) {
+                                Tap({
+                                    // Played from more than one release: ask which, each resuming where it was left.
+                                    val all = history.filter { it.titleKey == item.titleKey }.sortedByDescending { it.at }
+                                    if (all.size > 1) releases = all else watch.resume(item)
+                                }, Modifier.fillMaxWidth().aspectRatio(2f / 3f), RoundedCornerShape(6.dp), onLongClick = { menu = item }) {
+                                    LandscapeCard(remoteArt(item.poster) ?: item.art(), item.label, resumeStamp(item), item.ratio.toFloat())
+                                }
+                                Text(item.label.substringBefore(" · "), Modifier.padding(top = 6.dp), style = Type.label.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }
@@ -224,11 +227,12 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
             }
             if (state.fresh.isNotEmpty()) item(key = "fresh") {
                 Rail("New Episodes") {
-                    LazyRow(state = state.row("fresh"), contentPadding = PaddingValues(horizontal = EDGE), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    LazyRow(state = state.row("fresh"), contentPadding = PaddingValues(horizontal = EDGE), horizontalArrangement = Arrangement.spacedBy(CARD_GAP)) {
                         items(state.fresh, key = { it.title.imdb }) { f ->
-                            Tap({ onOpen(f.title) }, Modifier.width(posterWidth()).aspectRatio(2f / 3f), RoundedCornerShape(6.dp)) {
-                                LandscapeCard(f.title.poster ?: f.title.wide, f.title.title, if (f.count == 1) "1 new episode" else "${f.count} new episodes")
-                            }
+                            TitleCard(
+                                f.title.poster ?: f.title.wide, f.title.title, { onOpen(f.title) }, Modifier.width(posterWidth()),
+                                info = if (f.count == 1) "1 new episode" else "${f.count} new episodes", badge = "NEW",
+                            )
                         }
                     }
                 }
@@ -245,22 +249,16 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
         }
 
         // The wordmark and who is watching: a shade over the hero; once the rows scroll under it, the
-        // page itself, eased in and ending in a soft fade rather than a hard edge across the art.
+        // page itself, eased in. A clean edge: a fade under it washed out the tops of the cards.
         val scrolled by remember { derivedStateOf { state.list.firstVisibleItemIndex > 0 || state.list.firstVisibleItemScrollOffset > 240 } }
         val solid by animateFloatAsState(if (scrolled) 1f else 0f, tween(260), label = "bar")
         StatusIconsOverArt(!scrolled)
         Box(Modifier.fillMaxWidth()) {
             Box(Modifier.matchParentSize().graphicsLayer { alpha = 1f - solid }.background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent))))
-            Column(Modifier.matchParentSize().graphicsLayer { alpha = solid }) {
-                Box(Modifier.fillMaxWidth().weight(1f).background(Ink.bg).grain())
-                Box(Modifier.fillMaxWidth().height(HEADER_FADE).background(Brush.verticalGradient(listOf(Ink.bg, Ink.bg.copy(alpha = 0f)))))
-            }
-            Column {
-                Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = EDGE, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("WATCHLY", Modifier.weight(1f), style = Type.title.copy(color = Ink.accent, fontWeight = FontWeight.Black, letterSpacing = 2.sp))
-                    if (!isWide()) Tap(onProfile, shape = RoundedCornerShape(6.dp)) { Avatar(who, 30.dp) }
-                }
-                Spacer(Modifier.height(HEADER_FADE))
+            Box(Modifier.matchParentSize().graphicsLayer { alpha = solid }.background(Ink.bg).grain())
+            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = EDGE, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("WATCHLY", Modifier.weight(1f), style = Type.title.copy(color = Ink.accent, fontWeight = FontWeight.Black, letterSpacing = 2.sp))
+                if (!isWide()) Tap(onProfile, shape = RoundedCornerShape(6.dp)) { Avatar(who, 30.dp) }
             }
         }
         if (!online) {
@@ -312,7 +310,8 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
 private fun Rail(heading: String, onMore: (() -> Unit)? = null, content: @Composable () -> Unit) {
     Column {
         Row(Modifier.fillMaxWidth().padding(start = EDGE, end = 6.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(heading, Modifier.weight(1f), style = Type.title.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // "Because you watched …" names a title in full: two lines rather than cut off.
+            Text(heading, Modifier.weight(1f), style = Type.title.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold, lineHeight = 21.sp), maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (onMore != null) Tap(onMore, shape = CircleShape) {
                 Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("See all", style = Type.meta)
@@ -326,18 +325,16 @@ private fun Rail(heading: String, onMore: (() -> Unit)? = null, content: @Compos
 
 @Composable
 private fun Placeholders() {
-    Row(Modifier.padding(start = EDGE), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        repeat(4) { Box(Modifier.width(posterWidth()).aspectRatio(2f / 3f).background(Ink.surface, RoundedCornerShape(6.dp))) }
+    Row(Modifier.padding(start = EDGE), horizontalArrangement = Arrangement.spacedBy(CARD_GAP)) {
+        repeat(4) { CardPlaceholder(Modifier.width(posterWidth())) }
     }
 }
 
 @Composable
 private fun TitleRow(state: LazyListState, titles: List<Title>, onOpen: (Title) -> Unit) {
-    LazyRow(state = state, contentPadding = PaddingValues(horizontal = EDGE), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    LazyRow(state = state, contentPadding = PaddingValues(horizontal = EDGE), horizontalArrangement = Arrangement.spacedBy(CARD_GAP)) {
         items(titles, key = { it.imdb }) { t ->
-            Tap({ onOpen(t) }, Modifier.width(posterWidth()).aspectRatio(2f / 3f), RoundedCornerShape(6.dp)) {
-                Artwork(t.poster ?: t.wide, t.title, Modifier.fillMaxSize())
-            }
+            TitleCard(t.poster ?: t.wide, t.title, { onOpen(t) }, Modifier.width(posterWidth()), info = cardInfo(t))
         }
     }
 }

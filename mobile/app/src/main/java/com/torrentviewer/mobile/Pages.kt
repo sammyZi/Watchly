@@ -91,7 +91,9 @@ import com.torrentviewer.core.Title
 import com.torrentviewer.core.Type
 import com.torrentviewer.core.Watch
 import com.torrentviewer.core.ago
-import com.torrentviewer.core.avatarIcon
+import com.torrentviewer.core.AvatarTile
+import com.torrentviewer.core.Avatars
+import androidx.compose.foundation.border
 import com.torrentviewer.core.colorOf
 import com.torrentviewer.core.parseEpisode
 import com.torrentviewer.core.searchTorrents
@@ -860,7 +862,7 @@ private fun Tile(name: String, onClick: () -> Unit, face: @Composable androidx.c
 @Composable
 private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, String, String) -> Unit, onDelete: () -> Unit, onCancel: () -> Unit) {
     var name by remember { mutableStateOf(profile?.name.orEmpty()) }
-    var icon by remember { mutableStateOf(profile?.icon ?: AVATARS[0]) }
+    var icon by remember { mutableStateOf(profile?.let { Avatars.of(it).id } ?: AVATARS[0]) }
     var colour by remember { mutableStateOf(profile?.colour ?: COLOURS[0]) }
     Column(Modifier.widthIn(max = 480.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Avatar(Profile("preview", name.ifBlank { "?" }, colour, icon), 110.dp)
@@ -870,8 +872,11 @@ private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, Strin
         Text("ICON", Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 10.dp), style = Type.overline)
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             AVATARS.forEach { a ->
-                Tap({ icon = a }, Modifier.size(46.dp), CircleShape) {
-                    Box(Modifier.background(if (a == icon) Ink.accent else Ink.surface2), contentAlignment = Alignment.Center) { Lc(avatarIcon(a), tint = if (a == icon) Color.White else Ink.text, size = 22.dp) }
+                Tap({ icon = a }, Modifier.size(54.dp), RoundedCornerShape(12.dp)) {
+                    Box {
+                        AvatarTile(Avatars.art(a), colorOf(colour), 54.dp)
+                        if (a == icon) Box(Modifier.matchParentSize().border(3.dp, Ink.accent, RoundedCornerShape(12.dp)))
+                    }
                 }
             }
         }

@@ -62,24 +62,29 @@ public sealed class ProfilesView : UserControl
         });
     }
 
-    /// <summary>core Avatar: the profile's colour with its initial — Guest's figure for the guest.</summary>
-    public static FrameworkElement Avatar(Profile p, double size)
+    /// <summary>core Avatar: the profile's face on the raised page colour, washed with its colour.</summary>
+    public static FrameworkElement Avatar(Profile p, double size) => Tile(Avatars.Of(p), p.Colour, size);
+
+    public static FrameworkElement Tile(AvatarArt art, string colourHex, double size)
     {
         Color colour;
-        try { colour = (Color)ColorConverter.ConvertFromString(p.Colour); }
+        try { colour = (Color)ColorConverter.ConvertFromString(colourHex); }
         catch { colour = Color.FromRgb(0xe5, 0x09, 0x14); }
-        return new Border
+        var radius = new CornerRadius(size * 0.22);
+        var tile = new Border
         {
-            Width = size, Height = size, CornerRadius = new CornerRadius(size * 0.12),
-            Background = new LinearGradientBrush(colour, Color.FromArgb(0xa6, colour.R, colour.G, colour.B), 90),
-            Child = p.IsGuest
-                ? new Icon { Kind = "user", Size = size * 0.48, Foreground = Brushes.White }
-                : new TextBlock
+            Width = size, Height = size, CornerRadius = radius,
+            Child = new Grid
+            {
+                Children =
                 {
-                    Text = p.Initial, FontSize = size * 0.46, FontWeight = FontWeights.Bold, Foreground = Brushes.White,
-                    HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+                    new Border { CornerRadius = radius, Background = new SolidColorBrush(Color.FromArgb(0x48, colour.R, colour.G, colour.B)) },
+                    new Image { Source = art.Image, Stretch = Stretch.Fill },
                 },
+            },
         };
+        tile.SetResourceReference(Border.BackgroundProperty, "SurfaceAlt");
+        return tile;
     }
 
     FrameworkElement Picker()
@@ -147,11 +152,26 @@ public sealed class ProfilesView : UserControl
         var editing = target;
         var name = editing?.Name ?? "";
         var colour = editing?.Colour ?? Profiles.Colours[0];
+        var icon = editing is not null ? Avatars.Of(editing).Id : Avatars.Pickable[0].Id;
         var preview = new ContentControl { VerticalAlignment = VerticalAlignment.Top };
+        var faces = new WrapPanel();
         var swatches = new StackPanel { Orientation = Orientation.Horizontal };
         void Refresh()
         {
-            preview.Content = Avatar(new Profile { Id = "preview", Name = name.Trim().Length > 0 ? name : "?", Colour = colour }, 160);
+            preview.Content = Tile(Avatars.Art(icon), colour, 160);
+            faces.Children.Clear();
+            foreach (var art in Avatars.Pickable)
+            {
+                var chosen = art.Id == icon;
+                var face = Ui.Button(new Border
+                {
+                    BorderThickness = new Thickness(3), CornerRadius = new CornerRadius(14), Padding = new Thickness(2),
+                    BorderBrush = chosen ? (Brush)FindResource("Accent") : Brushes.Transparent,
+                    Child = Tile(art, colour, 50),
+                }, () => { icon = art.Id; Refresh(); }, "Bare", art.Name);
+                face.Margin = new Thickness(0, 0, 6, 6);
+                faces.Children.Add(face);
+            }
             swatches.Children.Clear();
             foreach (var c in Profiles.Colours)
             {
@@ -173,10 +193,10 @@ public sealed class ProfilesView : UserControl
 
         void Save()
         {
-            if (editing is null) onPick(Profiles.Add(name, colour));
+            if (editing is null) onPick(Profiles.Add(name, colour, icon));
             else
             {
-                Profiles.Edit(editing.Id, name, colour);
+                MainWindow.Shell.ProfileEdited(Profiles.Edit(editing.Id, name, colour, icon));
                 Go(Mode.Pick);
             }
         }
@@ -194,11 +214,13 @@ public sealed class ProfilesView : UserControl
             })));
 
         var heading = Ui.Text(editing is null ? "Add a profile" : "Edit profile", "Display", "Text", 32, FontWeights.Bold);
-        var hint = Ui.Text(editing is null ? "Its own library, My List and resume points." : "Change the name or the colour.", "Meta", "Faint", 14);
+        var hint = Ui.Text(editing is null ? "Its own library, My List and resume points." : "Change the name, the face or the colour.", "Meta", "Faint", 14);
         hint.Margin = new Thickness(0, 4, 0, 20);
+        var faceLabel = Ui.Text("FACE", "Overline", "Faint");
+        faceLabel.Margin = new Thickness(0, 22, 0, 10);
         var colourLabel = Ui.Text("COLOUR", "Overline", "Faint");
-        colourLabel.Margin = new Thickness(0, 22, 0, 10);
-        var form = new StackPanel { Width = 520, Margin = new Thickness(48, 0, 0, 0), Children = { heading, hint, field, colourLabel, swatches, buttons } };
+        colourLabel.Margin = new Thickness(0, 16, 0, 10);
+        var form = new StackPanel { Width = 600, Margin = new Thickness(48, 0, 0, 0), Children = { heading, hint, field, faceLabel, faces, colourLabel, swatches, buttons } };
         return Centered(new StackPanel { Orientation = Orientation.Horizontal, Children = { preview, form } });
     }
 

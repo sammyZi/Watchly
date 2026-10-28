@@ -65,9 +65,14 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
     val inList = saved.any { it.imdb == title.imdb && it.list == "later" }
 
     val seasons = remember(title.episodes) { title.episodes.map { it.season }.filter { it > 0 }.distinct().sorted() }
+    val history by History.items.collectAsState()
+    /** Where this series was left: the episode after the last one finished, or the one stopped part-way. */
+    val continueAt = remember(history, title.episodes) { continueEpisode(title, history) }
     var season by rememberSaveable(title.imdb) { mutableStateOf<Int?>(null) }
     // Not while the episode list is still loading: that would throw away the season being come back to.
-    LaunchedEffect(seasons) { if (seasons.isNotEmpty() && (season == null || season !in seasons)) season = seasons.first() }
+    LaunchedEffect(seasons) {
+        if (seasons.isNotEmpty() && (season == null || season !in seasons)) season = continueAt?.season?.takeIf { it in seasons } ?: seasons.first()
+    }
     // Long-running anime: every episode by its number through the show, a hundred at a time.
     val through = title.numberedThrough
     val numbered = remember(title.episodes) {
@@ -75,8 +80,11 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
     }
     val blocks = remember(title.episodes, through) { if (through) title.episodes.filter { it.season > 0 }.chunked(100) else emptyList() }
     var block by rememberSaveable(title.imdb) { mutableStateOf(0) }
+    // Opens on the hundred the series was left in.
+    LaunchedEffect(blocks) {
+        if (block == 0) continueAt?.let { c -> blocks.indexOfFirst { b -> b.any { it.id == c.id } }.takeIf { it > 0 }?.let { block = it } }
+    }
     val episodes = if (through) blocks.getOrNull(block).orEmpty() else title.episodes.filter { it.season == season }
-    val history by History.items.collectAsState()
     val progress = remember(history, title.imdb) { episodeProgress(history, title.imdb) }
 
     var episode by remember(title.imdb) { mutableStateOf<Episode?>(null) }
@@ -90,6 +98,10 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
     var ticket by remember { mutableIntStateOf(0) }
     val qualities = hits.orEmpty().mapNotNull { it.quality }.distinct().sortedBy { QUALITY_ORDER.indexOf(it).let { i -> if (i < 0) 9 else i } }
     val shown = hits.orEmpty().filter { quality == null || it.quality == quality }
+    /** The releases' language, by its code; empty is any language. */
+    var lang by rememberSaveable(title.imdb) { mutableStateOf("") }
+    fun searchLang() = LANGS.find { it.code == lang }
+    var pickingLang by remember { mutableStateOf(false) }
 
     val list = rememberLazyListState()
     val play = remember { FocusRequester() }
@@ -103,8 +115,8 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
         episodeId = ep?.id
         val run: suspend (OnHits) -> List<Hit> = { onHits ->
             try {
-                if (ep != null) searchEpisode(title, ep.season, ep.episode, onHits)
-                else searchTorrents(title.title, title.imdb, title.year?.take(4), onHits = onHits)
+                if (ep != null) searchEpisode(title, ep.season, ep.episode, onHits, searchLang())
+                else searchTorrents(title.title, title.imdb, title.year?.take(4), lang = searchLang(), onHits = onHits)
             } finally {
                 if (mine == ticket) busy = false
             }
@@ -115,15 +127,18 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
     }
 
     // A film has one thing to look for: look on arrival.
-    LaunchedEffect(title.imdb, title.kind) { if (!title.isSeries) findSources(null) }
+    LaunchedEffect(title.imdb, title.kind, lang) { if (!title.isSeries) findSources(null) }
 
-    /** What the big button plays: the episode being looked at, or the first of the season. */
-    val upNext = episode ?: episodes.firstOrNull()
+    /** What the big button plays: the episode being looked at, where the series was left, or the first of the season. */
+    val upNext = episode ?: continueAt ?: episodes.firstOrNull()
 
     fun playEpisode(ep: Episode) = scope.launch {
         val ready = if (episode?.id == ep.id && shown.isNotEmpty()) shown else findSources(ep).await()
         ready.firstOrNull()?.let { watch.stream(it, title, episodeTag(ep.season, ep.episode), ep) }
-            ?: watch.notes.tryEmit("No sources found for ${episodeTag(ep.season, ep.episode)}.")
+            ?: watch.notes.tryEmit(
+                if (lang.isEmpty()) "No sources found for ${episodeTag(ep.season, ep.episode)}."
+                else "No ${episodeTag(ep.season, ep.episode)} in ${langName(lang)} — change the language and try again.",
+            )
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -183,6 +198,11 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
                             onClick = { SavedStore.toggle(title) },
                             icon = if (inList) L.drawable.lucide_ic_check else L.drawable.lucide_ic_plus,
                             requester = if (title.isSeries && upNext == null) play else null,
+                        )
+                        TvButton(
+                            label = "Language: " + if (lang.isEmpty()) "Any" else langName(lang),
+                            onClick = { pickingLang = true },
+                            icon = L.drawable.lucide_ic_languages,
                         )
                     }
                 }
@@ -255,7 +275,10 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
                             Text("   Asking every index…", style = Type.body)
                         }
                         busy -> Note("${shown.size} so far · finding more…", Modifier.padding(bottom = 10.dp))
-                        hits?.isEmpty() == true -> Note("Nothing found. Try another episode, or search for the release by name.")
+                        hits?.isEmpty() == true -> Note(
+                            if (lang.isNotEmpty()) "Nothing found in ${langName(lang)}. Change the language and try again."
+                            else "Nothing found. Try another episode, or search for the release by name.",
+                        )
                         hits == null && title.isSeries -> Note("Choose an episode to see what is available.")
                     }
                 }
@@ -267,6 +290,21 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
                 }
             }
         }
+        }
+
+        if (pickingLang) {
+            Sheet(
+                title = "Release language",
+                options = listOf(Option("", "Any language")) + LANGS.map { Option(it.code, it.name) },
+                selected = lang,
+                onPick = {
+                    pickingLang = false
+                    lang = it
+                    // A film looks again by itself; a series, for the episode on show.
+                    if (title.isSeries) episode?.let(::findSources)
+                },
+                onDismiss = { pickingLang = false },
+            )
         }
     }
 }

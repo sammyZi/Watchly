@@ -315,35 +315,7 @@ fun Note(text: String, modifier: Modifier = Modifier) = Text(text, modifier, sty
 fun SectionTitle(text: String, modifier: Modifier = Modifier) =
     Text(text, modifier.padding(bottom = 12.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
 
-/** Drawn glyph for each avatar name kept from the Expo build. */
-fun avatarIcon(name: String?): Int = when (name) {
-    "emoticon-happy" -> L.drawable.lucide_ic_smile
-    "emoticon-cool" -> L.drawable.lucide_ic_rocket
-    "emoticon-excited" -> L.drawable.lucide_ic_laugh
-    "emoticon-wink" -> L.drawable.lucide_ic_smile_plus
-    "emoticon-tongue" -> L.drawable.lucide_ic_flame
-    "robot" -> L.drawable.lucide_ic_bot
-    "cat" -> L.drawable.lucide_ic_cat
-    "dog" -> L.drawable.lucide_ic_dog
-    "alien" -> L.drawable.lucide_ic_ghost
-    "penguin" -> L.drawable.lucide_ic_bird
-    else -> L.drawable.lucide_ic_user_round
-}
-
 fun colorOf(hex: String): Color = runCatching { Color(android.graphics.Color.parseColor(hex)) }.getOrDefault(Ink.surface2)
-
-@Composable
-fun Avatar(profile: Profile, size: Dp, modifier: Modifier = Modifier) {
-    Box(
-        modifier.size(size).clip(RoundedCornerShape(size / 8)).background(
-            Brush.linearGradient(listOf(colorOf(profile.colour), colorOf(profile.colour).copy(alpha = 0.65f))),
-        ),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (profile.icon != null || profile.isGuest) Lc(avatarIcon(profile.icon), tint = Color.White, size = size * 0.48f)
-        else Text(profile.name.take(1).uppercase(), style = Type.hero.copy(fontSize = (size.value * 0.42f).sp))
-    }
-}
 
 /**
  * The panel's highest mode up to 120Hz at the current resolution. Without it Android keeps an

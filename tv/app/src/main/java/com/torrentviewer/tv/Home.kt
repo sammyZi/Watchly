@@ -237,12 +237,18 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit) {
 val CARD_W = 210.dp
 val CARD_H = 118.dp
 
+/** A focused card grows from its left edge by this: 13dp on a 210dp card, inside [ROW_GAP], so its ring clears the next card. */
+private const val CARD_GROW = 1.06f
+
+/** Between a row's cards: the focused card's growth plus room to spare. */
+private val ROW_GAP = 18.dp
+
 /** The focused card holds at the row's left edge, where the first card sits. */
 @Composable
 private fun rowScroll() = with(LocalDensity.current) { ROW_LEAD.toPx() }.let { remember(it) { edgeScroll(it) } }
 
 /** Room left of the focused card for it to grow into — the same as the gap, so the card before it is fully out. */
-private val ROW_LEAD = 14.dp
+private val ROW_LEAD = ROW_GAP
 
 @Composable
 private fun Rail(heading: String, onEnter: () -> Unit, content: @Composable () -> Unit) {
@@ -260,7 +266,7 @@ private fun Rail(heading: String, onEnter: () -> Unit, content: @Composable () -
 
 @Composable
 private fun Placeholders() {
-    Row(Modifier.padding(start = GUTTER), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+    Row(Modifier.padding(start = GUTTER), horizontalArrangement = Arrangement.spacedBy(ROW_GAP)) {
         repeat(5) { Box(Modifier.width(CARD_W).height(CARD_H).background(Ink.surface, RoundedCornerShape(8.dp))) }
     }
 }
@@ -343,7 +349,7 @@ private fun TitleRow(state: HomeState, row: String, titles: List<Title>, claimFi
         // scrolled past slide out of sight instead of peeking out under the side bar.
         modifier = Modifier.padding(start = GUTTER - ROW_LEAD).focusRestorer(fallback),
         contentPadding = PaddingValues(start = ROW_LEAD, end = Safe.x),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(ROW_GAP),
     ) {
         itemsIndexed(titles, key = { _, t -> t.imdb }) { i, t ->
             val here = "$row/${t.imdb}"
@@ -356,7 +362,7 @@ private fun TitleRow(state: HomeState, row: String, titles: List<Title>, claimFi
                 },
                 modifier = Modifier.width(CARD_W).height(CARD_H),
                 shape = RoundedCornerShape(8.dp),
-                scale = 1.1f,
+                scale = CARD_GROW,
                 origin = TransformOrigin(0f, 0.5f),
                 requester = if (i == 0 && !back) fallback else requester,
                 onFocus = { onFocus(t) },
@@ -400,14 +406,14 @@ private fun ResumeRow(state: HomeState, items: List<Item>, claimFirst: Boolean, 
         state = state.row("resume"),
         modifier = Modifier.padding(start = GUTTER - ROW_LEAD).focusRestorer(fallback),
         contentPadding = PaddingValues(start = ROW_LEAD, end = Safe.x),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(ROW_GAP),
     ) {
         itemsIndexed(items, key = { _, it -> it.uri }) { i, item ->
             Focusable(
                 onClick = { watch.resume(item) },
                 modifier = Modifier.width(CARD_W).height(CARD_H),
                 shape = RoundedCornerShape(8.dp),
-                scale = 1.1f,
+                scale = CARD_GROW,
                 origin = TransformOrigin(0f, 0.5f),
                 requester = if (i == 0) fallback else null,
                 onFocus = {

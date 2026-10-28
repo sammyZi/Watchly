@@ -479,14 +479,17 @@ suspend fun searchTorrents(
     year: String? = null,
     suffix: String? = null,
     series: Boolean = false,
+    lang: Lang? = null,
     onHits: OnHits? = null,
 ): List<Hit> {
-    val tail = listOfNotNull(suffix, year).joinToString(" ")
+    // A language is asked for by name ("Hindi"), and only releases that say it count.
+    val tail = listOfNotNull(suffix, lang?.name?.substringBefore(" ("), year).joinToString(" ")
     val full = listOf(title, tail).filter { it.isNotEmpty() }.joinToString(" ")
     val alias = aliasOf(title)
     val aliasQuery = alias?.let { listOf(it, tail).filter { s -> s.isNotEmpty() }.joinToString(" ") }
     val bags = mutableListOf<List<Hit>>()
     fun now() = synchronized(bags) { settle(bags.toList(), full, title, alias, imdb) }
+        .let { all -> if (lang == null) all else all.filter { lang.match.containsMatchIn(it.name) } }
     fun add(hits: List<Hit>) {
         if (hits.isEmpty()) return
         synchronized(bags) { bags.add(hits) }
@@ -519,8 +522,8 @@ private val episodeMemo = java.util.concurrent.ConcurrentHashMap<String, List<Hi
  * Every release that can play one episode, packs included: a pack streams just as
  * well (only the one file is fetched) and usually has far more seeders.
  */
-suspend fun searchEpisode(title: Title, season: Int, episode: Int, onHits: OnHits? = null) =
-    searchEpisode(title.title, season, episode, title.imdb, onHits, absoluteNumber(title.episodes, season, episode), title.isAnime)
+suspend fun searchEpisode(title: Title, season: Int, episode: Int, onHits: OnHits? = null, lang: Lang? = null) =
+    searchEpisode(title.title, season, episode, title.imdb, onHits, absoluteNumber(title.episodes, season, episode), title.isAnime, lang)
 
 /**
  * [absolute] is the episode counted through the show, the number anime is released under.
@@ -528,11 +531,12 @@ suspend fun searchEpisode(title: Title, season: Int, episode: Int, onHits: OnHit
  */
 suspend fun searchEpisode(
     show: String, season: Int, episode: Int, imdb: String?, onHits: OnHits? = null,
-    absolute: Int? = null, anime: Boolean = false,
+    absolute: Int? = null, anime: Boolean = false, lang: Lang? = null,
 ): List<Hit> {
-    val key = "${imdb ?: show}:$season:$episode"
+    val key = "${imdb ?: show}:$season:$episode:${lang?.code}"
     episodeMemo[key]?.let { return it }
     fun plays(h: Hit): Boolean {
+        if (lang != null && !lang.match.containsMatchIn(h.name)) return false
         // A batch first: its first episode alone would otherwise decide.
         spanHolds(h.name, season, episode, absolute)?.let { return it }
         namesEpisode(h.name, season, episode, absolute)?.let { return it }
@@ -552,16 +556,16 @@ suspend fun searchEpisode(
     withContext(Dispatchers.Default) {
         // Anime is indexed by its running number, not S02E05.
         launch {
-            val hits = searchTorrents(show, imdb, suffix = "%02d".format(absolute ?: episode)) { synchronized(lock) { numbered = it }; onHits?.invoke(current()) }
+            val hits = searchTorrents(show, imdb, suffix = "%02d".format(absolute ?: episode), lang = lang) { synchronized(lock) { numbered = it }; onHits?.invoke(current()) }
             synchronized(lock) { numbered = hits }
         }
         launch {
-            val hits = searchTorrents(show, imdb, suffix = tag) { synchronized(lock) { loose = it }; onHits?.invoke(current()) }
+            val hits = searchTorrents(show, imdb, suffix = tag, lang = lang) { synchronized(lock) { loose = it }; onHits?.invoke(current()) }
             synchronized(lock) { loose = hits }
         }
         // "Prison Break Season 1 Complete" carries no episode tag: ask for the show by name too.
         launch {
-            val hits = searchTorrents(show, imdb, series = true) { synchronized(lock) { packs = it }; onHits?.invoke(current()) }
+            val hits = searchTorrents(show, imdb, series = true, lang = lang) { synchronized(lock) { packs = it }; onHits?.invoke(current()) }
             synchronized(lock) { packs = hits }
         }
         if (imdb != null) {

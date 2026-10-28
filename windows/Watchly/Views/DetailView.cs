@@ -36,6 +36,8 @@ public sealed class DetailView : UserControl, IDisposable
     int? season;
     bool wholeSeason;
     string? wanted;
+    /// <summary>The releases' language; null is any.</summary>
+    Lang? lang;
     bool plotOpen;
     bool saving;
     /// <summary>An episode's download button asked before its releases were in: keep the best once they are.</summary>
@@ -145,7 +147,7 @@ public sealed class DetailView : UserControl, IDisposable
         };
     }
 
-    string PickKey => picked is not null ? $"{picked.Season}:{picked.Number}" : $"movie:{title.Imdb}";
+    string PickKey => (picked is not null ? $"{picked.Season}:{picked.Number}" : $"movie:{title.Imdb}") + $":{lang?.Code}";
     int? PickedAbsolute => picked is not null ? Meta.AbsoluteNumber(title.Episodes, picked.Season, picked.Number) : null;
     string? PickedTag => picked is not null ? Search.PickTag(picked.Season, picked.Number, PickedAbsolute) : null;
     /// <summary>"S2:E4", as the phone and the TV write an episode.</summary>
@@ -167,8 +169,8 @@ public sealed class DetailView : UserControl, IDisposable
         var key = PickKey;
         error = null;
         var job = picked is not null
-            ? Search.SearchEpisode(title.Name, picked.Season, picked.Number, cts.Token, title.Imdb, PickedAbsolute)
-            : Search.SearchTorrents(title.Name, cts.Token, title.Imdb, title.Kind == "movie" ? title.Year?[..Math.Min(4, title.Year.Length)] : null);
+            ? Search.SearchEpisode(title.Name, picked.Season, picked.Number, cts.Token, title.Imdb, PickedAbsolute, lang)
+            : Search.SearchTorrents(title.Name, cts.Token, title.Imdb, title.Kind == "movie" ? title.Year?[..Math.Min(4, title.Year.Length)] : null, lang: lang);
         job.ContinueWith(t => Dispatcher.BeginInvoke(() =>
         {
             if (mine != searchGen) return;
@@ -180,7 +182,8 @@ public sealed class DetailView : UserControl, IDisposable
             {
                 saveWhenFound = false;
                 if (sources.FirstOrDefault() is { } hit) { Save(hit.Magnet); return; }
-                shell.Toast($"No sources found for {(picked is null ? title.Name : Short(picked))}", true);
+                var what = picked is null ? title.Name : Short(picked);
+                shell.Toast(lang is null ? $"No sources found for {what}" : $"No {what} in {lang.Name} — change the language and try again", true);
             }
             Render();
         }));
@@ -280,8 +283,10 @@ public sealed class DetailView : UserControl, IDisposable
             actions.Children.Add(Ui.IconAction("download", "Download", () =>
             {
                 if (best is not null) Save(best.Magnet);
-                else shell.Toast(fresh && sources is not null ? "No sources to download." : "Still finding sources…");
+                else shell.Toast(!(fresh && sources is not null) ? "Still finding sources…"
+                    : lang is null ? "No sources to download." : $"Nothing in {lang.Name} — change the language and try again.");
             }, width: double.NaN));
+        actions.Children.Add(LanguageAction());
         head.Children.Add(actions);
 
         if (title.Cast.Count > 0) head.Children.Add(CastRow());
@@ -289,10 +294,31 @@ public sealed class DetailView : UserControl, IDisposable
         content.Children.Add(head);
 
         if (title.Kind == "tv") RenderEpisodes(progress);
-        RenderSources(fresh, shown, wait);
         RenderReviews();
+        RenderSources(fresh, shown, wait);
 
         Dispatcher.BeginInvoke(() => scroll.ScrollToVerticalOffset(offset), DispatcherPriority.Loaded);
+    }
+
+    /// <summary>The releases' language, from a menu; picking one looks again.</summary>
+    Button LanguageAction()
+    {
+        var menu = new ContextMenu();
+        foreach (var l in new Lang?[] { null }.Concat(Lang.All))
+        {
+            var item = new MenuItem { Header = l?.Name ?? "Any language", IsChecked = l == lang };
+            item.Click += (_, _) =>
+            {
+                lang = l;
+                FindReleases();
+                Render();
+            };
+            menu.Items.Add(item);
+        }
+        Button button = null!;
+        button = Ui.IconAction("languages", lang?.Name ?? "Language", () => { menu.PlacementTarget = button; menu.IsOpen = true; }, lang is not null, "Accent", double.NaN);
+        button.ContextMenu = menu;
+        return button;
     }
 
     /// <summary>The cast as faces: a round photo over each name. Initials until the photos arrive.</summary>
@@ -358,7 +384,7 @@ public sealed class DetailView : UserControl, IDisposable
             var pills = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
             FrameworkElement Pill(string label, Color tint, string brush)
             {
-                var b = new Border { CornerRadius = new CornerRadius(999), Padding = new Thickness(10, 3, 10, 3), Margin = new Thickness(0, 0, 8, 0), Background = new SolidColorBrush(Color.FromArgb(0x24, tint.R, tint.G, tint.B)), Child = Ui.Text(label, "Meta", brush, 12, FontWeights.SemiBold) };
+                var b = Ui.Pill(new Border { Padding = new Thickness(10, 3, 10, 3), Margin = new Thickness(0, 0, 8, 0), Background = new SolidColorBrush(Color.FromArgb(0x24, tint.R, tint.G, tint.B)), Child = Ui.Text(label, "Meta", brush, 12, FontWeights.SemiBold) });
                 return b;
             }
             if (wins.Success) pills.Children.Add(Pill($"{wins.Groups[1].Value} {(wins.Groups[1].Value == "1" ? "win" : "wins")}", Color.FromRgb(0xf5, 0xc5, 0x18), "Imdb"));
@@ -592,7 +618,9 @@ public sealed class DetailView : UserControl, IDisposable
         if (wait) block.Children.Add(Busy(saving ? "Starting download…" : "Reading torrent…"));
         if (sources is null || !fresh) block.Children.Add(Busy("Asking every index…"));
         else if (error is not null) block.Children.Add(Note(error, "Danger"));
-        else if (sources.Count == 0) block.Children.Add(Note("Nothing found. Try another episode, or search for the release by name."));
+        else if (sources.Count == 0) block.Children.Add(Note(lang is not null
+            ? $"Nothing found in {lang.Name}. Change the language and try again."
+            : "Nothing found. Try another episode, or search for the release by name."));
 
         if (fresh && shown is not null)
             foreach (var hit in shown.Take(MaxSources)) block.Children.Add(SourceRow(hit));
@@ -642,10 +670,12 @@ public sealed class DetailView : UserControl, IDisposable
         foreach (var (label, url) in Meta.ReviewLinks(title))
         {
             var words = Ui.Text(label, "Meta", "Text", 13);
+            words.VerticalAlignment = VerticalAlignment.Center;
             var mark = Ui.Glyph("external-link", 13, "Muted");
             mark.Margin = new Thickness(8, 0, 0, 0);
-            var link = Ui.Button(new StackPanel { Orientation = Orientation.Horizontal, Children = { words, mark } }, () => Ui.Open(url), tooltip: url);
-            link.Tag = 999;
+            mark.VerticalAlignment = VerticalAlignment.Center;
+            var link = Ui.Button(new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Children = { words, mark } }, () => Ui.Open(url), tooltip: url);
+            link.Tag = 18; // half the height: round ends, not an oval
             link.Height = 36;
             link.Padding = new Thickness(16, 0, 14, 0);
             link.Margin = new Thickness(0, 0, 8, 8);
@@ -752,7 +782,7 @@ public sealed class DetailView : UserControl, IDisposable
             var claims = Search.SeasonsIn(h.Name);
             return claims.Count == 0 || claims.Contains(which);
         }
-        var found = await Search.SearchTorrents(title.Name, suffix: $"S{which:00}").ContinueWith(t => t.IsCompletedSuccessfully ? t.Result : new List<Hit>());
+        var found = await Search.SearchTorrents(title.Name, suffix: $"S{which:00}", lang: lang).ContinueWith(t => t.IsCompletedSuccessfully ? t.Result : new List<Hit>());
         if (packSeason != which) return;
         packs = (sources ?? new()).Concat(found).Where(IsPack).DistinctBy(h => h.Id).OrderByDescending(h => h.Seeders).ToList();
         Render();
@@ -771,7 +801,9 @@ public sealed class DetailView : UserControl, IDisposable
         }
         if (packs.Count == 0)
         {
-            list.Children.Add(Ui.Text($"No pack for season {which} — download its episodes one by one below.", "Body", "Faint"));
+            list.Children.Add(Ui.Text(lang is null
+                ? $"No pack for season {which} — download its episodes one by one below."
+                : $"No season {which} pack in {lang.Name} — change the language and try again, or download its episodes one by one below.", "Body", "Faint"));
             return list;
         }
         foreach (var hit in packs.Take(MaxSources))

@@ -809,8 +809,8 @@ private fun rateLabel(r: Float) = "${r.toString().removeSuffix(".0")}×"
 private fun TopBar(title: Title?, episode: Episode?, file: TorrentFile?, progress: Progress?, duration: Double, at: () -> Double, rate: Float) {
     Row(Modifier.fillMaxWidth().padding(horizontal = Safe.x, vertical = Safe.y), verticalAlignment = Alignment.Top) {
         Column(Modifier.weight(1f)) {
-            val ep = episode?.let { "S${it.season}:E${it.episode}  ${it.name}" }
-                ?: file?.let { parseEpisode(it.name) }?.let { "S${it.season}:E${it.episode}" }
+            val ep = episode?.let { "${episodeLabel(title, it.season, it.episode)}  ${it.name}" }
+                ?: file?.let { fileEpisodeLabel(title, it.name) }
             Text(
                 title?.title ?: searchableName(file?.name.orEmpty()).ifBlank { file?.name.orEmpty() },
                 style = Type.display.copy(fontSize = 26.sp),
@@ -1054,7 +1054,7 @@ private fun PausedCard(visible: Boolean, title: Title?, episode: Episode?, watch
                 Spacer(Modifier.height(10.dp))
                 if (title != null) TitleMark(title, maxHeight = 90.dp) else Text(watch.item?.label.orEmpty(), style = Type.hero)
                 episode?.let {
-                    Text("S${it.season}:E${it.episode}  “${it.name}”", Modifier.padding(top = 14.dp), style = Type.title)
+                    Text("${episodeLabel(title, it.season, it.episode)}  “${it.name}”", Modifier.padding(top = 14.dp), style = Type.title)
                 }
                 val plot = episode?.overview ?: title?.plot
                 if (title != null) Facts(title, Modifier.padding(top = 12.dp))
@@ -1093,7 +1093,8 @@ private fun Loading(title: Title?, episode: Episode?, file: TorrentFile?, starti
             Column(Modifier.weight(1f)) {
                 if (title != null) TitleMark(title, Modifier.widthIn(max = 520.dp), maxHeight = 100.dp)
                 else Text(searchableName(file?.name.orEmpty()).ifBlank { file?.name.orEmpty() }, style = Type.hero, maxLines = 2)
-                episode?.let { Text("S${it.season}:E${it.episode}  ${it.name}", Modifier.padding(top = 12.dp), style = Type.title) }
+                (episode?.let { "${episodeLabel(title, it.season, it.episode)}  ${it.name}" } ?: file?.let { fileEpisodeLabel(title, it.name) })
+                    ?.let { Text(it, Modifier.padding(top = 12.dp), style = Type.title) }
                 Row(Modifier.padding(top = 22.dp), verticalAlignment = Alignment.CenterVertically) {
                     val live = (progress?.peers ?: 0) > 0
                     Box(Modifier.size(9.dp).clip(CircleShape).background(if (live) Ink.good else Ink.faint))

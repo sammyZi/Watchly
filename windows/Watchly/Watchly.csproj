@@ -66,6 +66,8 @@
   <ItemGroup>
     <Resource Include="Assets\Fonts\*.ttf" />
     <Resource Include="Assets\app.ico" />
+    <!-- The profile faces, drawn from the same file as the phone's and the TV's. -->
+    <EmbeddedResource Include="..\..\tv\core\src\main\resources\avatars.json" LogicalName="avatars.json" />
   </ItemGroup>
 
   <ItemGroup>
