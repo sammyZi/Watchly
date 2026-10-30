@@ -63,9 +63,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import com.composables.icons.lucide.R as L
 
 /* ---------------------------------------------------------------- input */
@@ -236,14 +239,42 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
 
 /* -------------------------------------------------------------- library */
 
+/** Every release a title was played from, each with its size and where it was left; picking one resumes it. */
+@Composable
+fun ReleasesSheet(all: List<Item>, watch: Watch, onDismiss: () -> Unit) {
+    Sheet(
+        title = all.first().label.substringBefore(" · "),
+        options = all.map {
+            val hint = listOfNotNull(it.playedSize()?.let(::bytes), it.seeders?.let { s -> "$s seeds" }, it.leftLabel() ?: "Not started")
+            Option(it.uri, it.torrentName ?: it.title, hint.joinToString("  ·  "))
+        },
+        selected = latestPerTitle(all).first().uri,
+        onPick = { uri ->
+            onDismiss()
+            all.find { it.uri == uri }?.let { watch.resume(it) }
+        },
+        onDismiss = onDismiss,
+    )
+}
+
+/** Played from more than one release: ask which, each resuming where it was left. */
+fun releasesOf(history: List<Item>, item: Item) = history.filter { it.titleKey == item.titleKey }.sortedByDescending { it.at }
+
 /** Everything opened before, newest first — the only way back to a magnet watched once. */
 @Composable
-fun LibraryScreen(watch: Watch) {
+fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit) {
     val history by History.items.collectAsState()
     // One card per title, however many releases it was played from.
     val items = latestPerTitle(history)
+    // After a reinstall this TV's history is empty; what Simkl has still belongs here.
+    val simklLibrary by Simkl.library.collectAsState()
+    val fromSimkl = remember(simklLibrary, history) { simklLibrary.notIn(history) }
     var focusedUri by remember { mutableStateOf<String?>(null) }
     val first = remember { FocusRequester() }
+    var releases by remember { mutableStateOf<List<Item>?>(null) }
+    val simkl by Simkl.connected.collectAsState()
+    /** Per profile; the guest is offered nothing it would lose on exit. */
+    var simklLater by remember(me.id) { mutableStateOf(me.isGuest || Kv.get(SIMKL_LATER) != null) }
 
     CompositionLocalProvider(LocalBringIntoViewSpec provides rememberEdgeScroll(110.dp)) {
     LazyVerticalGrid(
@@ -262,13 +293,23 @@ fun LibraryScreen(watch: Watch) {
                 if (items.isNotEmpty()) TvButton("Clear all", { History.clear(watch.engine) }, icon = L.drawable.lucide_ic_trash_2)
             }
         }
-        if (items.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+        // Where the history is, the history's sync is offered.
+        if (Simkl.available && !simkl && !simklLater) item(span = { GridItemSpan(maxLineSpan) }) {
+            SimklSection(me, onLater = {
+                Kv.set(SIMKL_LATER, "1")
+                simklLater = true
+            })
+        }
+        if (simkl) item(span = { GridItemSpan(maxLineSpan) }) {
+            Text("✓ Simkl connected — finished films and episodes are marked watched", style = Type.meta.copy(color = Ink.faint))
+        }
+        if (items.isEmpty() && fromSimkl.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
             Note("Nothing here yet. Anything you play turns up in this list.", Modifier.padding(top = 20.dp))
         }
         items(items, key = { it.uri }) { item ->
             Column {
                 Focusable(
-                    onClick = { watch.resume(item) },
+                    onClick = { releasesOf(history, item).let { all -> if (all.size > 1) releases = all else watch.resume(item) } },
                     modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
                     shape = RoundedCornerShape(8.dp),
                     scale = 1.08f,
@@ -280,7 +321,11 @@ fun LibraryScreen(watch: Watch) {
                     Column(Modifier.align(Alignment.BottomStart).padding(10.dp)) {
                         Text(item.label, style = Type.label.copy(fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         val ep = item.lastFileIndex?.let { i -> item.files?.find { it.index == i } }?.let { parseEpisode(it.name) }
-                        Text(listOfNotNull(ep?.let { "S${it.season}:E${it.episode}" }, ago(item.at)).joinToString("  ·  "), style = Type.meta.copy(fontSize = 11.sp))
+                        val count = releasesOf(history, item).size
+                        Text(
+                            listOfNotNull(ep?.let { "S${it.season}:E${it.episode}" }, ago(item.at), item.playedSize()?.let(::bytes), if (count > 1) "$count releases" else null).joinToString("  ·  "),
+                            style = Type.meta.copy(fontSize = 11.sp), maxLines = 1,
+                        )
                         if (item.ratio > 0) {
                             Spacer(Modifier.height(5.dp))
                             ProgressLine(item.ratio.toFloat())
@@ -293,9 +338,40 @@ fun LibraryScreen(watch: Watch) {
                 }
             }
         }
+        if (fromSimkl.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+            Text("From Simkl", Modifier.padding(top = 14.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
+        }
+        // Never played on this TV: no release to resume, so the title opens; one picked there starts at Simkl's spot.
+        items(fromSimkl, key = { "simkl:${it.imdb}" }) { s ->
+            val paused = simklLibrary.paused.find { it.imdb == s.imdb }
+            Focusable(
+                onClick = { onOpen(Title(s.imdb, s.kind, s.title, year = s.year)) },
+                modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
+                shape = RoundedCornerShape(8.dp),
+                scale = 1.08f,
+                requester = if (items.isEmpty() && s == fromSimkl.first()) first else null,
+            ) {
+                Artwork("https://images.metahub.space/background/medium/${s.imdb}/img", s.title, Modifier.fillMaxSize())
+                Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(0.4f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.85f))))
+                Column(Modifier.align(Alignment.BottomStart).padding(10.dp)) {
+                    Text(s.title, style = Type.label.copy(fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val state = when {
+                        paused != null -> listOfNotNull(s.last, "${paused.progress.toInt()}% in").joinToString("  ·  ")
+                        s.kind == "movie" -> "Watched"
+                        else -> s.last?.let { "Last watched $it" } ?: "Watched"
+                    }
+                    Text("$state  ·  on Simkl", style = Type.meta.copy(fontSize = 11.sp), maxLines = 1)
+                    paused?.let {
+                        Spacer(Modifier.height(5.dp))
+                        ProgressLine((it.progress / 100).toFloat())
+                    }
+                }
+            }
+        }
     }
     }
-    if (items.isNotEmpty()) first.claim()
+    if (items.isNotEmpty() || fromSimkl.isNotEmpty()) first.claim()
+    releases?.let { all -> ReleasesSheet(all, watch) { releases = null } }
 }
 
 /* ------------------------------------------------------------- settings */
@@ -413,6 +489,8 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
 
+        if (Simkl.available) SimklSection(me)
+
         Section("Extra trackers","Attach public trackers to bare magnet links so they resolve faster.") {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Chip("On", settings.addTrackers, onClick = { set(settings.copy(addTrackers = true)) })
@@ -432,6 +510,94 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
         }
     }
     first.claim()
+}
+
+/** The Library's Simkl card was put off with "Not now"; Settings still offers it. */
+private const val SIMKL_LATER = "simkl:later"
+
+/** [text] as a QR code: black squares on white, with the one-module quiet zone a camera needs. */
+@Composable
+private fun Qr(text: String, size: androidx.compose.ui.unit.Dp) {
+    val matrix = remember(text) {
+        com.google.zxing.qrcode.QRCodeWriter().encode(text, com.google.zxing.BarcodeFormat.QR_CODE, 0, 0, mapOf(com.google.zxing.EncodeHintType.MARGIN to 1))
+    }
+    androidx.compose.foundation.Canvas(Modifier.size(size).clip(RoundedCornerShape(8.dp)).background(Color.White)) {
+        val cell = this.size.width / matrix.width
+        for (y in 0 until matrix.height) for (x in 0 until matrix.width) {
+            if (matrix[x, y]) drawRect(Color.Black, androidx.compose.ui.geometry.Offset(x * cell, y * cell), androidx.compose.ui.geometry.Size(cell, cell))
+        }
+    }
+}
+
+/**
+ * Connect by device code: the code shows here, the viewer approves on their phone, this page notices.
+ * [onLater] makes it a card, with a Not now — the Library's, and the first-run prompt's; without it,
+ * a Settings section.
+ */
+@Composable
+fun SimklSection(me: Profile, onLater: (() -> Unit)? = null) {
+    val connected by Simkl.connected.collectAsState()
+    var code by remember { mutableStateOf<DeviceCode?>(null) }
+    var note by remember { mutableStateOf<String?>(null) }
+    var job by remember { mutableStateOf<Job?>(null) }
+    val scope = rememberCoroutineScope()
+
+    fun connect() {
+        note = null
+        job?.cancel()
+        job = scope.launch {
+            try {
+                val c = Simkl.start()
+                code = c
+                if (!Simkl.await(c)) note = "That code ran out — connect again for a new one."
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) note = e.message ?: "Couldn't reach Simkl."
+            } finally {
+                code = null
+            }
+        }
+    }
+
+    val hint = when {
+        connected -> "Connected — films and episodes you watch to the end are marked watched on Simkl."
+        me.isGuest -> "Marks what you finish as watched on your Simkl account. As Guest it's forgotten when the app closes."
+        else -> "Films and episodes you finish get marked watched on your Simkl account, and Continue Watching follows you to other devices."
+    }
+    val body: @Composable () -> Unit = {
+        Column {
+            val c = code
+            if (c != null) Row(Modifier.padding(bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                // Scanned, it opens Simkl with the code filled in; the code itself is for typing on any device.
+                Qr(c.uriComplete, 168.dp)
+                Spacer(Modifier.width(24.dp))
+                Column(Modifier.widthIn(max = 560.dp)) {
+                    Text("Scan with your phone's camera — or go to ${c.uri.removePrefix("https://")} and enter", style = Type.meta.copy(color = Ink.faint))
+                    Text(c.userCode, Modifier.padding(vertical = 8.dp), style = Type.display)
+                    Text("Signing in? Simkl emails that account a link — open it and confirm, then press Allow.", style = Type.meta.copy(color = Ink.faint))
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                when {
+                    connected -> TvButton("Disconnect", { Simkl.disconnect() }, icon = L.drawable.lucide_ic_link)
+                    c != null -> TvButton("Cancel", { job?.cancel() })
+                    else -> {
+                        TvButton("Connect Simkl", ::connect, icon = L.drawable.lucide_ic_link)
+                        onLater?.let {
+                            Spacer(Modifier.width(10.dp))
+                            TvButton("Not now", it)
+                        }
+                    }
+                }
+            }
+            note?.let { Text(it, Modifier.padding(top = 10.dp), style = Type.meta.copy(color = Ink.faint)) }
+        }
+    }
+    if (onLater == null) Section("Simkl", hint, body)
+    else Column(Modifier.fillMaxWidth().background(Ink.surface, RoundedCornerShape(14.dp)).padding(24.dp)) {
+        Text("Sync your history with Simkl", style = Type.title.copy(fontWeight = FontWeight.Bold))
+        Text(hint, Modifier.padding(top = 4.dp, bottom = 16.dp).widthIn(max = 760.dp), style = Type.meta.copy(color = Ink.faint))
+        body()
+    }
 }
 
 @Composable

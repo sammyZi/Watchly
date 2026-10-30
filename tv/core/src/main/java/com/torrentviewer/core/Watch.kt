@@ -96,8 +96,9 @@ class Watch(val engine: TorrentStream) {
                 uri = hit.magnet,
                 title = hit.name,
                 at = System.currentTimeMillis(),
-                imdb = from?.imdb,
-                kind = from?.kind,
+                // Played straight from search: the index's own IMDb tag, so Simkl can still place it.
+                imdb = from?.imdb ?: hit.imdb,
+                kind = from?.kind ?: hit.imdb?.let { hit.kind },
                 poster = from?.poster,
                 backdrop = from?.backdrop,
                 titleName = if (episode != null && from != null) "${from.title} · ${episodeTag(episode.season, episode.episode)}" else from?.title,
@@ -125,10 +126,23 @@ class Watch(val engine: TorrentStream) {
         val now = History.find(uri) ?: return item!!
         if ((now.positions[index] ?: 0.0) > 0.0) return now
         val name = found.files.find { it.index == index }?.name ?: return now
-        val (at, duration) = carryOver(History.items.value, now, name) ?: return now
+        val (at, duration) = carryOver(History.items.value, now, name) ?: return fromSimkl(now, index, name)
         History.setPosition(uri, index, at)
         duration?.let { History.setDuration(uri, index, it) }
         return (History.find(uri) ?: now).also { item = it }
+    }
+
+    /**
+     * Nothing here has played this title — a reinstall, another device — but Simkl kept where it
+     * was paused. Its percent of the runtime Cinemeta gives: close, not to the second.
+     */
+    private fun fromSimkl(now: Item, index: Int, name: String): Item {
+        val imdb = now.imdb ?: return now
+        val ep = if (now.kind == "movie") null else (episodeOfFile(title?.episodes.orEmpty(), name)?.let { Ep(it.season, it.episode) } ?: parseEpisode(name) ?: return now)
+        val percent = Simkl.library.value.pausedAt(imdb, ep) ?: return now
+        val runtime = runtimeSeconds(title?.runtime).takeIf { it > 0 } ?: return now
+        History.setPosition(now.uri, index, runtime * percent / 100)
+        return (History.find(now.uri) ?: now).also { item = it }
     }
 
     /**
@@ -245,7 +259,45 @@ class Watch(val engine: TorrentStream) {
 
     val playingFile: TorrentFile? get() = meta?.files?.find { it.index == playingIndex }
 
-    fun savePosition(seconds: Double) = item?.let { History.setPosition(it.uri, playingIndex, seconds, engine.readRatio()) }
+    fun savePosition(seconds: Double) {
+        val at = item ?: return
+        History.setPosition(at.uri, playingIndex, seconds, engine.readRatio())
+        markWatched(at, seconds)
+    }
+
+    /** The episode the playing file is, by Cinemeta's list or its name; null for a film or a file that can't say. */
+    private fun playingEp(at: Item): Ep? {
+        if (at.kind == "movie") return null
+        val name = playingFile?.name ?: return null
+        return episodeOf(playingFile)?.let { Ep(it.season, it.episode) } ?: parseEpisode(name)
+    }
+
+    /** Closed part-way: Simkl keeps the spot, for a reinstall or another device. Finished goes as watched instead. */
+    private fun pauseOnSimkl() {
+        val at = item ?: return
+        if (marked == playId) return
+        val now = History.find(at.uri) ?: return
+        val of = now.durations[playingIndex]?.takeIf { it > 0 } ?: return
+        val r = (now.positions[playingIndex] ?: return) / of
+        if (r < 0.02 || r >= WATCHED_AT) return
+        val ep = playingEp(at)
+        if (at.kind != "movie" && ep == null) return
+        Simkl.pause(at.imdb, ep, r * 100, at.label.substringBefore(" · "))
+    }
+
+    /** The play that has gone to Simkl, so a film is marked once however often its position is saved. */
+    private var marked = -1
+
+    /** [WATCHED_AT] in is watched: the credits are not worth waiting for. */
+    private fun markWatched(at: Item, seconds: Double) {
+        if (marked == playId) return
+        val of = History.find(at.uri)?.durations?.get(playingIndex) ?: return
+        if (of <= 0 || seconds / of < WATCHED_AT) return
+        marked = playId
+        if (at.kind == "movie") return Simkl.watched(at.imdb, null, null)
+        val ep = playingEp(at) ?: return
+        Simkl.watched(at.imdb, ep.season, ep.episode)
+    }
 
     fun saveDuration(seconds: Double) = item?.let { History.setDuration(it.uri, playingIndex, seconds) }
 
@@ -256,6 +308,7 @@ class Watch(val engine: TorrentStream) {
     fun startAt(): Double = item?.let { History.find(it.uri)?.positions?.get(playingIndex) } ?: 0.0
 
     fun exit() {
+        pauseOnSimkl()
         gen++
         phase = Phase.IDLE
         item = null

@@ -20,6 +20,7 @@ import com.torrentviewer.core.AppScope
 import com.torrentviewer.core.Ink
 import com.torrentviewer.core.Kv
 import com.torrentviewer.core.Profiles
+import com.torrentviewer.core.Simkl
 import com.torrentviewer.core.SettingsStore
 import com.torrentviewer.core.TorrentStream
 import com.torrentviewer.core.Watch
@@ -39,6 +40,7 @@ object Services {
         Kv.init(context)
         SettingsStore.load()
         Profiles.load()
+        Simkl.clientId = BuildConfig.SIMKL_CLIENT_ID
         // 6882: the TV (6881) and the Windows app (51413) may share the router.
         // lan: the stream is also served to the network, for a Cast receiver to fetch.
         engine = TorrentStream(context.applicationContext, port = 6882, lan = true)

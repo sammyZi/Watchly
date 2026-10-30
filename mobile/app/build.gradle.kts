@@ -3,11 +3,16 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-/** SUBDL_KEY from mobile/.env (the Expo name still works), so the key stays out of git. */
-val subdlKey: String = rootProject.file(".env").takeIf { it.exists() }?.readLines().orEmpty()
+/** From mobile/.env, so keys stay out of git: the first of [names] set. */
+fun env(vararg names: String): String = rootProject.file(".env").takeIf { it.exists() }?.readLines().orEmpty()
     .map { it.trim() }
-    .firstOrNull { it.startsWith("SUBDL_KEY=") || it.startsWith("EXPO_PUBLIC_SUBDL_KEY=") }
+    .firstOrNull { line -> names.any { line.startsWith("$it=") } }
     ?.substringAfter('=')?.trim().orEmpty()
+
+// The Expo name still works.
+val subdlKey = env("SUBDL_KEY", "EXPO_PUBLIC_SUBDL_KEY")
+// An AUTH V2 app from simkl.com/settings/developer; unset leaves Simkl out of Settings.
+val simklClientId = env("SIMKL_CLIENT_ID")
 
 android {
     namespace = "com.torrentviewer.mobile"
@@ -22,6 +27,7 @@ android {
         versionCode = 3
         versionName = "2.1.0"
         buildConfigField("String", "SUBDL_KEY", "\"$subdlKey\"")
+        buildConfigField("String", "SIMKL_CLIENT_ID", "\"$simklClientId\"")
         buildConfigField("long", "BUILD_TIME", "${System.currentTimeMillis()}L")
         manifestPlaceholders["appLabel"] = "Watchly"
     }

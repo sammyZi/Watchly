@@ -85,6 +85,9 @@ enum class Tab(val label: String, @DrawableRes val icon: Int) {
     SETTINGS("Settings", L.drawable.lucide_ic_settings),
 }
 
+/** This profile has been offered Simkl once, on its first open. */
+private const val SIMKL_ASKED = "simkl:asked"
+
 @Composable
 fun App(watch: Watch, incoming: MutableState<Uri?>) {
     MaterialTheme(colorScheme = darkColorScheme(primary = Ink.accent, background = Ink.bg, surface = Ink.surface)) {
@@ -115,6 +118,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         Kv.useProfile(profile.id, profile.isGuest)
         History.load()
         SavedStore.load()
+        Simkl.load(profile.id, profile.isGuest)
         who = profile
         switching = false
     }
@@ -186,7 +190,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
                     when (tab) {
                         Tab.HOME -> HomeScreen(home, watch, onOpen = { detail = it })
                         Tab.SEARCH -> SearchScreen(watch, onOpen = { detail = it })
-                        Tab.LIBRARY -> LibraryScreen(watch)
+                        Tab.LIBRARY -> LibraryScreen(watch, who!!, onOpen = { detail = it })
                         Tab.SETTINGS -> SettingsScreen(who!!, onSwitchProfile = { switching = true })
                     }
                 }
@@ -195,6 +199,18 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         if (detail == null) NavRail(tab, who!!, rail, page, onTab = { tab = it }, onProfile = { switching = true })
 
         if (watch.phase == Phase.INSPECTING) Opening(watch)
+
+        // Once per profile, the first time it opens: Simkl is otherwise easy never to find.
+        who?.let { me ->
+            var askSimkl by remember(me.id) { mutableStateOf(Simkl.available && !me.isGuest && Kv.get(SIMKL_ASKED) == null) }
+            val simkl by Simkl.connected.collectAsState()
+            if (askSimkl && !simkl) {
+                LaunchedEffect(me.id) { Kv.set(SIMKL_ASKED, "1") }
+                androidx.compose.ui.window.Dialog(onDismissRequest = { askSimkl = false }, androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+                    Box(Modifier.width(820.dp)) { SimklSection(me, onLater = { askSimkl = false }) }
+                }
+            }
+        }
 
         watch.choose?.let { (item, meta) ->
             Sheet(

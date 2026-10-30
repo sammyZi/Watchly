@@ -85,6 +85,7 @@ import com.torrentviewer.core.Lc
 import com.torrentviewer.core.Phase
 import com.torrentviewer.core.Profile
 import com.torrentviewer.core.Profiles
+import com.torrentviewer.core.Simkl
 import com.torrentviewer.core.SavedStore
 import com.torrentviewer.core.Spinner
 import com.torrentviewer.core.Title
@@ -122,6 +123,9 @@ private fun keyOf(index: Int, page: Page) = when (page) {
 /** The profile opened last on this phone, so a phone with one owner never asks. */
 private const val LAST_PROFILE = "phone:lastProfile"
 
+/** This profile has been offered Simkl once, on its first open. */
+private const val SIMKL_ASKED = "simkl:asked"
+
 /** Before profiles there were the bare keys; with none made, the phone keeps using them. */
 private val OWNER = Profile("", "Me", COLOURS[0])
 
@@ -130,6 +134,7 @@ private fun open(profile: Profile) {
     Kv.useProfile(profile.id, profile.isGuest)
     History.load()
     SavedStore.load()
+    Simkl.load(profile.id, profile.isGuest)
     if (!profile.isGuest) Kv.setGlobal(LAST_PROFILE, profile.id)
 }
 
@@ -272,7 +277,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
                     when (t) {
                         Tab.HOME -> HomeScreen(home, watch, me, onOpen = openTitle, onShelf = { pages.add(Page.Catalog(it)) }, onProfile = { switching = true })
                         Tab.SEARCH -> SearchScreen(watch, onOpen = openTitle)
-                        Tab.LIBRARY -> LibraryScreen(watch, onOpen = openTitle)
+                        Tab.LIBRARY -> LibraryScreen(watch, me, onOpen = openTitle)
                         Tab.DOWNLOADS -> DownloadsScreen(watch)
                         Tab.SETTINGS -> SettingsScreen(watch, me, onSwitchProfile = { switching = true })
                     }
@@ -299,6 +304,16 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         }
 
         if (watch.phase == Phase.INSPECTING) Opening(watch)
+
+        // Once per profile, the first time it opens: Simkl is otherwise easy never to find.
+        var askSimkl by remember(me.id) { mutableStateOf(Simkl.available && !me.isGuest && Kv.get(SIMKL_ASKED) == null) }
+        val simkl by Simkl.connected.collectAsState()
+        if (askSimkl && !simkl) {
+            LaunchedEffect(me.id) { Kv.set(SIMKL_ASKED, "1") }
+            androidx.compose.ui.window.Dialog(onDismissRequest = { askSimkl = false }) {
+                Box(Modifier.background(Ink.bg, RoundedCornerShape(16.dp))) { SimklSection(me, onLater = { askSimkl = false }) }
+            }
+        }
 
         watch.choose?.let { (item, meta) ->
             Sheet(

@@ -81,6 +81,8 @@ import com.torrentviewer.core.latestPerTitle
 import com.torrentviewer.core.titleKey
 import com.torrentviewer.core.parseEpisode
 import com.torrentviewer.core.quality
+import com.torrentviewer.core.bytes
+import com.torrentviewer.core.playedSize
 import com.torrentviewer.core.remoteArt
 import kotlinx.coroutines.delay
 import com.composables.icons.lucide.R as L
@@ -190,6 +192,9 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
 
     // One card per title — its latest episode or release — and only if that one is part-watched.
     val resumable = latestPerTitle(history).filter(::inProgress).take(10)
+    // Left part-way somewhere this phone never saw — another device, before a reinstall: Simkl kept the spot.
+    val simkl by com.torrentviewer.core.Simkl.library.collectAsState()
+    val fromSimkl = simkl.paused.filter { p -> history.none { it.imdb == p.imdb } }.distinctBy { it.imdb }.take(10)
     val watchlist = saved.filter { it.list == "later" }.map { it.asTitle() }
     val heroes = shelves.firstNotNullOfOrNull { state.loaded[it.key]?.takeIf { l -> l.isNotEmpty() } }.orEmpty().take(HEROES)
     SideEffect { state.heroCount = heroes.size }
@@ -207,7 +212,7 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
                 if (heroes.isEmpty()) Box(Modifier.fillMaxWidth().height(if (isWide()) 320.dp else 420.dp))
                 else Hero(state.hero, heroes, onOpen)
             }
-            if (resumable.isNotEmpty()) item(key = "resume") {
+            if (resumable.isNotEmpty() || fromSimkl.isNotEmpty()) item(key = "resume") {
                 Rail("Continue Watching") {
                     LazyRow(state = state.row("resume"), contentPadding = PaddingValues(horizontal = EDGE), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         items(resumable, key = { it.uri }) { item ->
@@ -220,6 +225,19 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
                                     LandscapeCard(remoteArt(item.poster) ?: item.art(), item.label, resumeStamp(item), item.ratio.toFloat())
                                 }
                                 Text(item.label.substringBefore(" · "), Modifier.padding(top = 6.dp), style = Type.label.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                        // No release to resume from yet: the title opens, and the one picked starts at Simkl's spot.
+                        items(fromSimkl, key = { "simkl:${it.imdb}" }) { p ->
+                            Column(Modifier.width(posterWidth())) {
+                                Tap({ onOpen(Title(p.imdb, p.kind, p.title, year = p.year)) }, Modifier.fillMaxWidth().aspectRatio(2f / 3f), RoundedCornerShape(6.dp)) {
+                                    LandscapeCard(
+                                        "https://images.metahub.space/poster/medium/${p.imdb}/img", p.title,
+                                        listOfNotNull(p.ep?.let { "S${it.season}:E${it.episode}" }, "${p.progress.toInt()}%").joinToString("  ·  "),
+                                        (p.progress / 100).toFloat(),
+                                    )
+                                }
+                                Text(p.title, Modifier.padding(top = 6.dp), style = Type.label.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }
@@ -289,21 +307,26 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
         )
     }
 
-    releases?.let { all ->
-        Sheet(
-            title = all.first().label,
-            options = all.map {
-                val name = it.torrentName ?: it.title
-                Option(it.uri, name, listOfNotNull(it.seeders?.let { s -> "$s seeds" }, resumeStamp(it) ?: "Not started").joinToString("  ·  "), tag = quality(name))
-            },
-            selected = latestPerTitle(all).first().uri,
-            onPick = { uri ->
-                releases = null
-                all.find { it.uri == uri }?.let { watch.resume(it) }
-            },
-            onDismiss = { releases = null },
-        )
-    }
+    releases?.let { all -> ReleasesSheet(all, watch) { releases = null } }
+}
+
+/** Every release a title was played from, each with its size and where it was left; picking one resumes it. */
+@Composable
+fun ReleasesSheet(all: List<Item>, watch: Watch, onDismiss: () -> Unit) {
+    Sheet(
+        title = all.first().label.substringBefore(" · "),
+        options = all.map {
+            val name = it.torrentName ?: it.title
+            val hint = listOfNotNull(it.playedSize()?.let(::bytes), it.seeders?.let { s -> "$s seeds" }, resumeStamp(it) ?: "Not started")
+            Option(it.uri, name, hint.joinToString("  ·  "), tag = quality(name))
+        },
+        selected = latestPerTitle(all).first().uri,
+        onPick = { uri ->
+            onDismiss()
+            all.find { it.uri == uri }?.let { watch.resume(it) }
+        },
+        onDismiss = onDismiss,
+    )
 }
 
 @Composable
