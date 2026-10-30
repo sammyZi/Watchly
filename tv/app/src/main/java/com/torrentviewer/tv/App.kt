@@ -17,6 +17,8 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -85,9 +87,6 @@ enum class Tab(val label: String, @DrawableRes val icon: Int) {
     SETTINGS("Settings", L.drawable.lucide_ic_settings),
 }
 
-/** This profile has been offered Simkl once, on its first open. */
-private const val SIMKL_ASKED = "simkl:asked"
-
 @Composable
 fun App(watch: Watch, incoming: MutableState<Uri?>) {
     MaterialTheme(colorScheme = darkColorScheme(primary = Ink.accent, background = Ink.bg, surface = Ink.surface)) {
@@ -105,7 +104,11 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     val profiles by Profiles.list.collectAsState()
     var who by remember { mutableStateOf<Profile?>(null) }
     // An edit to the profile in use — its name, face or colour — shows at once.
-    LaunchedEffect(profiles) { who = who?.let { w -> profiles.find { it.id == w.id } ?: w } }
+    LaunchedEffect(profiles) {
+        who = who?.let { w -> profiles.find { it.id == w.id } ?: w }
+        // Kids switched on or off for the profile in use: at once, not at the next switch.
+        who?.let(Kids::use)
+    }
     var switching by remember { mutableStateOf(false) }
     var tab by remember { mutableStateOf(Tab.HOME) }
     var detail by remember { mutableStateOf<Title?>(null) }
@@ -119,6 +122,12 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         History.load()
         SavedStore.load()
         Simkl.load(profile.id, profile.isGuest)
+        Kids.use(profile)
+        // Rows loaded for the last profile: a kids profile must not inherit a grown-up's, nor the reverse.
+        if (who?.kids != profile.kids) {
+            home.loaded.clear()
+            home.hero = null
+        }
         who = profile
         switching = false
     }
@@ -131,6 +140,8 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         val uri = incoming.value ?: return@LaunchedEffect
         if (who == null) return@LaunchedEffect
         incoming.value = null
+        // A magnet is anything at all: a kids profile plays only what it can browse to.
+        if (Kids.on) return@LaunchedEffect watch.fail("A kids profile can't open torrents from other apps.")
         detail = null
         val raw = uri.toString()
         if (!isTorrentSource(raw)) return@LaunchedEffect
@@ -199,18 +210,6 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         if (detail == null) NavRail(tab, who!!, rail, page, onTab = { tab = it }, onProfile = { switching = true })
 
         if (watch.phase == Phase.INSPECTING) Opening(watch)
-
-        // Once per profile, the first time it opens: Simkl is otherwise easy never to find.
-        who?.let { me ->
-            var askSimkl by remember(me.id) { mutableStateOf(Simkl.available && !me.isGuest && Kv.get(SIMKL_ASKED) == null) }
-            val simkl by Simkl.connected.collectAsState()
-            if (askSimkl && !simkl) {
-                LaunchedEffect(me.id) { Kv.set(SIMKL_ASKED, "1") }
-                androidx.compose.ui.window.Dialog(onDismissRequest = { askSimkl = false }, androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
-                    Box(Modifier.width(820.dp)) { SimklSection(me, onLater = { askSimkl = false }) }
-                }
-            }
-        }
 
         watch.choose?.let { (item, meta) ->
             Sheet(
@@ -388,6 +387,10 @@ fun <T> Sheet(
         AnimatedVisibility(shown, enter = slideInHorizontally(Motion.spatial()) { it } + fadeIn(), exit = slideOutHorizontally { it } + fadeOut()) {
             Column(
                 Modifier.fillMaxHeight().width(440.dp)
+                    // While it is up the remote stays in it: focus that slipped out landed on the
+                    // player behind, and OK there paused or sought instead of picking. Back closes it.
+                    .focusProperties { onExit = { cancelFocusChange() } }
+                    .focusGroup()
                     .background(Brush.horizontalGradient(listOf(Ink.surface.copy(alpha = 0.96f), Color(0xF2101010))))
                     .padding(start = 28.dp, end = Safe.x, top = Safe.y + 8.dp, bottom = Safe.y),
             ) {
@@ -397,7 +400,10 @@ fun <T> Sheet(
                     options.isEmpty() -> Note(empty ?: "Nothing to choose from.")
                     else -> {
                         val start = options.indexOfFirst { it.value == selected }.coerceAtLeast(0)
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.focusRestorer(first)) {
+                        // Opened at the selected row: a lazy list only builds what is on screen, and a
+                        // row further down (Croatian, in the subtitle languages) had nothing to focus.
+                        val list = rememberLazyListState(initialFirstVisibleItemIndex = (start - 3).coerceAtLeast(0))
+                        LazyColumn(state = list, verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.focusRestorer(first)) {
                             itemsIndexed(options) { i, option ->
                                 val on = option.value == selected
                                 Focusable(

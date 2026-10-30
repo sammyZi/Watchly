@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 7 and older, which has no adaptive icons: a red square with the clapper well
+     inside it, so a launcher that rounds the corners never cuts the clapper. Drawn from the
+     adaptive icon's own layers (mipmap-anydpi-v26 wins from Android 8 on). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+  <item>
+    <shape android:shape="rectangle">
+      <solid android:color="#E50914" />
+      <size android:width="48dp" android:height="48dp" />
+    </shape>
+  </item>
+  <item android:drawable="@mipmap/ic_launcher_foreground" />
+</layer-list>

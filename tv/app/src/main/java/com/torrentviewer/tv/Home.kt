@@ -144,17 +144,19 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit) {
         }
     }
     val chosen = settings.genres.map { Shelf(if (it == ANIME_GENRE) "Anime" else it, kindOfGenre(it), it) }
-    val shelves = remember(chosen, state.picks) {
+    val shelves = remember(chosen, state.picks, Kids.on) {
+        if (Kids.on) return@remember KIDS_SHELVES.map { (title, kind, genre) -> Shelf(title, kind, genre) }
         val taken = chosen.map { it.key }.toMutableSet()
         val rest = state.picks.filter { taken.add(it.key) }
         chosen + rest + SHELVES.filter { it.key !in taken }
     }
 
     // Top-down, not all at once: a 2GB television and a burst of parallel fetches do not mix.
-    LaunchedEffect(shelves, online) {
+    // A kids profile's rows are filtered again once the family list is in.
+    LaunchedEffect(shelves, online, Kids.allowed) {
         for (shelf in shelves) {
-            if (state.loaded[shelf.key].isNullOrEmpty()) {
-                val titles = Meta.peekCatalog(shelf.kind, shelf.genre) ?: Meta.catalog(shelf.kind, shelf.genre)
+            if (state.loaded[shelf.key].isNullOrEmpty() || Kids.on) {
+                val titles = Kids.only(Meta.peekCatalog(shelf.kind, shelf.genre) ?: Meta.catalog(shelf.kind, shelf.genre))
                 if (titles.isNotEmpty()) state.loaded[shelf.key] = titles
             }
         }
@@ -181,7 +183,7 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit) {
     val resumable = latestPerTitle(history).filter(::inProgress).take(8)
     // Left part-way somewhere this TV never saw — another device, before a reinstall: Simkl kept the spot.
     val simkl by Simkl.library.collectAsState()
-    val fromSimkl = simkl.paused.filter { p -> history.none { it.imdb == p.imdb } }.distinctBy { it.imdb }.take(8)
+    val fromSimkl = Kids.only(simkl.paused.filter { p -> history.none { it.imdb == p.imdb } }.distinctBy { it.imdb }) { Title(it.imdb, it.kind, it.title) }.take(8)
     val resuming = resumable.isNotEmpty() || fromSimkl.isNotEmpty()
     var releases by remember { mutableStateOf<List<Item>?>(null) }
     val watchlist = saved.filter { it.list == "later" }.map { it.asTitle() }

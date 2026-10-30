@@ -387,6 +387,28 @@ class LibTest {
         assertNull(trackForLang(tracks, "IT"))
         assertEquals(2, trackForLang(listOf(Track(2, "eng forced")), "EN")?.id)
         assertEquals("Portuguese (Brazil)", langName("BR_PT"))
+        // Three close languages, each found by its own name or code and never taken for another.
+        val balkan = listOf(Track(1, "Hrvatski"), Track(2, "srp"), Track(3, "Track 3 - [Bosnian]"), Track(4, "Српски (Forced)"))
+        assertEquals(1, trackForLang(balkan, "HR")?.id)
+        assertEquals(2, trackForLang(balkan, "SR")?.id)
+        assertEquals(3, trackForLang(balkan, "BS")?.id)
+        assertEquals(4, trackForLang(listOf(Track(4, "Српски")), "SR")?.id)
+        assertEquals("Croatian", langName("HR"))
+    }
+
+    @Test fun kidsFilter() {
+        val family = setOf("tt0114709")
+        // Toy Story: Cinemeta cuts its genres to three, none of them Family; the Family catalogue still has it.
+        val toyStory = Title("tt0114709", "movie", "Toy Story", genres = listOf("Animation", "Adventure", "Comedy"))
+        val paddington = Title("tt1109624", "movie", "Paddington", genres = listOf("Adventure", "Comedy", "Family"))
+        val sausageParty = Title("tt1700841", "movie", "Sausage Party", genres = listOf("Animation", "Adventure", "Comedy"))
+        assertTrue(allows(toyStory, kids = true, family = family))
+        assertTrue(allows(paddington, kids = true, family = family))
+        // Animated and a comedy, but not a family film: kept out.
+        assertFalse(allows(sausageParty, kids = true, family = family))
+        assertTrue(allows(sausageParty, kids = false, family = family))
+        // Before the family list arrives, only what says Family itself gets through.
+        assertFalse(allows(toyStory, kids = true, family = emptySet()))
     }
 
     @Test fun backupFiles() {

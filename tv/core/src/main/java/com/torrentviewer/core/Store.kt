@@ -259,7 +259,8 @@ object Secrets {
 
 /* -------------------------------------------------------------- profiles */
 
-data class Profile(val id: String, val name: String, val colour: String, val icon: String? = null, val pin: String? = null) {
+/** [kids]: sees only family titles, and can't search torrents or open magnets itself — see [Kids]. */
+data class Profile(val id: String, val name: String, val colour: String, val icon: String? = null, val pin: String? = null, val kids: Boolean = false) {
     val isGuest get() = id == GUEST.id
 }
 
@@ -278,7 +279,7 @@ object Profiles {
     fun load() {
         _list.value = runCatching {
             JSONArray(Kv.global("profiles") ?: "[]").objects().map {
-                Profile(it.optString("id"), it.optString("name"), it.str("colour") ?: COLOURS[0], it.str("icon"), it.str("pin"))
+                Profile(it.optString("id"), it.optString("name"), it.str("colour") ?: COLOURS[0], it.str("icon"), it.str("pin"), it.optBoolean("kids"))
             }
         }.getOrDefault(emptyList())
     }
@@ -287,25 +288,26 @@ object Profiles {
         _list.value = next
         Kv.setGlobal(
             "profiles",
-            JSONArray(next.map { JSONObject().put("id", it.id).put("name", it.name).put("colour", it.colour).put("icon", it.icon).put("pin", it.pin) }).toString(),
+            JSONArray(next.map { JSONObject().put("id", it.id).put("name", it.name).put("colour", it.colour).put("icon", it.icon).put("pin", it.pin).put("kids", it.kids) }).toString(),
         )
     }
 
     /** The very first takes the bare keys, so a library from before profiles survives. */
-    fun add(name: String, icon: String, colour: String): Profile {
+    fun add(name: String, icon: String, colour: String, kids: Boolean = false): Profile {
         val list = _list.value
         val profile = Profile(
             id = if (list.isEmpty()) "" else "p${System.currentTimeMillis().toString(36)}",
             name = name.trim().ifBlank { "Me" },
             colour = colour,
             icon = icon,
+            kids = kids,
         )
         write(list + profile)
         return profile
     }
 
-    fun edit(id: String, name: String, icon: String, colour: String) =
-        write(_list.value.map { if (it.id == id) it.copy(name = name.trim().ifBlank { it.name }, icon = icon, colour = colour) else it })
+    fun edit(id: String, name: String, icon: String, colour: String, kids: Boolean) =
+        write(_list.value.map { if (it.id == id) it.copy(name = name.trim().ifBlank { it.name }, icon = icon, colour = colour, kids = kids) else it })
 
     /** Four digits sets a lock; anything else clears it. A lock, not security. */
     fun setPin(id: String, pin: String) {

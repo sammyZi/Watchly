@@ -86,6 +86,7 @@ import com.torrentviewer.core.Phase
 import com.torrentviewer.core.Profile
 import com.torrentviewer.core.Profiles
 import com.torrentviewer.core.Simkl
+import com.torrentviewer.core.Kids
 import com.torrentviewer.core.SavedStore
 import com.torrentviewer.core.Spinner
 import com.torrentviewer.core.Title
@@ -123,9 +124,6 @@ private fun keyOf(index: Int, page: Page) = when (page) {
 /** The profile opened last on this phone, so a phone with one owner never asks. */
 private const val LAST_PROFILE = "phone:lastProfile"
 
-/** This profile has been offered Simkl once, on its first open. */
-private const val SIMKL_ASKED = "simkl:asked"
-
 /** Before profiles there were the bare keys; with none made, the phone keeps using them. */
 private val OWNER = Profile("", "Me", COLOURS[0])
 
@@ -135,6 +133,7 @@ private fun open(profile: Profile) {
     History.load()
     SavedStore.load()
     Simkl.load(profile.id, profile.isGuest)
+    Kids.use(profile)
     if (!profile.isGuest) Kv.setGlobal(LAST_PROFILE, profile.id)
 }
 
@@ -179,7 +178,11 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     val profiles by Profiles.list.collectAsState()
     var who by remember { mutableStateOf(startProfile(Profiles.list.value)?.also(::open)) }
     // An edit to the profile in use — its name, face or colour — shows at once.
-    LaunchedEffect(profiles) { who = who?.let { w -> profiles.find { it.id == w.id } ?: w } }
+    LaunchedEffect(profiles) {
+        who = who?.let { w -> profiles.find { it.id == w.id } ?: w }
+        // Kids switched on or off for the profile in use: at once, not at the next switch.
+        who?.let(Kids::use)
+    }
     var switching by remember { mutableStateOf(false) }
     var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
     val pages = remember { mutableStateListOf<Page>() }
@@ -198,6 +201,8 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     }
 
     fun enter(profile: Profile) {
+        // Rows loaded for the last profile: a kids profile must not inherit a grown-up's, nor the reverse.
+        if (who?.kids != profile.kids) home.loaded.clear()
         open(profile)
         who = profile
         switching = false
@@ -223,6 +228,8 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         val uri = incoming.value ?: return@LaunchedEffect
         if (who == null) return@LaunchedEffect
         incoming.value = null
+        // A magnet is anything at all: a kids profile plays only what it can browse to.
+        if (Kids.on) return@LaunchedEffect watch.fail("A kids profile can't open torrents from other apps.")
         val raw = uri.toString()
         if (!isTorrentSource(raw)) return@LaunchedEffect
         val path = runCatching { withContext(Dispatchers.IO) { watch.engine.importSource(raw) } }
@@ -304,16 +311,6 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         }
 
         if (watch.phase == Phase.INSPECTING) Opening(watch)
-
-        // Once per profile, the first time it opens: Simkl is otherwise easy never to find.
-        var askSimkl by remember(me.id) { mutableStateOf(Simkl.available && !me.isGuest && Kv.get(SIMKL_ASKED) == null) }
-        val simkl by Simkl.connected.collectAsState()
-        if (askSimkl && !simkl) {
-            LaunchedEffect(me.id) { Kv.set(SIMKL_ASKED, "1") }
-            androidx.compose.ui.window.Dialog(onDismissRequest = { askSimkl = false }) {
-                Box(Modifier.background(Ink.bg, RoundedCornerShape(16.dp))) { SimklSection(me, onLater = { askSimkl = false }) }
-            }
-        }
 
         watch.choose?.let { (item, meta) ->
             Sheet(

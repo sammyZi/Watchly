@@ -63,6 +63,21 @@
     <AssemblyMetadata Include="SubdlKey" Value="$(SubdlKey)" />
   </ItemGroup>
 
+  <!--
+    Simkl's client_id (SIMKL_CLIENT_ID), from the same .env the TV or phone build reads. It is
+    public by Simkl's design, not a secret; missing leaves Simkl out of the app.
+  -->
+  <PropertyGroup>
+    <SimklEnv Condition="Exists('..\..\tv\.env')">$(MSBuildProjectDirectory)\..\..\tv\.env</SimklEnv>
+    <SimklEnv Condition="'$(SimklEnv)' == '' And Exists('..\..\mobile\.env')">$(MSBuildProjectDirectory)\..\..\mobile\.env</SimklEnv>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(SimklEnv)' != ''">
+    <SimklClientId>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(SimklEnv)')), 'SIMKL_CLIENT_ID=(\S+)').Groups[1].Value)</SimklClientId>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="SimklClientId" Value="$(SimklClientId)" />
+  </ItemGroup>
+
   <ItemGroup>
     <Resource Include="Assets\Fonts\*.ttf" />
     <Resource Include="Assets\app.ico" />

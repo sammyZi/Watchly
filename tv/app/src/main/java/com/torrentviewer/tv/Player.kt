@@ -269,6 +269,12 @@ private fun Player(watch: Watch) {
         touch()
     }
 
+    /** Back out of a panel goes straight to the picture: the controls under it took a second Back. */
+    fun closePanel() {
+        panel = null
+        hide()
+    }
+
     fun togglePause() {
         val v = view.value ?: return
         v.setPaused(!v.isPaused)
@@ -442,7 +448,7 @@ private fun Player(watch: Watch) {
     // BACK closes a panel, then the controls, then the info card — and only then leaves.
     BackHandler {
         when {
-            panel != null -> panel = null
+            panel != null -> closePanel()
             scrub != null -> {
                 commit.value?.cancel()
                 scrub = null
@@ -733,7 +739,7 @@ private fun Player(watch: Watch) {
                     view.value?.setAudioTrack(it)
                 },
                 onFind = ::findSubs,
-                onDismiss = { panel = null },
+                onDismiss = ::closePanel,
             )
             Panel.SPEED -> Sheet(
                 title = "Playback speed",
@@ -744,7 +750,7 @@ private fun Player(watch: Watch) {
                     view.value?.setRate(it)
                     panel = null
                 },
-                onDismiss = { panel = null },
+                onDismiss = ::closePanel,
             )
             Panel.ASPECT -> Sheet(
                 title = "Picture",
@@ -755,7 +761,7 @@ private fun Player(watch: Watch) {
                     view.value?.setScale(SCALES[it].first)
                     panel = null
                 },
-                onDismiss = { panel = null },
+                onDismiss = ::closePanel,
             )
             Panel.FIND -> Sheet(
                 title = "Find subtitles",
@@ -781,7 +787,7 @@ private fun Player(watch: Watch) {
                         }.onFailure { watch.notes.tryEmit(it.message ?: "Couldn't fetch that subtitle") }
                     }
                 },
-                onDismiss = { panel = null },
+                onDismiss = ::closePanel,
             )
             // The same list as Settings → Subtitles, and the same setting: it sticks for the next film.
             Panel.LANG -> Sheet(

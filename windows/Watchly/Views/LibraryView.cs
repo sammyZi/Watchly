@@ -128,21 +128,64 @@ public sealed class LibraryView : UserControl
         var history = History.LatestPerTitle(shell.HistoryList);
         var q = query?.Text.Trim().ToLowerInvariant() ?? "";
         var shown = q.Length == 0 ? history : history.Where(h => Haystack(h).Contains(q)).ToList();
-        if (shown.Count == 0)
+        // After a reinstall this PC's history is empty; what Simkl has still belongs here.
+        var fromSimkl = Simkl.Library.NotIn(shell.HistoryList)
+            .Where(s => q.Length == 0 || s.Title.ToLowerInvariant().Contains(q))
+            .Select(s => new Title { Imdb = s.Imdb, Kind = s.Kind, Name = s.Title, Year = s.Year, Poster = $"https://images.metahub.space/poster/medium/{s.Imdb}/img" })
+            .ToList();
+        var page = new StackPanel();
+        if (q.Length == 0 && SimklCard() is { } card) page.Children.Add(card);
+        if (shown.Count == 0 && fromSimkl.Count == 0)
         {
-            list.Content = q.Length > 0
+            page.Children.Add(q.Length > 0
                 ? Ui.Empty("search", "No matches", $"Nothing in your library matches “{q}”.")
-                : Ui.Empty("inbox", "Nothing here yet", "Torrents you stream show up here with every file they contain, each with its own resume point.");
+                : Ui.Empty("inbox", "Nothing here yet", "Torrents you stream show up here with every file they contain, each with its own resume point."));
+            list.Content = page;
             return;
         }
 
-        var count = Ui.Text(q.Length > 0
-            ? $"{shown.Count} {(shown.Count == 1 ? "match" : "matches")}"
-            : $"{history.Count} {(history.Count == 1 ? "torrent" : "torrents")} · right-click a row to remove it", "Meta");
-        count.Margin = new Thickness(0, 0, 0, 12);
-        var rows = new ColumnWrap();
-        foreach (var item in shown) rows.Children.Add(Row(item, history));
-        list.Content = new StackPanel { Children = { count, rows } };
+        if (shown.Count > 0)
+        {
+            var count = Ui.Text(q.Length > 0
+                ? $"{shown.Count} {(shown.Count == 1 ? "match" : "matches")}"
+                : $"{history.Count} {(history.Count == 1 ? "torrent" : "torrents")} · right-click a row to remove it", "Meta");
+            count.Margin = new Thickness(0, 0, 0, 12);
+            var rows = new ColumnWrap();
+            foreach (var item in shown) rows.Children.Add(Row(item, history));
+            page.Children.Add(count);
+            page.Children.Add(rows);
+        }
+        if (fromSimkl.Count > 0)
+        {
+            var heading = Ui.Text("From Simkl", "TitleText", "Text", 17, FontWeights.Bold);
+            heading.Margin = new Thickness(0, shown.Count > 0 ? 24 : 0, 0, 4);
+            var hint = Ui.Text("Watched or paused on another device, or before this PC — open one to play it from where Simkl says you were.", "Meta", "Faint", 12);
+            hint.Margin = new Thickness(0, 0, 0, 12);
+            page.Children.Add(heading);
+            page.Children.Add(hint);
+            page.Children.Add(Ui.Grid(fromSimkl));
+        }
+        list.Content = page;
+    }
+
+    /// <summary>Where the history is, the history's sync is offered — until connected, or put off with Not now.</summary>
+    FrameworkElement? SimklCard()
+    {
+        if (!Simkl.Available || Simkl.Connected || shell.Who is not { IsGuest: false } || Store.LoadOwn<bool>("simkl-later", false)) return null;
+        var connect = Ui.Button(Ui.Text("Connect Simkl", "Label", "Accent", 13, FontWeights.SemiBold), () => _ = shell.ConnectSimkl());
+        var later = Ui.Button(Ui.Text("Not now", "Label", "Muted", 13), () => { Store.SaveOwn("simkl-later", true); Render(); });
+        later.Margin = new Thickness(20, 0, 0, 0);
+        var card = Ui.Card(new StackPanel
+        {
+            Children =
+            {
+                Ui.Text("Sync your history with Simkl", "TitleText", "Text", 15, FontWeights.SemiBold),
+                Ui.Text("Films and episodes you finish get marked watched on your Simkl account, and Continue Watching follows you to your phone and TV.", "Meta", "Faint", 12),
+                new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 0), Children = { connect, later } },
+            },
+        }, "Surface", 10, new Thickness(16));
+        card.Margin = new Thickness(0, 0, 0, 16);
+        return card;
     }
 
     /// <summary>src/components/HistoryRow.tsx.</summary>

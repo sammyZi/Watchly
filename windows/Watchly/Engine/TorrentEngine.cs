@@ -741,6 +741,20 @@ public sealed class StreamSession : IAsyncDisposable
 
     public Progress Progress => TorrentEngine.ProgressOf(Manager, FileIndex);
 
+    /// <summary>
+    /// What a buffering stream waits on, for the log: the piece the player reads (counted within the
+    /// file), its size, the next few pieces (# have, . missing), and how many peers could send it.
+    /// </summary>
+    public string Waiting()
+    {
+        if (window is null || Manager.Bitfield is not { } have || Manager.Torrent is not { } torrent) return "";
+        var (at, holding, sending) = window.Waiting;
+        var file = Manager.Files[FileIndex];
+        if (at < file.StartPieceIndex || at > file.EndPieceIndex) return $"reading piece {at}, outside this file";
+        var next = string.Concat(Enumerable.Range(at, Math.Min(8, file.EndPieceIndex - at + 1)).Select(i => have[i] ? '#' : '.'));
+        return $"waiting on piece {at - file.StartPieceIndex}/{file.EndPieceIndex - file.StartPieceIndex} ({Format.Bytes(torrent.PieceLength)}) next {next} · {holding} peers have it, {sending} sending";
+    }
+
     /// <summary>The watched file's pieces: finished, and all.</summary>
     public (int Have, int Total) Pieces()
     {
@@ -930,7 +944,21 @@ public sealed class WindowedRequester : IStreamingPieceRequester
     {
         Apply();
         inner.AddRequests(peers);
+        // For the log while buffering: who could send the piece the player waits on.
+        var at = inner.HighPriorityPieceIndex;
+        int holding = 0, sending = 0;
+        foreach (var (peer, available) in peers)
+        {
+            if (at >= available.Length || !available[at]) continue;
+            holding++;
+            if (!peer.IsChoking) sending++;
+        }
+        (WaitingOn, PeersHolding, PeersSending) = (at, holding, sending);
     }
+
+    /// <summary>The piece the player reads, how many connected peers have it, and how many of those let us download.</summary>
+    public (int WaitingOn, int PeersHolding, int PeersSending) Waiting => (WaitingOn, PeersHolding, PeersSending);
+    int WaitingOn = -1, PeersHolding, PeersSending;
 
     public void AddRequests(IRequester peer, ReadOnlyBitField available, ReadOnlySpan<ReadOnlyBitField> peers)
     {

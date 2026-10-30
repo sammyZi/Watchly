@@ -174,17 +174,20 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
         state.fresh = runCatching { NewEpisodes.fresh(shows) }.getOrDefault(state.fresh)
     }
     val chosen = settings.genres.map { Shelf(if (it == ANIME_GENRE) "Anime" else it, kindOfGenre(it), it) }
-    val shelves = remember(chosen, state.picks) {
+    val kids = com.torrentviewer.core.Kids
+    val shelves = remember(chosen, state.picks, kids.on) {
+        if (kids.on) return@remember com.torrentviewer.core.KIDS_SHELVES.map { (title, kind, genre) -> Shelf(title, kind, genre) }
         val taken = chosen.map { it.key }.toMutableSet()
         val rest = state.picks.filter { taken.add(it.key) }
         chosen + rest + SHELVES.filter { it.key !in taken }
     }
 
     // Top-down, not all at once: a phone on mobile data and a burst of parallel fetches do not mix.
-    LaunchedEffect(shelves, online) {
+    // A kids profile's rows are filtered again once the family list is in.
+    LaunchedEffect(shelves, online, kids.allowed) {
         for (shelf in shelves) {
-            if (state.loaded[shelf.key].isNullOrEmpty()) {
-                val titles = Meta.peekCatalog(shelf.kind, shelf.genre) ?: Meta.catalog(shelf.kind, shelf.genre)
+            if (state.loaded[shelf.key].isNullOrEmpty() || kids.on) {
+                val titles = kids.only(Meta.peekCatalog(shelf.kind, shelf.genre) ?: Meta.catalog(shelf.kind, shelf.genre))
                 if (titles.isNotEmpty()) state.loaded[shelf.key] = titles
             }
         }
@@ -194,7 +197,7 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
     val resumable = latestPerTitle(history).filter(::inProgress).take(10)
     // Left part-way somewhere this phone never saw — another device, before a reinstall: Simkl kept the spot.
     val simkl by com.torrentviewer.core.Simkl.library.collectAsState()
-    val fromSimkl = simkl.paused.filter { p -> history.none { it.imdb == p.imdb } }.distinctBy { it.imdb }.take(10)
+    val fromSimkl = com.torrentviewer.core.Kids.only(simkl.paused.filter { p -> history.none { it.imdb == p.imdb } }.distinctBy { it.imdb }) { Title(it.imdb, it.kind, it.title) }.take(10)
     val watchlist = saved.filter { it.list == "later" }.map { it.asTitle() }
     val heroes = shelves.firstNotNullOfOrNull { state.loaded[it.key]?.takeIf { l -> l.isNotEmpty() } }.orEmpty().take(HEROES)
     SideEffect { state.heroCount = heroes.size }

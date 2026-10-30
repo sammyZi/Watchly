@@ -277,6 +277,13 @@ public sealed class HomeView : UserControl
             var position = item.PositionOf(index) ?? 0;
             return new ResumeTile(FromHistory(item), item, index, duration > 0 ? position / duration.Value * 100 : 0, ResumeStamp(item));
         }).ToList();
+        // Left part-way somewhere this PC never saw — another device, before a reinstall: Simkl kept the spot.
+        resumable.AddRange(Simkl.Library.Paused.Where(p => shell.HistoryList.All(h => h.Imdb != p.Imdb)).DistinctBy(p => p.Imdb).Take(10).Select(p =>
+            new ResumeTile(
+                new Title { Imdb = p.Imdb, Kind = p.Kind, Name = p.Title, Year = p.Year, Poster = $"https://images.metahub.space/poster/medium/{p.Imdb}/img" },
+                new HistoryItem { Uri = $"simkl:{p.Imdb}", Title = p.Title, Imdb = p.Imdb, Kind = p.Kind },
+                0, p.Progress,
+                string.Join(" · ", new[] { p.Ep is { } e ? $"S{e.Season}:E{e.Episode}" : null, $"{(int)p.Progress}%" }.Where(s => s is not null)))));
         if (resumable.Count > 0) personal.Children.Add(Section("Continue Watching", () => shell.ShowTab("history"), resumable, "ResumeCard"));
 
         var later = Saved.InList(shell.SavedList, "later").Select(s => s.AsTitle()).ToList();

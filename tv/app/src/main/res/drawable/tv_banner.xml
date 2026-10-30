@@ -4,8 +4,11 @@
      as a PNG so it stays in step with the launcher artwork. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
   <item>
+    <!-- The size is the banner's: without it the layer list measured as the 132dp icon
+         below, and launchers that draw a banner at its own size showed a square tile. -->
     <shape android:shape="rectangle">
       <solid android:color="#E50914" />
+      <size android:width="320dp" android:height="180dp" />
     </shape>
   </item>
   <item

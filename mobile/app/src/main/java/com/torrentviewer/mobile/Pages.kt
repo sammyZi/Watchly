@@ -86,6 +86,7 @@ import com.torrentviewer.core.Searches
 import com.torrentviewer.core.Secrets
 import com.torrentviewer.core.Simkl
 import com.torrentviewer.core.Kv
+import com.torrentviewer.core.Kids
 import com.torrentviewer.core.bytes
 import com.torrentviewer.core.playedSize
 import com.torrentviewer.core.DeviceCode
@@ -182,7 +183,8 @@ private enum class HitOrder(val label: String) { BEST("Best match"), BIGGEST("Bi
 @Composable
 fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
-    var torrents by rememberSaveable { mutableStateOf(false) }
+    // Off again whenever kids mode changes, so a kids profile never lands on the torrent list.
+    var torrents by rememberSaveable(Kids.on) { mutableStateOf(false) }
     var results by remember { mutableStateOf<List<Title>?>(null) }
     var hits by remember { mutableStateOf<List<Hit>?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -206,7 +208,7 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
             results = if (!torrents && g != null) {
                 busy = true
                 coroutineScope {
-                    listOf("movie", "tv").filter { kind == null || it == kind }.map { k -> async { Meta.catalog(k, g) } }.flatMap { it.await() }.distinctBy { it.imdb }
+                    Kids.only(listOf("movie", "tv").filter { kind == null || it == kind }.map { k -> async { Meta.catalog(k, g) } }.flatMap { it.await() }.distinctBy { it.imdb })
                 }
             } else null
             busy = false
@@ -214,13 +216,14 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
         }
         delay(400)
         busy = true
-        if (torrents) {
+        // A kids profile has no torrent search (a release name can't be vetted) and sees family titles only.
+        if (torrents && !Kids.on) {
             hits = searchTorrents(q) { hits = it }
         } else {
             results = coroutineScope {
                 val films = async { Meta.search(q, "movie") }
                 val series = async { Meta.search(q, "tv") }
-                (films.await() + series.await()).distinctBy { it.imdb }.sortedBy { relevance(it.title, q) }
+                Kids.only((films.await() + series.await()).distinctBy { it.imdb }.sortedBy { relevance(it.title, q) })
             }
         }
         busy = false
@@ -270,7 +273,8 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
                         }
                     },
                 )
-                Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // A kids profile searches titles only.
+                if (!Kids.on) Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Chip("Titles", !torrents, onClick = { torrents = false; hits = null })
                     Chip("Torrents", torrents, onClick = { torrents = true; results = null }, icon = L.drawable.lucide_ic_layers)
                 }
@@ -364,7 +368,7 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit) {
     // One row per title, however many torrents it was played from: its latest one.
     val items = latestPerTitle(history)
     // After a reinstall this phone's history is empty; what Simkl has still belongs here.
-    val fromSimkl = remember(simklLibrary, history) { simklLibrary.notIn(history) }
+    val fromSimkl = remember(simklLibrary, history, Kids.on, Kids.allowed) { Kids.only(simklLibrary.notIn(history)) { Title(it.imdb, it.kind, it.title) } }
     val sources = history.groupingBy { it.titleKey }.eachCount()
     val listed = saved.filter { it.list == if (shelf == Shelfs.FAVORITE) "favorite" else "later" }.map { it.asTitle() }
 
@@ -854,8 +858,7 @@ private const val SIMKL_LATER = "simkl:later"
  * Connect by device code, as on the TV — but a phone has a browser, so Connect opens Simkl's
  * page with the code filled in; the code stays up to copy, and Open Simkl to go back to it.
  * This notices the approval when the viewer comes back.
- * [onLater] makes it a card, with a Not now — the Library's, and the first-run prompt's;
- * without it, a Settings section.
+ * [onLater] makes it the Library's card, with a Not now; without it, a Settings section.
  */
 @Composable
 fun SimklSection(me: Profile, onLater: (() -> Unit)? = null) {
@@ -985,10 +988,10 @@ fun ProfilesScreen(profiles: List<Profile>, onPick: (Profile) -> Unit, onCancel:
             is ProfilesMode.Edit -> Editor(
                 m.profile,
                 canCancel = profiles.isNotEmpty() || onCancel != null,
-                onSave = { name, icon, colour ->
-                    if (m.profile == null) onPick(Profiles.add(name, icon, colour))
+                onSave = { name, icon, colour, kids ->
+                    if (m.profile == null) onPick(Profiles.add(name, icon, colour, kids))
                     else {
-                        Profiles.edit(m.profile.id, name, icon, colour)
+                        Profiles.edit(m.profile.id, name, icon, colour, kids)
                         mode = ProfilesMode.Pick
                     }
                 },
@@ -1055,10 +1058,11 @@ private fun Tile(name: String, onClick: () -> Unit, face: @Composable androidx.c
 }
 
 @Composable
-private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, String, String) -> Unit, onDelete: () -> Unit, onCancel: () -> Unit) {
+private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, String, String, Boolean) -> Unit, onDelete: () -> Unit, onCancel: () -> Unit) {
     var name by remember { mutableStateOf(profile?.name.orEmpty()) }
     var icon by remember { mutableStateOf(profile?.let { Avatars.of(it).id } ?: AVATARS[0]) }
     var colour by remember { mutableStateOf(profile?.colour ?: COLOURS[0]) }
+    var kids by remember { mutableStateOf(profile?.kids ?: false) }
     Column(Modifier.widthIn(max = 480.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Avatar(Profile("preview", name.ifBlank { "?" }, colour, icon), 110.dp)
         Text(if (profile == null) "Add a profile" else "Edit profile", Modifier.padding(top = 18.dp), style = Type.display)
@@ -1083,9 +1087,20 @@ private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, Strin
                 }
             }
         }
+        Text("KIDS", Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 10.dp), style = Type.overline)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip("Kids profile", kids, onClick = { kids = true }, icon = if (kids) L.drawable.lucide_ic_check else null)
+            Chip("Everything", !kids, onClick = { kids = false })
+        }
+        Text(
+            if (kids) "Family films and series only. No torrent search or links from other apps — give your own profile a PIN so it stays that way."
+            else "Every title, torrent search included.",
+            Modifier.fillMaxWidth().padding(top = 8.dp),
+            style = Type.meta.copy(color = Ink.faint),
+        )
         // A profile not saved yet has no id to keep a connection under.
         if (profile != null && Simkl.available) Box(Modifier.fillMaxWidth().padding(top = 24.dp)) { SimklSection(profile) }
-        Button("Save", { onSave(name, icon, colour) }, Modifier.fillMaxWidth().padding(top = 28.dp), icon = L.drawable.lucide_ic_check, primary = true)
+        Button("Save", { onSave(name, icon, colour, kids) }, Modifier.fillMaxWidth().padding(top = 28.dp), icon = L.drawable.lucide_ic_check, primary = true)
         Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             if (canCancel) Button("Cancel", onCancel)
             if (profile != null) Button("Delete profile", onDelete, icon = L.drawable.lucide_ic_trash_2)
