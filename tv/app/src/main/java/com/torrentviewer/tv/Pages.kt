@@ -144,7 +144,8 @@ private fun relevance(title: String, query: String): Int {
 @Composable
 fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
     var query by remember { mutableStateOf("") }
-    var torrents by remember { mutableStateOf(false) }
+    // Off again whenever kids mode changes, so a kids profile never lands on the torrent list.
+    var torrents by remember(Kids.on) { mutableStateOf(false) }
     var results by remember { mutableStateOf<List<Title>?>(null) }
     var hits by remember { mutableStateOf<List<Hit>?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -162,13 +163,14 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
         }
         delay(450)
         busy = true
-        if (torrents) {
+        // A kids profile has no torrent search (a release name can't be vetted) and sees family titles only.
+        if (torrents && !Kids.on) {
             hits = searchTorrents(q) { hits = it }
         } else {
             results = coroutineScope {
                 val films = async { Meta.search(q, "movie") }
                 val series = async { Meta.search(q, "tv") }
-                (films.await() + series.await()).distinctBy { it.imdb }.sortedBy { relevance(it.title, q) }
+                Kids.only((films.await() + series.await()).distinctBy { it.imdb }.sortedBy { relevance(it.title, q) })
             }
         }
         busy = false
@@ -200,8 +202,10 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
                         imeAction = ImeAction.Search,
                         trailing = { if (busy) Spinner(size = 22.dp) },
                     )
-                    Spacer(Modifier.width(14.dp))
-                    Chip("Torrents", torrents, onClick = { torrents = !torrents; results = null; hits = null }, icon = L.drawable.lucide_ic_layers)
+                    if (!Kids.on) {
+                        Spacer(Modifier.width(14.dp))
+                        Chip("Torrents", torrents, onClick = { torrents = !torrents; results = null; hits = null }, icon = L.drawable.lucide_ic_layers)
+                    }
                 }
                 if (recents.isNotEmpty() && results == null && hits == null) {
                     Text("Recent searches", Modifier.padding(top = 30.dp, bottom = 12.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
@@ -268,7 +272,7 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit) {
     val items = latestPerTitle(history)
     // After a reinstall this TV's history is empty; what Simkl has still belongs here.
     val simklLibrary by Simkl.library.collectAsState()
-    val fromSimkl = remember(simklLibrary, history) { simklLibrary.notIn(history) }
+    val fromSimkl = remember(simklLibrary, history, Kids.on, Kids.allowed) { Kids.only(simklLibrary.notIn(history)) { Title(it.imdb, it.kind, it.title) } }
     var focusedUri by remember { mutableStateOf<String?>(null) }
     val first = remember { FocusRequester() }
     var releases by remember { mutableStateOf<List<Item>?>(null) }
@@ -531,8 +535,7 @@ private fun Qr(text: String, size: androidx.compose.ui.unit.Dp) {
 
 /**
  * Connect by device code: the code shows here, the viewer approves on their phone, this page notices.
- * [onLater] makes it a card, with a Not now — the Library's, and the first-run prompt's; without it,
- * a Settings section.
+ * [onLater] makes it the Library's card, with a Not now; without it, a Settings section.
  */
 @Composable
 fun SimklSection(me: Profile, onLater: (() -> Unit)? = null) {
@@ -648,10 +651,10 @@ fun ProfilesScreen(profiles: List<Profile>, onPick: (Profile) -> Unit, onCancel:
                 onGuest = { onPick(GUEST) },
             )
             is ProfilesMode.Edit -> Editor(m.profile, canCancel = profiles.isNotEmpty(),
-                onSave = { name, icon, colour ->
-                    if (m.profile == null) onPick(Profiles.add(name, icon, colour))
+                onSave = { name, icon, colour, kids ->
+                    if (m.profile == null) onPick(Profiles.add(name, icon, colour, kids))
                     else {
-                        Profiles.edit(m.profile.id, name, icon, colour)
+                        Profiles.edit(m.profile.id, name, icon, colour, kids)
                         mode = ProfilesMode.Pick
                     }
                 },
@@ -720,10 +723,11 @@ private fun Tile(name: String, onClick: () -> Unit, requester: FocusRequester? =
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, String, String) -> Unit, onDelete: () -> Unit, onCancel: () -> Unit) {
+private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, String, String, Boolean) -> Unit, onDelete: () -> Unit, onCancel: () -> Unit) {
     var name by remember { mutableStateOf(profile?.name.orEmpty()) }
     var icon by remember { mutableStateOf(profile?.let { Avatars.of(it).id } ?: AVATARS[0]) }
     var colour by remember { mutableStateOf(profile?.colour ?: COLOURS[0]) }
+    var kids by remember { mutableStateOf(profile?.kids ?: false) }
     val field = remember { FocusRequester() }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = Safe.x)) {
         Avatar(Profile("preview", name.ifBlank { "?" }, colour, icon), 160.dp)
@@ -751,8 +755,19 @@ private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, Strin
                     }
                 }
             }
+            Text("KIDS", Modifier.padding(top = 20.dp, bottom = 10.dp), style = Type.overline)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Chip("Kids profile", kids, onClick = { kids = true }, icon = if (kids) L.drawable.lucide_ic_check else null)
+                Chip("Everything", !kids, onClick = { kids = false })
+            }
+            Text(
+                if (kids) "Family films and series only. No torrent search or links from other apps — give your own profile a PIN so it stays that way."
+                else "Every title, torrent search included.",
+                Modifier.padding(top = 8.dp),
+                style = Type.meta.copy(color = Ink.faint),
+            )
             Row(Modifier.padding(top = 30.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                TvButton("Save", { onSave(name, icon, colour) }, icon = L.drawable.lucide_ic_check, primary = true)
+                TvButton("Save", { onSave(name, icon, colour, kids) }, icon = L.drawable.lucide_ic_check, primary = true)
                 if (canCancel) TvButton("Cancel", onCancel)
                 if (profile != null) TvButton("Delete profile", onDelete, icon = L.drawable.lucide_ic_trash_2)
             }

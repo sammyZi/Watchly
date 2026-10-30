@@ -471,6 +471,7 @@ public static class Profiles
     {
         Write(Load().Where(p => p.Id != id).ToList());
         Store.WipeProfile(id);
+        Simkl.Forget(id);
     }
 }
 

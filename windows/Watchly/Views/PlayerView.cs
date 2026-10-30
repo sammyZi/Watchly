@@ -194,9 +194,6 @@ public sealed class PlayerView : UserControl, IDisposable
     readonly TextBlock clockText = new() { Foreground = Brushes.White, FontSize = 12, FontWeight = FontWeights.Medium, MinWidth = 52, VerticalAlignment = VerticalAlignment.Center };
     readonly TextBlock lengthText = new() { Foreground = Brushes.White, FontSize = 12, FontWeight = FontWeights.Medium, MinWidth = 52, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
     readonly SeekBar seek = new();
-    SeekPreview? preview;
-    /// <summary>The hovered time, in ms, when it has a picture to show; -1 for the time alone.</summary>
-    long peekAt = -1;
 
     public PlayerView(PlaybackRequest request)
     {
@@ -249,7 +246,6 @@ public sealed class PlayerView : UserControl, IDisposable
 
         seek.Scrub += ratio => { seekAt = DateTime.UtcNow; current = (long)(ratio * duration); UpdateClock(); Bump(); };
         seek.Commit += ratio => SeekTo((long)(ratio * duration));
-        seek.Hover += PeekAt;
 
         // Stretch and Crop follow the window's shape, so a resize re-applies them (once it settles).
         scaleAfterResize.Tick += (_, _) => { scaleAfterResize.Stop(); ApplyScale(); };
@@ -639,7 +635,8 @@ public sealed class PlayerView : UserControl, IDisposable
             lastLog = DateTime.UtcNow;
             if (stats is not null)
             {
-                Log.Player($"{Format.Speed(stats.Speed)} · seeds={stats.Seeds} · peers={stats.Peers} · {stats.State} · {Format.Clock(current / 1000.0)}/{Format.Clock(duration / 1000.0)} · buf={bufferPct:0}%");
+                Log.Player($"{Format.Speed(stats.Speed)} · seeds={stats.Seeds} · peers={stats.Peers} · {stats.State} · {Format.Clock(current / 1000.0)}/{Format.Clock(duration / 1000.0)} · buf={bufferPct:0}%"
+                    + (bufferPct < 100 && session is not null ? $" · {session.Waiting()}" : ""));
             }
         }
 
@@ -1662,40 +1659,6 @@ public sealed class PlayerView : UserControl, IDisposable
         seek.Duration = duration;
     }
 
-    /// <summary>The frame under the hovered spot of the seek bar, as YouTube shows one.</summary>
-    void PeekAt(double ratio)
-    {
-        if (duration <= 0) return;
-        // A stream has only the downloaded parts to show; elsewhere the time alone.
-        var onDisk = session is null || seek.Downloaded.Any(s => ratio >= s.From && ratio <= s.To);
-        // Short of the very end: stepping a frame past it would end the preview's playback.
-        peekAt = onDisk ? Math.Min((long)(ratio * duration), duration - 3000) : -1;
-        if (onDisk) (preview ??= OpenPreview())?.Show(peekAt);
-        ShowPeek();
-    }
-
-    /// <summary>
-    /// Only a picture from near the hovered spot. The last one stays up until the next lands,
-    /// and where that never comes (the keyframe before the spot isn't downloaded) it would
-    /// show some other moment as this one.
-    /// </summary>
-    void ShowPeek() =>
-        seek.Preview = preview is { Image: { } image } p && peekAt >= 0 && Math.Abs(p.FrameAt - peekAt) <= duration / 50 ? image : null;
-
-    SeekPreview? OpenPreview()
-    {
-        var path = session is { } s ? s.Manager.Files[s.FileIndex].FullPath : request.LocalPath;
-        if (path is null || !File.Exists(path)) return null;
-        try
-        {
-            return new SeekPreview(vlc, path, _ => ShowPeek());
-        }
-        catch (Exception e)
-        {
-            Log.Player($"Seek preview: {e.Message}");
-            return null;
-        }
-    }
 
     static string StageLabel(Progress? p) => p?.State switch
     {
@@ -2570,7 +2533,6 @@ public sealed class PlayerView : UserControl, IDisposable
         hideTimer.Stop();
         clickTimer.Stop();
         hudTimer.Stop();
-        preview?.Dispose();
         // The controls live in LibVLCSharp's own see-through window over the video, which
         // only hides when the VideoView unloads — and that waits for libVLC and the torrent
         // to finish closing, seconds after Back or closing the app. Hide it now.
@@ -2719,8 +2681,6 @@ public sealed class SeekBar : FrameworkElement
 {
     public event Action<double>? Scrub;
     public event Action<double>? Commit;
-    /// <summary>The spot under the mouse, hovering or dragging.</summary>
-    public event Action<double>? Hover;
 
     double value;
     double? dragging;
@@ -2728,19 +2688,6 @@ public sealed class SeekBar : FrameworkElement
 
     /// <summary>In ms, for the time shown over the hovered spot.</summary>
     public long Duration { get; set; }
-
-    /// <summary>The frame at the hovered spot, drawn above it; null shows the time alone.</summary>
-    public ImageSource? Preview
-    {
-        get => preview;
-        set
-        {
-            if (preview == value) return;
-            preview = value;
-            InvalidateVisual();
-        }
-    }
-    ImageSource? preview;
 
     public double Value
     {
@@ -2794,7 +2741,7 @@ public sealed class SeekBar : FrameworkElement
         if (at is double r && Duration > 0) DrawPeek(dc, r, w, y);
     }
 
-    /// <summary>Above the bar, over the video: the frame at that spot and its time under it.</summary>
+    /// <summary>Above the bar, over the video: the time at that spot.</summary>
     void DrawPeek(DrawingContext dc, double r, double w, double y)
     {
         var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
@@ -2804,17 +2751,6 @@ public sealed class SeekBar : FrameworkElement
         var x = w * r;
         var pill = new Rect(0, y - 12 - time.Height - 4, time.Width + 12, time.Height + 4);
         pill.X = Math.Clamp(x - pill.Width / 2, 0, Math.Max(0, w - pill.Width));
-        if (preview is { Width: > 0 } image)
-        {
-            const double width = 168;
-            var frame = new Rect(0, pill.Top - 6 - width * image.Height / image.Width, width, width * image.Height / image.Width);
-            frame.X = Math.Clamp(x - width / 2, 0, Math.Max(0, w - width));
-            var round = new RectangleGeometry(frame, 6, 6);
-            dc.PushClip(round);
-            dc.DrawImage(image, frame);
-            dc.Pop();
-            dc.DrawGeometry(null, new Pen(Brushes.White, 2), round);
-        }
         dc.DrawRoundedRectangle(shade, null, pill, 4, 4);
         dc.DrawText(time, new Point(pill.X + 6, pill.Y + 2));
     }
@@ -2830,7 +2766,6 @@ public sealed class SeekBar : FrameworkElement
         CaptureMouse();
         dragging = RatioAt(e);
         Scrub?.Invoke(dragging.Value);
-        Hover?.Invoke(dragging.Value);
         InvalidateVisual();
         e.Handled = true;
     }
@@ -2838,7 +2773,6 @@ public sealed class SeekBar : FrameworkElement
     protected override void OnMouseMove(MouseEventArgs e)
     {
         hover = RatioAt(e);
-        Hover?.Invoke(hover.Value);
         if (dragging is null) { InvalidateVisual(); return; }
         dragging = hover;
         Scrub?.Invoke(dragging.Value);
@@ -2860,142 +2794,5 @@ public sealed class SeekBar : FrameworkElement
     {
         hover = null;
         InvalidateVisual();
-    }
-}
-
-/// <summary>
-/// The seek bar's hover frames: a second libVLC player on the same file, silent and paused,
-/// decoding into a small bitmap; each hover seeks it (to keyframes, for speed) and plays it
-/// to the first new picture. YouTube reads
-/// these off a pre-made storyboard; here the file itself is the storyboard. It reads the file
-/// off disk — a torrent's HTTP stream has one reader, the playback — shared so the torrent
-/// can keep writing it and rename it once complete.
-/// </summary>
-sealed class SeekPreview : IDisposable
-{
-    const uint Width = 320;
-    readonly FileStream file;
-    readonly Media media;
-    readonly MediaPlayer player;
-    readonly Dispatcher ui = Dispatcher.CurrentDispatcher;
-    readonly Action<WriteableBitmap> shown;
-    readonly DispatcherTimer pump = new() { Interval = TimeSpan.FromMilliseconds(120) };
-    // Held here: libVLC calls them on its own threads, and a collected delegate crashes it.
-    readonly MediaPlayer.LibVLCVideoFormatCb formatCb;
-    readonly MediaPlayer.LibVLCVideoCleanupCb cleanupCb;
-    readonly MediaPlayer.LibVLCVideoLockCb lockCb;
-    readonly MediaPlayer.LibVLCVideoDisplayCb displayCb;
-    IntPtr buffer;
-    int height;
-    byte[]? last;
-    long wanted = -1, asked = -1;
-    /// <summary>Pause on the next new picture: set at the start and by each seek.</summary>
-    volatile bool hold = true;
-    volatile bool disposed;
-
-    public WriteableBitmap? Image { get; private set; }
-
-    /// <summary>The time, in ms, <see cref="Image"/> was asked for (the latest seek when it came).</summary>
-    public long FrameAt { get; private set; }
-
-    public SeekPreview(LibVLC vlc, string path, Action<WriteableBitmap> shown)
-    {
-        this.shown = shown;
-        file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        media = new Media(vlc, new StreamMediaInput(file), ":no-audio", ":no-spu", ":no-sub-autodetect-file", ":input-fast-seek");
-        player = new MediaPlayer(media) { EnableHardwareDecoding = false };
-        formatCb = Format;
-        cleanupCb = Cleanup;
-        lockCb = Lock;
-        displayCb = Display;
-        player.SetVideoFormatCallbacks(formatCb, cleanupCb);
-        player.SetVideoCallbacks(lockCb, null, displayCb);
-        pump.Tick += (_, _) =>
-        {
-            if (wanted == asked || disposed) { pump.Stop(); return; }
-            asked = wanted;
-            // Seek, then play until the new picture lands (Display pauses it again). Paused,
-            // a seek plus a frame step drew nothing for some files (4K x265).
-            hold = true;
-            player.Time = asked;
-            player.SetPause(false);
-        };
-        player.Play();
-    }
-
-    /// <summary>Seeks to <paramref name="ms"/>, at most every 120 ms however fast the mouse moves.</summary>
-    public void Show(long ms)
-    {
-        wanted = ms;
-        if (!pump.IsEnabled) pump.Start();
-    }
-
-    uint Format(ref IntPtr opaque, IntPtr chroma, ref uint width, ref uint height, ref uint pitches, ref uint lines)
-    {
-        Marshal.Copy("RV32"u8.ToArray(), 0, chroma, 4);
-        var h = width > 0 && height > 0 ? Math.Max(2, Width * height / width) : Width * 9 / 16;
-        width = Width;
-        height = h;
-        pitches = Width * 4;
-        lines = h;
-        this.height = (int)h;
-        buffer = Marshal.AllocHGlobal((int)(pitches * lines));
-        return 1;
-    }
-
-    void Cleanup(ref IntPtr opaque)
-    {
-        Marshal.FreeHGlobal(buffer);
-        buffer = IntPtr.Zero;
-    }
-
-    IntPtr Lock(IntPtr opaque, IntPtr planes)
-    {
-        Marshal.WriteIntPtr(planes, buffer);
-        return IntPtr.Zero;
-    }
-
-    void Display(IntPtr opaque, IntPtr picture)
-    {
-        if (disposed) return;
-        var h = height;
-        var pixels = new byte[Width * 4 * h];
-        Marshal.Copy(buffer, pixels, 0, pixels.Length);
-        // Paused, libVLC keeps redrawing the same picture; only a new one goes up.
-        if (last is not null && pixels.AsSpan().SequenceEqual(last)) return;
-        last = pixels;
-        if (hold)
-        {
-            hold = false;
-            // Not if a newer seek wants it playing again meanwhile.
-            ThreadPool.QueueUserWorkItem(_ => { if (!disposed && !hold) player.SetPause(true); });
-        }
-        ui.BeginInvoke(() =>
-        {
-            if (disposed) return;
-            if (Image is null || Image.PixelHeight != h) Image = new WriteableBitmap((int)Width, h, 96, 96, PixelFormats.Bgr32, null);
-            Image.WritePixels(new Int32Rect(0, 0, (int)Width, h), pixels, (int)Width * 4, 0);
-            FrameAt = Math.Max(0, asked);
-            shown(Image);
-        });
-    }
-
-    public void Dispose()
-    {
-        if (disposed) return;
-        disposed = true;
-        pump.Stop();
-        // Stop waits for libVLC's threads; off the UI thread, like the main player's close.
-        ThreadPool.QueueUserWorkItem(_ =>
-        {
-            try
-            {
-                player.Stop();
-                player.Dispose();
-                media.Dispose();
-                file.Dispose();
-            }
-            catch { }
-        });
     }
 }

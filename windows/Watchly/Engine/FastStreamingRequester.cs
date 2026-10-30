@@ -6,6 +6,7 @@
 // pieces at the playhead (still requested from two peers at once, so still capped) each peer
 // now gets MaxPendingRequests: MonoTorrent's own per-peer depth, which grows with that peer's
 // speed up to what the peer says it accepts — what its normal (non-streaming) picker uses.
+// And past the playhead pieces are taken in order, not rarest-first (see Initialise).
 // Everything else is upstream's.
 
 using MonoTorrent;
@@ -43,7 +44,10 @@ public sealed class FastStreamingRequester : IStreamingPieceRequester
 
         var standardPicker = new StandardPicker();
         highPriorityPicker = IgnoringPicker.Wrap(new PriorityPicker(standardPicker), ignoringBitfields);
-        lowPriorityPicker = IgnoringPicker.Wrap(new PriorityPicker(new RarestFirstPicker(new RandomisedPicker(standardPicker))), ignoringBitfields);
+        // In order from the playhead, not rarest-first at random: across a 5-minute window of 4K the
+        // swarm's 2–3 MB/s went to pieces minutes ahead while the one the video waited on trickled in
+        // (stuck at 0% for 40 s+ at full speed). Rarity is for finishing a torrent; this is for watching it.
+        lowPriorityPicker = IgnoringPicker.Wrap(new PriorityPicker(standardPicker), ignoringBitfields);
         lowPriorityPicker.Initialise(data);
         highPriorityPicker.Initialise(data);
     }

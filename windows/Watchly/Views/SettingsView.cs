@@ -37,6 +37,7 @@ public sealed class SettingsView : UserControl
         page.Children.Clear();
 
         if (shell.Who is { } me) page.Children.Add(ProfileGroup(me));
+        if (Simkl.Available) page.Children.Add(SimklGroup());
 
         page.Children.Add(Group("Appearance",
             ChoiceRow("Theme", "Match Windows, or lock light or dark",
@@ -151,6 +152,47 @@ public sealed class SettingsView : UserControl
 
     /// <summary>A section as the phone sets one (mobile Pages.kt Section): a bold title, then its rows — no card.</summary>
     /// <summary>The phone's and TV's SubDL key: the viewer's own, encrypted on this PC (Secrets).</summary>
+    /// <summary>
+    /// Connect opens Simkl's page with the code filled in; while it waits, the code is here to type on
+    /// another device, with a copy button, and Open Simkl to get back to the page.
+    /// </summary>
+    FrameworkElement SimklGroup()
+    {
+        var box = new StackPanel();
+        if (Simkl.Connected)
+        {
+            box.Children.Add(Row("Connected", "Films and episodes you watch to the end are marked watched on Simkl, and Continue Watching follows you to your phone and TV.",
+                Ui.Button(Ui.Text("Disconnect", "Label", "Muted", 13), () => { Simkl.Disconnect(); Render(); })));
+        }
+        else if (shell.SimklPending is { } code)
+        {
+            box.Children.Add(Ui.Text($"Approve Watchly in the browser that just opened. Signing in? Simkl emails that account a link — open it and confirm, then press Allow. Or enter this code at {code.Uri.Replace("https://", "")} on another device.", "Meta", "Faint", 12));
+            var copy = Ui.Button(Ui.Glyph("copy", 18, "Muted"), () =>
+            {
+                Clipboard.SetText(code.UserCode);
+                shell.Toast("Code copied");
+            }, tooltip: "Copy the code");
+            copy.Margin = new Thickness(10, 0, 0, 0);
+            var open = Ui.Button(Ui.Text("Open Simkl", "Label", "Accent", 13, FontWeights.SemiBold), () =>
+                Process.Start(new ProcessStartInfo(code.UriComplete) { UseShellExecute = true }));
+            open.Margin = new Thickness(20, 0, 0, 0);
+            var cancel = Ui.Button(Ui.Text("Cancel", "Label", "Muted", 13), () => shell.SimklCode?.Cancel());
+            cancel.Margin = new Thickness(16, 0, 0, 0);
+            box.Children.Add(new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Margin = new Thickness(0, 10, 0, 0),
+                Children = { Ui.Text(code.UserCode, "TitleText", "Text", 28, FontWeights.Bold), copy, open, cancel },
+            });
+        }
+        else
+        {
+            box.Children.Add(Row("Sync with Simkl", "Films and episodes you finish get marked watched on your Simkl account, and your Simkl history shows in the Library.",
+                Ui.Button(Ui.Text("Connect Simkl", "Label", "Accent", 13, FontWeights.SemiBold), () => _ = shell.ConnectSimkl())));
+        }
+        return Group("Simkl", box);
+    }
+
     FrameworkElement SubdlGroup()
     {
         var saved = Secrets.Subdl.Length > 0;

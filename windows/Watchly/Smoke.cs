@@ -39,7 +39,6 @@ static class Smoke
             try { _ = Engine.TorrentEngine.Instance; } catch (Exception ex) { Failures.Add($"torrent engine: {ex}"); }
             Logic();
             Screens();
-            Peek();
         }
         catch (Exception e)
         {
@@ -48,53 +47,6 @@ static class Smoke
         Engine.Downloads.Instance.Live.Clear();
         File.WriteAllText(log, Failures.Count == 0 ? "ok\n" : string.Join("\n", Failures) + "\n");
         return Failures.Count == 0 ? 0 : 1;
-    }
-
-    /// <summary>
-    /// With WATCHLY_SMOKE_VIDEO set to a film or an episode (15 min or more): the seek bar's
-    /// hover frames decode, stay paused between hovers, and spots across it differ.
-    /// </summary>
-    static void Peek()
-    {
-        if (Environment.GetEnvironmentVariable("WATCHLY_SMOKE_VIDEO") is not { } path) return;
-        LibVLCSharp.Shared.Core.Initialize();
-        var frames = new List<byte[]>();
-        using var preview = new SeekPreview(VlcLibrary.Instance.Value, path, image =>
-        {
-            var pixels = new byte[image.PixelWidth * 4 * image.PixelHeight];
-            image.CopyPixels(pixels, image.PixelWidth * 4, 0);
-            frames.Add(pixels);
-        });
-        static void Wait(double seconds)
-        {
-            var frame = new System.Windows.Threading.DispatcherFrame();
-            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(seconds) };
-            timer.Tick += (_, _) => { timer.Stop(); frame.Continue = false; };
-            timer.Start();
-            System.Windows.Threading.Dispatcher.PushFrame(frame);
-        }
-        Wait(2);
-        Ok(frames.Count > 0, "peek: no first frame");
-        var settled = frames.Count;
-        Wait(1);
-        Eq(frames.Count, settled, "peek: new frames while paused");
-        // Spots across a film or an episode; each must draw a picture of its own, quickly.
-        var seen = new List<byte[]>();
-        // First the very end, which must not leave the preview stuck there.
-        preview.Show(24 * 3600_000);
-        Wait(1);
-        foreach (var at in new long[] { 30_000, 120_000, 300_000, 600_000, 900_000 })
-        {
-            var before = frames.Count;
-            var clock = System.Diagnostics.Stopwatch.StartNew();
-            preview.Show(at);
-            while (frames.Count == before && clock.ElapsedMilliseconds < 3000) Wait(0.05);
-            Wait(0.3); // let the last picture of this hover land
-            Log.Player($"peek {at / 1000}s: {frames.Count - before} frames, first after {clock.ElapsedMilliseconds - 300} ms");
-            Ok(frames.Count > before, $"peek: no frame for {at / 1000}s");
-            if (frames.Count > 0) seen.Add(frames[^1]);
-        }
-        Eq(seen.Select(Convert.ToBase64String).Distinct().Count(), 5, "peek: distinct pictures for five spots");
     }
 
     static void Logic()
