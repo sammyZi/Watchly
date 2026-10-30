@@ -179,6 +179,11 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit) {
 
     // One card per title — its newest started episode or release — while that one is part-watched.
     val resumable = latestPerTitle(history).filter(::inProgress).take(8)
+    // Left part-way somewhere this TV never saw — another device, before a reinstall: Simkl kept the spot.
+    val simkl by Simkl.library.collectAsState()
+    val fromSimkl = simkl.paused.filter { p -> history.none { it.imdb == p.imdb } }.distinctBy { it.imdb }.take(8)
+    val resuming = resumable.isNotEmpty() || fromSimkl.isNotEmpty()
+    var releases by remember { mutableStateOf<List<Item>?>(null) }
     val watchlist = saved.filter { it.list == "later" }.map { it.asTitle() }
     val fallback = { shelves.firstNotNullOfOrNull { state.loaded[it.key]?.firstOrNull() } ?: watchlist.firstOrNull() }
     // Focus lands on the first card the first time only; afterwards it goes back to the opened one.
@@ -200,15 +205,17 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit) {
             // off: half a row of cards peeking under the synopsis looked broken.
             fun pin(index: Int) = { scope.launch { state.list.animateScrollToItem(index) }; Unit }
             var at = 0
-            if (resumable.isNotEmpty()) item(key = "resume") {
+            if (resuming) item(key = "resume") {
                 Rail("Continue Watching", pin(0)) {
-                    ResumeRow(state, resumable, firstKey != null, watch, onFocus = aim)
+                    ResumeRow(state, resumable, fromSimkl, firstKey != null, onResume = { item ->
+                        releasesOf(history, item).let { all -> if (all.size > 1) releases = all else watch.resume(item) }
+                    }, onFocus = aim, onOpen = onOpen)
                 }
             }.also { at++ }
             val listAt = at
             if (watchlist.isNotEmpty()) item(key = "list") {
                 Rail("My List", pin(listAt)) {
-                    TitleRow(state, "list", watchlist, firstKey != null && resumable.isEmpty(), onFocus = aim, onOpen = onOpen)
+                    TitleRow(state, "list", watchlist, firstKey != null && !resuming, onFocus = aim, onOpen = onOpen)
                 }
             }.also { at++ }
             val shelvesAt = at
@@ -218,7 +225,7 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit) {
                     if (titles.isEmpty()) {
                         Box(Modifier.height(CARD_H).fillMaxWidth()) { Placeholders() }
                     } else {
-                        TitleRow(state, shelf.key, titles, firstKey != null && resumable.isEmpty() && watchlist.isEmpty() && i == 0, onFocus = aim, onOpen = onOpen)
+                        TitleRow(state, shelf.key, titles, firstKey != null && !resuming && watchlist.isEmpty() && i == 0, onFocus = aim, onOpen = onOpen)
                     }
                 }
             }
@@ -231,6 +238,7 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit) {
                 style = Type.meta.copy(color = Ink.text),
             )
         }
+        releases?.let { all -> ReleasesSheet(all, watch) { releases = null } }
     }
 }
 
@@ -399,7 +407,7 @@ private fun LandscapeCard(art: String?, name: String, focused: Boolean, stamp: S
 }
 
 @Composable
-private fun ResumeRow(state: HomeState, items: List<Item>, claimFirst: Boolean, watch: Watch, onFocus: (Title) -> Unit) {
+private fun ResumeRow(state: HomeState, items: List<Item>, fromSimkl: List<Paused>, claimFirst: Boolean, onResume: (Item) -> Unit, onFocus: (Title) -> Unit, onOpen: (Title) -> Unit) {
     val fallback = remember { FocusRequester() }
     CompositionLocalProvider(LocalBringIntoViewSpec provides rowScroll()) {
     LazyRow(
@@ -410,7 +418,7 @@ private fun ResumeRow(state: HomeState, items: List<Item>, claimFirst: Boolean, 
     ) {
         itemsIndexed(items, key = { _, it -> it.uri }) { i, item ->
             Focusable(
-                onClick = { watch.resume(item) },
+                onClick = { onResume(item) },
                 modifier = Modifier.width(CARD_W).height(CARD_H),
                 shape = RoundedCornerShape(8.dp),
                 scale = CARD_GROW,
@@ -424,6 +432,27 @@ private fun ResumeRow(state: HomeState, items: List<Item>, claimFirst: Boolean, 
                 LandscapeCard(item.backdrop ?: item.imdb?.let { "https://images.metahub.space/background/medium/$it/img" } ?: remoteArt(item.poster), item.label, focused, resumeStamp(item), item.ratio.toFloat())
             }
             if (claimFirst && i == 0) fallback.claim()
+        }
+        // No release to resume from yet: the title opens, and the one picked starts at Simkl's spot.
+        itemsIndexed(fromSimkl, key = { _, it -> "simkl:${it.imdb}" }) { i, p ->
+            val title = Title(p.imdb, p.kind, p.title, year = p.year)
+            val first = items.isEmpty() && i == 0
+            Focusable(
+                onClick = { onOpen(title) },
+                modifier = Modifier.width(CARD_W).height(CARD_H),
+                shape = RoundedCornerShape(8.dp),
+                scale = CARD_GROW,
+                origin = TransformOrigin(0f, 0.5f),
+                requester = if (first) fallback else null,
+                onFocus = { onFocus(title) },
+            ) { focused ->
+                LandscapeCard(
+                    "https://images.metahub.space/background/medium/${p.imdb}/img", p.title, focused,
+                    listOfNotNull(p.ep?.let { "S${it.season}:E${it.episode}" }, "${p.progress.toInt()}%").joinToString("  ·  "),
+                    (p.progress / 100).toFloat(),
+                )
+            }
+            if (claimFirst && first) fallback.claim()
         }
     }
     }
