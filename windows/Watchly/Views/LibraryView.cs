@@ -129,10 +129,9 @@ public sealed class LibraryView : UserControl
         var q = query?.Text.Trim().ToLowerInvariant() ?? "";
         var shown = q.Length == 0 ? history : history.Where(h => Haystack(h).Contains(q)).ToList();
         // After a reinstall this PC's history is empty; what Simkl has still belongs here.
-        var fromSimkl = Simkl.Library.NotIn(shell.HistoryList)
+        var fromSimkl = KidsMode.Only(Simkl.Library.NotIn(shell.HistoryList)
             .Where(s => q.Length == 0 || s.Title.ToLowerInvariant().Contains(q))
-            .Select(s => new Title { Imdb = s.Imdb, Kind = s.Kind, Name = s.Title, Year = s.Year, Poster = $"https://images.metahub.space/poster/medium/{s.Imdb}/img" })
-            .ToList();
+            .Select(s => new Title { Imdb = s.Imdb, Kind = s.Kind, Name = s.Title, Year = s.Year, Poster = $"https://images.metahub.space/poster/medium/{s.Imdb}/img" }));
         var page = new StackPanel();
         if (q.Length == 0 && SimklCard() is { } card) page.Children.Add(card);
         if (shown.Count == 0 && fromSimkl.Count == 0)

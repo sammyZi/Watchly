@@ -623,7 +623,11 @@ public sealed class DetailView : UserControl, IDisposable
             : "Nothing found. Try another episode, or search for the release by name."));
 
         if (fresh && shown is not null)
+        {
+            // Which of these TorBox has cached: the rows say Instant once it answers.
+            _ = TorBox.Check(shown.Take(MaxSources).Select(h => h.Id));
             foreach (var hit in shown.Take(MaxSources)) block.Children.Add(SourceRow(hit));
+        }
         content.Children.Add(block);
     }
 
@@ -656,7 +660,9 @@ public sealed class DetailView : UserControl, IDisposable
         var scope = picked is null && hit.Scope == "episode" ? null : hit.Scope switch { "season" => "Season pack", "complete" => "Complete series", _ => "Episode" };
         var meta = Ui.Text(string.Join("  ·  ", new[] { scope, Format.Bytes(TorrentBytes(hit)), $"{hit.Seeders} seeds" }.Where(s => s is not null)), "Meta", "Faint", 12);
         meta.Margin = new Thickness(0, 2, 0, 0);
-        dock.Children.Add(new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { name, meta } });
+        var lines = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { name, meta } };
+        if (TorBox.IsCached(hit.Id)) lines.Children.Add(Ui.Text("Instant · TorBox", "Meta", "Good", 12, FontWeights.SemiBold));
+        dock.Children.Add(lines);
 
         var row = Ui.Button(Ui.Card(dock, "Surface", 8, new Thickness(14, 11, 8, 11)), () => Start(captured.Magnet, false));
         row.Margin = new Thickness(0, 0, 0, 8);

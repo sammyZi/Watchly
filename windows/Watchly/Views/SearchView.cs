@@ -105,7 +105,9 @@ public sealed class SearchView : UserControl
 
         chipRow.Children.Clear();
         void Add(FrameworkElement e) { e.Margin = new Thickness(0, 0, 8, 6); chipRow.Children.Add(e); }
-        Add(Ui.Chip("Torrents", torrents, () =>
+        // A kids profile searches titles only: a release name can't be vetted.
+        if (KidsMode.On) torrents = false;
+        if (!KidsMode.On) Add(Ui.Chip("Torrents", torrents, () =>
         {
             torrents = !torrents;
             hits = null;
@@ -134,7 +136,7 @@ public sealed class SearchView : UserControl
     {
         var q = Query;
         var mine = ++latest;
-        if (torrents)
+        if (torrents && !KidsMode.On)
         {
             if (q.Length == 0)
             {
@@ -189,7 +191,7 @@ public sealed class SearchView : UserControl
             }
         }
         if (mine != latest) return;
-        titles = mixed;
+        titles = KidsMode.Only(mixed);
         SetBusy(false);
         Render();
     }

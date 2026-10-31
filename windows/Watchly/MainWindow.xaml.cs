@@ -47,6 +47,8 @@ public sealed record PlaybackRequest
     public string? HistoryUri { get; init; }
     public List<SavedSub> SavedSubs { get; init; } = new();
     public string? LocalPath { get; init; }
+    /// <summary>TorBox's HTTPS link for this file; the torrent is the fallback when it fails.</summary>
+    public string? Remote { get; init; }
     public (string Name, Func<Task> Go)? Next { get; init; }
 }
 
@@ -103,6 +105,8 @@ public partial class MainWindow : Window
         History.Changed += items => Dispatcher.BeginInvoke(() => { HistoryList = items; LibraryChanged?.Invoke(); });
         Saved.Changed += items => Dispatcher.BeginInvoke(() => { SavedList = items; LibraryChanged?.Invoke(); });
         Simkl.Changed += () => Dispatcher.BeginInvoke(() => LibraryChanged?.Invoke());
+        // The Instant tag on a release, once TorBox has answered which it has cached.
+        TorBox.Changed += () => Dispatcher.BeginInvoke(() => LibraryChanged?.Invoke());
         Net.OnlineChanged += () => Dispatcher.BeginInvoke(() => Offline.Visibility = Net.IsOnline ? Visibility.Collapsed : Visibility.Visible);
         Downloads.Instance.Failed += message => Dispatcher.BeginInvoke(() => Toast(message, true));
 
@@ -170,6 +174,7 @@ public partial class MainWindow : Window
         SavedList = Saved.Load();
         Links = EpisodeLinks.Load();
         Simkl.Load(profile.Id, profile.IsGuest);
+        KidsMode.Use(profile);
         // Pages built for the last profile read its library; start again from Home.
         // ponytail: the old tab views stay subscribed to the shell's events; switching is rare, unhook them if it ever shows.
         foreach (var page in Layers.Children.OfType<FrameworkElement>().ToList()) CloseLayer(page);
@@ -225,7 +230,19 @@ public partial class MainWindow : Window
     public void ProfileEdited(Profile? next)
     {
         if (next is null || Who?.Id != next.Id) return;
+        var kidsChanged = Who.Kids != next.Kids;
         Who = next;
+        if (kidsChanged)
+        {
+            // Kids switched on or off for the profile in use: every page again, filtered or not.
+            KidsMode.Use(next);
+            foreach (var page in Layers.Children.OfType<FrameworkElement>().ToList()) CloseLayer(page);
+            foreach (var view in tabViews.Values) (view as IDisposable)?.Dispose();
+            tabViews.Clear();
+            Tabs.Children.Clear();
+            ShowTab("home");
+            LibraryChanged?.Invoke();
+        }
         ProfileButton.Content = ProfilesView.Avatar(next, 40);
         ProfileButton.ToolTip = $"{next.Name} — switch profile";
     }
@@ -478,6 +495,8 @@ public partial class MainWindow : Window
     /// <summary>A magnet or .torrent from outside — the command line or a drop.</summary>
     void OpenIncoming(string source)
     {
+        // A magnet is anything at all: a kids profile plays only what it can browse to.
+        if (KidsMode.On) { Toast("A kids profile can't open torrents or magnet links.", true); return; }
         torrentMode = null;
         _ = OpenUri(source, new OpenOptions());
     }
@@ -655,10 +674,19 @@ public partial class MainWindow : Window
         _ = Open(target, target.LastFileIndex, new OpenOptions { Auto = "best" });
     }
 
-    void Play(string uri, Torrent torrent, TorrentMeta meta, int index, bool startOver)
+    /// <summary><paramref name="torbox"/> false goes straight to the swarm: TorBox already failed this file.</summary>
+    async void Play(string uri, Torrent torrent, TorrentMeta meta, int index, bool startOver, bool torbox = true)
     {
-        var stored = HistoryList.FirstOrDefault(h => h.Uri == uri) ?? new HistoryItem { Uri = uri, Title = meta.Name };
         var detail = CurrentDetail;
+        // A cached release streams from TorBox; not cached, or any TorBox error, and Watchly's own engine as ever.
+        string? remote = null;
+        if (torbox && TorBox.On && TorBox.HashOf(uri) is not null)
+        {
+            Toast("Checking TorBox…");
+            try { remote = await TorBox.Link(uri, meta.Files[index].Path, meta.Files[index].Size); }
+            catch (Exception e) { Toast($"TorBox: {e.Message.TrimEnd('.')} — streaming from peers instead.", true); }
+        }
+        var stored = HistoryList.FirstOrDefault(h => h.Uri == uri) ?? new HistoryItem { Uri = uri, Title = meta.Name };
         var file = meta.Files[index];
         var ratio = stored.ResumeRatio(index);
         // A release never played here starts where another release of the title was left.
@@ -678,8 +706,15 @@ public partial class MainWindow : Window
             HistoryUri = uri,
             SavedSubs = stored.Subtitles?.GetValueOrDefault(index) ?? new(),
             Next = UpNext(stored, torrent, meta, index, detail),
+            Remote = remote,
         };
-        OpenPlayer(request);
+        var player = OpenPlayer(request);
+        player.TorBoxFailed += (seconds, why) =>
+        {
+            if (seconds > 0) SavePosition(uri, index, seconds);
+            Toast(why, true);
+            Play(uri, torrent, meta, index, false, torbox: false);
+        };
     }
 
     /// <summary>
@@ -736,7 +771,7 @@ public partial class MainWindow : Window
     public void PlayLocal(string path, string title) =>
         OpenPlayer(new PlaybackRequest { Title = title, LocalPath = path });
 
-    void OpenPlayer(PlaybackRequest request)
+    PlayerView OpenPlayer(PlaybackRequest request)
     {
         if (PlayerHost.Content is PlayerView old) _ = old.Shutdown();
         PlayerHost.Visibility = Visibility.Visible;
@@ -758,6 +793,7 @@ public partial class MainWindow : Window
         // collapsed: the pages keep their layout, so coming back doesn't lay out every shelf again.
         Tabs.Visibility = Layers.Visibility = TabDock.Visibility = Visibility.Hidden;
         PlayerHost.Content = player;
+        return player;
     }
 
     public void SavePosition(string uri, int index, double seconds)

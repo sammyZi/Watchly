@@ -108,6 +108,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.torrentviewer.core.Artwork
+import com.torrentviewer.core.TORBOX_STALL_MS
+import com.torrentviewer.core.TORBOX_STALL_NOTE
 import com.torrentviewer.core.Ep
 import com.torrentviewer.core.Episode
 import com.torrentviewer.core.ExoView
@@ -707,6 +709,18 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         say("Skipped intro", L.drawable.lucide_ic_chevrons_right)
     }
 
+    /* ---------------------------------------------------- TorBox stall */
+
+    // A TorBox stream that hasn't moved goes to Watchly's own engine: a video this phone can't
+    // decode left VLC silent, with no error to fall back on, and the film never started. Counted
+    // again from the switch to VLC: Media3's failed attempt used 4–6 s of VLC's time.
+    LaunchedEffect(watch.via, vlc) {
+        if (watch.via == null) return@LaunchedEffect
+        val from = at
+        kotlinx.coroutines.delay(TORBOX_STALL_MS)
+        if (watch.via != null && !paused && at < from + 1) watch.leaveTorBox(at, TORBOX_STALL_NOTE)
+    }
+
     /* ------------------------------------------------------------ input */
 
     BackHandler {
@@ -888,8 +902,11 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                             }
                         }
                         v.onFailed = { message ->
-                            watch.notes.tryEmit(message)
-                            watch.exit()
+                            // From TorBox: on to Watchly's own engine at the same spot, not out of the film.
+                            if (!watch.leaveTorBox(at)) {
+                                watch.notes.tryEmit(message)
+                                watch.exit()
+                            }
                         }
                         view.value = v
                     }

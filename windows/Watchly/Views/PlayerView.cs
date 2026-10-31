@@ -355,6 +355,8 @@ public sealed class PlayerView : UserControl, IDisposable
         p.EndReached += (_, _) => On(OnEnded);
         p.EncounteredError += (_, _) => On(() =>
         {
+            // From TorBox: on to Watchly's own engine at the same spot, not an error on screen.
+            if (request.Remote is not null && !leftTorBox) { LeaveTorBox("TorBox stopped — streaming from peers instead."); return; }
             if (duration > 0) Warn("Playback stalled — waiting for data");
             else Fail("This file could not be played", true);
         });
@@ -436,7 +438,12 @@ public sealed class PlayerView : UserControl, IDisposable
         string url;
         try
         {
-            if (request.LocalPath is not null)
+            if (request.Remote is not null)
+            {
+                url = request.Remote;
+                WatchTorBox();
+            }
+            else if (request.LocalPath is not null)
             {
                 url = new Uri(request.LocalPath).AbsoluteUri;
             }
@@ -458,6 +465,38 @@ public sealed class PlayerView : UserControl, IDisposable
             return;
         }
         Load(url, request.ResumeAt);
+    }
+
+    /// <summary>
+    /// TorBox's stream failed, or hasn't moved in 20 s, with where it got to: the shell reopens the
+    /// file from Watchly's own engine. Once — the reopened player isn't on TorBox.
+    /// </summary>
+    public event Action<double, string>? TorBoxFailed;
+    bool leftTorBox;
+
+    void LeaveTorBox(string why)
+    {
+        if (leftTorBox || request.Remote is null || disposed) return;
+        leftTorBox = true;
+        TorBoxFailed?.Invoke(current / 1000.0, why);
+    }
+
+    /// <summary>
+    /// No error comes for a video libVLC can't decode: the picture just never moves. 45 seconds of
+    /// that (not paused) and the film goes to the swarm instead of hanging on "Opening" — as long as
+    /// the phone and TV give it (TORBOX_STALL_MS): a big remux over HTTPS can take a while to start.
+    /// </summary>
+    void WatchTorBox()
+    {
+        var from = (long)(request.ResumeAt * 1000);
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(45) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            if (!disposed && current < from + 1000 && SafeState != VLCState.Paused)
+                LeaveTorBox("TorBox didn't start — trying peers. If this won't play either, this release's video may not suit this PC: try another.");
+        };
+        timer.Start();
     }
 
     void Load(string url, double startSeconds)

@@ -73,6 +73,7 @@ public sealed class SettingsView : UserControl
                 Toggle(S.AutoSkipIntro, v => Set(S with { AutoSkipIntro = v })))));
 
         page.Children.Add(SubdlGroup());
+        page.Children.Add(TorBoxGroup());
 
         var folder = Ui.Button(Ui.Text("Change", "Label", "Accent", 13, FontWeights.SemiBold), () =>
         {
@@ -191,6 +192,60 @@ public sealed class SettingsView : UserControl
                 Ui.Button(Ui.Text("Connect Simkl", "Label", "Accent", 13, FontWeights.SemiBold), () => _ = shell.ConnectSimkl())));
         }
         return Group("Simkl", box);
+    }
+
+    /// <summary>A TorBox key: cached releases play from its servers, anything else from the swarm as before.</summary>
+    FrameworkElement TorBoxGroup()
+    {
+        var saved = TorBox.On;
+        var box = new PasswordBox { Background = Brushes.Transparent, BorderThickness = new Thickness(0), FontSize = 14, Width = 260, VerticalContentAlignment = VerticalAlignment.Center };
+        box.SetResourceReference(ForegroundProperty, "Text");
+        box.SetResourceReference(PasswordBox.CaretBrushProperty, "Accent");
+        void Save()
+        {
+            if (box.Password.Trim().Length == 0) { shell.Toast("Paste your TorBox key first", true); return; }
+            TorBox.SetKey(box.Password);
+            shell.Toast("TorBox key saved");
+            Render();
+        }
+        box.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) Save(); };
+        var save = Ui.Button(Ui.Text("Save", "Label", "Accent", 13, FontWeights.SemiBold), Save);
+        save.Margin = new Thickness(14, 0, 0, 0);
+        var controls = new StackPanel { Orientation = Orientation.Horizontal, Children = { Ui.Card(box, "SurfaceAlt", 6, new Thickness(10, 6, 10, 6)), save } };
+        if (saved)
+        {
+            var remove = Ui.Button(Ui.Text("Remove", "Label", "Muted", 13), () =>
+            {
+                TorBox.SetKey("");
+                shell.Toast("TorBox key removed");
+                Render();
+            });
+            remove.Margin = new Thickness(16, 0, 0, 0);
+            controls.Children.Add(remove);
+        }
+        var panel = new StackPanel();
+        if (saved)
+        {
+            // The account it opens, or why it doesn't.
+            var account = Ui.Text("Checking the key…", "Meta", "Muted", 12);
+            account.Margin = new Thickness(0, 0, 0, 10);
+            panel.Children.Add(account);
+            _ = TorBox.Account().ContinueWith(t => Dispatcher.BeginInvoke(() =>
+            {
+                account.Text = t.IsCompletedSuccessfully ? t.Result : $"Not working: {t.Exception?.GetBaseException().Message}";
+                account.SetResourceReference(TextBlock.ForegroundProperty, t.IsCompletedSuccessfully ? "Muted" : "Danger");
+            }));
+        }
+        panel.Children.Add(Row(saved ? "API key saved" : "TorBox API key",
+            saved ? "Releases TorBox has cached say Instant and play from its servers — no peers to wait for. Anything else streams from the swarm as before."
+                  : "With a torbox.app API key, releases TorBox has cached play from its servers instead of from peers. Stored encrypted for this Windows account."));
+        panel.Children.Add(controls);
+        var get = Ui.Button(Ui.Text("Find your key at torbox.app", "Meta", "Accent", 12), () =>
+            Process.Start(new ProcessStartInfo("https://torbox.app/settings") { UseShellExecute = true }));
+        get.HorizontalAlignment = HorizontalAlignment.Left;
+        get.Margin = new Thickness(0, 10, 0, 0);
+        panel.Children.Add(get);
+        return Group("TorBox", panel);
     }
 
     FrameworkElement SubdlGroup()

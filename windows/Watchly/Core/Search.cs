@@ -44,6 +44,10 @@ public sealed record Lang(string Code, string Name, Regex Match)
         Of("TR", "Turkish", "turkish|tur"),
         Of("NL", "Dutch", "dutch|nederlands|dut|nld"),
         Of("PL", "Polish", "polish|polski|pol"),
+        // ISO 639-2 has old codes for these too (scr, scc), still in some files' track names.
+        Of("HR", "Croatian", "croatian|hrvatski|hrv|scr"),
+        Of("SR", "Serbian", "serbian|srpski|српски|srp|scc"),
+        Of("BS", "Bosnian", "bosnian|bosanski|bos"),
         Of("JA", "Japanese", "japanese|jpn"),
         Of("KO", "Korean", "korean|kor"),
         Of("ZH", "Chinese", "chinese|mandarin|chi|zho"),
