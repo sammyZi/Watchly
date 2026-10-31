@@ -200,8 +200,8 @@ private fun Player(watch: Watch) {
     val bitrate = remember { file?.size?.let { size -> watch.item?.durations?.get(watch.playingIndex)?.takeIf { it > 0 }?.let { size / it } } ?: 0.0 }
 
     val view = remember { mutableStateOf<Video?>(null) }
-    /** Media3 unless the setting asks for VLC, or Media3 has already given up on this file. */
-    var vlc by remember { mutableStateOf(SettingsStore.value.value.vlcPlayer) }
+    /** Media3 unless the setting asks for VLC, or Media3 has already given up on this file — now or any time before. */
+    var vlc by remember { mutableStateOf(SettingsStore.value.value.vlcPlayer || file?.let { NeedsVlc.has(it.name, it.size) } == true) }
     var paused by remember { mutableStateOf(false) }
     var at by remember { mutableDoubleStateOf(startAt) }
     var duration by remember { mutableDoubleStateOf(0.0) }
@@ -534,6 +534,12 @@ private fun Player(watch: Watch) {
                     v.setScale(SCALES[scale].first)
                     if (!vlc) v.onUnsupported = { message ->
                         Log.w("Player", "Media3 gave up ($message), falling back to VLC")
+                        engine.note("player: Media3 gave up ($message), falling back to VLC")
+                        // Said, so a slower start isn't a mystery: VLC takes a few seconds more to open a file.
+                        // A note, not the HUD: the loading screen is usually still up and hides the HUD.
+                        watch.notes.tryEmit("Switching to VLC — the built-in player can't play this video")
+                        // Next time this file opens straight in VLC.
+                        file?.let { NeedsVlc.add(it.name, it.size) }
                         // Track ids are the backend's own.
                         tracks = null
                         subtitle = null
@@ -580,6 +586,7 @@ private fun Player(watch: Watch) {
                         } else if (next != null && !noNext) goNext() else watch.exit()
                     }
                     v.onFailed = { message ->
+                        engine.note("player: failed — $message")
                         // From TorBox: on to Watchly's own engine at the same spot, not out of the film.
                         if (!watch.leaveTorBox(at)) {
                             watch.notes.tryEmit(message)

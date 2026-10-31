@@ -615,6 +615,10 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
         // With the profile: the connection is this profile's.
         if (Simkl.available) SimklSection(me)
 
+        Section("Welcome tour", "The four pages a new install opens with: what Watchly does, over what's trending now.") {
+            Button("Show the welcome tour", { tourAgain = true }, icon = L.drawable.lucide_ic_sparkles)
+        }
+
         Section("Appearance", "Light or dark pages, or whichever the phone is set to. The player stays dark either way.") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("system" to "System", "light" to "Light", "dark" to "Dark").forEach { (mode, label) ->

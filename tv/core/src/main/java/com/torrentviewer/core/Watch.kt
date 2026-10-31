@@ -294,6 +294,7 @@ class Watch(val engine: TorrentStream) {
         if (via == null || phase != Phase.PLAYING) return false
         val current = item ?: return false
         if (seconds > 0) savePosition(seconds)
+        engine.note("torbox: leaving at ${seconds.toInt()}s — $note")
         notes.tryEmit(note)
         val started = History.find(current.uri) ?: current
         val size = meta?.files?.find { it.index == playingIndex }?.size ?: 0
@@ -319,15 +320,18 @@ class Watch(val engine: TorrentStream) {
             try {
                 if (torbox && file != null && TorBox.on && magnetHash(uri) != null) {
                     askingTorBox = true
+                    engine.note("torbox: asking for ${file.name}")
                     val link = try {
                         TorBox.link(uri, file.path, file.size)
                     } catch (e: Exception) {
+                        engine.note("torbox: failed — ${e.message}; peers instead")
                         if (ticket == playId) notes.tryEmit("TorBox: ${e.message?.trimEnd('.') ?: "no link"} — streaming from peers instead.")
                         null
                     } finally {
                         if (ticket == playId) askingTorBox = false
                     }
                     if (ticket != playId || phase != Phase.PLAYING) return@launch
+                    engine.note(if (link != null) "torbox: playing from ${link.substringBefore('?').take(80)}" else "torbox: not cached; peers instead")
                     if (link != null) {
                         // Whatever the swarm was streaming before (the last episode) goes.
                         withContext(Dispatchers.IO) { engine.stop() }

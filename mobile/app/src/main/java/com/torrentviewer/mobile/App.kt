@@ -124,6 +124,9 @@ private fun keyOf(index: Int, page: Page) = when (page) {
 /** The profile opened last on this phone, so a phone with one owner never asks. */
 private const val LAST_PROFILE = "phone:lastProfile"
 
+/** The first-launch tour has been seen (or skipped). */
+private const val TOURED = "phone:toured"
+
 /** Before profiles there were the bare keys; with none made, the phone keeps using them. */
 private val OWNER = Profile("", "Me", COLOURS[0])
 
@@ -236,6 +239,17 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
             .getOrElse { return@LaunchedEffect watch.fail(it.message ?: "Couldn't read that file.") }
         val item = History.put(Item(path, titleOf(raw), System.currentTimeMillis()))
         watch.resume(item)
+    }
+
+    // The tour, once, on a fresh install: anyone with a library or a profile already knows the app.
+    var toured by remember { mutableStateOf(Kv.global(TOURED) != null || Profiles.list.value.isNotEmpty() || History.items.value.isNotEmpty()) }
+    if (!toured || tourAgain) {
+        Onboarding {
+            Kv.setGlobal(TOURED, "1")
+            toured = true
+            tourAgain = false
+        }
+        return
     }
 
     val me = who
