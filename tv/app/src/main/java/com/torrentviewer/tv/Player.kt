@@ -443,6 +443,18 @@ private fun Player(watch: Watch) {
         say("Skipped intro")
     }
 
+    /* -------------------------------------------------------- TorBox stall */
+
+    // A TorBox stream that hasn't moved goes to Watchly's own engine: a video this TV can't decode
+    // left VLC silent, with no error to fall back on, and the film never started. Counted again from
+    // the switch to VLC: Media3's failed attempt used 4–6 s of VLC's time.
+    LaunchedEffect(watch.via, vlc) {
+        if (watch.via == null) return@LaunchedEffect
+        val from = at
+        delay(TORBOX_STALL_MS)
+        if (watch.via != null && !paused && at < from + 1) watch.leaveTorBox(at, TORBOX_STALL_NOTE)
+    }
+
     /* ----------------------------------------------------------------- back */
 
     // BACK closes a panel, then the controls, then the info card — and only then leaves.
@@ -568,8 +580,11 @@ private fun Player(watch: Watch) {
                         } else if (next != null && !noNext) goNext() else watch.exit()
                     }
                     v.onFailed = { message ->
-                        watch.notes.tryEmit(message)
-                        watch.exit()
+                        // From TorBox: on to Watchly's own engine at the same spot, not out of the film.
+                        if (!watch.leaveTorBox(at)) {
+                            watch.notes.tryEmit(message)
+                            watch.exit()
+                        }
                     }
                     view.value = v
                 }

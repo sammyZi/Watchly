@@ -12,6 +12,18 @@ import kotlinx.coroutines.withContext
 
 enum class Phase { IDLE, INSPECTING, PLAYING }
 
+/**
+ * A TorBox stream whose picture hasn't moved in this long goes to Watchly's own engine. No error
+ * comes for it: a video the device can't decode left VLC silent, the film never starting. 45 s, not
+ * 20: VLC reads an MKV's index at the end, then buffers seconds of a large remux over HTTPS first,
+ * which outlasted 20 s on the TV while peers (whose start and end are fetched before the timer) played.
+ * Calibration knob: shorter gives up on slow-starting streams, longer leaves a dead one on screen.
+ */
+const val TORBOX_STALL_MS = 45_000L
+
+/** What the viewer is told then: the swarm may stall the same way if the video is the trouble. */
+const val TORBOX_STALL_NOTE = "TorBox didn't start — trying peers. If this won't play either, this release's video may not suit this device: try another."
+
 /** "136 min" → 8160 s: the only duration a never-played torrent has, and bitrate needs one. */
 fun runtimeSeconds(runtime: String?): Double =
     Regex("(\\d+)\\s*min", RegexOption.IGNORE_CASE).find(runtime.orEmpty())?.groupValues?.get(1)?.toDouble()?.times(60) ?: 0.0
@@ -274,7 +286,23 @@ class Watch(val engine: TorrentStream) {
         play(index, started.resumeRatio(index), bitrateOf(size, started.durations[index] ?: 0.0))
     }
 
-    private fun play(index: Int, startRatio: Double, bitrate: Double) {
+    /**
+     * TorBox's link failed mid-film: the same file from Watchly's own engine, from where it got to.
+     * False when it wasn't playing from TorBox — then the failure is the player's to report.
+     */
+    fun leaveTorBox(seconds: Double, note: String = "TorBox stopped — streaming from peers instead."): Boolean {
+        if (via == null || phase != Phase.PLAYING) return false
+        val current = item ?: return false
+        if (seconds > 0) savePosition(seconds)
+        notes.tryEmit(note)
+        val started = History.find(current.uri) ?: current
+        val size = meta?.files?.find { it.index == playingIndex }?.size ?: 0
+        play(playingIndex, started.resumeRatio(playingIndex), bitrateOf(size, started.durations[playingIndex] ?: 0.0), torbox = false)
+        return true
+    }
+
+    /** [torbox] false goes straight to the swarm: TorBox already failed this file. */
+    private fun play(index: Int, startRatio: Double, bitrate: Double, torbox: Boolean = true) {
         val uri = source ?: return
         // Cleared here, not on the engine thread: the player mounts this frame and must
         // not open the previous file's URL while engine.play() is still starting.
@@ -289,7 +317,7 @@ class Watch(val engine: TorrentStream) {
         val file = meta?.files?.find { it.index == index }
         AppScope.launch {
             try {
-                if (file != null && TorBox.on && magnetHash(uri) != null) {
+                if (torbox && file != null && TorBox.on && magnetHash(uri) != null) {
                     askingTorBox = true
                     val link = try {
                         TorBox.link(uri, file.path, file.size)

@@ -144,6 +144,7 @@ public static class OpenSubs
         ["chi"] = "ZH", ["zho"] = "ZH", ["ind"] = "ID", ["vie"] = "VI", ["tha"] = "TH", ["per"] = "FA",
         ["fas"] = "FA", ["heb"] = "HE", ["gre"] = "EL", ["ell"] = "EL", ["swe"] = "SV", ["rum"] = "RO",
         ["ron"] = "RO", ["tam"] = "TA", ["tel"] = "TE",
+        ["hrv"] = "HR", ["scr"] = "HR", ["srp"] = "SR", ["scc"] = "SR", ["bos"] = "BS",
     };
 
     static int? Positive(JsonNode? n) => int.TryParse(n?.ToString(), out var v) && v > 0 ? v : null;

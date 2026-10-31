@@ -431,7 +431,10 @@ class ExoView(context: Context) : Video(context) {
             // No error for a stream it cannot decode: it would play on without picture or sound.
             for (type in listOf(C.TRACK_TYPE_VIDEO, C.TRACK_TYPE_AUDIO)) {
                 if (tracks.containsType(type) && !tracks.isTypeSupported(type, true)) {
-                    giveUp(if (type == C.TRACK_TYPE_VIDEO) "No decoder for this video" else "No decoder for this audio")
+                    // Named, so the log says which formats this device can't take: "hevc dvhe.05.06", "av01…".
+                    val f = tracks.groups.firstOrNull { it.type == type }?.takeIf { it.length > 0 }?.getTrackFormat(0)
+                    val what = listOfNotNull(f?.sampleMimeType?.substringAfter('/'), f?.codecs).distinct().joinToString(" ").ifEmpty { "unknown" }
+                    giveUp((if (type == C.TRACK_TYPE_VIDEO) "No decoder for this video" else "No decoder for this audio") + " ($what)")
                     return
                 }
             }

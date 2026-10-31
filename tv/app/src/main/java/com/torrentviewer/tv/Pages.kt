@@ -35,6 +35,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -50,6 +51,8 @@ import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -93,8 +96,19 @@ fun Field(
 ) {
     var focused by remember { mutableStateOf(false) }
     val ring by animateColorAsState(if (focused) Color.White else Color.Transparent, Motion.effects(), label = "ring")
+    // Passed on the way down a page, the box itself takes focus and the text field stays shut until
+    // OK: some TV keyboards ignore showKeyboardOnFocus = false and opened at every key box.
+    var editing by remember { mutableStateOf(keyboardOnFocus) }
+    val text = remember { FocusRequester() }
+    LaunchedEffect(editing) { if (editing && !keyboardOnFocus) runCatching { text.requestFocus() } }
     Row(
-        modifier.height(54.dp).clip(RoundedCornerShape(8.dp)).background(Color.White.copy(alpha = if (focused) 0.16f else 0.09f)).border(2.dp, ring, RoundedCornerShape(8.dp)).padding(horizontal = 18.dp),
+        modifier.height(54.dp).clip(RoundedCornerShape(8.dp)).background(Color.White.copy(alpha = if (focused) 0.16f else 0.09f)).border(2.dp, ring, RoundedCornerShape(8.dp))
+            .onFocusChanged { focused = it.hasFocus }
+            .then(
+                if (keyboardOnFocus) Modifier
+                else Modifier.focusProperties { canFocus = !editing }.clickable(remember { MutableInteractionSource() }, indication = null) { editing = true },
+            )
+            .padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         leading?.let {
@@ -115,7 +129,10 @@ fun Field(
                 keyboardActions = KeyboardActions(onAny = { onSubmit(); defaultKeyboardAction(imeAction) }),
                 modifier = Modifier.fillMaxWidth()
                     .then(if (requester != null) Modifier.focusRequester(requester) else Modifier)
-                    .onFocusChanged { focused = it.isFocused },
+                    .focusRequester(text)
+                    .focusProperties { canFocus = editing }
+                    // Left again: shut until the next OK.
+                    .onFocusChanged { if (!it.isFocused && editing && !keyboardOnFocus) editing = false },
             )
         }
         trailing()
@@ -485,6 +502,7 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             if (subdl.isNotEmpty()) "Saved, encrypted on this TV — Find subtitles searches SubDL too. Enter another to replace it."
             else "A free key from subdl.com adds its subtitles to Find subtitles. It stays encrypted on this TV.",
         ) {
+            Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Field(key, { key = it.trim() }, if (subdl.isNotEmpty()) "••••••••••••" else "Your SubDL API key", Modifier.width(420.dp), secret = true, keyboardOnFocus = false)
                 Spacer(Modifier.width(14.dp))
@@ -499,6 +517,8 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
                     TvButton("Remove", { Secrets.setSubdl("") })
                 }
             }
+            PhoneKey("SubDL") { Secrets.setSubdl(it) }
+            }
         }
 
         Section(
@@ -506,6 +526,8 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             if (torbox.isNotEmpty()) "Releases TorBox has cached say Instant, and play from its servers — no peers to wait for, seek anywhere. Anything else streams from the swarm as before."
             else "With a torbox.app API key, releases TorBox has cached play from its servers instead of from peers. The key is under Settings on torbox.app, and stays encrypted on this TV.",
         ) {
+            // A column: a section's box draws its children on top of each other.
+            Column {
             if (torbox.isNotEmpty()) {
                 Text(
                     torboxAccount ?: "Checking the key…",
@@ -526,6 +548,8 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
                     Spacer(Modifier.width(10.dp))
                     TvButton("Remove", { TorBox.setKey("") })
                 }
+            }
+            PhoneKey("TorBox") { TorBox.setKey(it) }
             }
         }
 
@@ -554,6 +578,45 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
 
 /** The Library's Simkl card was put off with "Not now"; Settings still offers it. */
 private const val SIMKL_LATER = "simkl:later"
+
+/**
+ * A key pasted on a phone rather than typed with the remote: a QR of a page the TV serves on the
+ * home network ([KeyDrop]), open only while this shows. It closes itself once the key arrives.
+ */
+@Composable
+private fun PhoneKey(what: String, onKey: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    // One button that changes its label, not a button swapped for another: a focused button taken
+    // away left focus nowhere, and the page sent it back to the top.
+    TvButton(if (open) "Cancel" else "Paste from phone", { open = !open }, Modifier.padding(top = 12.dp), icon = if (open) L.drawable.lucide_ic_x else L.drawable.lucide_ic_smartphone)
+    if (!open) return
+    var address by remember { mutableStateOf<String?>(null) }
+    var tried by remember { mutableStateOf(false) }
+    DisposableEffect(Unit) {
+        val drop = KeyDrop(what) {
+            onKey(it)
+            open = false
+        }
+        address = drop.open()
+        tried = true
+        onDispose { drop.close() }
+    }
+    Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        address?.let { Qr(it, 168.dp) }
+        Spacer(Modifier.width(22.dp))
+        Column(Modifier.widthIn(max = 520.dp)) {
+            Text(
+                when {
+                    address != null -> "Scan with your phone's camera, paste your $what key on the page that opens, and tap Save. Your phone needs to be on the same Wi-Fi as the TV."
+                    tried -> "The TV isn't on a network a phone can reach."
+                    else -> "Opening…"
+                },
+                style = Type.meta.copy(color = Ink.muted),
+            )
+            address?.let { Text(it, Modifier.padding(top = 6.dp), style = Type.meta.copy(color = Ink.faint)) }
+        }
+    }
+}
 
 /** [text] as a QR code: black squares on white, with the one-module quiet zone a camera needs. */
 @Composable

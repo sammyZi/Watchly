@@ -21,7 +21,7 @@ public sealed class CatalogView : UserControl
 
     async void Load(Shelf shelf, ContentControl body)
     {
-        var titles = await Meta.LoadCatalog(shelf.Kind, shelf.Genre);
+        var titles = KidsMode.Only(await Meta.LoadCatalog(shelf.Kind, shelf.Genre));
         if (titles.Count == 0)
         {
             body.Content = Ui.Empty("wifi-off", "Could not load this shelf", "Check the connection — it loads again when you are back online.");
