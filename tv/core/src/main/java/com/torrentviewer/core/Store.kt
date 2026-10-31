@@ -41,6 +41,7 @@ object Kv {
         prefs = context.getSharedPreferences("watchly", Context.MODE_PRIVATE)
         importExpo(context)
         Secrets.init(context)
+        TorBox.load()
     }
 
     fun useProfile(id: String, isGuest: Boolean) {
@@ -352,6 +353,8 @@ data class Item(
     val titleName: String? = null,
     /** The swarm when this release was picked from search; null if opened another way. */
     val seeders: Int? = null,
+    /** [files] are numbered as TorBox listed them, not as libtorrent does — see [Watch]. */
+    val torboxFiles: Boolean = false,
 ) {
     val label get() = titleName ?: title
 
@@ -387,7 +390,7 @@ data class Item(
             subtitles.forEach { (k, v) -> o.put(k.toString(), JSONArray(v.map { JSONObject().put("path", it.path).put("label", it.label) })) }
         })
         .put("imdb", imdb).put("kind", kind).put("poster", poster).put("backdrop", backdrop).put("titleName", titleName)
-        .put("seeders", seeders)
+        .put("seeders", seeders).put("torboxFiles", torboxFiles)
 
     companion object {
         fun from(o: JSONObject) = Item(
@@ -413,6 +416,7 @@ data class Item(
             backdrop = o.str("backdrop"),
             titleName = o.str("titleName"),
             seeders = if (o.has("seeders") && !o.isNull("seeders")) o.optInt("seeders") else null,
+            torboxFiles = o.optBoolean("torboxFiles", false),
         )
     }
 }

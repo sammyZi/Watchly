@@ -85,6 +85,7 @@ import com.torrentviewer.core.SavedStore
 import com.torrentviewer.core.Searches
 import com.torrentviewer.core.Secrets
 import com.torrentviewer.core.Simkl
+import com.torrentviewer.core.TorBox
 import com.torrentviewer.core.Kv
 import com.torrentviewer.core.Kids
 import com.torrentviewer.core.bytes
@@ -540,6 +541,14 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
     val subdl by Secrets.subdl.collectAsState()
     /** A SubDL key being typed or pasted, until Save. */
     var key by remember { mutableStateOf("") }
+    val torbox by TorBox.key.collectAsState()
+    var torboxKey by remember { mutableStateOf("") }
+    /** The account the saved key opens, or why it doesn't; null while asking. */
+    var torboxAccount by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(torbox) {
+        torboxAccount = null
+        if (torbox.isNotEmpty()) torboxAccount = runCatching { TorBox.account() }.getOrElse { "Not working: ${it.message}" }
+    }
     fun set(next: Settings) = SettingsStore.save(next)
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = EDGE).padding(bottom = 32.dp)) {
@@ -689,6 +698,36 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
             if (subdl.isNotEmpty()) Button("Remove key", {
                 Secrets.setSubdl("")
                 watch.notes.tryEmit("SubDL key removed")
+            }, Modifier.padding(top = 10.dp))
+        }
+
+        Section(
+            "TorBox",
+            if (torbox.isNotEmpty()) "Releases TorBox has cached say Instant, and play from its servers — no peers to wait for, seek anywhere. Anything else streams from the swarm as before."
+            else "With a torbox.app API key, releases TorBox has cached play from its servers instead of from peers. The key is under Settings on torbox.app, and stays encrypted on this phone.",
+        ) {
+            if (torbox.isNotEmpty()) {
+                Text(
+                    torboxAccount ?: "Checking the key…",
+                    Modifier.padding(bottom = 10.dp),
+                    style = Type.meta.copy(color = if (torboxAccount?.startsWith("Not working") == true) Ink.danger else Ink.muted),
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Field(torboxKey, { torboxKey = it.trim() }, if (torbox.isNotEmpty()) "••••••••••••" else "Your TorBox API key", Modifier.weight(1f), secret = true)
+                Spacer(Modifier.width(10.dp))
+                Button("Save", {
+                    if (torboxKey.isEmpty()) watch.notes.tryEmit("Paste your TorBox key first")
+                    else {
+                        TorBox.setKey(torboxKey)
+                        torboxKey = ""
+                        watch.notes.tryEmit("TorBox key saved")
+                    }
+                }, icon = L.drawable.lucide_ic_key)
+            }
+            if (torbox.isNotEmpty()) Button("Remove key", {
+                TorBox.setKey("")
+                watch.notes.tryEmit("TorBox key removed")
             }, Modifier.padding(top = 10.dp))
         }
 

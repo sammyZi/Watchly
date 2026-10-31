@@ -389,6 +389,14 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
     var pin by remember { mutableStateOf("") }
     val subdl by Secrets.subdl.collectAsState()
     var key by remember { mutableStateOf("") }
+    val torbox by TorBox.key.collectAsState()
+    var torboxKey by remember { mutableStateOf("") }
+    /** The account the saved key opens, or why it doesn't; null while asking. */
+    var torboxAccount by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(torbox) {
+        torboxAccount = null
+        if (torbox.isNotEmpty()) torboxAccount = runCatching { TorBox.account() }.getOrElse { "Not working: ${it.message}" }
+    }
     val first = remember { FocusRequester() }
     fun set(next: Settings) = SettingsStore.save(next)
 
@@ -489,6 +497,34 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
                 if (subdl.isNotEmpty()) {
                     Spacer(Modifier.width(10.dp))
                     TvButton("Remove", { Secrets.setSubdl("") })
+                }
+            }
+        }
+
+        Section(
+            "TorBox",
+            if (torbox.isNotEmpty()) "Releases TorBox has cached say Instant, and play from its servers — no peers to wait for, seek anywhere. Anything else streams from the swarm as before."
+            else "With a torbox.app API key, releases TorBox has cached play from its servers instead of from peers. The key is under Settings on torbox.app, and stays encrypted on this TV.",
+        ) {
+            if (torbox.isNotEmpty()) {
+                Text(
+                    torboxAccount ?: "Checking the key…",
+                    Modifier.padding(bottom = 12.dp),
+                    style = Type.meta.copy(color = if (torboxAccount?.startsWith("Not working") == true) Ink.danger else Ink.muted),
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Field(torboxKey, { torboxKey = it.trim() }, if (torbox.isNotEmpty()) "••••••••••••" else "Your TorBox API key", Modifier.width(420.dp), secret = true, keyboardOnFocus = false)
+                Spacer(Modifier.width(14.dp))
+                TvButton(if (torboxKey.isNotEmpty()) "Save key" else "Enter a key", {
+                    if (torboxKey.isNotEmpty()) {
+                        TorBox.setKey(torboxKey)
+                        torboxKey = ""
+                    }
+                }, icon = L.drawable.lucide_ic_key)
+                if (torbox.isNotEmpty()) {
+                    Spacer(Modifier.width(10.dp))
+                    TvButton("Remove", { TorBox.setKey("") })
                 }
             }
         }

@@ -41,6 +41,16 @@ object Net {
     suspend fun postForm(url: String, fields: Map<String, String>, timeoutMs: Int = 15_000): String =
         request(url, "POST", fields.entries.joinToString("&") { (k, v) -> "${enc(k)}=${enc(v)}" }, timeoutMs, false, "application/x-www-form-urlencoded")
 
+    /** multipart/form-data, text fields only — what TorBox's create endpoints take. */
+    suspend fun postMultipart(url: String, fields: Map<String, String>, timeoutMs: Int = 15_000, quiet: Boolean = false, headers: Map<String, String> = emptyMap()): String {
+        val boundary = "watchly${System.nanoTime()}"
+        val body = buildString {
+            fields.forEach { (k, v) -> append("--$boundary\r\nContent-Disposition: form-data; name=\"$k\"\r\n\r\n$v\r\n") }
+            append("--$boundary--\r\n")
+        }
+        return request(url, "POST", body, timeoutMs, quiet, "multipart/form-data; boundary=$boundary", headers)
+    }
+
     private suspend fun request(
         url: String, method: String, body: String?, timeoutMs: Int, quiet: Boolean,
         type: String = "application/json", headers: Map<String, String> = emptyMap(),
