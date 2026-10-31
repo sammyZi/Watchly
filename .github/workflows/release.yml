@@ -1,17 +1,16 @@
 # Builds every app and publishes them as one GitHub release:
 #   phone and TV release APKs, per ABI and universal; the Windows exe.
-# Runs on a pushed v* tag, or by hand from the Actions tab with a tag to create.
+# Releases are built locally (the .env keys stay off GitHub); this runs only by hand from the Actions tab,
+# with a tag to create, and its builds carry no .env keys.
 name: Release
 
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
         description: Tag to release (created on this commit if it doesn't exist)
         required: true
-        default: v2.1.0
+        default: v2.2.0
 
 permissions:
   contents: write

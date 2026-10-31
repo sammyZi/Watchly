@@ -1,11 +1,11 @@
 ; Watchly for Windows — installer and uninstaller (Inno Setup 6).
 ; Built by windows/build-installer.ps1, which publishes the exe first and passes:
-;   /DAppVersion=2.1.0   the app's <Version> from Watchly.csproj
+;   /DAppVersion=2.2.0   the app's <Version> from Watchly.csproj
 ;   /DSign + /Swatchly=…  only when a code-signing certificate is configured; then the setup
 ;                         and its uninstaller are signed too (see README "Signing").
 
 #ifndef AppVersion
-  #define AppVersion "2.1.0"
+  #define AppVersion "2.2.0"
 #endif
 
 [Setup]
