@@ -1028,7 +1028,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         }
 
         AnimatedVisibility(waiting, enter = fadeIn(), exit = fadeOut(tween(500))) {
-            Loading(title, episode, file, ready != null, progressState.value, onBack = ::leave)
+            Loading(title, episode, file, ready != null, progressState.value, watch.via, watch.askingTorBox, onBack = ::leave)
         }
 
         // On the TV now: this screen becomes its remote.
@@ -1440,7 +1440,7 @@ private fun PausedCard(visible: Boolean, title: Title?, episode: Episode?, label
 
 /** Before the first frame: the title's own backdrop, its logo, and a ring that fills — the TV's loading screen. */
 @Composable
-private fun Loading(title: Title?, episode: Episode?, file: TorrentFile?, starting: Boolean, progress: Progress?, onBack: () -> Unit) {
+private fun Loading(title: Title?, episode: Episode?, file: TorrentFile?, starting: Boolean, progress: Progress?, via: String?, asking: Boolean, onBack: () -> Unit) {
     val percent = if (starting) 100 else progress?.buffer ?: 0
     val ring by animateFloatAsState(percent / 100f, Motion.spatial(), label = "ring")
     Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -1457,12 +1457,13 @@ private fun Loading(title: Title?, episode: Episode?, file: TorrentFile?, starti
                     (episode?.let { "${episodeLabel(title, it.season, it.episode)}  ${it.name}" } ?: file?.let { fileEpisodeLabel(title, it.name) })
                         ?.let { Text(it, Modifier.padding(top = 10.dp), style = Type.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                     Row(Modifier.padding(top = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-                        val live = (progress?.peers ?: 0) > 0
+                        val live = via != null || (progress?.peers ?: 0) > 0
                         Box(Modifier.size(8.dp).clip(CircleShape).background(if (live) Ink.good else Ink.faint))
                         Spacer(Modifier.width(10.dp))
                         Text(
                             when {
-                                starting -> "Starting playback"
+                                starting -> if (via != null) "Starting playback  ·  from $via" else "Starting playback"
+                                asking -> "Checking TorBox"
                                 progress == null -> "Finding peers"
                                 progress.peers == 0 -> "Finding peers  ·  ${progress.dhtNodes} DHT nodes"
                                 else -> "Buffering  ·  ${speed(progress.speed)}  ·  ${progress.peers} peers"

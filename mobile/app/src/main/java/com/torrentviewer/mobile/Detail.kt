@@ -78,6 +78,7 @@ import com.torrentviewer.core.Scope
 import com.torrentviewer.core.Spinner
 import com.torrentviewer.core.Title
 import com.torrentviewer.core.TitleMark
+import com.torrentviewer.core.TorBox
 import com.torrentviewer.core.Type
 import com.torrentviewer.core.Watch
 import com.torrentviewer.core.bytes
@@ -656,6 +657,11 @@ private const val TOO_HEAVY_MBPS = 80.0
 @Composable
 fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0, onDownload: (() -> Unit)? = null, onClick: () -> Unit) {
     val grade = health(hit.seeders)
+    // Cached on TorBox: it plays from TorBox's servers, so the swarm's health says nothing.
+    val torbox by TorBox.key.collectAsState()
+    val cached by TorBox.cached.collectAsState()
+    LaunchedEffect(hit.id, torbox) { TorBox.check(hit.id) }
+    val instant = torbox.isNotEmpty() && hit.id.lowercase() in cached
     // A pack's size is many episodes; only a single file's size over the runtime is a bitrate.
     val mbps = if (runtimeSeconds > 0 && hit.size > 0 && (hit.scope == Scope.EPISODE || hit.perFileSize)) hit.size * 8 / runtimeSeconds / 1_000_000 else 0.0
     val tint = when (grade) {
@@ -693,7 +699,8 @@ fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0
             }
             Spacer(Modifier.width(10.dp))
             Column(horizontalAlignment = Alignment.End) {
-                Text(grade.label, style = Type.meta.copy(color = tint, fontWeight = FontWeight.Bold))
+                Text(if (instant) "Instant" else grade.label, style = Type.meta.copy(color = if (instant) Ink.good else tint, fontWeight = FontWeight.Bold))
+                if (instant) Text("TorBox", style = Type.meta.copy(fontSize = 11.sp, color = Ink.faint))
                 if (mbps >= HEAVY_MBPS) Text("Needs ${mbps.toInt()} Mb/s", style = Type.meta.copy(fontSize = 11.sp, color = if (mbps >= TOO_HEAVY_MBPS) Ink.danger else Ink.warn))
             }
             if (onDownload != null) Tap(onDownload, Modifier.padding(start = 4.dp), CircleShape) { Lc(L.drawable.lucide_ic_download, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp) }

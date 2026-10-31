@@ -43,12 +43,23 @@ class Watch(val engine: TorrentStream) {
         private set
     /** A torrent whose names cannot say which file was asked for. */
     var choose by mutableStateOf<Pair<Item, TorrentMeta>?>(null)
+    /** "TorBox" while the playing file streams from there; null is the swarm (or a file on disk). */
+    var via by mutableStateOf<String?>(null)
+        private set
+    /** Asking TorBox for a link, before the swarm is tried — for the loading screen. */
+    var askingTorBox by mutableStateOf(false)
+        private set
 
     val notes = MutableSharedFlow<String>(extraBufferCapacity = 4)
 
     private var source: String? = null
     /** Bumped by every open and exit, so a file list that lands after backing out is dropped. */
     private var gen = 0
+    /**
+     * [meta]'s files are numbered as TorBox listed them. libtorrent can number them otherwise
+     * (it counts padding files), so the swarm is never handed one of these indices — see [swarmIndex].
+     */
+    private var torboxIndexed = false
 
     fun fail(message: String) {
         Log.w("watch", message)
@@ -64,9 +75,17 @@ class Watch(val engine: TorrentStream) {
         item = target
         meta = null
         phase = Phase.INSPECTING
+        // A release TorBox has cached lists its files at once; the swarm can take a minute.
+        TorBox.meta(target.uri)?.let { found ->
+            if (ticket != gen) return null
+            torboxIndexed = true
+            meta = found
+            return found
+        }
         return try {
             val found = withContext(Dispatchers.IO) { engine.inspect(source!!, 60) }
             if (ticket != gen) return null
+            torboxIndexed = false
             meta = found
             found
         } catch (e: Exception) {
@@ -83,9 +102,41 @@ class Watch(val engine: TorrentStream) {
                 torrentName = found.name,
                 lastFileIndex = index,
                 files = found.files.map { f -> StoredFile(f.index, f.name, f.size, f.isVideo, f.isSubtitle, f.path) },
+                torboxFiles = torboxIndexed,
             )
         }
         item = History.find(uri) ?: item
+    }
+
+    /**
+     * The swarm's own index for the file TorBox numbered [index], by size and name. From then
+     * on this release goes by the swarm's numbering: the file list and every saved spot move over.
+     */
+    private suspend fun swarmIndex(uri: String, index: Int): Int {
+        val want = meta?.files?.find { it.index == index } ?: return index
+        val real = withContext(Dispatchers.IO) { engine.inspect(uri, 60) }
+        fun twin(f: TorrentFile) = real.files.filter { it.size == f.size }.let { same -> same.find { it.name == f.name } ?: same.singleOrNull() }
+        val moved = meta?.files.orEmpty().mapNotNull { f -> twin(f)?.let { f.index to it.index } }.toMap()
+        val at = moved[index] ?: throw TorrentException("Couldn't find ${want.name} in the torrent.")
+        val key = item?.uri
+        if (key != null) History.patch(key) {
+            fun <T> Map<Int, T>.renumbered() = entries.mapNotNull { (k, v) -> moved[k]?.let { it to v } }.toMap()
+            it.copy(
+                files = real.files.map { f -> StoredFile(f.index, f.name, f.size, f.isVideo, f.isSubtitle, f.path) },
+                torrentName = real.name,
+                lastFileIndex = at,
+                positions = it.positions.renumbered(),
+                durations = it.durations.renumbered(),
+                byteAts = it.byteAts.renumbered(),
+                subtitles = it.subtitles.renumbered(),
+                torboxFiles = false,
+            )
+        }
+        torboxIndexed = false
+        meta = real
+        playingIndex = at
+        item = key?.let(History::find) ?: item
+        return at
     }
 
     /** A chosen release becomes a stream. `tag` (S01E02) picks the file inside a pack. */
@@ -168,6 +219,8 @@ class Watch(val engine: TorrentStream) {
         target.imdb?.let { id -> launch { Meta.title(id, target.kind ?: "movie")?.let { if (item?.uri == target.uri) title = it } } }
         meta = TorrentMeta(label, listOf(TorrentFile(0, file.path, file.name, file.length(), true, false)))
         playingIndex = 0
+        via = null
+        torboxIndexed = false
         engine.progress.value = null
         engine.ready.value = Ready(android.net.Uri.fromFile(file).toString(), file.name, emptyList())
         playId++
@@ -192,6 +245,7 @@ class Watch(val engine: TorrentStream) {
             source = uriOf(target.uri)
             item = target
             meta = TorrentMeta(target.torrentName, target.files.map { TorrentFile(it.index, it.path ?: it.name, it.name, it.size, it.isVideo, it.isSubtitle) })
+            torboxIndexed = target.torboxFiles
             val size = target.files.find { it.index == known }?.size ?: 0
             play(known, target.resumeRatio(known), bitrateOf(size, target.durations[known] ?: 0.0))
             return@launch
@@ -229,12 +283,37 @@ class Watch(val engine: TorrentStream) {
         playingIndex = index
         playId++
         phase = Phase.PLAYING
+        via = null
+        val ticket = playId
         val s = SettingsStore.value.value
+        val file = meta?.files?.find { it.index == index }
         AppScope.launch {
             try {
-                withContext(Dispatchers.IO) { engine.play(uri, index, PlayOptions(s.prepareMb, startRatio, bitrate, s.cacheCapMb)) }
+                if (file != null && TorBox.on && magnetHash(uri) != null) {
+                    askingTorBox = true
+                    val link = try {
+                        TorBox.link(uri, file.path, file.size)
+                    } catch (e: Exception) {
+                        if (ticket == playId) notes.tryEmit("TorBox: ${e.message?.trimEnd('.') ?: "no link"} — streaming from peers instead.")
+                        null
+                    } finally {
+                        if (ticket == playId) askingTorBox = false
+                    }
+                    if (ticket != playId || phase != Phase.PLAYING) return@launch
+                    if (link != null) {
+                        // Whatever the swarm was streaming before (the last episode) goes.
+                        withContext(Dispatchers.IO) { engine.stop() }
+                        if (ticket != playId || phase != Phase.PLAYING) return@launch
+                        via = "TorBox"
+                        engine.ready.value = Ready(link, file.name, emptyList(), lanUrl = link)
+                        return@launch
+                    }
+                }
+                val at = if (torboxIndexed) swarmIndex(uri, index) else index
+                if (ticket != playId || phase != Phase.PLAYING) return@launch
+                withContext(Dispatchers.IO) { engine.play(uri, at, PlayOptions(s.prepareMb, startRatio, bitrate, s.cacheCapMb)) }
             } catch (e: Exception) {
-                fail(e.message ?: "Couldn't start that stream.")
+                if (ticket == playId) fail(e.message ?: "Couldn't start that stream.")
             }
         }
     }
@@ -261,7 +340,7 @@ class Watch(val engine: TorrentStream) {
 
     fun savePosition(seconds: Double) {
         val at = item ?: return
-        History.setPosition(at.uri, playingIndex, seconds, engine.readRatio())
+        History.setPosition(at.uri, playingIndex, seconds, if (via != null) -1.0 else engine.readRatio())
         markWatched(at, seconds)
     }
 
@@ -314,6 +393,8 @@ class Watch(val engine: TorrentStream) {
         item = null
         meta = null
         source = null
+        via = null
+        askingTorBox = false
         AppScope.launch(Dispatchers.IO) { engine.stop() }
     }
 
