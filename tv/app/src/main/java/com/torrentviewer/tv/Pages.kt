@@ -828,44 +828,47 @@ private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, Strin
     var colour by remember { mutableStateOf(profile?.colour ?: COLOURS[0]) }
     var kids by remember { mutableStateOf(profile?.kids ?: false) }
     val field = remember { FocusRequester() }
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = Safe.x)) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = Safe.x, vertical = Safe.y)) {
         Avatar(Profile("preview", name.ifBlank { "?" }, colour, icon), 160.dp)
         Spacer(Modifier.width(48.dp))
         Column(Modifier.width(520.dp)) {
-            Text(if (profile == null) "Add a profile" else "Edit profile", style = Type.display)
-            Text(if (profile == null) "Its own library, My List and resume points." else "Change the name, the face or the colour.", Modifier.padding(top = 4.dp, bottom = 20.dp), style = Type.meta)
-            Field(name, { name = it.take(20) }, "Name", Modifier.fillMaxWidth(), requester = field)
-            Text("ICON", Modifier.padding(top = 22.dp, bottom = 10.dp), style = Type.overline)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                AVATARS.forEach { a ->
-                    Focusable({ icon = a }, Modifier.size(56.dp), RoundedCornerShape(12.dp), 1.12f) {
-                        AvatarTile(Avatars.art(a), colorOf(colour), 56.dp)
-                        if (a == icon) Box(Modifier.fillMaxSize().border(3.dp, Ink.accent, RoundedCornerShape(12.dp)))
-                    }
-                }
-            }
-            Text("COLOUR", Modifier.padding(top = 20.dp, bottom = 10.dp), style = Type.overline)
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                COLOURS.forEach { c ->
-                    Focusable({ colour = c }, Modifier.size(42.dp), CircleShape, 1.15f) {
-                        Box(Modifier.fillMaxSize().background(colorOf(c)), contentAlignment = Alignment.Center) {
-                            if (c == colour) Lc(L.drawable.lucide_ic_check, tint = Color.White, size = 20.dp)
+            // Taller than a TV screen since Kids: the form scrolls with focus, Save stays in sight below it.
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                Text(if (profile == null) "Add a profile" else "Edit profile", style = Type.display)
+                Text(if (profile == null) "Its own library, My List and resume points." else "Change the name, the face or the colour.", Modifier.padding(top = 4.dp, bottom = 20.dp), style = Type.meta)
+                Field(name, { name = it.take(20) }, "Name", Modifier.fillMaxWidth(), requester = field)
+                Text("ICON", Modifier.padding(top = 22.dp, bottom = 10.dp), style = Type.overline)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    AVATARS.forEach { a ->
+                        Focusable({ icon = a }, Modifier.size(56.dp), RoundedCornerShape(12.dp), 1.12f) {
+                            AvatarTile(Avatars.art(a), colorOf(colour), 56.dp)
+                            if (a == icon) Box(Modifier.fillMaxSize().border(3.dp, Ink.accent, RoundedCornerShape(12.dp)))
                         }
                     }
                 }
+                Text("COLOUR", Modifier.padding(top = 20.dp, bottom = 10.dp), style = Type.overline)
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    COLOURS.forEach { c ->
+                        Focusable({ colour = c }, Modifier.size(42.dp), CircleShape, 1.15f) {
+                            Box(Modifier.fillMaxSize().background(colorOf(c)), contentAlignment = Alignment.Center) {
+                                if (c == colour) Lc(L.drawable.lucide_ic_check, tint = Color.White, size = 20.dp)
+                            }
+                        }
+                    }
+                }
+                Text("KIDS", Modifier.padding(top = 20.dp, bottom = 10.dp), style = Type.overline)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Chip("Kids profile", kids, onClick = { kids = true }, icon = if (kids) L.drawable.lucide_ic_check else null)
+                    Chip("Everything", !kids, onClick = { kids = false })
+                }
+                Text(
+                    if (kids) "Family films and series only. No torrent search or links from other apps — give your own profile a PIN so it stays that way."
+                    else "Every title, torrent search included.",
+                    Modifier.padding(top = 8.dp),
+                    style = Type.meta.copy(color = Ink.faint),
+                )
             }
-            Text("KIDS", Modifier.padding(top = 20.dp, bottom = 10.dp), style = Type.overline)
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Chip("Kids profile", kids, onClick = { kids = true }, icon = if (kids) L.drawable.lucide_ic_check else null)
-                Chip("Everything", !kids, onClick = { kids = false })
-            }
-            Text(
-                if (kids) "Family films and series only. No torrent search or links from other apps — give your own profile a PIN so it stays that way."
-                else "Every title, torrent search included.",
-                Modifier.padding(top = 8.dp),
-                style = Type.meta.copy(color = Ink.faint),
-            )
-            Row(Modifier.padding(top = 30.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 TvButton("Save", { onSave(name, icon, colour, kids) }, icon = L.drawable.lucide_ic_check, primary = true)
                 if (canCancel) TvButton("Cancel", onCancel)
                 if (profile != null) TvButton("Delete profile", onDelete, icon = L.drawable.lucide_ic_trash_2)

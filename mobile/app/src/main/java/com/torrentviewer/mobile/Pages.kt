@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -1013,7 +1014,9 @@ fun ProfilesScreen(profiles: List<Profile>, onPick: (Profile) -> Unit, onCancel:
             onCancel != null -> onCancel()
         }
     }
-    Box(Modifier.fillMaxSize().statusBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = EDGE, vertical = 24.dp), contentAlignment = Alignment.Center) {
+    // The editor scrolls its own form so Save stays on screen; the rest scroll whole.
+    val scroll = if (mode is ProfilesMode.Edit) Modifier else Modifier.verticalScroll(rememberScrollState())
+    Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().then(scroll).padding(horizontal = EDGE, vertical = 24.dp), contentAlignment = Alignment.Center) {
         when (val m = mode) {
             ProfilesMode.Pick, ProfilesMode.Manage -> Picker(
                 profiles, m == ProfilesMode.Manage, onCancel,
@@ -1107,43 +1110,45 @@ private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, Strin
     var colour by remember { mutableStateOf(profile?.colour ?: COLOURS[0]) }
     var kids by remember { mutableStateOf(profile?.kids ?: false) }
     Column(Modifier.widthIn(max = 480.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Avatar(Profile("preview", name.ifBlank { "?" }, colour, icon), 110.dp)
-        Text(if (profile == null) "Add a profile" else "Edit profile", Modifier.padding(top = 18.dp), style = Type.display)
-        Text(if (profile == null) "Its own library, My List and resume points." else "Change the name, the face or the colour.", Modifier.padding(top = 4.dp, bottom = 18.dp), style = Type.meta, textAlign = TextAlign.Center)
-        Field(name, { name = it.take(20) }, "Name", Modifier.fillMaxWidth())
-        Text("ICON", Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 10.dp), style = Type.overline)
-        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            AVATARS.forEach { a ->
-                Tap({ icon = a }, Modifier.size(54.dp), RoundedCornerShape(12.dp)) {
-                    Box {
-                        AvatarTile(Avatars.art(a), colorOf(colour), 54.dp)
-                        if (a == icon) Box(Modifier.matchParentSize().border(3.dp, Ink.accent, RoundedCornerShape(12.dp)))
+        Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
+            Avatar(Profile("preview", name.ifBlank { "?" }, colour, icon), 110.dp)
+            Text(if (profile == null) "Add a profile" else "Edit profile", Modifier.padding(top = 18.dp), style = Type.display)
+            Text(if (profile == null) "Its own library, My List and resume points." else "Change the name, the face or the colour.", Modifier.padding(top = 4.dp, bottom = 18.dp), style = Type.meta, textAlign = TextAlign.Center)
+            Field(name, { name = it.take(20) }, "Name", Modifier.fillMaxWidth())
+            Text("ICON", Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 10.dp), style = Type.overline)
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                AVATARS.forEach { a ->
+                    Tap({ icon = a }, Modifier.size(54.dp), RoundedCornerShape(12.dp)) {
+                        Box {
+                            AvatarTile(Avatars.art(a), colorOf(colour), 54.dp)
+                            if (a == icon) Box(Modifier.matchParentSize().border(3.dp, Ink.accent, RoundedCornerShape(12.dp)))
+                        }
                     }
                 }
             }
-        }
-        Text("COLOUR", Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 10.dp), style = Type.overline)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            COLOURS.forEach { c ->
-                Tap({ colour = c }, Modifier.size(40.dp), CircleShape) {
-                    Box(Modifier.background(colorOf(c)), contentAlignment = Alignment.Center) { if (c == colour) Lc(L.drawable.lucide_ic_check, tint = Color.White, size = 18.dp) }
+            Text("COLOUR", Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 10.dp), style = Type.overline)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                COLOURS.forEach { c ->
+                    Tap({ colour = c }, Modifier.size(40.dp), CircleShape) {
+                        Box(Modifier.background(colorOf(c)), contentAlignment = Alignment.Center) { if (c == colour) Lc(L.drawable.lucide_ic_check, tint = Color.White, size = 18.dp) }
+                    }
                 }
             }
+            Text("KIDS", Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 10.dp), style = Type.overline)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Chip("Kids profile", kids, onClick = { kids = true }, icon = if (kids) L.drawable.lucide_ic_check else null)
+                Chip("Everything", !kids, onClick = { kids = false })
+            }
+            Text(
+                if (kids) "Family films and series only. No torrent search or links from other apps — give your own profile a PIN so it stays that way."
+                else "Every title, torrent search included.",
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                style = Type.meta.copy(color = Ink.faint),
+            )
+            // A profile not saved yet has no id to keep a connection under.
+            if (profile != null && Simkl.available) Box(Modifier.fillMaxWidth().padding(top = 24.dp)) { SimklSection(profile) }
         }
-        Text("KIDS", Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 10.dp), style = Type.overline)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Chip("Kids profile", kids, onClick = { kids = true }, icon = if (kids) L.drawable.lucide_ic_check else null)
-            Chip("Everything", !kids, onClick = { kids = false })
-        }
-        Text(
-            if (kids) "Family films and series only. No torrent search or links from other apps — give your own profile a PIN so it stays that way."
-            else "Every title, torrent search included.",
-            Modifier.fillMaxWidth().padding(top = 8.dp),
-            style = Type.meta.copy(color = Ink.faint),
-        )
-        // A profile not saved yet has no id to keep a connection under.
-        if (profile != null && Simkl.available) Box(Modifier.fillMaxWidth().padding(top = 24.dp)) { SimklSection(profile) }
-        Button("Save", { onSave(name, icon, colour, kids) }, Modifier.fillMaxWidth().padding(top = 28.dp), icon = L.drawable.lucide_ic_check, primary = true)
+        Button("Save", { onSave(name, icon, colour, kids) }, Modifier.fillMaxWidth().padding(top = 20.dp), icon = L.drawable.lucide_ic_check, primary = true)
         Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             if (canCancel) Button("Cancel", onCancel)
             if (profile != null) Button("Delete profile", onDelete, icon = L.drawable.lucide_ic_trash_2)
