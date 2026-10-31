@@ -73,7 +73,15 @@ public sealed class HomeView : UserControl
         Content = new Grid { Children = { scroll, header } };
 
         foreach (var s in AllShelves())
-            if (Meta.PeekCatalog(s.Kind, s.Genre) is { } ready) loaded[s.Key] = ready;
+            if (Meta.PeekCatalog(s.Kind, s.Genre) is { } ready) loaded[s.Key] = KidsMode.Only(ready);
+        // A kids profile's rows filtered again once the family list is in.
+        KidsMode.Changed += () => Dispatcher.BeginInvoke(() =>
+        {
+            if (!KidsMode.On) return;
+            loaded.Clear();
+            shelfControls.Clear();
+            Refresh();
+        });
 
         shell.LibraryChanged += Refresh;
         shell.SettingsChanged += Refresh;
@@ -129,8 +137,12 @@ public sealed class HomeView : UserControl
     List<Shelf> Chosen() => shell.Settings.Genres
         .Select(g => new Shelf(g == Meta.AnimeGenre ? "Anime" : g, Meta.KindOfGenre(g), g)).ToList();
 
+    /// <summary>A kids profile's rows: family films and series, and the animation among them.</summary>
+    static readonly Shelf[] KidsShelves = { new("Family films", "movie", "Family"), new("Family series", "tv", "Family"), new("Animation", "movie", "Animation") };
+
     List<Shelf> AllShelves()
     {
+        if (KidsMode.On) return KidsShelves.ToList();
         var chosen = Chosen();
         var taken = chosen.Select(s => s.Key).ToHashSet();
         var rest = picks.Where(p => taken.Add(p.Key)).ToList();
@@ -197,8 +209,9 @@ public sealed class HomeView : UserControl
             _ = Meta.LoadCatalog(shelf.Kind, shelf.Genre).ContinueWith(t => Dispatcher.BeginInvoke(() =>
             {
                 requested.Remove(shelf.Key);
-                if (t.Result.Count == 0) return;
-                loaded[shelf.Key] = t.Result;
+                var titles = KidsMode.Only(t.Result);
+                if (titles.Count == 0) return;
+                loaded[shelf.Key] = titles;
                 var watched = shell.HistoryList.Select(h => h.Imdb).Where(i => i is not null).ToHashSet();
                 if (shelfControls.TryGetValue(shelf.Key, out var pair) && pair.Body.Content is FrameworkElement { Tag: Loading })
                     Fill(shelf, pair.Container, pair.Body, watched);
@@ -277,6 +290,13 @@ public sealed class HomeView : UserControl
             var position = item.PositionOf(index) ?? 0;
             return new ResumeTile(FromHistory(item), item, index, duration > 0 ? position / duration.Value * 100 : 0, ResumeStamp(item));
         }).ToList();
+        // Left part-way somewhere this PC never saw — another device, before a reinstall: Simkl kept the spot.
+        resumable.AddRange(KidsMode.Only(Simkl.Library.Paused.Where(p => shell.HistoryList.All(h => h.Imdb != p.Imdb)), p => new Title { Imdb = p.Imdb }).DistinctBy(p => p.Imdb).Take(10).Select(p =>
+            new ResumeTile(
+                new Title { Imdb = p.Imdb, Kind = p.Kind, Name = p.Title, Year = p.Year, Poster = $"https://images.metahub.space/poster/medium/{p.Imdb}/img" },
+                new HistoryItem { Uri = $"simkl:{p.Imdb}", Title = p.Title, Imdb = p.Imdb, Kind = p.Kind },
+                0, p.Progress,
+                string.Join(" · ", new[] { p.Ep is { } e ? $"S{e.Season}:E{e.Episode}" : null, $"{(int)p.Progress}%" }.Where(s => s is not null)))));
         if (resumable.Count > 0) personal.Children.Add(Section("Continue Watching", () => shell.ShowTab("history"), resumable, "ResumeCard"));
 
         var later = Saved.InList(shell.SavedList, "later").Select(s => s.AsTitle()).ToList();

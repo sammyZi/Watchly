@@ -41,6 +41,7 @@ object Kv {
         prefs = context.getSharedPreferences("watchly", Context.MODE_PRIVATE)
         importExpo(context)
         Secrets.init(context)
+        TorBox.load()
     }
 
     fun useProfile(id: String, isGuest: Boolean) {
@@ -222,6 +223,11 @@ object Secrets {
         _subdl.value = k
     }
 
+    /** Anything else kept the same way — Simkl's tokens, one entry per profile. Null forgets it. */
+    fun get(name: String): String? = read(name)
+
+    fun put(name: String, value: String?) = write(name, value)
+
     private fun keystoreKey(): javax.crypto.SecretKey {
         val store = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (store.getKey(ALIAS, null) as? javax.crypto.SecretKey)?.let { return it }
@@ -254,7 +260,8 @@ object Secrets {
 
 /* -------------------------------------------------------------- profiles */
 
-data class Profile(val id: String, val name: String, val colour: String, val icon: String? = null, val pin: String? = null) {
+/** [kids]: sees only family titles, and can't search torrents or open magnets itself — see [Kids]. */
+data class Profile(val id: String, val name: String, val colour: String, val icon: String? = null, val pin: String? = null, val kids: Boolean = false) {
     val isGuest get() = id == GUEST.id
 }
 
@@ -273,7 +280,7 @@ object Profiles {
     fun load() {
         _list.value = runCatching {
             JSONArray(Kv.global("profiles") ?: "[]").objects().map {
-                Profile(it.optString("id"), it.optString("name"), it.str("colour") ?: COLOURS[0], it.str("icon"), it.str("pin"))
+                Profile(it.optString("id"), it.optString("name"), it.str("colour") ?: COLOURS[0], it.str("icon"), it.str("pin"), it.optBoolean("kids"))
             }
         }.getOrDefault(emptyList())
     }
@@ -282,25 +289,26 @@ object Profiles {
         _list.value = next
         Kv.setGlobal(
             "profiles",
-            JSONArray(next.map { JSONObject().put("id", it.id).put("name", it.name).put("colour", it.colour).put("icon", it.icon).put("pin", it.pin) }).toString(),
+            JSONArray(next.map { JSONObject().put("id", it.id).put("name", it.name).put("colour", it.colour).put("icon", it.icon).put("pin", it.pin).put("kids", it.kids) }).toString(),
         )
     }
 
     /** The very first takes the bare keys, so a library from before profiles survives. */
-    fun add(name: String, icon: String, colour: String): Profile {
+    fun add(name: String, icon: String, colour: String, kids: Boolean = false): Profile {
         val list = _list.value
         val profile = Profile(
             id = if (list.isEmpty()) "" else "p${System.currentTimeMillis().toString(36)}",
             name = name.trim().ifBlank { "Me" },
             colour = colour,
             icon = icon,
+            kids = kids,
         )
         write(list + profile)
         return profile
     }
 
-    fun edit(id: String, name: String, icon: String, colour: String) =
-        write(_list.value.map { if (it.id == id) it.copy(name = name.trim().ifBlank { it.name }, icon = icon, colour = colour) else it })
+    fun edit(id: String, name: String, icon: String, colour: String, kids: Boolean) =
+        write(_list.value.map { if (it.id == id) it.copy(name = name.trim().ifBlank { it.name }, icon = icon, colour = colour, kids = kids) else it })
 
     /** Four digits sets a lock; anything else clears it. A lock, not security. */
     fun setPin(id: String, pin: String) {
@@ -311,6 +319,7 @@ object Profiles {
     fun remove(id: String) {
         write(_list.value.filter { it.id != id })
         Kv.wipeProfile(id)
+        Simkl.forget(id)
     }
 }
 
@@ -344,6 +353,8 @@ data class Item(
     val titleName: String? = null,
     /** The swarm when this release was picked from search; null if opened another way. */
     val seeders: Int? = null,
+    /** [files] are numbered as TorBox listed them, not as libtorrent does — see [Watch]. */
+    val torboxFiles: Boolean = false,
 ) {
     val label get() = titleName ?: title
 
@@ -379,7 +390,7 @@ data class Item(
             subtitles.forEach { (k, v) -> o.put(k.toString(), JSONArray(v.map { JSONObject().put("path", it.path).put("label", it.label) })) }
         })
         .put("imdb", imdb).put("kind", kind).put("poster", poster).put("backdrop", backdrop).put("titleName", titleName)
-        .put("seeders", seeders)
+        .put("seeders", seeders).put("torboxFiles", torboxFiles)
 
     companion object {
         fun from(o: JSONObject) = Item(
@@ -405,6 +416,7 @@ data class Item(
             backdrop = o.str("backdrop"),
             titleName = o.str("titleName"),
             seeders = if (o.has("seeders") && !o.isNull("seeders")) o.optInt("seeders") else null,
+            torboxFiles = o.optBoolean("torboxFiles", false),
         )
     }
 }
@@ -459,12 +471,12 @@ fun episodeOfFile(list: List<Episode>, name: String): Episode? {
  * What a series' Play button offers: the episode last played if it was left part-way,
  * else the one after it. Null when nothing of [title] was played, or it was the last.
  */
-fun continueEpisode(title: Title, items: List<Item>): Episode? {
+fun continueEpisode(title: Title, items: List<Item>, simkl: SimklLibrary = SimklLibrary()): Episode? {
     val last = items.filter { it.imdb == title.imdb }.sortedByDescending { it.at }.firstNotNullOfOrNull { item ->
         val i = item.lastFileIndex ?: return@firstNotNullOfOrNull null
         val name = item.files?.find { it.index == i }?.name ?: item.title
         episodeOfFile(title.episodes, name)?.let { it to item }
-    } ?: return null
+    } ?: return simklContinue(title, simkl)
     val (ep, item) = last
     val i = item.lastFileIndex!!
     val done = item.durations[i]?.let { d -> d > 0 && (item.positions[i] ?: 0.0) >= d * 0.95 } ?: false
@@ -473,9 +485,25 @@ fun continueEpisode(title: Title, items: List<Item>): Episode? {
     return inOrder.getOrNull(inOrder.indexOf(ep) + 1)
 }
 
-/** How far through each episode of [imdb] anyone got, 0–1, by its file name — the furthest of every release it was played from. */
-fun episodeProgress(items: List<Item>, imdb: String): Map<Ep, Double> {
+/** Nothing played here: Simkl's paused episode (newest first), else the one after the furthest it has as watched. */
+private fun simklContinue(title: Title, simkl: SimklLibrary): Episode? {
+    simkl.paused.firstOrNull { it.imdb == title.imdb && it.ep != null }?.ep?.let { p ->
+        title.episodes.find { it.season == p.season && it.episode == p.episode }?.let { return it }
+    }
+    val seen = simkl.episodes[title.imdb]?.takeIf { it.isNotEmpty() } ?: return null
+    val inOrder = title.episodes.filter { it.season > 0 }.sortedWith(compareBy({ it.season }, { it.episode }))
+    val furthest = inOrder.indexOfLast { Ep(it.season, it.episode) in seen }
+    return if (furthest < 0) null else inOrder.getOrNull(furthest + 1)
+}
+
+/**
+ * How far through each episode of [imdb] anyone got, 0–1, by its file name — the furthest of every
+ * release it was played from, and of what Simkl has: watched is 1, paused its percent.
+ */
+fun episodeProgress(items: List<Item>, imdb: String, simkl: SimklLibrary = SimklLibrary()): Map<Ep, Double> {
     val out = mutableMapOf<Ep, Double>()
+    simkl.episodes[imdb]?.forEach { out[it] = 1.0 }
+    for (p in simkl.paused) if (p.imdb == imdb && p.ep != null) out[p.ep] = maxOf(out[p.ep] ?: 0.0, p.progress / 100)
     for (item in items) if (item.imdb == imdb) for (file in item.files.orEmpty()) {
         val ep = parseEpisode(file.name) ?: continue
         val at = item.positions[file.index] ?: continue
@@ -486,6 +514,17 @@ fun episodeProgress(items: List<Item>, imdb: String): Map<Ep, Double> {
 }
 
 /** Prefer a real http(s) URL over a missing or local one. */
+/** The size of the file last played from this release — what it took, not the whole pack. */
+fun Item.playedSize(): Long? = files?.find { it.index == lastFileIndex }?.size?.takeIf { it > 0 }
+
+/** "1h 19m left", "Watched", or null before it has a position — under a release in a list. */
+fun Item.leftLabel(): String? {
+    val i = lastFileIndex ?: return null
+    val of = durations[i]?.takeIf { it > 0 } ?: return null
+    val at = positions[i] ?: return null
+    return if (at / of >= 0.95) "Watched" else left(of - at)
+}
+
 fun remoteArt(vararg urls: String?): String? = urls.firstOrNull { it != null && Regex("^https?://", RegexOption.IGNORE_CASE).containsMatchIn(it) }
 
 object History {
@@ -616,6 +655,29 @@ object SavedStore {
 data class Intro(val start: Double, val end: Double) {
     /** Inside the intro, with a moment's lead so the button is up as it starts. */
     fun covers(at: Double) = at >= start - 2 && at < end - 1
+}
+
+/**
+ * Files Media3 couldn't decode on this device, so they open in VLC from then on instead of
+ * spending seconds failing in Media3 first. By name and size: the same whether it streams from
+ * peers or TorBox, or arrives by another magnet. The device's, not a profile's — it is what this
+ * device's decoders can do. The newest 300 are kept.
+ */
+object NeedsVlc {
+    private const val KEY = "needs-vlc"
+    private const val MOST = 300
+
+    private fun all(): List<String> = runCatching { Kv.global(KEY)?.let { JSONArray(it).let { a -> (0 until a.length()).map(a::getString) } } }.getOrNull().orEmpty()
+
+    fun key(name: String, size: Long) = "$size:$name"
+
+    fun has(name: String, size: Long) = key(name, size) in all()
+
+    fun add(name: String, size: Long) {
+        val k = key(name, size)
+        val next = (listOf(k) + all().filter { it != k }).take(MOST)
+        Kv.setGlobal(KEY, JSONArray(next).toString())
+    }
 }
 
 /**

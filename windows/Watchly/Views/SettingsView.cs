@@ -37,6 +37,7 @@ public sealed class SettingsView : UserControl
         page.Children.Clear();
 
         if (shell.Who is { } me) page.Children.Add(ProfileGroup(me));
+        if (Simkl.Available) page.Children.Add(SimklGroup());
 
         page.Children.Add(Group("Appearance",
             ChoiceRow("Theme", "Match Windows, or lock light or dark",
@@ -72,6 +73,7 @@ public sealed class SettingsView : UserControl
                 Toggle(S.AutoSkipIntro, v => Set(S with { AutoSkipIntro = v })))));
 
         page.Children.Add(SubdlGroup());
+        page.Children.Add(TorBoxGroup());
 
         var folder = Ui.Button(Ui.Text("Change", "Label", "Accent", 13, FontWeights.SemiBold), () =>
         {
@@ -151,6 +153,101 @@ public sealed class SettingsView : UserControl
 
     /// <summary>A section as the phone sets one (mobile Pages.kt Section): a bold title, then its rows — no card.</summary>
     /// <summary>The phone's and TV's SubDL key: the viewer's own, encrypted on this PC (Secrets).</summary>
+    /// <summary>
+    /// Connect opens Simkl's page with the code filled in; while it waits, the code is here to type on
+    /// another device, with a copy button, and Open Simkl to get back to the page.
+    /// </summary>
+    FrameworkElement SimklGroup()
+    {
+        var box = new StackPanel();
+        if (Simkl.Connected)
+        {
+            box.Children.Add(Row("Connected", "Films and episodes you watch to the end are marked watched on Simkl, and Continue Watching follows you to your phone and TV.",
+                Ui.Button(Ui.Text("Disconnect", "Label", "Muted", 13), () => { Simkl.Disconnect(); Render(); })));
+        }
+        else if (shell.SimklPending is { } code)
+        {
+            box.Children.Add(Ui.Text($"Approve Watchly in the browser that just opened. Signing in? Simkl emails that account a link — open it and confirm, then press Allow. Or enter this code at {code.Uri.Replace("https://", "")} on another device.", "Meta", "Faint", 12));
+            var copy = Ui.Button(Ui.Glyph("copy", 18, "Muted"), () =>
+            {
+                Clipboard.SetText(code.UserCode);
+                shell.Toast("Code copied");
+            }, tooltip: "Copy the code");
+            copy.Margin = new Thickness(10, 0, 0, 0);
+            var open = Ui.Button(Ui.Text("Open Simkl", "Label", "Accent", 13, FontWeights.SemiBold), () =>
+                Process.Start(new ProcessStartInfo(code.UriComplete) { UseShellExecute = true }));
+            open.Margin = new Thickness(20, 0, 0, 0);
+            var cancel = Ui.Button(Ui.Text("Cancel", "Label", "Muted", 13), () => shell.SimklCode?.Cancel());
+            cancel.Margin = new Thickness(16, 0, 0, 0);
+            box.Children.Add(new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Margin = new Thickness(0, 10, 0, 0),
+                Children = { Ui.Text(code.UserCode, "TitleText", "Text", 28, FontWeights.Bold), copy, open, cancel },
+            });
+        }
+        else
+        {
+            box.Children.Add(Row("Sync with Simkl", "Films and episodes you finish get marked watched on your Simkl account, and your Simkl history shows in the Library.",
+                Ui.Button(Ui.Text("Connect Simkl", "Label", "Accent", 13, FontWeights.SemiBold), () => _ = shell.ConnectSimkl())));
+        }
+        return Group("Simkl", box);
+    }
+
+    /// <summary>A TorBox key: cached releases play from its servers, anything else from the swarm as before.</summary>
+    FrameworkElement TorBoxGroup()
+    {
+        var saved = TorBox.On;
+        var box = new PasswordBox { Background = Brushes.Transparent, BorderThickness = new Thickness(0), FontSize = 14, Width = 260, VerticalContentAlignment = VerticalAlignment.Center };
+        box.SetResourceReference(ForegroundProperty, "Text");
+        box.SetResourceReference(PasswordBox.CaretBrushProperty, "Accent");
+        void Save()
+        {
+            if (box.Password.Trim().Length == 0) { shell.Toast("Paste your TorBox key first", true); return; }
+            TorBox.SetKey(box.Password);
+            shell.Toast("TorBox key saved");
+            Render();
+        }
+        box.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) Save(); };
+        var save = Ui.Button(Ui.Text("Save", "Label", "Accent", 13, FontWeights.SemiBold), Save);
+        save.Margin = new Thickness(14, 0, 0, 0);
+        var controls = new StackPanel { Orientation = Orientation.Horizontal, Children = { Ui.Card(box, "SurfaceAlt", 6, new Thickness(10, 6, 10, 6)), save } };
+        if (saved)
+        {
+            var remove = Ui.Button(Ui.Text("Remove", "Label", "Muted", 13), () =>
+            {
+                TorBox.SetKey("");
+                shell.Toast("TorBox key removed");
+                Render();
+            });
+            remove.Margin = new Thickness(16, 0, 0, 0);
+            controls.Children.Add(remove);
+        }
+        var panel = new StackPanel();
+        if (saved)
+        {
+            // The account it opens, or why it doesn't.
+            var account = Ui.Text("Checking the key…", "Meta", "Muted", 12);
+            account.Margin = new Thickness(0, 0, 0, 10);
+            panel.Children.Add(account);
+            _ = TorBox.Account().ContinueWith(t => Dispatcher.BeginInvoke(() =>
+            {
+                account.Text = t.IsCompletedSuccessfully ? t.Result : $"Not working: {t.Exception?.GetBaseException().Message}";
+                account.SetResourceReference(TextBlock.ForegroundProperty, t.IsCompletedSuccessfully ? "Muted" : "Danger");
+            }));
+        }
+        panel.Children.Add(Row(saved ? "API key saved" : "TorBox API key",
+            saved ? "Releases TorBox has cached say Instant and play from its servers — no peers to wait for. Anything else streams from the swarm as before."
+                  : "With a torbox.app API key, releases TorBox has cached play from its servers instead of from peers. Stored encrypted for this Windows account."));
+        panel.Children.Add(controls);
+        var get = Ui.Button(Ui.Text("Find your key at torbox.app", "Meta", "Accent", 12), () =>
+            Process.Start(new ProcessStartInfo("https://torbox.app/settings") { UseShellExecute = true }));
+        get.HorizontalAlignment = HorizontalAlignment.Left;
+        get.Margin = new Thickness(0, 10, 0, 0);
+        panel.Children.Add(get);
+        return Group("TorBox", panel);
+    }
+
     FrameworkElement SubdlGroup()
     {
         var saved = Secrets.Subdl.Length > 0;

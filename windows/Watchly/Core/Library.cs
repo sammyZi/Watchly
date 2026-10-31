@@ -416,6 +416,8 @@ public sealed record Profile
     public string? Icon { get; init; }
     /// <summary>Four digits asked for before it opens — a lock for a shared PC, not a password.</summary>
     public string? Pin { get; init; }
+    /// <summary>Sees only family titles, and can't search torrents or open magnets itself — see <see cref="KidsMode"/>.</summary>
+    public bool Kids { get; init; }
 
     [System.Text.Json.Serialization.JsonIgnore]
     public bool IsGuest => Id == Profiles.Guest.Id;
@@ -442,7 +444,7 @@ public static class Profiles
     }
 
     /// <summary>The very first takes the bare keys, so a library from before profiles survives.</summary>
-    public static Profile Add(string name, string colour, string icon)
+    public static Profile Add(string name, string colour, string icon, bool kids = false)
     {
         var list = Load();
         var profile = new Profile
@@ -451,13 +453,14 @@ public static class Profiles
             Name = name.Trim() is { Length: > 0 } n ? n : "Me",
             Colour = colour,
             Icon = icon,
+            Kids = kids,
         };
         Write(list.Append(profile).ToList());
         return profile;
     }
 
-    public static Profile? Edit(string id, string name, string colour, string icon) =>
-        Write(Load().Select(p => p.Id == id ? p with { Name = name.Trim() is { Length: > 0 } n ? n : p.Name, Colour = colour, Icon = icon } : p).ToList())
+    public static Profile? Edit(string id, string name, string colour, string icon, bool kids) =>
+        Write(Load().Select(p => p.Id == id ? p with { Name = name.Trim() is { Length: > 0 } n ? n : p.Name, Colour = colour, Icon = icon, Kids = kids } : p).ToList())
             .FirstOrDefault(p => p.Id == id);
 
     /// <summary>Four digits sets a lock; anything else clears it.</summary>
@@ -471,6 +474,7 @@ public static class Profiles
     {
         Write(Load().Where(p => p.Id != id).ToList());
         Store.WipeProfile(id);
+        Simkl.Forget(id);
     }
 }
 

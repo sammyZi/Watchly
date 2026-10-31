@@ -85,6 +85,8 @@ import com.torrentviewer.core.Lc
 import com.torrentviewer.core.Phase
 import com.torrentviewer.core.Profile
 import com.torrentviewer.core.Profiles
+import com.torrentviewer.core.Simkl
+import com.torrentviewer.core.Kids
 import com.torrentviewer.core.SavedStore
 import com.torrentviewer.core.Spinner
 import com.torrentviewer.core.Title
@@ -122,6 +124,9 @@ private fun keyOf(index: Int, page: Page) = when (page) {
 /** The profile opened last on this phone, so a phone with one owner never asks. */
 private const val LAST_PROFILE = "phone:lastProfile"
 
+/** The first-launch tour has been seen (or skipped). */
+private const val TOURED = "phone:toured"
+
 /** Before profiles there were the bare keys; with none made, the phone keeps using them. */
 private val OWNER = Profile("", "Me", COLOURS[0])
 
@@ -130,6 +135,8 @@ private fun open(profile: Profile) {
     Kv.useProfile(profile.id, profile.isGuest)
     History.load()
     SavedStore.load()
+    Simkl.load(profile.id, profile.isGuest)
+    Kids.use(profile)
     if (!profile.isGuest) Kv.setGlobal(LAST_PROFILE, profile.id)
 }
 
@@ -174,7 +181,11 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     val profiles by Profiles.list.collectAsState()
     var who by remember { mutableStateOf(startProfile(Profiles.list.value)?.also(::open)) }
     // An edit to the profile in use — its name, face or colour — shows at once.
-    LaunchedEffect(profiles) { who = who?.let { w -> profiles.find { it.id == w.id } ?: w } }
+    LaunchedEffect(profiles) {
+        who = who?.let { w -> profiles.find { it.id == w.id } ?: w }
+        // Kids switched on or off for the profile in use: at once, not at the next switch.
+        who?.let(Kids::use)
+    }
     var switching by remember { mutableStateOf(false) }
     var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
     val pages = remember { mutableStateListOf<Page>() }
@@ -193,6 +204,8 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     }
 
     fun enter(profile: Profile) {
+        // Rows loaded for the last profile: a kids profile must not inherit a grown-up's, nor the reverse.
+        if (who?.kids != profile.kids) home.loaded.clear()
         open(profile)
         who = profile
         switching = false
@@ -218,12 +231,25 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         val uri = incoming.value ?: return@LaunchedEffect
         if (who == null) return@LaunchedEffect
         incoming.value = null
+        // A magnet is anything at all: a kids profile plays only what it can browse to.
+        if (Kids.on) return@LaunchedEffect watch.fail("A kids profile can't open torrents from other apps.")
         val raw = uri.toString()
         if (!isTorrentSource(raw)) return@LaunchedEffect
         val path = runCatching { withContext(Dispatchers.IO) { watch.engine.importSource(raw) } }
             .getOrElse { return@LaunchedEffect watch.fail(it.message ?: "Couldn't read that file.") }
         val item = History.put(Item(path, titleOf(raw), System.currentTimeMillis()))
         watch.resume(item)
+    }
+
+    // The tour, once, on a fresh install: anyone with a library or a profile already knows the app.
+    var toured by remember { mutableStateOf(Kv.global(TOURED) != null || Profiles.list.value.isNotEmpty() || History.items.value.isNotEmpty()) }
+    if (!toured || tourAgain) {
+        Onboarding {
+            Kv.setGlobal(TOURED, "1")
+            toured = true
+            tourAgain = false
+        }
+        return
     }
 
     val me = who
@@ -272,7 +298,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
                     when (t) {
                         Tab.HOME -> HomeScreen(home, watch, me, onOpen = openTitle, onShelf = { pages.add(Page.Catalog(it)) }, onProfile = { switching = true })
                         Tab.SEARCH -> SearchScreen(watch, onOpen = openTitle)
-                        Tab.LIBRARY -> LibraryScreen(watch, onOpen = openTitle)
+                        Tab.LIBRARY -> LibraryScreen(watch, me, onOpen = openTitle)
                         Tab.DOWNLOADS -> DownloadsScreen(watch)
                         Tab.SETTINGS -> SettingsScreen(watch, me, onSwitchProfile = { switching = true })
                     }

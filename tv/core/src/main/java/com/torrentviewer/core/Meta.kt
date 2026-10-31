@@ -146,6 +146,28 @@ object Meta {
         })
     }.getOrDefault(t)
 
+    /**
+     * IMDb ids in Cinemeta's Family catalogues, most popular first: 1000 films and 500 series.
+     * Those go by IMDb's full genre list; a title's own is cut to three, and Toy Story's has no Family.
+     * Cached a day like the shelves, as ids only.
+     */
+    suspend fun familyIds(): Set<String> = runCatching {
+        remember("family-ids", { raw -> JSONArray(raw).let { a -> (0 until a.length()).map(a::getString).toSet() } }, { JSONArray(it.toList()).toString() }) {
+            coroutineScope {
+                // Fifty to a page; a page that fails just leaves its titles out.
+                val pages = (0 until 20).map { "movie" to it * 50 } + (0 until 10).map { "series" to it * 50 }
+                pages.map { (type, skip) ->
+                    async {
+                        runCatching {
+                            JSONObject(Net.get("$CATALOG/$type/top/genre=Family&skip=$skip.json", quiet = true))
+                                .optJSONArray("metas")?.objects().orEmpty().mapNotNull { it.str("imdb_id") ?: it.str("id") }
+                        }.getOrDefault(emptyList())
+                    }
+                }.awaitAll().flatten().toSet().also { check(it.isNotEmpty()) { "no family titles" } }
+            }
+        }
+    }.getOrDefault(emptySet())
+
     /** Not persisted: queries are one-off. */
     suspend fun search(query: String, kind: String): List<Title> = runCatching {
         val key = "find:$kind:${query.lowercase()}"

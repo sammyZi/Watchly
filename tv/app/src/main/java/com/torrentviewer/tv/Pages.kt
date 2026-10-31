@@ -35,6 +35,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -50,6 +51,8 @@ import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -63,9 +66,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import com.composables.icons.lucide.R as L
 
 /* ---------------------------------------------------------------- input */
@@ -90,8 +96,19 @@ fun Field(
 ) {
     var focused by remember { mutableStateOf(false) }
     val ring by animateColorAsState(if (focused) Color.White else Color.Transparent, Motion.effects(), label = "ring")
+    // Passed on the way down a page, the box itself takes focus and the text field stays shut until
+    // OK: some TV keyboards ignore showKeyboardOnFocus = false and opened at every key box.
+    var editing by remember { mutableStateOf(keyboardOnFocus) }
+    val text = remember { FocusRequester() }
+    LaunchedEffect(editing) { if (editing && !keyboardOnFocus) runCatching { text.requestFocus() } }
     Row(
-        modifier.height(54.dp).clip(RoundedCornerShape(8.dp)).background(Color.White.copy(alpha = if (focused) 0.16f else 0.09f)).border(2.dp, ring, RoundedCornerShape(8.dp)).padding(horizontal = 18.dp),
+        modifier.height(54.dp).clip(RoundedCornerShape(8.dp)).background(Color.White.copy(alpha = if (focused) 0.16f else 0.09f)).border(2.dp, ring, RoundedCornerShape(8.dp))
+            .onFocusChanged { focused = it.hasFocus }
+            .then(
+                if (keyboardOnFocus) Modifier
+                else Modifier.focusProperties { canFocus = !editing }.clickable(remember { MutableInteractionSource() }, indication = null) { editing = true },
+            )
+            .padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         leading?.let {
@@ -112,7 +129,10 @@ fun Field(
                 keyboardActions = KeyboardActions(onAny = { onSubmit(); defaultKeyboardAction(imeAction) }),
                 modifier = Modifier.fillMaxWidth()
                     .then(if (requester != null) Modifier.focusRequester(requester) else Modifier)
-                    .onFocusChanged { focused = it.isFocused },
+                    .focusRequester(text)
+                    .focusProperties { canFocus = editing }
+                    // Left again: shut until the next OK.
+                    .onFocusChanged { if (!it.isFocused && editing && !keyboardOnFocus) editing = false },
             )
         }
         trailing()
@@ -141,7 +161,8 @@ private fun relevance(title: String, query: String): Int {
 @Composable
 fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
     var query by remember { mutableStateOf("") }
-    var torrents by remember { mutableStateOf(false) }
+    // Off again whenever kids mode changes, so a kids profile never lands on the torrent list.
+    var torrents by remember(Kids.on) { mutableStateOf(false) }
     var results by remember { mutableStateOf<List<Title>?>(null) }
     var hits by remember { mutableStateOf<List<Hit>?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -159,13 +180,14 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
         }
         delay(450)
         busy = true
-        if (torrents) {
+        // A kids profile has no torrent search (a release name can't be vetted) and sees family titles only.
+        if (torrents && !Kids.on) {
             hits = searchTorrents(q) { hits = it }
         } else {
             results = coroutineScope {
                 val films = async { Meta.search(q, "movie") }
                 val series = async { Meta.search(q, "tv") }
-                (films.await() + series.await()).distinctBy { it.imdb }.sortedBy { relevance(it.title, q) }
+                Kids.only((films.await() + series.await()).distinctBy { it.imdb }.sortedBy { relevance(it.title, q) })
             }
         }
         busy = false
@@ -197,8 +219,10 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
                         imeAction = ImeAction.Search,
                         trailing = { if (busy) Spinner(size = 22.dp) },
                     )
-                    Spacer(Modifier.width(14.dp))
-                    Chip("Torrents", torrents, onClick = { torrents = !torrents; results = null; hits = null }, icon = L.drawable.lucide_ic_layers)
+                    if (!Kids.on) {
+                        Spacer(Modifier.width(14.dp))
+                        Chip("Torrents", torrents, onClick = { torrents = !torrents; results = null; hits = null }, icon = L.drawable.lucide_ic_layers)
+                    }
                 }
                 if (recents.isNotEmpty() && results == null && hits == null) {
                     Text("Recent searches", Modifier.padding(top = 30.dp, bottom = 12.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
@@ -236,14 +260,42 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
 
 /* -------------------------------------------------------------- library */
 
+/** Every release a title was played from, each with its size and where it was left; picking one resumes it. */
+@Composable
+fun ReleasesSheet(all: List<Item>, watch: Watch, onDismiss: () -> Unit) {
+    Sheet(
+        title = all.first().label.substringBefore(" · "),
+        options = all.map {
+            val hint = listOfNotNull(it.playedSize()?.let(::bytes), it.seeders?.let { s -> "$s seeds" }, it.leftLabel() ?: "Not started")
+            Option(it.uri, it.torrentName ?: it.title, hint.joinToString("  ·  "))
+        },
+        selected = latestPerTitle(all).first().uri,
+        onPick = { uri ->
+            onDismiss()
+            all.find { it.uri == uri }?.let { watch.resume(it) }
+        },
+        onDismiss = onDismiss,
+    )
+}
+
+/** Played from more than one release: ask which, each resuming where it was left. */
+fun releasesOf(history: List<Item>, item: Item) = history.filter { it.titleKey == item.titleKey }.sortedByDescending { it.at }
+
 /** Everything opened before, newest first — the only way back to a magnet watched once. */
 @Composable
-fun LibraryScreen(watch: Watch) {
+fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit) {
     val history by History.items.collectAsState()
     // One card per title, however many releases it was played from.
     val items = latestPerTitle(history)
+    // After a reinstall this TV's history is empty; what Simkl has still belongs here.
+    val simklLibrary by Simkl.library.collectAsState()
+    val fromSimkl = remember(simklLibrary, history, Kids.on, Kids.allowed) { Kids.only(simklLibrary.notIn(history)) { Title(it.imdb, it.kind, it.title) } }
     var focusedUri by remember { mutableStateOf<String?>(null) }
     val first = remember { FocusRequester() }
+    var releases by remember { mutableStateOf<List<Item>?>(null) }
+    val simkl by Simkl.connected.collectAsState()
+    /** Per profile; the guest is offered nothing it would lose on exit. */
+    var simklLater by remember(me.id) { mutableStateOf(me.isGuest || Kv.get(SIMKL_LATER) != null) }
 
     CompositionLocalProvider(LocalBringIntoViewSpec provides rememberEdgeScroll(110.dp)) {
     LazyVerticalGrid(
@@ -262,13 +314,23 @@ fun LibraryScreen(watch: Watch) {
                 if (items.isNotEmpty()) TvButton("Clear all", { History.clear(watch.engine) }, icon = L.drawable.lucide_ic_trash_2)
             }
         }
-        if (items.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+        // Where the history is, the history's sync is offered.
+        if (Simkl.available && !simkl && !simklLater) item(span = { GridItemSpan(maxLineSpan) }) {
+            SimklSection(me, onLater = {
+                Kv.set(SIMKL_LATER, "1")
+                simklLater = true
+            })
+        }
+        if (simkl) item(span = { GridItemSpan(maxLineSpan) }) {
+            Text("✓ Simkl connected — finished films and episodes are marked watched", style = Type.meta.copy(color = Ink.faint))
+        }
+        if (items.isEmpty() && fromSimkl.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
             Note("Nothing here yet. Anything you play turns up in this list.", Modifier.padding(top = 20.dp))
         }
         items(items, key = { it.uri }) { item ->
             Column {
                 Focusable(
-                    onClick = { watch.resume(item) },
+                    onClick = { releasesOf(history, item).let { all -> if (all.size > 1) releases = all else watch.resume(item) } },
                     modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
                     shape = RoundedCornerShape(8.dp),
                     scale = 1.08f,
@@ -280,7 +342,11 @@ fun LibraryScreen(watch: Watch) {
                     Column(Modifier.align(Alignment.BottomStart).padding(10.dp)) {
                         Text(item.label, style = Type.label.copy(fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         val ep = item.lastFileIndex?.let { i -> item.files?.find { it.index == i } }?.let { parseEpisode(it.name) }
-                        Text(listOfNotNull(ep?.let { "S${it.season}:E${it.episode}" }, ago(item.at)).joinToString("  ·  "), style = Type.meta.copy(fontSize = 11.sp))
+                        val count = releasesOf(history, item).size
+                        Text(
+                            listOfNotNull(ep?.let { "S${it.season}:E${it.episode}" }, ago(item.at), item.playedSize()?.let(::bytes), if (count > 1) "$count releases" else null).joinToString("  ·  "),
+                            style = Type.meta.copy(fontSize = 11.sp), maxLines = 1,
+                        )
                         if (item.ratio > 0) {
                             Spacer(Modifier.height(5.dp))
                             ProgressLine(item.ratio.toFloat())
@@ -293,9 +359,40 @@ fun LibraryScreen(watch: Watch) {
                 }
             }
         }
+        if (fromSimkl.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+            Text("From Simkl", Modifier.padding(top = 14.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
+        }
+        // Never played on this TV: no release to resume, so the title opens; one picked there starts at Simkl's spot.
+        items(fromSimkl, key = { "simkl:${it.imdb}" }) { s ->
+            val paused = simklLibrary.paused.find { it.imdb == s.imdb }
+            Focusable(
+                onClick = { onOpen(Title(s.imdb, s.kind, s.title, year = s.year)) },
+                modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
+                shape = RoundedCornerShape(8.dp),
+                scale = 1.08f,
+                requester = if (items.isEmpty() && s == fromSimkl.first()) first else null,
+            ) {
+                Artwork("https://images.metahub.space/background/medium/${s.imdb}/img", s.title, Modifier.fillMaxSize())
+                Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(0.4f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.85f))))
+                Column(Modifier.align(Alignment.BottomStart).padding(10.dp)) {
+                    Text(s.title, style = Type.label.copy(fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val state = when {
+                        paused != null -> listOfNotNull(s.last, "${paused.progress.toInt()}% in").joinToString("  ·  ")
+                        s.kind == "movie" -> "Watched"
+                        else -> s.last?.let { "Last watched $it" } ?: "Watched"
+                    }
+                    Text("$state  ·  on Simkl", style = Type.meta.copy(fontSize = 11.sp), maxLines = 1)
+                    paused?.let {
+                        Spacer(Modifier.height(5.dp))
+                        ProgressLine((it.progress / 100).toFloat())
+                    }
+                }
+            }
+        }
     }
     }
-    if (items.isNotEmpty()) first.claim()
+    if (items.isNotEmpty() || fromSimkl.isNotEmpty()) first.claim()
+    releases?.let { all -> ReleasesSheet(all, watch) { releases = null } }
 }
 
 /* ------------------------------------------------------------- settings */
@@ -309,6 +406,14 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
     var pin by remember { mutableStateOf("") }
     val subdl by Secrets.subdl.collectAsState()
     var key by remember { mutableStateOf("") }
+    val torbox by TorBox.key.collectAsState()
+    var torboxKey by remember { mutableStateOf("") }
+    /** The account the saved key opens, or why it doesn't; null while asking. */
+    var torboxAccount by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(torbox) {
+        torboxAccount = null
+        if (torbox.isNotEmpty()) torboxAccount = runCatching { TorBox.account() }.getOrElse { "Not working: ${it.message}" }
+    }
     val first = remember { FocusRequester() }
     fun set(next: Settings) = SettingsStore.save(next)
 
@@ -397,6 +502,7 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             if (subdl.isNotEmpty()) "Saved, encrypted on this TV — Find subtitles searches SubDL too. Enter another to replace it."
             else "A free key from subdl.com adds its subtitles to Find subtitles. It stays encrypted on this TV.",
         ) {
+            Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Field(key, { key = it.trim() }, if (subdl.isNotEmpty()) "••••••••••••" else "Your SubDL API key", Modifier.width(420.dp), secret = true, keyboardOnFocus = false)
                 Spacer(Modifier.width(14.dp))
@@ -411,7 +517,43 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
                     TvButton("Remove", { Secrets.setSubdl("") })
                 }
             }
+            PhoneKey("SubDL") { Secrets.setSubdl(it) }
+            }
         }
+
+        Section(
+            "TorBox",
+            if (torbox.isNotEmpty()) "Releases TorBox has cached say Instant, and play from its servers — no peers to wait for, seek anywhere. Anything else streams from the swarm as before."
+            else "With a torbox.app API key, releases TorBox has cached play from its servers instead of from peers. The key is under Settings on torbox.app, and stays encrypted on this TV.",
+        ) {
+            // A column: a section's box draws its children on top of each other.
+            Column {
+            if (torbox.isNotEmpty()) {
+                Text(
+                    torboxAccount ?: "Checking the key…",
+                    Modifier.padding(bottom = 12.dp),
+                    style = Type.meta.copy(color = if (torboxAccount?.startsWith("Not working") == true) Ink.danger else Ink.muted),
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Field(torboxKey, { torboxKey = it.trim() }, if (torbox.isNotEmpty()) "••••••••••••" else "Your TorBox API key", Modifier.width(420.dp), secret = true, keyboardOnFocus = false)
+                Spacer(Modifier.width(14.dp))
+                TvButton(if (torboxKey.isNotEmpty()) "Save key" else "Enter a key", {
+                    if (torboxKey.isNotEmpty()) {
+                        TorBox.setKey(torboxKey)
+                        torboxKey = ""
+                    }
+                }, icon = L.drawable.lucide_ic_key)
+                if (torbox.isNotEmpty()) {
+                    Spacer(Modifier.width(10.dp))
+                    TvButton("Remove", { TorBox.setKey("") })
+                }
+            }
+            PhoneKey("TorBox") { TorBox.setKey(it) }
+            }
+        }
+
+        if (Simkl.available) SimklSection(me)
 
         Section("Extra trackers","Attach public trackers to bare magnet links so they resolve faster.") {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -432,6 +574,132 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
         }
     }
     first.claim()
+}
+
+/** The Library's Simkl card was put off with "Not now"; Settings still offers it. */
+private const val SIMKL_LATER = "simkl:later"
+
+/**
+ * A key pasted on a phone rather than typed with the remote: a QR of a page the TV serves on the
+ * home network ([KeyDrop]), open only while this shows. It closes itself once the key arrives.
+ */
+@Composable
+private fun PhoneKey(what: String, onKey: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    // One button that changes its label, not a button swapped for another: a focused button taken
+    // away left focus nowhere, and the page sent it back to the top.
+    TvButton(if (open) "Cancel" else "Paste from phone", { open = !open }, Modifier.padding(top = 12.dp), icon = if (open) L.drawable.lucide_ic_x else L.drawable.lucide_ic_smartphone)
+    if (!open) return
+    var address by remember { mutableStateOf<String?>(null) }
+    var tried by remember { mutableStateOf(false) }
+    DisposableEffect(Unit) {
+        val drop = KeyDrop(what) {
+            onKey(it)
+            open = false
+        }
+        address = drop.open()
+        tried = true
+        onDispose { drop.close() }
+    }
+    Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        address?.let { Qr(it, 168.dp) }
+        Spacer(Modifier.width(22.dp))
+        Column(Modifier.widthIn(max = 520.dp)) {
+            Text(
+                when {
+                    address != null -> "Scan with your phone's camera, paste your $what key on the page that opens, and tap Save. Your phone needs to be on the same Wi-Fi as the TV."
+                    tried -> "The TV isn't on a network a phone can reach."
+                    else -> "Opening…"
+                },
+                style = Type.meta.copy(color = Ink.muted),
+            )
+            address?.let { Text(it, Modifier.padding(top = 6.dp), style = Type.meta.copy(color = Ink.faint)) }
+        }
+    }
+}
+
+/** [text] as a QR code: black squares on white, with the one-module quiet zone a camera needs. */
+@Composable
+private fun Qr(text: String, size: androidx.compose.ui.unit.Dp) {
+    val matrix = remember(text) {
+        com.google.zxing.qrcode.QRCodeWriter().encode(text, com.google.zxing.BarcodeFormat.QR_CODE, 0, 0, mapOf(com.google.zxing.EncodeHintType.MARGIN to 1))
+    }
+    androidx.compose.foundation.Canvas(Modifier.size(size).clip(RoundedCornerShape(8.dp)).background(Color.White)) {
+        val cell = this.size.width / matrix.width
+        for (y in 0 until matrix.height) for (x in 0 until matrix.width) {
+            if (matrix[x, y]) drawRect(Color.Black, androidx.compose.ui.geometry.Offset(x * cell, y * cell), androidx.compose.ui.geometry.Size(cell, cell))
+        }
+    }
+}
+
+/**
+ * Connect by device code: the code shows here, the viewer approves on their phone, this page notices.
+ * [onLater] makes it the Library's card, with a Not now; without it, a Settings section.
+ */
+@Composable
+fun SimklSection(me: Profile, onLater: (() -> Unit)? = null) {
+    val connected by Simkl.connected.collectAsState()
+    var code by remember { mutableStateOf<DeviceCode?>(null) }
+    var note by remember { mutableStateOf<String?>(null) }
+    var job by remember { mutableStateOf<Job?>(null) }
+    val scope = rememberCoroutineScope()
+
+    fun connect() {
+        note = null
+        job?.cancel()
+        job = scope.launch {
+            try {
+                val c = Simkl.start()
+                code = c
+                if (!Simkl.await(c)) note = "That code ran out — connect again for a new one."
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) note = e.message ?: "Couldn't reach Simkl."
+            } finally {
+                code = null
+            }
+        }
+    }
+
+    val hint = when {
+        connected -> "Connected — films and episodes you watch to the end are marked watched on Simkl."
+        me.isGuest -> "Marks what you finish as watched on your Simkl account. As Guest it's forgotten when the app closes."
+        else -> "Films and episodes you finish get marked watched on your Simkl account, and Continue Watching follows you to other devices."
+    }
+    val body: @Composable () -> Unit = {
+        Column {
+            val c = code
+            if (c != null) Row(Modifier.padding(bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                // Scanned, it opens Simkl with the code filled in; the code itself is for typing on any device.
+                Qr(c.uriComplete, 168.dp)
+                Spacer(Modifier.width(24.dp))
+                Column(Modifier.widthIn(max = 560.dp)) {
+                    Text("Scan with your phone's camera — or go to ${c.uri.removePrefix("https://")} and enter", style = Type.meta.copy(color = Ink.faint))
+                    Text(c.userCode, Modifier.padding(vertical = 8.dp), style = Type.display)
+                    Text("Signing in? Simkl emails that account a link — open it and confirm, then press Allow.", style = Type.meta.copy(color = Ink.faint))
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                when {
+                    connected -> TvButton("Disconnect", { Simkl.disconnect() }, icon = L.drawable.lucide_ic_link)
+                    c != null -> TvButton("Cancel", { job?.cancel() })
+                    else -> {
+                        TvButton("Connect Simkl", ::connect, icon = L.drawable.lucide_ic_link)
+                        onLater?.let {
+                            Spacer(Modifier.width(10.dp))
+                            TvButton("Not now", it)
+                        }
+                    }
+                }
+            }
+            note?.let { Text(it, Modifier.padding(top = 10.dp), style = Type.meta.copy(color = Ink.faint)) }
+        }
+    }
+    if (onLater == null) Section("Simkl", hint, body)
+    else Column(Modifier.fillMaxWidth().background(Ink.surface, RoundedCornerShape(14.dp)).padding(24.dp)) {
+        Text("Sync your history with Simkl", style = Type.title.copy(fontWeight = FontWeight.Bold))
+        Text(hint, Modifier.padding(top = 4.dp, bottom = 16.dp).widthIn(max = 760.dp), style = Type.meta.copy(color = Ink.faint))
+        body()
+    }
 }
 
 @Composable
@@ -482,10 +750,10 @@ fun ProfilesScreen(profiles: List<Profile>, onPick: (Profile) -> Unit, onCancel:
                 onGuest = { onPick(GUEST) },
             )
             is ProfilesMode.Edit -> Editor(m.profile, canCancel = profiles.isNotEmpty(),
-                onSave = { name, icon, colour ->
-                    if (m.profile == null) onPick(Profiles.add(name, icon, colour))
+                onSave = { name, icon, colour, kids ->
+                    if (m.profile == null) onPick(Profiles.add(name, icon, colour, kids))
                     else {
-                        Profiles.edit(m.profile.id, name, icon, colour)
+                        Profiles.edit(m.profile.id, name, icon, colour, kids)
                         mode = ProfilesMode.Pick
                     }
                 },
@@ -554,10 +822,11 @@ private fun Tile(name: String, onClick: () -> Unit, requester: FocusRequester? =
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, String, String) -> Unit, onDelete: () -> Unit, onCancel: () -> Unit) {
+private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, String, String, Boolean) -> Unit, onDelete: () -> Unit, onCancel: () -> Unit) {
     var name by remember { mutableStateOf(profile?.name.orEmpty()) }
     var icon by remember { mutableStateOf(profile?.let { Avatars.of(it).id } ?: AVATARS[0]) }
     var colour by remember { mutableStateOf(profile?.colour ?: COLOURS[0]) }
+    var kids by remember { mutableStateOf(profile?.kids ?: false) }
     val field = remember { FocusRequester() }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = Safe.x)) {
         Avatar(Profile("preview", name.ifBlank { "?" }, colour, icon), 160.dp)
@@ -585,8 +854,19 @@ private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, Strin
                     }
                 }
             }
+            Text("KIDS", Modifier.padding(top = 20.dp, bottom = 10.dp), style = Type.overline)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Chip("Kids profile", kids, onClick = { kids = true }, icon = if (kids) L.drawable.lucide_ic_check else null)
+                Chip("Everything", !kids, onClick = { kids = false })
+            }
+            Text(
+                if (kids) "Family films and series only. No torrent search or links from other apps — give your own profile a PIN so it stays that way."
+                else "Every title, torrent search included.",
+                Modifier.padding(top = 8.dp),
+                style = Type.meta.copy(color = Ink.faint),
+            )
             Row(Modifier.padding(top = 30.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                TvButton("Save", { onSave(name, icon, colour) }, icon = L.drawable.lucide_ic_check, primary = true)
+                TvButton("Save", { onSave(name, icon, colour, kids) }, icon = L.drawable.lucide_ic_check, primary = true)
                 if (canCancel) TvButton("Cancel", onCancel)
                 if (profile != null) TvButton("Delete profile", onDelete, icon = L.drawable.lucide_ic_trash_2)
             }

@@ -57,6 +57,15 @@ Netflix-style, driven entirely by the remote:
   Up Next card with the next episode's still and a filling Play button.
 - BACK closes a panel, then the bar, then the stats — and only then leaves.
 
+## TorBox
+
+With a [torbox.app](https://torbox.app) API key in **Settings → TorBox**, a
+release TorBox already has cached shows **Instant** in the sources list and plays
+from TorBox's servers over HTTPS instead of from peers; the loading screen says
+"Checking TorBox", then "from TorBox". Anything not cached — or any TorBox error —
+falls back to the swarm. `tv/core`'s `TorBox.kt` does the talking and `Watch`
+asks it first, so the phone gets the same.
+
 ## The rolling cache
 
 A 4K film is tens of gigabytes and a TV has single digits free. libtorrent cannot

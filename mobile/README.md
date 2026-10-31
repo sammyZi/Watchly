@@ -91,6 +91,13 @@ or Cast TV: the engine serves it to the network as well as to itself, the
 default media receiver plays it, and the phone becomes the remote. Ending the
 session picks the film up on the phone where the TV left it.
 
+**TorBox.** Paste a [torbox.app](https://torbox.app) API key in Settings and
+releases TorBox already has cached say **Instant** in the sources list and play
+from its servers over HTTPS — no peers to wait for, seek anywhere, and Cast and
+"open in another app" get the same link. Anything not cached streams from the
+swarm as before. The key is encrypted on the phone, like the SubDL key. Downloads
+still use the swarm.
+
 **Downloads.** A Download button on films, on episodes, on whole seasons and on
 every release. A libtorrent session of its own, a foreground service with a
 progress notification, Wi-Fi only (a waiting download can be let through on
