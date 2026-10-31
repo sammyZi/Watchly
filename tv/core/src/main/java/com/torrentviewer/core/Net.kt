@@ -17,7 +17,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** Work that outlives a screen. */
 val AppScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-class HttpException(val code: Int, message: String) : IOException(message)
+/** [body] is what the service said back — an OAuth error is in there, not in the status. */
+class HttpException(val code: Int, message: String, val body: String = "") : IOException(message)
 
 fun enc(s: String): String = URLEncoder.encode(s, "UTF-8").replace("+", "%20")
 
@@ -31,13 +32,29 @@ object Net {
     val online: StateFlow<Boolean> = _online
     private val probing = AtomicBoolean(false)
 
-    suspend fun get(url: String, timeoutMs: Int = 15_000, quiet: Boolean = false): String =
-        request(url, "GET", null, timeoutMs, quiet)
+    suspend fun get(url: String, timeoutMs: Int = 15_000, quiet: Boolean = false, headers: Map<String, String> = emptyMap()): String =
+        request(url, "GET", null, timeoutMs, quiet, headers = headers)
 
-    suspend fun postJson(url: String, body: String, timeoutMs: Int = 15_000, quiet: Boolean = false): String =
-        request(url, "POST", body, timeoutMs, quiet)
+    suspend fun postJson(url: String, body: String, timeoutMs: Int = 15_000, quiet: Boolean = false, headers: Map<String, String> = emptyMap()): String =
+        request(url, "POST", body, timeoutMs, quiet, headers = headers)
 
-    private suspend fun request(url: String, method: String, body: String?, timeoutMs: Int, quiet: Boolean): String =
+    suspend fun postForm(url: String, fields: Map<String, String>, timeoutMs: Int = 15_000): String =
+        request(url, "POST", fields.entries.joinToString("&") { (k, v) -> "${enc(k)}=${enc(v)}" }, timeoutMs, false, "application/x-www-form-urlencoded")
+
+    /** multipart/form-data, text fields only — what TorBox's create endpoints take. */
+    suspend fun postMultipart(url: String, fields: Map<String, String>, timeoutMs: Int = 15_000, quiet: Boolean = false, headers: Map<String, String> = emptyMap()): String {
+        val boundary = "watchly${System.nanoTime()}"
+        val body = buildString {
+            fields.forEach { (k, v) -> append("--$boundary\r\nContent-Disposition: form-data; name=\"$k\"\r\n\r\n$v\r\n") }
+            append("--$boundary--\r\n")
+        }
+        return request(url, "POST", body, timeoutMs, quiet, "multipart/form-data; boundary=$boundary", headers)
+    }
+
+    private suspend fun request(
+        url: String, method: String, body: String?, timeoutMs: Int, quiet: Boolean,
+        type: String = "application/json", headers: Map<String, String> = emptyMap(),
+    ): String =
         withContext(Dispatchers.IO) {
             val conn = try {
                 (URL(url).openConnection() as HttpURLConnection).apply {
@@ -46,9 +63,10 @@ object Net {
                     requestMethod = method
                     setRequestProperty("User-Agent", "WatchlyTV/2")
                     setRequestProperty("Accept", "application/json, text/xml, */*")
+                    headers.forEach { (k, v) -> setRequestProperty(k, v) }
                     if (body != null) {
                         doOutput = true
-                        setRequestProperty("Content-Type", "application/json")
+                        setRequestProperty("Content-Type", type)
                         outputStream.use { it.write(body.toByteArray()) }
                     }
                 }
@@ -64,7 +82,10 @@ object Net {
                     throw e
                 }
                 _online.value = true
-                if (code !in 200..299) throw HttpException(code, "$url returned $code")
+                if (code !in 200..299) {
+                    val said = runCatching { conn.errorStream?.bufferedReader()?.use { it.readText() } }.getOrNull().orEmpty()
+                    throw HttpException(code, "${url.substringBefore('?')} returned $code", said)
+                }
                 conn.inputStream.bufferedReader().use { it.readText() }
             } finally {
                 conn.disconnect()

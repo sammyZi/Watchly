@@ -153,6 +153,23 @@ public sealed class ProfilesView : UserControl
         var name = editing?.Name ?? "";
         var colour = editing?.Colour ?? Profiles.Colours[0];
         var icon = editing is not null ? Avatars.Of(editing).Id : Avatars.Pickable[0].Id;
+        var kids = editing?.Kids ?? false;
+        var kidsRow = new StackPanel { Orientation = Orientation.Horizontal };
+        var kidsHint = Ui.Text("", "Meta", "Faint", 13);
+        kidsHint.Margin = new Thickness(0, 8, 0, 0);
+        kidsHint.TextWrapping = TextWrapping.Wrap;
+        void RefreshKids()
+        {
+            kidsRow.Children.Clear();
+            var on = Ui.Chip("Kids profile", kids, () => { kids = true; RefreshKids(); }, kids ? "check" : null, "ChoiceChip");
+            on.Margin = new Thickness(0, 0, 8, 0);
+            kidsRow.Children.Add(on);
+            kidsRow.Children.Add(Ui.Chip("Everything", !kids, () => { kids = false; RefreshKids(); }, style: "ChoiceChip"));
+            kidsHint.Text = kids
+                ? "Family films and series only. No torrent search or links — give your own profile a PIN so it stays that way."
+                : "Every title, torrent search included.";
+        }
+        RefreshKids();
         var preview = new ContentControl { VerticalAlignment = VerticalAlignment.Top };
         var faces = new WrapPanel();
         var swatches = new StackPanel { Orientation = Orientation.Horizontal };
@@ -193,10 +210,10 @@ public sealed class ProfilesView : UserControl
 
         void Save()
         {
-            if (editing is null) onPick(Profiles.Add(name, colour, icon));
+            if (editing is null) onPick(Profiles.Add(name, colour, icon, kids));
             else
             {
-                MainWindow.Shell.ProfileEdited(Profiles.Edit(editing.Id, name, colour, icon));
+                MainWindow.Shell.ProfileEdited(Profiles.Edit(editing.Id, name, colour, icon, kids));
                 Go(Mode.Pick);
             }
         }
@@ -220,7 +237,9 @@ public sealed class ProfilesView : UserControl
         faceLabel.Margin = new Thickness(0, 22, 0, 10);
         var colourLabel = Ui.Text("COLOUR", "Overline", "Faint");
         colourLabel.Margin = new Thickness(0, 16, 0, 10);
-        var form = new StackPanel { Width = 600, Margin = new Thickness(48, 0, 0, 0), Children = { heading, hint, field, faceLabel, faces, colourLabel, swatches, buttons } };
+        var kidsLabel = Ui.Text("KIDS", "Overline", "Faint");
+        kidsLabel.Margin = new Thickness(0, 16, 0, 10);
+        var form = new StackPanel { Width = 600, Margin = new Thickness(48, 0, 0, 0), Children = { heading, hint, field, faceLabel, faces, colourLabel, swatches, kidsLabel, kidsRow, kidsHint, buttons } };
         return Centered(new StackPanel { Orientation = Orientation.Horizontal, Children = { preview, form } });
     }
 

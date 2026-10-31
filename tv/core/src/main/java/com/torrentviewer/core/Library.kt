@@ -30,6 +30,10 @@ val LANGS = listOf(
     lang("TR", "Turkish", "turkish|tur"),
     lang("NL", "Dutch", "dutch|nederlands|dut|nld"),
     lang("PL", "Polish", "polish|polski|pol"),
+    // ISO 639-2 has old codes for these too (scr, scc), still in some files' track names.
+    lang("HR", "Croatian", "croatian|hrvatski|hrv|scr"),
+    lang("SR", "Serbian", "serbian|srpski|српски|srp|scc"),
+    lang("BS", "Bosnian", "bosnian|bosanski|bos"),
     lang("JA", "Japanese", "japanese|jpn"),
     lang("KO", "Korean", "korean|kor"),
     lang("ZH", "Chinese", "chinese|mandarin|chi|zho"),

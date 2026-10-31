@@ -24,6 +24,7 @@ object Services {
         Kv.init(context)
         SettingsStore.load()
         Profiles.load()
+        Simkl.clientId = BuildConfig.SIMKL_CLIENT_ID
         engine = TorrentStream(context.applicationContext)
         watch = Watch(engine)
     }

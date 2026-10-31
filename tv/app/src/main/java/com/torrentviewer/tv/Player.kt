@@ -200,8 +200,8 @@ private fun Player(watch: Watch) {
     val bitrate = remember { file?.size?.let { size -> watch.item?.durations?.get(watch.playingIndex)?.takeIf { it > 0 }?.let { size / it } } ?: 0.0 }
 
     val view = remember { mutableStateOf<Video?>(null) }
-    /** Media3 unless the setting asks for VLC, or Media3 has already given up on this file. */
-    var vlc by remember { mutableStateOf(SettingsStore.value.value.vlcPlayer) }
+    /** Media3 unless the setting asks for VLC, or Media3 has already given up on this file — now or any time before. */
+    var vlc by remember { mutableStateOf(SettingsStore.value.value.vlcPlayer || file?.let { NeedsVlc.has(it.name, it.size) } == true) }
     var paused by remember { mutableStateOf(false) }
     var at by remember { mutableDoubleStateOf(startAt) }
     var duration by remember { mutableDoubleStateOf(0.0) }
@@ -267,6 +267,12 @@ private fun Player(watch: Watch) {
     fun hide() {
         controls = false
         touch()
+    }
+
+    /** Back out of a panel goes straight to the picture: the controls under it took a second Back. */
+    fun closePanel() {
+        panel = null
+        hide()
     }
 
     fun togglePause() {
@@ -437,12 +443,24 @@ private fun Player(watch: Watch) {
         say("Skipped intro")
     }
 
+    /* -------------------------------------------------------- TorBox stall */
+
+    // A TorBox stream that hasn't moved goes to Watchly's own engine: a video this TV can't decode
+    // left VLC silent, with no error to fall back on, and the film never started. Counted again from
+    // the switch to VLC: Media3's failed attempt used 4–6 s of VLC's time.
+    LaunchedEffect(watch.via, vlc) {
+        if (watch.via == null) return@LaunchedEffect
+        val from = at
+        delay(TORBOX_STALL_MS)
+        if (watch.via != null && !paused && at < from + 1) watch.leaveTorBox(at, TORBOX_STALL_NOTE)
+    }
+
     /* ----------------------------------------------------------------- back */
 
     // BACK closes a panel, then the controls, then the info card — and only then leaves.
     BackHandler {
         when {
-            panel != null -> panel = null
+            panel != null -> closePanel()
             scrub != null -> {
                 commit.value?.cancel()
                 scrub = null
@@ -516,6 +534,12 @@ private fun Player(watch: Watch) {
                     v.setScale(SCALES[scale].first)
                     if (!vlc) v.onUnsupported = { message ->
                         Log.w("Player", "Media3 gave up ($message), falling back to VLC")
+                        engine.note("player: Media3 gave up ($message), falling back to VLC")
+                        // Said, so a slower start isn't a mystery: VLC takes a few seconds more to open a file.
+                        // A note, not the HUD: the loading screen is usually still up and hides the HUD.
+                        watch.notes.tryEmit("Switching to VLC — the built-in player can't play this video")
+                        // Next time this file opens straight in VLC.
+                        file?.let { NeedsVlc.add(it.name, it.size) }
                         // Track ids are the backend's own.
                         tracks = null
                         subtitle = null
@@ -562,8 +586,12 @@ private fun Player(watch: Watch) {
                         } else if (next != null && !noNext) goNext() else watch.exit()
                     }
                     v.onFailed = { message ->
-                        watch.notes.tryEmit(message)
-                        watch.exit()
+                        engine.note("player: failed — $message")
+                        // From TorBox: on to Watchly's own engine at the same spot, not out of the film.
+                        if (!watch.leaveTorBox(at)) {
+                            watch.notes.tryEmit(message)
+                            watch.exit()
+                        }
                     }
                     view.value = v
                 }
@@ -686,7 +714,7 @@ private fun Player(watch: Watch) {
         }
 
         AnimatedVisibility(waiting, enter = fadeIn(), exit = fadeOut(tween(500))) {
-            Loading(title, episode, file, ready != null, progressState.value)
+            Loading(title, episode, file, ready != null, progressState.value, watch.via, watch.askingTorBox)
         }
 
         /** Online subtitles in the chosen language — again whenever it is changed from the sheet. */
@@ -733,7 +761,7 @@ private fun Player(watch: Watch) {
                     view.value?.setAudioTrack(it)
                 },
                 onFind = ::findSubs,
-                onDismiss = { panel = null },
+                onDismiss = ::closePanel,
             )
             Panel.SPEED -> Sheet(
                 title = "Playback speed",
@@ -744,7 +772,7 @@ private fun Player(watch: Watch) {
                     view.value?.setRate(it)
                     panel = null
                 },
-                onDismiss = { panel = null },
+                onDismiss = ::closePanel,
             )
             Panel.ASPECT -> Sheet(
                 title = "Picture",
@@ -755,7 +783,7 @@ private fun Player(watch: Watch) {
                     view.value?.setScale(SCALES[it].first)
                     panel = null
                 },
-                onDismiss = { panel = null },
+                onDismiss = ::closePanel,
             )
             Panel.FIND -> Sheet(
                 title = "Find subtitles",
@@ -781,7 +809,7 @@ private fun Player(watch: Watch) {
                         }.onFailure { watch.notes.tryEmit(it.message ?: "Couldn't fetch that subtitle") }
                     }
                 },
-                onDismiss = { panel = null },
+                onDismiss = ::closePanel,
             )
             // The same list as Settings → Subtitles, and the same setting: it sticks for the next film.
             Panel.LANG -> Sheet(
@@ -1081,7 +1109,7 @@ private fun PausedCard(visible: Boolean, title: Title?, episode: Episode?, watch
 
 /** Before the first frame: the title's own backdrop, its logo, and a ring that fills. */
 @Composable
-private fun Loading(title: Title?, episode: Episode?, file: TorrentFile?, starting: Boolean, progress: Progress?) {
+private fun Loading(title: Title?, episode: Episode?, file: TorrentFile?, starting: Boolean, progress: Progress?, via: String?, asking: Boolean) {
     val percent = if (starting) 100 else progress?.buffer ?: 0
     val ring by animateFloatAsState(percent / 100f, Motion.spatial(), label = "ring")
     Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -1096,12 +1124,13 @@ private fun Loading(title: Title?, episode: Episode?, file: TorrentFile?, starti
                 (episode?.let { "${episodeLabel(title, it.season, it.episode)}  ${it.name}" } ?: file?.let { fileEpisodeLabel(title, it.name) })
                     ?.let { Text(it, Modifier.padding(top = 12.dp), style = Type.title) }
                 Row(Modifier.padding(top = 22.dp), verticalAlignment = Alignment.CenterVertically) {
-                    val live = (progress?.peers ?: 0) > 0
+                    val live = via != null || (progress?.peers ?: 0) > 0
                     Box(Modifier.size(9.dp).clip(CircleShape).background(if (live) Ink.good else Ink.faint))
                     Spacer(Modifier.width(10.dp))
                     Text(
                         when {
-                            starting -> "Starting playback"
+                            starting -> if (via != null) "Starting playback  ·  from $via" else "Starting playback"
+                            asking -> "Checking TorBox"
                             progress == null -> "Finding peers"
                             progress.peers == 0 -> "Finding peers  ·  ${progress.dhtNodes} DHT nodes"
                             else -> "Buffering  ·  ${speed(progress.speed)}  ·  ${progress.peers} peers"

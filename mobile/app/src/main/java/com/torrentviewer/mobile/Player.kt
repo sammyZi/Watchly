@@ -108,6 +108,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.torrentviewer.core.Artwork
+import com.torrentviewer.core.TORBOX_STALL_MS
+import com.torrentviewer.core.NeedsVlc
+import com.torrentviewer.core.TORBOX_STALL_NOTE
 import com.torrentviewer.core.Ep
 import com.torrentviewer.core.Episode
 import com.torrentviewer.core.ExoView
@@ -313,8 +316,8 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     }
 
     val view = remember { mutableStateOf<Video?>(null) }
-    /** Media3 unless the setting asks for VLC, or Media3 has already given up on this file. */
-    var vlc by remember { mutableStateOf(SettingsStore.value.value.vlcPlayer) }
+    /** Media3 unless the setting asks for VLC, or Media3 has already given up on this file — now or any time before. */
+    var vlc by remember { mutableStateOf(SettingsStore.value.value.vlcPlayer || file?.let { NeedsVlc.has(it.name, it.size) } == true) }
     var paused by remember { mutableStateOf(false) }
     var at by remember { mutableDoubleStateOf(startAt) }
     var duration by remember { mutableDoubleStateOf(0.0) }
@@ -707,6 +710,18 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         say("Skipped intro", L.drawable.lucide_ic_chevrons_right)
     }
 
+    /* ---------------------------------------------------- TorBox stall */
+
+    // A TorBox stream that hasn't moved goes to Watchly's own engine: a video this phone can't
+    // decode left VLC silent, with no error to fall back on, and the film never started. Counted
+    // again from the switch to VLC: Media3's failed attempt used 4–6 s of VLC's time.
+    LaunchedEffect(watch.via, vlc) {
+        if (watch.via == null) return@LaunchedEffect
+        val from = at
+        kotlinx.coroutines.delay(TORBOX_STALL_MS)
+        if (watch.via != null && !paused && at < from + 1) watch.leaveTorBox(at, TORBOX_STALL_NOTE)
+    }
+
     /* ------------------------------------------------------------ input */
 
     BackHandler {
@@ -821,6 +836,12 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                         v.setScale(SCALES[scale].first)
                         if (!vlc) v.onUnsupported = { message ->
                             Log.w("Player", "Media3 gave up ($message), falling back to VLC")
+                            watch.engine.note("player: Media3 gave up ($message), falling back to VLC")
+                            // Said, so a slower start isn't a mystery: VLC takes a few seconds more to open a file.
+                            // A note, not the HUD: the loading screen is usually still up and hides the HUD.
+                            watch.notes.tryEmit("Switching to VLC — the built-in player can't play this video")
+                            // Next time this file opens straight in VLC.
+                            file?.let { NeedsVlc.add(it.name, it.size) }
                             // Track ids are the backend's own.
                             tracks = null
                             subtitle = null
@@ -888,8 +909,12 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                             }
                         }
                         v.onFailed = { message ->
-                            watch.notes.tryEmit(message)
-                            watch.exit()
+                            watch.engine.note("player: failed — $message")
+                            // From TorBox: on to Watchly's own engine at the same spot, not out of the film.
+                            if (!watch.leaveTorBox(at)) {
+                                watch.notes.tryEmit(message)
+                                watch.exit()
+                            }
                         }
                         view.value = v
                     }
@@ -1028,7 +1053,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         }
 
         AnimatedVisibility(waiting, enter = fadeIn(), exit = fadeOut(tween(500))) {
-            Loading(title, episode, file, ready != null, progressState.value, onBack = ::leave)
+            Loading(title, episode, file, ready != null, progressState.value, watch.via, watch.askingTorBox, onBack = ::leave)
         }
 
         // On the TV now: this screen becomes its remote.
@@ -1440,7 +1465,7 @@ private fun PausedCard(visible: Boolean, title: Title?, episode: Episode?, label
 
 /** Before the first frame: the title's own backdrop, its logo, and a ring that fills — the TV's loading screen. */
 @Composable
-private fun Loading(title: Title?, episode: Episode?, file: TorrentFile?, starting: Boolean, progress: Progress?, onBack: () -> Unit) {
+private fun Loading(title: Title?, episode: Episode?, file: TorrentFile?, starting: Boolean, progress: Progress?, via: String?, asking: Boolean, onBack: () -> Unit) {
     val percent = if (starting) 100 else progress?.buffer ?: 0
     val ring by animateFloatAsState(percent / 100f, Motion.spatial(), label = "ring")
     Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -1457,12 +1482,13 @@ private fun Loading(title: Title?, episode: Episode?, file: TorrentFile?, starti
                     (episode?.let { "${episodeLabel(title, it.season, it.episode)}  ${it.name}" } ?: file?.let { fileEpisodeLabel(title, it.name) })
                         ?.let { Text(it, Modifier.padding(top = 10.dp), style = Type.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                     Row(Modifier.padding(top = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-                        val live = (progress?.peers ?: 0) > 0
+                        val live = via != null || (progress?.peers ?: 0) > 0
                         Box(Modifier.size(8.dp).clip(CircleShape).background(if (live) Ink.good else Ink.faint))
                         Spacer(Modifier.width(10.dp))
                         Text(
                             when {
-                                starting -> "Starting playback"
+                                starting -> if (via != null) "Starting playback  ·  from $via" else "Starting playback"
+                                asking -> "Checking TorBox"
                                 progress == null -> "Finding peers"
                                 progress.peers == 0 -> "Finding peers  ·  ${progress.dhtNodes} DHT nodes"
                                 else -> "Buffering  ·  ${speed(progress.speed)}  ·  ${progress.peers} peers"

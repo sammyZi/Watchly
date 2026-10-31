@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -46,6 +47,8 @@ public sealed record PlaybackRequest
     public string? HistoryUri { get; init; }
     public List<SavedSub> SavedSubs { get; init; } = new();
     public string? LocalPath { get; init; }
+    /// <summary>TorBox's HTTPS link for this file; the torrent is the fallback when it fails.</summary>
+    public string? Remote { get; init; }
     public (string Name, Func<Task> Go)? Next { get; init; }
 }
 
@@ -101,6 +104,9 @@ public partial class MainWindow : Window
 
         History.Changed += items => Dispatcher.BeginInvoke(() => { HistoryList = items; LibraryChanged?.Invoke(); });
         Saved.Changed += items => Dispatcher.BeginInvoke(() => { SavedList = items; LibraryChanged?.Invoke(); });
+        Simkl.Changed += () => Dispatcher.BeginInvoke(() => LibraryChanged?.Invoke());
+        // The Instant tag on a release, once TorBox has answered which it has cached.
+        TorBox.Changed += () => Dispatcher.BeginInvoke(() => LibraryChanged?.Invoke());
         Net.OnlineChanged += () => Dispatcher.BeginInvoke(() => Offline.Visibility = Net.IsOnline ? Visibility.Collapsed : Visibility.Visible);
         Downloads.Instance.Failed += message => Dispatcher.BeginInvoke(() => Toast(message, true));
 
@@ -167,6 +173,8 @@ public partial class MainWindow : Window
         HistoryList = History.Load();
         SavedList = Saved.Load();
         Links = EpisodeLinks.Load();
+        Simkl.Load(profile.Id, profile.IsGuest);
+        KidsMode.Use(profile);
         // Pages built for the last profile read its library; start again from Home.
         // ponytail: the old tab views stay subscribed to the shell's events; switching is rare, unhook them if it ever shows.
         foreach (var page in Layers.Children.OfType<FrameworkElement>().ToList()) CloseLayer(page);
@@ -183,11 +191,58 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>Simkl's page opens in the browser with the code filled in; this waits for the approval. Settings shows the code meanwhile.</summary>
+    public async Task ConnectSimkl()
+    {
+        SimklCode?.Cancel();
+        var cts = SimklCode = new CancellationTokenSource();
+        try
+        {
+            var code = await Simkl.Start();
+            SimklPending = code;
+            ShowTab("settings");
+            SettingsChanged?.Invoke();
+            Process.Start(new ProcessStartInfo(code.UriComplete) { UseShellExecute = true });
+            var ok = await Simkl.Await(code, cts.Token);
+            Toast(ok ? "Simkl connected" : "That code ran out — connect again for a new one.", !ok);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception e)
+        {
+            Toast(e.Message, true);
+        }
+        finally
+        {
+            if (SimklCode == cts)
+            {
+                SimklCode = null;
+                SimklPending = null;
+                SettingsChanged?.Invoke();
+            }
+        }
+    }
+
+    public CancellationTokenSource? SimklCode { get; private set; }
+    /// <summary>The code being waited on, for Settings to show; null when nothing is.</summary>
+    public Simkl.DeviceCode? SimklPending { get; private set; }
+
     /// <summary>The profile in use was edited — its PIN in Settings, or its name, face or colour: the header shows it at once.</summary>
     public void ProfileEdited(Profile? next)
     {
         if (next is null || Who?.Id != next.Id) return;
+        var kidsChanged = Who.Kids != next.Kids;
         Who = next;
+        if (kidsChanged)
+        {
+            // Kids switched on or off for the profile in use: every page again, filtered or not.
+            KidsMode.Use(next);
+            foreach (var page in Layers.Children.OfType<FrameworkElement>().ToList()) CloseLayer(page);
+            foreach (var view in tabViews.Values) (view as IDisposable)?.Dispose();
+            tabViews.Clear();
+            Tabs.Children.Clear();
+            ShowTab("home");
+            LibraryChanged?.Invoke();
+        }
         ProfileButton.Content = ProfilesView.Avatar(next, 40);
         ProfileButton.ToolTip = $"{next.Name} — switch profile";
     }
@@ -293,7 +348,8 @@ public partial class MainWindow : Window
 
     void OnPlayResume(object sender, ExecutedRoutedEventArgs e)
     {
-        if (e.Parameter is ResumeTile tile) PlayFile(tile.Item, tile.Index);
+        // A Simkl card has no release yet: the title opens, and the one picked starts at Simkl's spot.
+        if (e.Parameter is ResumeTile tile) { if (tile.Item.Uri.StartsWith("simkl:")) OpenTitle(tile.Title); else PlayFile(tile.Item, tile.Index); }
     }
 
     public void OpenTitle(Title title) => PushLayer(new DetailView(title));
@@ -372,6 +428,12 @@ public partial class MainWindow : Window
                 Record($"{entry.Imdb}:{at.Value.Season}:{at.Value.Episode}", entry.PositionOf(file.Index), entry.DurationOf(file.Index));
             }
         }
+        // What Simkl has counts too: after a reinstall, this PC's own history is empty.
+        var simkl = Simkl.Library;
+        foreach (var (imdb, eps) in simkl.Episodes)
+            foreach (var (s, e) in eps) Record($"{imdb}:{s}:{e}", 1, 1);
+        foreach (var p in simkl.Paused)
+            if (p.Ep is { } ep) Record($"{p.Imdb}:{ep.Season}:{ep.Episode}", p.Progress, 100);
         return @out;
     }
 
@@ -433,6 +495,8 @@ public partial class MainWindow : Window
     /// <summary>A magnet or .torrent from outside — the command line or a drop.</summary>
     void OpenIncoming(string source)
     {
+        // A magnet is anything at all: a kids profile plays only what it can browse to.
+        if (KidsMode.On) { Toast("A kids profile can't open torrents or magnet links.", true); return; }
         torrentMode = null;
         _ = OpenUri(source, new OpenOptions());
     }
@@ -610,16 +674,26 @@ public partial class MainWindow : Window
         _ = Open(target, target.LastFileIndex, new OpenOptions { Auto = "best" });
     }
 
-    void Play(string uri, Torrent torrent, TorrentMeta meta, int index, bool startOver)
+    /// <summary><paramref name="torbox"/> false goes straight to the swarm: TorBox already failed this file.</summary>
+    async void Play(string uri, Torrent torrent, TorrentMeta meta, int index, bool startOver, bool torbox = true)
     {
-        var stored = HistoryList.FirstOrDefault(h => h.Uri == uri) ?? new HistoryItem { Uri = uri, Title = meta.Name };
         var detail = CurrentDetail;
+        // A cached release streams from TorBox; not cached, or any TorBox error, and Watchly's own engine as ever.
+        string? remote = null;
+        if (torbox && TorBox.On && TorBox.HashOf(uri) is not null)
+        {
+            Toast("Checking TorBox…");
+            try { remote = await TorBox.Link(uri, meta.Files[index].Path, meta.Files[index].Size); }
+            catch (Exception e) { Toast($"TorBox: {e.Message.TrimEnd('.')} — streaming from peers instead.", true); }
+        }
+        var stored = HistoryList.FirstOrDefault(h => h.Uri == uri) ?? new HistoryItem { Uri = uri, Title = meta.Name };
         var file = meta.Files[index];
         var ratio = stored.ResumeRatio(index);
         // A release never played here starts where another release of the title was left.
         var resumeAt = startOver ? 0
             : ratio > 0 ? stored.PositionOf(index) ?? 0
-            : History.CarryOver(HistoryList, stored with { Imdb = detail?.Imdb ?? stored.Imdb, TitleName = stored.TitleName ?? detail?.Name }, file.Name)?.At ?? 0;
+            : History.CarryOver(HistoryList, stored with { Imdb = detail?.Imdb ?? stored.Imdb, TitleName = stored.TitleName ?? detail?.Name }, file.Name)?.At
+              ?? FromSimkl(detail?.Imdb ?? stored.Imdb, detail, file.Name);
         var request = new PlaybackRequest
         {
             Title = file.Name,
@@ -632,8 +706,29 @@ public partial class MainWindow : Window
             HistoryUri = uri,
             SavedSubs = stored.Subtitles?.GetValueOrDefault(index) ?? new(),
             Next = UpNext(stored, torrent, meta, index, detail),
+            Remote = remote,
         };
-        OpenPlayer(request);
+        var player = OpenPlayer(request);
+        player.TorBoxFailed += (seconds, why) =>
+        {
+            if (seconds > 0) SavePosition(uri, index, seconds);
+            Toast(why, true);
+            Play(uri, torrent, meta, index, false, torbox: false);
+        };
+    }
+
+    /// <summary>
+    /// Nothing here has played this title — a reinstall, another device — but Simkl kept where it was
+    /// paused: its percent of the runtime Cinemeta gives. Close, not to the second.
+    /// </summary>
+    static double FromSimkl(string? imdb, Title? detail, string fileName)
+    {
+        if (imdb is null || detail is null) return 0;
+        (int, int)? ep = detail.Kind == "movie" ? null : Search.ParseEpisode(fileName);
+        if (detail.Kind != "movie" && ep is null) return 0;
+        var minutes = System.Text.RegularExpressions.Regex.Match(detail.Runtime ?? "", @"(\d+)\s*min", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (!minutes.Success || Simkl.Library.PausedAt(imdb, ep) is not double percent) return 0;
+        return int.Parse(minutes.Groups[1].Value) * 60 * percent / 100;
     }
 
     /// <summary>
@@ -676,13 +771,14 @@ public partial class MainWindow : Window
     public void PlayLocal(string path, string title) =>
         OpenPlayer(new PlaybackRequest { Title = title, LocalPath = path });
 
-    void OpenPlayer(PlaybackRequest request)
+    PlayerView OpenPlayer(PlaybackRequest request)
     {
         if (PlayerHost.Content is PlayerView old) _ = old.Shutdown();
         PlayerHost.Visibility = Visibility.Visible;
         var player = new PlayerView(request);
         player.Exited += async () =>
         {
+            PauseOnSimkl(request);
             if (PlayerHost.Content == player) PlayerHost.Visibility = Visibility.Collapsed;
             Layers.Visibility = Visibility.Visible;
             TabDock.Visibility = Visibility.Visible;
@@ -697,9 +793,40 @@ public partial class MainWindow : Window
         // collapsed: the pages keep their layout, so coming back doesn't lay out every shelf again.
         Tabs.Visibility = Layers.Visibility = TabDock.Visibility = Visibility.Hidden;
         PlayerHost.Content = player;
+        return player;
     }
 
-    public void SavePosition(string uri, int index, double seconds) => HistoryList = History.SetPosition(uri, index, seconds);
+    public void SavePosition(string uri, int index, double seconds)
+    {
+        HistoryList = History.SetPosition(uri, index, seconds);
+        var item = HistoryList.FirstOrDefault(h => h.Uri == uri);
+        var of = item?.DurationOf(index);
+        if (item is null || of is not > 0 || seconds / of.Value < Simkl.WatchedAt || !simklMarked.Add($"{uri}#{index}")) return;
+        if (SimklEpisode(item, index) is var (ok, ep) && ok) Simkl.Watched(item.Imdb, ep);
+    }
+
+    /// <summary>Files already sent to Simkl as watched this session, so a film goes up once however often its spot is saved.</summary>
+    readonly HashSet<string> simklMarked = new();
+
+    /// <summary>The episode a file is, by its S/E; (true, null) for a film; (false, _) for one that can't say.</summary>
+    static (bool Ok, (int, int)? Ep) SimklEpisode(HistoryItem item, int index)
+    {
+        if (item.Kind == "movie") return (true, null);
+        var name = item.Files?.FirstOrDefault(f => f.Index == index)?.Name;
+        return Search.ParseEpisode(name) is { } ep ? (true, ep) : (false, null);
+    }
+
+    /// <summary>Closed part-way: Simkl keeps the spot, for a reinstall or another device. Finished went as watched instead.</summary>
+    void PauseOnSimkl(PlaybackRequest request)
+    {
+        if (request.HistoryUri is not { } uri || HistoryList.FirstOrDefault(h => h.Uri == uri) is not { } item) return;
+        var index = request.FileIndex;
+        var of = item.DurationOf(index);
+        if (of is not > 0 || item.PositionOf(index) is not double at) return;
+        var r = at / of.Value;
+        if (r < 0.02 || r >= Simkl.WatchedAt) return;
+        if (SimklEpisode(item, index) is var (ok, ep) && ok) Simkl.Pause(item.Imdb, ep, r * 100, item.DisplayName.Split(" · ")[0]);
+    }
     public void SaveDuration(string uri, int index, double seconds) => HistoryList = History.SetDuration(uri, index, seconds);
     public void SaveSubs(string uri, int index, List<SavedSub> subs) => HistoryList = History.SetFileSubs(uri, index, subs);
     public void LinkEpisode(string id, string uri) => Links = EpisodeLinks.Link(id, uri);

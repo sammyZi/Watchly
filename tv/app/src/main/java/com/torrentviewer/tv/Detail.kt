@@ -67,7 +67,9 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
     val seasons = remember(title.episodes) { title.episodes.map { it.season }.filter { it > 0 }.distinct().sorted() }
     val history by History.items.collectAsState()
     /** Where this series was left: the episode after the last one finished, or the one stopped part-way. */
-    val continueAt = remember(history, title.episodes) { continueEpisode(title, history) }
+    // What Simkl has seen counts too: after a reinstall, this TV's own history is empty.
+    val simkl by Simkl.library.collectAsState()
+    val continueAt = remember(history, title.episodes, simkl) { continueEpisode(title, history, simkl) }
     var season by rememberSaveable(title.imdb) { mutableStateOf<Int?>(null) }
     // Not while the episode list is still loading: that would throw away the season being come back to.
     LaunchedEffect(seasons) {
@@ -85,7 +87,7 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
         if (block == 0) continueAt?.let { c -> blocks.indexOfFirst { b -> b.any { it.id == c.id } }.takeIf { it > 0 }?.let { block = it } }
     }
     val episodes = if (through) blocks.getOrNull(block).orEmpty() else title.episodes.filter { it.season == season }
-    val progress = remember(history, title.imdb) { episodeProgress(history, title.imdb) }
+    val progress = remember(history, title.imdb, simkl) { episodeProgress(history, title.imdb, simkl) }
 
     var episode by remember(title.imdb) { mutableStateOf<Episode?>(null) }
     // Back from the player: the episode that was picked, once the list is in.
@@ -358,6 +360,11 @@ private const val TOO_HEAVY_MBPS = 80.0
 @Composable
 fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0, onClick: () -> Unit) {
     val grade = health(hit.seeders)
+    // Cached on TorBox: it plays from TorBox's servers, so the swarm's health says nothing.
+    val torbox by TorBox.key.collectAsState()
+    val cached by TorBox.cached.collectAsState()
+    LaunchedEffect(hit.id, torbox) { TorBox.check(hit.id) }
+    val instant = torbox.isNotEmpty() && hit.id.lowercase() in cached
     // A pack's size is many episodes; only a single file's size over the runtime is a bitrate.
     val mbps = if (runtimeSeconds > 0 && hit.size > 0 && (hit.scope == Scope.EPISODE || hit.perFileSize)) hit.size * 8 / runtimeSeconds / 1_000_000 else 0.0
     val tint = when (grade) {
@@ -388,7 +395,8 @@ fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0
             }
             Spacer(Modifier.width(14.dp))
             Column(horizontalAlignment = Alignment.End) {
-                Text(grade.label, style = Type.meta.copy(color = if (focused) Color.Black else tint, fontWeight = FontWeight.Bold))
+                Text(if (instant) "Instant" else grade.label, style = Type.meta.copy(color = if (focused) Color.Black else if (instant) Ink.good else tint, fontWeight = FontWeight.Bold))
+                if (instant) Text("TorBox", style = Type.meta.copy(color = if (focused) Color.Black.copy(alpha = 0.6f) else Ink.faint))
                 if (mbps >= HEAVY_MBPS) {
                     Text(
                         "Needs ${mbps.toInt()} Mb/s",

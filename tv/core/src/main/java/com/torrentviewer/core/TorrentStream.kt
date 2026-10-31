@@ -1511,6 +1511,9 @@ class TorrentStream(
     var logFile: File? = null
     private val stamp = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US)
 
+    /** For the rest of the app — TorBox, the player — into the same log: the one a vivo phone keeps. */
+    fun note(message: String) = log(message)
+
     private fun log(message: String) {
         Log.i(TAG, message)
         val f = logFile ?: return
