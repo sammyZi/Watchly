@@ -34,6 +34,7 @@ public sealed class TorrentEngine
 
     async Task DhtReady()
     {
+        KeepDhtAlive();
         try { await dhtSeeded.WaitAsync(TimeSpan.FromSeconds(3)); } catch { }
     }
 
@@ -73,16 +74,63 @@ public sealed class TorrentEngine
         if (app.MaxUploadKbps > 0) settings.MaximumUploadRate = app.MaxUploadKbps * 1024;
         dhtSeeded = Task.Run(SeedDhtNodes);
         engine = new ClientEngine(settings.ToSettings());
-        // A torrent asks DHT for peers as it starts, before DHT has joined the network, and then
-        // not again for a long while. Ask again for every torrent the moment DHT is ready.
-        engine.Dht.StateChanged += (_, _) =>
+        HookDht();
+        Log.Info("engine", $"ClientEngine initialized on {settings.HttpStreamingPrefix} (DiskCache: 128MB, MaxConn: 600, HalfOpen: 120)");
+    }
+
+    /// <summary>
+    /// A torrent asks DHT for peers as it starts, before DHT has joined the network, and then not
+    /// again for a long while: ask again for every torrent the moment DHT is ready. Every state is
+    /// logged, so a DHT that never comes up says so. Again after a restart: MonoTorrent replaces
+    /// engine.Dht then, and the old one's events stop.
+    /// </summary>
+    void HookDht()
+    {
+        var dht = engine.Dht;
+        dht.StateChanged += (_, _) =>
         {
-            if (engine.Dht.State != MonoTorrent.Dht.DhtState.Ready) return;
-            Log.Torrent($"DHT ready with {engine.Dht.NodeCount} nodes");
+            Log.Torrent($"DHT {dht.State} with {dht.NodeCount} nodes");
+            if (dht.State != MonoTorrent.Dht.DhtState.Ready) return;
             foreach (var manager in engine.Torrents.ToList())
                 _ = manager.DhtAnnounceAsync();
         };
-        Log.Info("engine", $"ClientEngine initialized on {settings.HttpStreamingPrefix} (DiskCache: 128MB, MaxConn: 600, HalfOpen: 120)");
+    }
+
+    int watchingDht;
+
+    /// <summary>
+    /// DHT finds most of a thin swarm's peers — a Rutracker release had 4 seeders on the trackers.
+    /// Once in a session MonoTorrent's never came up (no UDP socket on the peer port, no "DHT ready"),
+    /// and every torrent made do with tracker peers: 60 s and no file list. While torrents run, a DHT
+    /// not ready after 15 s is restarted — a fresh listener and engine, from the saved nodes — three
+    /// times at most. Calibration knob: 15 s is long past the usual second it takes to come up.
+    /// </summary>
+    void KeepDhtAlive()
+    {
+        if (Interlocked.Exchange(ref watchingDht, 1) == 1) return;
+        _ = Task.Run(async () =>
+        {
+            for (var restarts = 0; restarts < 3;)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(15));
+                if (engine.Dht.State == MonoTorrent.Dht.DhtState.Ready || engine.Torrents.Count == 0) continue;
+                restarts++;
+                Log.Warn("torrent", $"DHT {engine.Dht.State} with {engine.Dht.NodeCount} nodes after 15 s — restarting it ({restarts}/3)");
+                try
+                {
+                    // Off and on again: MonoTorrent builds a new listener and engine only when the endpoint changes.
+                    var endpoint = engine.Settings.DhtEndPoint;
+                    if (endpoint is null) return;
+                    await engine.UpdateSettingsAsync(new EngineSettingsBuilder(engine.Settings) { DhtEndPoint = null }.ToSettings());
+                    await engine.UpdateSettingsAsync(new EngineSettingsBuilder(engine.Settings) { DhtEndPoint = endpoint }.ToSettings());
+                    HookDht();
+                }
+                catch (Exception e)
+                {
+                    Log.Warn("torrent", $"DHT restart failed: {e.Message}");
+                }
+            }
+        });
     }
 
     /// <summary>

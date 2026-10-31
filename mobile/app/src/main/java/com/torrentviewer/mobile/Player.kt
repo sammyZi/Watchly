@@ -109,6 +109,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.torrentviewer.core.Artwork
 import com.torrentviewer.core.TORBOX_STALL_MS
+import com.torrentviewer.core.NeedsVlc
 import com.torrentviewer.core.TORBOX_STALL_NOTE
 import com.torrentviewer.core.Ep
 import com.torrentviewer.core.Episode
@@ -315,8 +316,8 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     }
 
     val view = remember { mutableStateOf<Video?>(null) }
-    /** Media3 unless the setting asks for VLC, or Media3 has already given up on this file. */
-    var vlc by remember { mutableStateOf(SettingsStore.value.value.vlcPlayer) }
+    /** Media3 unless the setting asks for VLC, or Media3 has already given up on this file — now or any time before. */
+    var vlc by remember { mutableStateOf(SettingsStore.value.value.vlcPlayer || file?.let { NeedsVlc.has(it.name, it.size) } == true) }
     var paused by remember { mutableStateOf(false) }
     var at by remember { mutableDoubleStateOf(startAt) }
     var duration by remember { mutableDoubleStateOf(0.0) }
@@ -835,6 +836,12 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                         v.setScale(SCALES[scale].first)
                         if (!vlc) v.onUnsupported = { message ->
                             Log.w("Player", "Media3 gave up ($message), falling back to VLC")
+                            watch.engine.note("player: Media3 gave up ($message), falling back to VLC")
+                            // Said, so a slower start isn't a mystery: VLC takes a few seconds more to open a file.
+                            // A note, not the HUD: the loading screen is usually still up and hides the HUD.
+                            watch.notes.tryEmit("Switching to VLC — the built-in player can't play this video")
+                            // Next time this file opens straight in VLC.
+                            file?.let { NeedsVlc.add(it.name, it.size) }
                             // Track ids are the backend's own.
                             tracks = null
                             subtitle = null
@@ -902,6 +909,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                             }
                         }
                         v.onFailed = { message ->
+                            watch.engine.note("player: failed — $message")
                             // From TorBox: on to Watchly's own engine at the same spot, not out of the film.
                             if (!watch.leaveTorBox(at)) {
                                 watch.notes.tryEmit(message)

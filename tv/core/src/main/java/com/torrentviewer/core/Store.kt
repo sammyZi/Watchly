@@ -658,6 +658,29 @@ data class Intro(val start: Double, val end: Double) {
 }
 
 /**
+ * Files Media3 couldn't decode on this device, so they open in VLC from then on instead of
+ * spending seconds failing in Media3 first. By name and size: the same whether it streams from
+ * peers or TorBox, or arrives by another magnet. The device's, not a profile's — it is what this
+ * device's decoders can do. The newest 300 are kept.
+ */
+object NeedsVlc {
+    private const val KEY = "needs-vlc"
+    private const val MOST = 300
+
+    private fun all(): List<String> = runCatching { Kv.global(KEY)?.let { JSONArray(it).let { a -> (0 until a.length()).map(a::getString) } } }.getOrNull().orEmpty()
+
+    fun key(name: String, size: Long) = "$size:$name"
+
+    fun has(name: String, size: Long) = key(name, size) in all()
+
+    fun add(name: String, size: Long) {
+        val k = key(name, size)
+        val next = (listOf(k) + all().filter { it != k }).take(MOST)
+        Kv.setGlobal(KEY, JSONArray(next).toString())
+    }
+}
+
+/**
  * The Expo build's "intros" key: one window per show (imdb id, else its name).
  * ponytail: a cold open that varies in length lands a little early or late; per-episode
  * detection (audio fingerprinting) is the upgrade if that matters.

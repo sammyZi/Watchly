@@ -1,5 +1,10 @@
 <resources>
-    <style name="Theme.Watchly" parent="android:Theme.Material.NoActionBar">
+    <!-- AppCompat, not plain Material: the Cast device chooser is a dialog themed from the activity,
+         and with no AppCompat colorPrimary it read #0 and crashed ("background can not be translucent"). -->
+    <style name="Theme.Watchly" parent="Theme.AppCompat.NoActionBar">
+        <item name="colorPrimary">#141414</item>
+        <item name="colorPrimaryDark">@android:color/black</item>
+        <item name="colorAccent">#E50914</item>
         <item name="android:windowBackground">@android:color/black</item>
         <item name="android:statusBarColor">@android:color/black</item>
         <item name="android:navigationBarColor">@android:color/black</item>
