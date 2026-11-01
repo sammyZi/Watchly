@@ -985,7 +985,8 @@ fun StremioSection(me: Profile, onLater: (() -> Unit)? = null) {
             }
         }
         when {
-            connected -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Stacked: side by side, a narrow card cut "Sign out" to "Sign …".
+            connected -> Column {
                 Button("Import addons", {
                     note = "Bringing your addons…"
                     scope.launch {
@@ -994,11 +995,11 @@ fun StremioSection(me: Profile, onLater: (() -> Unit)? = null) {
                             { it.message ?: "Couldn't reach Stremio" },
                         )
                     }
-                }, icon = L.drawable.lucide_ic_puzzle, primary = true)
+                }, Modifier.fillMaxWidth(), icon = L.drawable.lucide_ic_puzzle, primary = true)
                 Button("Sign out", {
                     Stremio.disconnect(me.id)
                     changed++
-                }, icon = L.drawable.lucide_ic_link)
+                }, Modifier.padding(top = 10.dp).fillMaxWidth(), icon = L.drawable.lucide_ic_link)
             }
             c != null -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button("Open Stremio", { runCatching { browser.openUri(c.uriComplete) } }, icon = L.drawable.lucide_ic_link, primary = true)
