@@ -37,7 +37,7 @@ public sealed class SettingsView : UserControl
         page.Children.Clear();
 
         if (shell.Who is { } me) page.Children.Add(ProfileGroup(me));
-        if (Simkl.Available) page.Children.Add(SimklGroup());
+        page.Children.Add(StremioGroup());
 
         page.Children.Add(Group("Appearance",
             ChoiceRow("Theme", "Match Windows, or lock light or dark",
@@ -154,44 +154,91 @@ public sealed class SettingsView : UserControl
     /// <summary>A section as the phone sets one (mobile Pages.kt Section): a bold title, then its rows — no card.</summary>
     /// <summary>The phone's and TV's SubDL key: the viewer's own, encrypted on this PC (Secrets).</summary>
     /// <summary>
-    /// Connect opens Simkl's page with the code filled in; while it waits, the code is here to type on
-    /// another device, with a copy button, and Open Simkl to get back to the page.
+    /// Sign in opens Stremio's link page with the code filled in; while it waits, the code is here with its
+    /// QR, to approve on a phone instead, a copy button, and Open in browser to get back to the page.
     /// </summary>
-    FrameworkElement SimklGroup()
+    FrameworkElement StremioGroup()
     {
         var box = new StackPanel();
-        if (Simkl.Connected)
+        if (Stremio.Connected)
         {
-            box.Children.Add(Row("Connected", "Films and episodes you watch to the end are marked watched on Simkl, and Continue Watching follows you to your phone and TV.",
-                Ui.Button(Ui.Text("Disconnect", "Label", "Muted", 13), () => { Simkl.Disconnect(); Render(); })));
+            var import = Ui.Button(Ui.Text("Import addons", "Label", "Accent", 13, FontWeights.SemiBold), async () =>
+            {
+                shell.Toast("Bringing your addons…");
+                try
+                {
+                    var n = await Stremio.ImportAddons();
+                    shell.Toast(n == 0 ? "Every addon is here already" : $"Added {n} addon{(n == 1 ? "" : "s")} — see the Addons tab");
+                }
+                catch (Exception e)
+                {
+                    shell.Toast(e.Message, true);
+                }
+            });
+            var signOut = Ui.Button(Ui.Text("Sign out", "Label", "Muted", 13), () => { Stremio.Disconnect(); Render(); });
+            signOut.Margin = new Thickness(20, 0, 0, 0);
+            box.Children.Add(Row($"Signed in{(Stremio.Email is { } email ? $" as {email}" : "")}",
+                "Your Stremio library and where you stopped are here, My List is your library there, and what you finish is marked watched.",
+                new StackPanel { Orientation = Orientation.Horizontal, Children = { import, signOut } }));
         }
-        else if (shell.SimklPending is { } code)
+        else if (shell.StremioPending is { } code)
         {
-            box.Children.Add(Ui.Text($"Approve Watchly in the browser that just opened. Signing in? Simkl emails that account a link — open it and confirm, then press Allow. Or enter this code at {code.Uri.Replace("https://", "")} on another device.", "Meta", "Faint", 12));
+            box.Children.Add(Ui.Text($"Sign in and approve on the page that opened — or scan this with your phone, or open {code.Link.Replace("https://", "")} on another device.", "Meta", "Faint", 12));
             var copy = Ui.Button(Ui.Glyph("copy", 18, "Muted"), () =>
             {
-                Clipboard.SetText(code.UserCode);
-                shell.Toast("Code copied");
+                try
+                {
+                    Clipboard.SetText(code.Code);
+                    shell.Toast("Code copied");
+                }
+                catch (System.Runtime.InteropServices.ExternalException)
+                {
+                    shell.Toast("Couldn't reach the clipboard — try again", true);
+                }
             }, tooltip: "Copy the code");
             copy.Margin = new Thickness(10, 0, 0, 0);
-            var open = Ui.Button(Ui.Text("Open Simkl", "Label", "Accent", 13, FontWeights.SemiBold), () =>
-                Process.Start(new ProcessStartInfo(code.UriComplete) { UseShellExecute = true }));
-            open.Margin = new Thickness(20, 0, 0, 0);
-            var cancel = Ui.Button(Ui.Text("Cancel", "Label", "Muted", 13), () => shell.SimklCode?.Cancel());
+            var open = Ui.Button(Ui.Text("Open in browser", "Label", "Accent", 13, FontWeights.SemiBold), () => Ui.Open(code.Link));
+            var cancel = Ui.Button(Ui.Text("Cancel", "Label", "Muted", 13), () => shell.StremioCode?.Cancel());
             cancel.Margin = new Thickness(16, 0, 0, 0);
-            box.Children.Add(new StackPanel
+            var words = new StackPanel
             {
-                Orientation = Orientation.Horizontal,
-                Margin = new Thickness(0, 10, 0, 0),
-                Children = { Ui.Text(code.UserCode, "TitleText", "Text", 28, FontWeights.Bold), copy, open, cancel },
-            });
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(20, 0, 0, 0),
+                Children =
+                {
+                    new StackPanel { Orientation = Orientation.Horizontal, Children = { Ui.Text(code.Code, "TitleText", "Text", 28, FontWeights.Bold), copy } },
+                    new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 0), Children = { open, cancel } },
+                },
+            };
+            box.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 0), Children = { Qr(code.Link), words } });
         }
         else
         {
-            box.Children.Add(Row("Sync with Simkl", "Films and episodes you finish get marked watched on your Simkl account, and your Simkl history shows in the Library.",
-                Ui.Button(Ui.Text("Connect Simkl", "Label", "Accent", 13, FontWeights.SemiBold), () => _ = shell.ConnectSimkl())));
+            box.Children.Add(Row(shell.Who?.IsGuest == true ? "Sign in to Stremio" : "Bring your Stremio library",
+                shell.Who?.IsGuest == true
+                    ? "Your Stremio library, Continue Watching and addons here. As Guest it's forgotten when the app closes."
+                    : "Your Stremio library, Continue Watching and addons here, kept in step both ways. Sign in on Stremio's own page — your password never comes to Watchly.",
+                Ui.Button(Ui.Text("Sign in to Stremio", "Label", "Accent", 13, FontWeights.SemiBold), () => _ = shell.ConnectStremio())));
         }
-        return Group("Simkl", box);
+        return Group("Stremio account", box);
+    }
+
+    /// <summary>A link as a QR code, black on white whatever the theme, so any phone camera reads it.</summary>
+    static FrameworkElement Qr(string link)
+    {
+        using var generator = new QRCoder.QRCodeGenerator();
+        using var data = generator.CreateQrCode(link, QRCoder.QRCodeGenerator.ECCLevel.M);
+        var png = new QRCoder.PngByteQRCode(data).GetGraphic(8);
+        var image = new System.Windows.Media.Imaging.BitmapImage();
+        image.BeginInit();
+        image.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+        image.StreamSource = new MemoryStream(png);
+        image.EndInit();
+        image.Freeze();
+        var picture = new Image { Source = image, Width = 150, Height = 150, SnapsToDevicePixels = true };
+        // Square modules stay square: smoothing blurs the edges a camera looks for.
+        RenderOptions.SetBitmapScalingMode(picture, BitmapScalingMode.NearestNeighbor);
+        return new Border { Background = Brushes.White, CornerRadius = new CornerRadius(8), Padding = new Thickness(6), Child = picture };
     }
 
     /// <summary>A TorBox key: cached releases play from its servers, anything else from the swarm as before.</summary>

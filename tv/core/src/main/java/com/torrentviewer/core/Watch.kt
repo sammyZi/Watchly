@@ -63,6 +63,8 @@ class Watch(val engine: TorrentStream) {
         private set
 
     val notes = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    /** Links for another app to open — a YouTube video, an addon's page: the app shell starts them. */
+    val opens = MutableSharedFlow<String>(extraBufferCapacity = 1)
 
     private var source: String? = null
     /** Bumped by every open and exit, so a file list that lands after backing out is dropped. */
@@ -153,26 +155,32 @@ class Watch(val engine: TorrentStream) {
 
     /** A chosen release becomes a stream. `tag` (S01E02) picks the file inside a pack. */
     fun stream(hit: Hit, from: Title?, tag: String? = null, episode: Episode? = null) = AppScope.launch {
+        if (hit.external) {
+            opens.tryEmit(hit.uri)
+            return@launch
+        }
         title = from
         val fresh = History.put(
             Item(
-                uri = hit.magnet,
+                uri = hit.uri,
                 title = hit.name,
                 at = System.currentTimeMillis(),
-                // Played straight from search: the index's own IMDb tag, so Simkl can still place it.
+                // Played straight from search: the index's own IMDb tag, so Stremio can still place it.
                 imdb = from?.imdb ?: hit.imdb,
                 kind = from?.kind ?: hit.imdb?.let { hit.kind },
                 poster = from?.poster,
                 backdrop = from?.backdrop,
                 titleName = if (episode != null && from != null) "${from.title} · ${episodeTag(episode.season, episode.episode)}" else from?.title,
-                seeders = hit.seeders,
+                seeders = hit.seeders.takeIf { !hit.direct },
             ),
         )
+        if (hit.direct) return@launch playLink(fresh, hit.name, hit.size, hit.headers)
         val found = inspect(fresh) ?: return@launch
         if (found.files.none { it.isVideo }) return@launch fail("This torrent holds no video.")
         // A pack of anime names its files by the number through the show: let that pick too.
         val pick = if (episode != null && from != null) pickTag(episode.season, episode.episode, absoluteNumber(from.episodes, episode.season, episode.episode)) else tag
-        val index = pickFile(found.files, pick)
+        // The addon's own file index settles it when the names can't.
+        val index = pickFile(found.files, pick) ?: hit.fileIdx?.takeIf { i -> found.files.any { it.index == i && it.isVideo } }
         if (index == null) {
             phase = Phase.IDLE
             choose = fresh to found
@@ -184,27 +192,37 @@ class Watch(val engine: TorrentStream) {
         play(index, started.resumeRatio(index), bitrateOf(size, started.durations[index] ?: runtimeSeconds(from?.runtime)))
     }
 
-    /** A release never played here takes the spot another release of the title was left at. */
+    /**
+     * One spot per title on this device, whichever release opens it: this release's own, unless another
+     * release of the title was played since — then that one's. Never played here at all: Stremio's.
+     */
     private fun carried(uri: String, found: TorrentMeta, index: Int): Item {
         val now = History.find(uri) ?: return item!!
-        if ((now.positions[index] ?: 0.0) > 0.0) return now
         val name = found.files.find { it.index == index }?.name ?: return now
-        val (at, duration) = carryOver(History.items.value, now, name) ?: return fromSimkl(now, index, name)
+        val own = (now.positions[index] ?: 0.0) > 0.0
+        val (at, duration) = carryOver(History.items.value, now, name, if (own) now.playedAt(index) else -1L)
+            ?: return if (own) now else fromStremio(now, index, name)
         History.setPosition(uri, index, at)
+        // Its own byte spot was for its own old time: the new time is all that's known now.
+        History.patch(uri) { it.copy(byteAts = it.byteAts - index) }
         duration?.let { History.setDuration(uri, index, it) }
         return (History.find(uri) ?: now).also { item = it }
     }
 
     /**
-     * Nothing here has played this title — a reinstall, another device — but Simkl kept where it
-     * was paused. Its percent of the runtime Cinemeta gives: close, not to the second.
+     * Nothing here has played this title — a reinstall, another device — but Stremio kept where it
+     * was paused: the very second, or its percent of the runtime when that's all there is.
      */
-    private fun fromSimkl(now: Item, index: Int, name: String): Item {
+    private fun fromStremio(now: Item, index: Int, name: String): Item {
         val imdb = now.imdb ?: return now
         val ep = if (now.kind == "movie") null else (episodeOfFile(title?.episodes.orEmpty(), name)?.let { Ep(it.season, it.episode) } ?: parseEpisode(name) ?: return now)
-        val percent = Simkl.library.value.pausedAt(imdb, ep) ?: return now
-        val runtime = runtimeSeconds(title?.runtime).takeIf { it > 0 } ?: return now
-        History.setPosition(now.uri, index, runtime * percent / 100)
+        val library = Stremio.library.value
+        val at = library.pausedSeconds(imdb, ep) ?: run {
+            val percent = library.pausedAt(imdb, ep) ?: return now
+            val runtime = runtimeSeconds(title?.runtime).takeIf { it > 0 } ?: return now
+            runtime * percent / 100
+        }
+        History.setPosition(now.uri, index, at)
         return (History.find(now.uri) ?: now).also { item = it }
     }
 
@@ -239,6 +257,30 @@ class Watch(val engine: TorrentStream) {
         phase = Phase.PLAYING
     }
 
+    /**
+     * A link that plays as it is — an addon's debrid stream, a file on the viewer's own server:
+     * one file, no torrent, so the engine only has to let go of whatever it was streaming.
+     */
+    // ponytail: [headers] aren't kept in History, so a link that needs them may not resume from Continue
+    // Watching; keep them on the Item if an addon that needs them gets common.
+    private suspend fun playLink(target: Item, name: String, size: Long, headers: Map<String, String> = emptyMap()) {
+        val ticket = ++gen
+        withContext(Dispatchers.IO) { engine.stop() }
+        if (ticket != gen) return
+        source = null
+        History.patch(target.uri) { it.copy(torrentName = name, lastFileIndex = 0, files = listOf(StoredFile(0, name, size, true, false, name))) }
+        item = History.find(target.uri) ?: target
+        meta = TorrentMeta(name, listOf(TorrentFile(0, name, name, size, true, false)))
+        playingIndex = 0
+        via = null
+        torboxIndexed = false
+        engine.progress.value = null
+        // A link that needs headers can't go to a Cast receiver, which won't send them.
+        engine.ready.value = Ready(target.uri, name, emptyList(), lanUrl = target.uri.takeIf { headers.isEmpty() }, headers = headers)
+        playId++
+        phase = Phase.PLAYING
+    }
+
     /** Continue watching: the stored file list goes straight to the engine. */
     fun resume(picked: Item) = AppScope.launch {
         if (isLocalVideo(picked.uri)) {
@@ -251,15 +293,19 @@ class Watch(val engine: TorrentStream) {
         title = null
         item = target
         target.imdb?.let { id -> launch { Meta.title(id, target.kind ?: "movie")?.let { if (item?.uri == target.uri) title = it } } }
+        if (isDirectLink(target.uri)) return@launch playLink(target, target.torrentName ?: target.label, target.files?.firstOrNull()?.size ?: 0)
         val known = target.lastFileIndex
         if (known != null && !target.files.isNullOrEmpty() && target.torrentName != null) {
             ++gen
             source = uriOf(target.uri)
             item = target
-            meta = TorrentMeta(target.torrentName, target.files.map { TorrentFile(it.index, it.path ?: it.name, it.name, it.size, it.isVideo, it.isSubtitle) })
+            val stored = TorrentMeta(target.torrentName, target.files.map { TorrentFile(it.index, it.path ?: it.name, it.name, it.size, it.isVideo, it.isSubtitle) })
+            meta = stored
             torboxIndexed = target.torboxFiles
             val size = target.files.find { it.index == known }?.size ?: 0
-            play(known, target.resumeRatio(known), bitrateOf(size, target.durations[known] ?: 0.0))
+            // An older release's row resumes where the title was last left, not where that release was.
+            val started = carried(target.uri, stored, known)
+            play(known, started.resumeRatio(known), bitrateOf(size, started.durations[known] ?: 0.0))
             return@launch
         }
         val found = inspect(target) ?: return@launch
@@ -271,7 +317,8 @@ class Watch(val engine: TorrentStream) {
         }
         remember(target.uri, found, index)
         val size = found.files.find { it.index == index }?.size ?: 0
-        play(index, target.resumeRatio(index), bitrateOf(size, target.durations[index] ?: 0.0))
+        val started = carried(target.uri, found, index)
+        play(index, started.resumeRatio(index), bitrateOf(size, started.durations[index] ?: 0.0))
     }
 
     /** From the "which file?" sheet. */
@@ -372,7 +419,8 @@ class Watch(val engine: TorrentStream) {
 
     fun savePosition(seconds: Double) {
         val at = item ?: return
-        History.setPosition(at.uri, playingIndex, seconds, if (via != null) -1.0 else engine.readRatio())
+        // Nothing on disk to measure when it streams from a link.
+        History.setPosition(at.uri, playingIndex, seconds, if (via != null || source == null) -1.0 else engine.readRatio())
         markWatched(at, seconds)
     }
 
@@ -383,20 +431,21 @@ class Watch(val engine: TorrentStream) {
         return episodeOf(playingFile)?.let { Ep(it.season, it.episode) } ?: parseEpisode(name)
     }
 
-    /** Closed part-way: Simkl keeps the spot, for a reinstall or another device. Finished goes as watched instead. */
-    private fun pauseOnSimkl() {
+    /** Closed part-way: Stremio keeps the spot, for a reinstall or another device. Finished goes as watched instead. */
+    private fun pauseOnStremio() {
         val at = item ?: return
         if (marked == playId) return
         val now = History.find(at.uri) ?: return
         val of = now.durations[playingIndex]?.takeIf { it > 0 } ?: return
-        val r = (now.positions[playingIndex] ?: return) / of
+        val seconds = now.positions[playingIndex] ?: return
+        val r = seconds / of
         if (r < 0.02 || r >= WATCHED_AT) return
         val ep = playingEp(at)
         if (at.kind != "movie" && ep == null) return
-        Simkl.pause(at.imdb, ep, r * 100, at.label.substringBefore(" · "))
+        Stremio.pause(at, ep, seconds, of)
     }
 
-    /** The play that has gone to Simkl, so a film is marked once however often its position is saved. */
+    /** The play that has gone to Stremio, so a film is marked once however often its position is saved. */
     private var marked = -1
 
     /** [WATCHED_AT] in is watched: the credits are not worth waiting for. */
@@ -405,9 +454,9 @@ class Watch(val engine: TorrentStream) {
         val of = History.find(at.uri)?.durations?.get(playingIndex) ?: return
         if (of <= 0 || seconds / of < WATCHED_AT) return
         marked = playId
-        if (at.kind == "movie") return Simkl.watched(at.imdb, null, null)
+        if (at.kind == "movie") return Stremio.watched(at, null, null)
         val ep = playingEp(at) ?: return
-        Simkl.watched(at.imdb, ep.season, ep.episode)
+        Stremio.watched(at, ep.season, ep.episode)
     }
 
     fun saveDuration(seconds: Double) = item?.let { History.setDuration(it.uri, playingIndex, seconds) }
@@ -419,7 +468,7 @@ class Watch(val engine: TorrentStream) {
     fun startAt(): Double = item?.let { History.find(it.uri)?.positions?.get(playingIndex) } ?: 0.0
 
     fun exit() {
-        pauseOnSimkl()
+        pauseOnStremio()
         gen++
         phase = Phase.IDLE
         item = null

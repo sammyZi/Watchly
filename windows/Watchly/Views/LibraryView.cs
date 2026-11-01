@@ -128,13 +128,13 @@ public sealed class LibraryView : UserControl
         var history = History.LatestPerTitle(shell.HistoryList);
         var q = query?.Text.Trim().ToLowerInvariant() ?? "";
         var shown = q.Length == 0 ? history : history.Where(h => Haystack(h).Contains(q)).ToList();
-        // After a reinstall this PC's history is empty; what Simkl has still belongs here.
-        var fromSimkl = KidsMode.Only(Simkl.Library.NotIn(shell.HistoryList)
+        // After a reinstall this PC's history is empty; what Stremio has still belongs here.
+        var fromStremio = KidsMode.Only(Stremio.Library.NotIn(shell.HistoryList)
             .Where(s => q.Length == 0 || s.Title.ToLowerInvariant().Contains(q))
             .Select(s => new Title { Imdb = s.Imdb, Kind = s.Kind, Name = s.Title, Year = s.Year, Poster = $"https://images.metahub.space/poster/medium/{s.Imdb}/img" }));
         var page = new StackPanel();
-        if (q.Length == 0 && SimklCard() is { } card) page.Children.Add(card);
-        if (shown.Count == 0 && fromSimkl.Count == 0)
+        if (q.Length == 0 && StremioCard() is { } card) page.Children.Add(card);
+        if (shown.Count == 0 && fromStremio.Count == 0)
         {
             page.Children.Add(q.Length > 0
                 ? Ui.Empty("search", "No matches", $"Nothing in your library matches “{q}”.")
@@ -154,32 +154,32 @@ public sealed class LibraryView : UserControl
             page.Children.Add(count);
             page.Children.Add(rows);
         }
-        if (fromSimkl.Count > 0)
+        if (fromStremio.Count > 0)
         {
-            var heading = Ui.Text("From Simkl", "TitleText", "Text", 17, FontWeights.Bold);
+            var heading = Ui.Text("From Stremio", "TitleText", "Text", 17, FontWeights.Bold);
             heading.Margin = new Thickness(0, shown.Count > 0 ? 24 : 0, 0, 4);
-            var hint = Ui.Text("Watched or paused on another device, or before this PC — open one to play it from where Simkl says you were.", "Meta", "Faint", 12);
+            var hint = Ui.Text("In your Stremio library, or paused on another device or before this PC — open one to play it from where Stremio says you were.", "Meta", "Faint", 12);
             hint.Margin = new Thickness(0, 0, 0, 12);
             page.Children.Add(heading);
             page.Children.Add(hint);
-            page.Children.Add(Ui.Grid(fromSimkl));
+            page.Children.Add(Ui.Grid(fromStremio));
         }
         list.Content = page;
     }
 
-    /// <summary>Where the history is, the history's sync is offered — until connected, or put off with Not now.</summary>
-    FrameworkElement? SimklCard()
+    /// <summary>Where the history is, the Stremio account is offered — until signed in, or put off with Not now.</summary>
+    FrameworkElement? StremioCard()
     {
-        if (!Simkl.Available || Simkl.Connected || shell.Who is not { IsGuest: false } || Store.LoadOwn<bool>("simkl-later", false)) return null;
-        var connect = Ui.Button(Ui.Text("Connect Simkl", "Label", "Accent", 13, FontWeights.SemiBold), () => _ = shell.ConnectSimkl());
-        var later = Ui.Button(Ui.Text("Not now", "Label", "Muted", 13), () => { Store.SaveOwn("simkl-later", true); Render(); });
+        if (Stremio.Connected || shell.Who is not { IsGuest: false } || Store.LoadOwn<bool>("stremio-later", false)) return null;
+        var connect = Ui.Button(Ui.Text("Sign in to Stremio", "Label", "Accent", 13, FontWeights.SemiBold), () => _ = shell.ConnectStremio());
+        var later = Ui.Button(Ui.Text("Not now", "Label", "Muted", 13), () => { Store.SaveOwn("stremio-later", true); Render(); });
         later.Margin = new Thickness(20, 0, 0, 0);
         var card = Ui.Card(new StackPanel
         {
             Children =
             {
-                Ui.Text("Sync your history with Simkl", "TitleText", "Text", 15, FontWeights.SemiBold),
-                Ui.Text("Films and episodes you finish get marked watched on your Simkl account, and Continue Watching follows you to your phone and TV.", "Meta", "Faint", 12),
+                Ui.Text("Bring your Stremio library", "TitleText", "Text", 15, FontWeights.SemiBold),
+                Ui.Text("Your Stremio library, Continue Watching and addons here, kept in step both ways. Sign in on Stremio's own page — your password never comes to Watchly.", "Meta", "Faint", 12),
                 new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 0), Children = { connect, later } },
             },
         }, "Surface", 10, new Thickness(16));

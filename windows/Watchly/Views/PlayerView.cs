@@ -447,6 +447,10 @@ public sealed class PlayerView : UserControl, IDisposable
             {
                 url = new Uri(request.LocalPath).AbsoluteUri;
             }
+            else if (request.Link is not null)
+            {
+                url = request.Link;
+            }
             else
             {
                 session = await StreamSession.Start(request.Torrent!, request.FileIndex, shell.Settings.RemoveFilesAfterStop, request.HistoryUri, life.Token);
@@ -508,6 +512,12 @@ public sealed class PlayerView : UserControl, IDisposable
             ":live-caching=300",
             ":clock-jitter=0",
             $":start-time={startSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+        // ponytail: libVLC sends only these two of a link's headers (an addon's proxyHeaders).
+        foreach (var (k, v) in request.Headers ?? new())
+        {
+            if (k.Equals("user-agent", StringComparison.OrdinalIgnoreCase)) media.AddOption($":http-user-agent={v}");
+            else if (k.Equals("referer", StringComparison.OrdinalIgnoreCase)) media.AddOption($":http-referrer={v}");
+        }
         started = true;
         buffering = true;
         current = (long)(startSeconds * 1000);
@@ -735,7 +745,9 @@ public sealed class PlayerView : UserControl, IDisposable
             livePct.Text = $"· {s.Percent:0}%";
             liveMeta.Text = $"{Format.Speed(s.Speed)} · {s.Seeds} seeds · {s.Peers} peers";
         }
-        liveStage.Text = request.LocalPath is not null ? "Opening" : !started ? StageLabel(stats) : $"Buffering {Math.Round(bufferPct)}%";
+        // No swarm to report on for a file on disk or a link.
+        var plain = request.LocalPath is not null || request.Link is not null;
+        liveStage.Text = plain ? "Opening" : !started ? StageLabel(stats) : $"Buffering {Math.Round(bufferPct)}%";
         liveUpNext.Text = $"Up next in {Math.Max(0, (int)Math.Ceiling((duration - current) / 1000.0))}s";
         liveVolume.Text = shell.Settings.Volume.ToString();
         volumeFill.Height = VolumeTrack * Math.Clamp(shell.Settings.Volume, 0, 150) / 150.0;
@@ -743,7 +755,7 @@ public sealed class PlayerView : UserControl, IDisposable
         liveNow.Text = DateTime.Now.ToString("t");
         liveEnds.Text = duration > 0 ? $"Ends at {ends:t}" : "";
         livePauseEnds.Text = $"Ends at {ends:t} if you resume now";
-        liveDot.Fill = request.LocalPath is not null || (stats?.Peers ?? 0) > 0 ? Green : White(0x55);
+        liveDot.Fill = plain || (stats?.Peers ?? 0) > 0 ? Green : White(0x55);
         ring.Percent = bufferPct;
     }
 
@@ -1579,7 +1591,7 @@ public sealed class PlayerView : UserControl, IDisposable
         {
             var at = Search.ParseEpisode(request.Title);
             var useImdb = request.Imdb is not null && (typed is null || typed.Trim().Length == 0 || typed.Trim() == request.MetaTitle);
-            // OpenSubtitles needs no key; SubDL joins in once the viewer has given theirs in Settings.
+            // The viewer's subtitles addons; SubDL joins in once the viewer has given their key in Settings.
             var results = await Subtitles.Find(q, useImdb ? request.Imdb : null, at?.Season, at?.Episode,
                 at is not null || request.Kind == "tv" ? "tv" : request.Kind == "movie" ? "movie" : null,
                 request.Title);
