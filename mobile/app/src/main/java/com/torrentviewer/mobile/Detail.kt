@@ -220,7 +220,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
      */
     /** A season pack is this season alone, or a complete series that holds it; the download takes only this season's episodes. */
     fun packsOf(hits: List<Hit>, s: Int) = hits.filter {
-        !it.direct && ((it.scope == Scope.SEASON && parseEpisode(it.name) == null && s in seasonsIn(it.name)) || it.scope == Scope.COMPLETE)
+        !it.direct && ((it.scope == Scope.SEASON && parseEpisode(it.release) == null && s in seasonsIn(it.release)) || it.scope == Scope.COMPLETE)
     }
 
     /** The season's packs, listed to pick one from, as they arrive. */
@@ -476,7 +476,8 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
 Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
                 else -> LazyColumn {
                     items(packs.take(MAX_SOURCES), key = { "pack-" + it.id }) { hit ->
-                        Source(hit, Modifier.padding(start = EDGE, end = EDGE, bottom = 8.dp), onDownload = { keepSeason(hit, s) }) { keepSeason(hit, s) }
+                        // Under the pack's own name, not the one episode file the addon pointed into it.
+                        Source(hit.copy(name = hit.release), Modifier.padding(start = EDGE, end = EDGE, bottom = 8.dp), onDownload = { keepSeason(hit, s) }) { keepSeason(hit, s) }
                     }
                 }
             }

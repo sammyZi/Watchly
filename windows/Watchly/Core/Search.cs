@@ -33,6 +33,11 @@ public sealed record Hit
     /// <summary>The manifest link of the addon it came from: a debrid link only plays while that addon (and its key) is still added.</summary>
     public string AddonUrl { get; init; } = "";
 
+    /// <summary>The release's own name, when it isn't <see cref="Name"/>: a season pack's, where Name is the one file in it the addon meant.</summary>
+    public string Release { get; init; } = "";
+    /// <summary>What says whether this is a pack and of which seasons: the release's name, else the file's.</summary>
+    public string PackName => Release.Length > 0 ? Release : Name;
+
     /// <summary>Plays straight from its link: no swarm, no seeders to count, nothing to download.</summary>
     public bool Direct => !External && Search.IsDirectLink(Uri);
     /// <summary>A torrent: the only kind the download engine can keep.</summary>
@@ -287,7 +292,7 @@ public static class Search
         bool ThisPack(Hit h)
         {
             if (h.Seeders < 1 || h.Scope != "season") return false;
-            var c = SeasonsIn(h.Name);
+            var c = SeasonsIn(h.PackName);
             return c.Count <= 1 && (season == null || c.Count == 0 || c.Contains(season.Value));
         }
         bool One(Hit h) => h.Scope == "episode" && h.Seeders >= 1;
@@ -335,9 +340,12 @@ public static class Search
             var fileIdx = (int)Num(s["fileIdx"] ?? JsonValue.Create(-1));
             var text = Str(s["title"]) is { Length: > 0 } t ? t : Str(s["description"]);
             var label = Str(s["name"]).Replace('\n', ' ').Trim();
-            var name = Str(hints?["filename"]) is { Length: > 0 } file ? file
-                : text.Split('\n')[0].Trim() is { Length: > 0 } first ? first : label;
+            var first = text.Split('\n')[0].Trim();
+            var name = Str(hints?["filename"]) is { Length: > 0 } file ? file : first.Length > 0 ? first : label;
             if (name.Length == 0) continue;
+            // Torrentio and the like name the one file they found and put the release on the first line:
+            // "Show.S01.1080p" over "Show.S01E01.mkv" is a season pack, whatever the file says.
+            var release = first.Length > 0 && first != name && ScopeOf(first) != "episode" ? first : "";
             var size = (long)Num(hints?["videoSize"]);
             if (size <= 0 && SizeRx.Match(text) is { Success: true } sm)
                 size = (long)Math.Round(double.Parse(sm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) * Unit(sm.Groups[2].Value));
@@ -353,7 +361,8 @@ public static class Search
                 Seeders = seeds.Success ? int.Parse(seeds.Groups[1].Value) : 0,
                 Size = Math.Max(0, size),
                 Quality = Quality(name) ?? Quality($"{label} {text}"),
-                Scope = ScopeOf(name),
+                Scope = ScopeOf(release.Length > 0 ? release : name),
+                Release = release,
                 Kind = kind,
                 PerFileSize = true,
                 Addon = addon,

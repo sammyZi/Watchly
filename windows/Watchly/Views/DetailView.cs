@@ -730,7 +730,7 @@ public sealed class DetailView : UserControl, IDisposable
     long TorrentBytes(Hit hit)
     {
         if (!hit.PerFileSize || hit.Scope == "episode" || hit.Size == 0) return hit.Size;
-        var claims = Search.SeasonsIn(hit.Name);
+        var claims = Search.SeasonsIn(hit.PackName);
         var n = (claims.Count > 0
             ? title.Episodes.Where(e => claims.Contains(e.Season))
             : hit.Scope == "complete" ? title.Episodes : title.Episodes.Where(e => e.Season == season)).Count();
@@ -825,7 +825,7 @@ public sealed class DetailView : UserControl, IDisposable
         bool IsPack(Hit h)
         {
             if (!h.IsTorrent || h.Scope is not ("season" or "complete")) return false;
-            var claims = Search.SeasonsIn(h.Name);
+            var claims = Search.SeasonsIn(h.PackName);
             return claims.Count == 0 || claims.Contains(which);
         }
         return sources.Where(IsPack).OrderByDescending(h => h.Seeders).ToList();
@@ -868,8 +868,9 @@ public sealed class DetailView : UserControl, IDisposable
             grade.VerticalAlignment = VerticalAlignment.Center;
             DockPanel.SetDock(grade, Dock.Right);
             dock.Children.Add(grade);
-            var name = Ui.Text(hit.Name, "Label", "Text", 14);
-            name.ToolTip = hit.Name;
+            // Under the pack's own name, not the one episode file the addon pointed into it.
+            var name = Ui.Text(hit.PackName, "Label", "Text", 14);
+            name.ToolTip = hit.PackName;
             var meta = Ui.Text(string.Join("  ·  ", hit.Scope == "complete" ? "Complete series" : "Season pack", Format.Bytes(TorrentBytes(hit)), $"{hit.Seeders} seeds"), "Meta", "Faint", 12);
             meta.Margin = new Thickness(0, 2, 0, 0);
             dock.Children.Add(new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { name, meta } });

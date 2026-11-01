@@ -186,6 +186,30 @@ class LibTest {
         assertEquals(3, tracked.fileIdx)
         assertTrue(tracked.uri.contains("t.example"))
 
+        // Torrentio's shape: the pack on the first line, the episode file it found in behaviorHints.
+        // It's a season pack, by the pack's name; the file's name stays for playing.
+        val packed = toStreamHits(
+            JSONArray().put(
+                JSONObject(stream.toString()).put("title", "Show.S01.1080p.WEB-DL\nShow.S01E01.1080p.WEB-DL.mkv\n👤 40 💾 1.2 GB ⚙️ somewhere")
+                    .put("behaviorHints", JSONObject().put("filename", "Show.S01E01.1080p.WEB-DL.mkv")),
+            ),
+            "tv",
+        ).single()
+        assertEquals("Show.S01E01.1080p.WEB-DL.mkv", packed.name)
+        assertEquals("Show.S01.1080p.WEB-DL", packed.release)
+        assertEquals(Scope.SEASON, packed.scope)
+        assertEquals("Show.S01.1080p.WEB-DL", rankEpisode(listOf(packed), "", 1).single().release)
+        // A single episode's release on the first line stays an episode.
+        val single = toStreamHits(
+            JSONArray().put(
+                JSONObject(stream.toString()).put("title", "Show.S01E02.1080p.WEB-DL\n👤 40")
+                    .put("behaviorHints", JSONObject().put("filename", "Show.S01E02.1080p.WEB-DL.mkv")),
+            ),
+            "tv",
+        ).single()
+        assertEquals(Scope.EPISODE, single.scope)
+        assertEquals("Show.S01E02.1080p.WEB-DL.mkv", single.release)
+
         // Pasted links: a magnet goes to the swarm, a video URL plays as it is, words are a search.
         assertTrue(linkHit("http://192.168.1.5:8096/Videos/1/stream.mkv")!!.direct)
         assertFalse(linkHit("magnet:?xt=urn:btih:aa0fd381c944a72cabb3e962d5f727c8694d7dd6&dn=X")!!.direct)

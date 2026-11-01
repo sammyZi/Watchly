@@ -224,6 +224,8 @@ data class Hit(
     val fileIdx: Int? = null,
     /** The manifest link of the addon it came from: a debrid link only plays while that addon (and its key) is still added. */
     val addonUrl: String = "",
+    /** The release's own name: a season pack's, where [name] is the one file in it the addon meant. */
+    val release: String = name,
 ) {
     /** Plays straight from its link: no swarm, no seeders to count. */
     val direct get() = !external && isDirectLink(uri)
@@ -274,8 +276,12 @@ fun toStreamHits(streams: JSONArray, kind: String, addon: String = "", addonUrl:
     val hints = s.optJSONObject("behaviorHints")
     val text = (s.str("title") ?: s.str("description")).orEmpty()
     val label = s.optString("name").replace('\n', ' ').trim()
-    val name = hints?.str("filename") ?: text.lineSequence().firstOrNull()?.trim().orEmpty().ifEmpty { label }
+    val first = text.lineSequence().firstOrNull()?.trim().orEmpty()
+    val name = hints?.str("filename") ?: first.ifEmpty { label }
     if (name.isEmpty()) return@mapNotNull null
+    // Torrentio and the like name the one file they found and put the release on the first line:
+    // "Show.S01.1080p" over "Show.S01E01.mkv" is a season pack, whatever the file says.
+    val release = first.takeIf { it.isNotEmpty() && it != name && scopeOf(it) != Scope.EPISODE } ?: name
     val size = hints?.optLong("videoSize")?.takeIf { it > 0 }
         ?: SIZE.find(text)?.let { (it.groupValues[1].toDouble() * (UNIT[it.groupValues[2].lowercase()] ?: 0.0)).roundToLong() } ?: 0L
     val trackers = s.strings("sources").filter { it.startsWith("tracker:") }.map { it.removePrefix("tracker:") }
@@ -289,10 +295,10 @@ fun toStreamHits(streams: JSONArray, kind: String, addon: String = "", addonUrl:
             else -> outside!!
         },
         seeders = SEEDERS.find(text)?.groupValues?.get(1)?.toIntOrNull() ?: 0, leechers = 0, size = size,
-        quality = quality(name) ?: quality("$label $text"), kind = kind, scope = scopeOf(name), imdb = null, perFileSize = true, addon = addon,
+        quality = quality(name) ?: quality("$label $text"), kind = kind, scope = scopeOf(release), imdb = null, perFileSize = true, addon = addon,
         external = hash == null && url == null, headers = if (url != null) headers else emptyMap(),
         fileIdx = s.optInt("fileIdx", -1).takeIf { hash != null && it >= 0 },
-        addonUrl = addonUrl,
+        addonUrl = addonUrl, release = release,
     )
 }
 
@@ -338,7 +344,7 @@ fun rankEpisode(hits: List<Hit>, query: String = "", season: Int? = null): List<
     val (links, ordered) = rank(hits, query).partition { it.direct }
     fun thisPack(h: Hit): Boolean {
         if (h.seeders < 1 || h.scope != Scope.SEASON) return false
-        val c = seasonsIn(h.name)
+        val c = seasonsIn(h.release)
         return c.size <= 1 && (season == null || c.isEmpty() || season in c)
     }
     fun one(h: Hit) = h.scope == Scope.EPISODE && h.seeders >= 1
