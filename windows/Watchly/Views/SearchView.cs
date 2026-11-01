@@ -180,6 +180,8 @@ public sealed class SearchView : UserControl
         {
             var filmsJob = q.Length > 0 ? Meta.SearchTitles(q, "movie") : Meta.LoadCatalog("movie");
             var seriesJob = q.Length > 0 ? Meta.SearchTitles(q, "tv") : Meta.LoadCatalog("tv");
+            // And every addon catalogue that searches, as Stremio asks them all.
+            var addonsJob = q.Length > 0 && !KidsMode.On ? Meta.SearchAddons(q) : Task.FromResult(new List<Title>());
             var films = await filmsJob;
             var series = await seriesJob;
             // Interleaved: looking for a show should not mean scrolling past thirty films.
@@ -189,6 +191,7 @@ public sealed class SearchView : UserControl
                 if (i < films.Count) mixed.Add(films[i]);
                 if (i < series.Count) mixed.Add(series[i]);
             }
+            mixed = Meta.UniqueById(mixed.Concat(await addonsJob));
         }
         if (mine != latest) return;
         titles = KidsMode.Only(mixed);
@@ -251,7 +254,7 @@ public sealed class SearchView : UserControl
     FrameworkElement HitRow(Hit hit)
     {
         var tone = Ui.HealthTone(hit.Seeders);
-        var meta = string.Join("  ·  ", new[] { hit.Size > 0 ? Format.Bytes(hit.Size) : null, hit.Quality, hit.Direct ? "Direct" : $"{hit.Seeders} seeders", hit.Addon.Length > 0 ? hit.Addon : null }.Where(s => s is not null));
+        var meta = string.Join("  ·  ", new[] { hit.Size > 0 ? Format.Bytes(hit.Size) : null, hit.Quality, hit.Direct ? "Direct" : hit.External ? "Opens in the browser" : $"{hit.Seeders} seeders", hit.Addon.Length > 0 ? hit.Addon : null }.Where(s => s is not null));
         var name = Ui.Text(hit.Name, "Label", "Text", 13);
         name.ToolTip = hit.Name;
         var body = new StackPanel { Children = { name, Ui.Text(meta, "Meta", "Faint") }, VerticalAlignment = VerticalAlignment.Center };
@@ -278,7 +281,7 @@ public sealed class SearchView : UserControl
         DockPanel.SetDock(dot, Dock.Right);
         dock.Children.Add(dot);
         // The download engine is a torrent client; a link is streamed only.
-        if (!hit.Direct)
+        if (hit.IsTorrent)
         {
             var download = Ui.Round("download", () =>
             {
@@ -296,7 +299,7 @@ public sealed class SearchView : UserControl
         {
             if (Query.Length > 0) recent = Searches.Remember(Query);
             // A torrent goes straight to its file list — someone who tapped a release wants to see what is in it.
-            _ = shell.StreamUri(hit.Uri, new OpenOptions { Name = hit.Name, TitleName = TitleText.SearchableName(hit.Name) });
+            _ = shell.StreamHit(hit, new OpenOptions { TitleName = TitleText.SearchableName(hit.Name) });
         });
         ((Border)row.Content).SetResourceReference(Border.BorderBrushProperty, "Line");
         return row;

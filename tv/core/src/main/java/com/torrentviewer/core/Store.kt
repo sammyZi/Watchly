@@ -357,8 +357,16 @@ data class Item(
     val seeders: Int? = null,
     /** [files] are numbered as TorBox listed them, not as libtorrent does — see [Watch]. */
     val torboxFiles: Boolean = false,
+    /** When each file's spot was last saved, ms: which of a title's releases was played last. */
+    val played: Map<Int, Long> = emptyMap(),
 ) {
     val label get() = titleName ?: title
+
+    /** When this file was last played; an entry from before this was kept says when it was opened. */
+    fun playedAt(index: Int): Long = played[index] ?: at
+
+    /** When anything in it was last played. */
+    val lastPlayed: Long get() = lastFileIndex?.let(::playedAt) ?: at
 
     /** 0–1 through the last file played. */
     val ratio: Double
@@ -393,6 +401,7 @@ data class Item(
         })
         .put("imdb", imdb).put("kind", kind).put("poster", poster).put("backdrop", backdrop).put("titleName", titleName)
         .put("seeders", seeders).put("torboxFiles", torboxFiles)
+        .put("played", JSONObject().also { o -> played.forEach { (k, v) -> o.put(k.toString(), v) } })
 
     companion object {
         fun from(o: JSONObject) = Item(
@@ -419,6 +428,7 @@ data class Item(
             titleName = o.str("titleName"),
             seeders = if (o.has("seeders") && !o.isNull("seeders")) o.optInt("seeders") else null,
             torboxFiles = o.optBoolean("torboxFiles", false),
+            played = o.optJSONObject("played")?.let { p -> p.keys().asSequence().mapNotNull { k -> k.toIntOrNull()?.let { it to p.optLong(k) } }.toMap() }.orEmpty(),
         )
     }
 }
@@ -431,31 +441,32 @@ val Item.titleKey: String get() = imdb ?: titleName?.substringBefore(" · ")?.lo
 
 /**
  * One entry per title, newest first — one card per film or show, wherever it was played from.
- * Of a title's entries, the newest that was actually started: a second release opened and
- * closed at once must not hide where the first one was left.
+ * Of a title's entries, the one played last: a second release opened and closed at once must
+ * not hide where the first one was left, nor an older one where the newest was.
  */
 fun latestPerTitle(items: List<Item>): List<Item> =
-    items.sortedByDescending { it.at }.groupBy { it.titleKey }.values
+    items.sortedByDescending { it.lastPlayed }.groupBy { it.titleKey }.values
         .map { group -> group.firstOrNull { it.ratio > 0.0 } ?: group.first() }
         .sortedByDescending { it.at }
 
 /**
- * Where to start [fileName] of [target] when this release has never been played: the spot
- * another release of the same title (and, for a series, the same episode) was left, in
- * seconds, with that release's duration. By time, not bytes — releases differ in size.
+ * Where to start [fileName] of [target]: the spot another release of the same title (and, for a
+ * series, the same episode) was left, if one was played after [since] — this release's own last
+ * play, or -1 when it never was. One spot per title on a device, whichever release opens it.
+ * In seconds, with that release's duration. By time, not bytes — releases differ in size.
  */
-fun carryOver(items: List<Item>, target: Item, fileName: String): Pair<Double, Double?>? {
+fun carryOver(items: List<Item>, target: Item, fileName: String, since: Long = -1L): Pair<Double, Double?>? {
     // Anime goes by its bare number ("One Piece - 1125"): without it, every such file was
     // "no episode" alike, and 1125 opened where 1124 was left.
     fun episodeOf(name: String): Any? = parseEpisode(name) ?: parseAbsolute(name)
     val ep = episodeOf(fileName)
     // A series file that says no episode can't be matched to anything.
     if (ep == null && target.kind == "tv") return null
-    val donor = items.filter { it.uri != target.uri && it.titleKey == target.titleKey }.sortedByDescending { it.at }.firstOrNull { d ->
-        val i = d.lastFileIndex ?: return@firstOrNull false
-        (d.positions[i] ?: 0.0) > 0.0 && d.files?.find { it.index == i }?.name?.let(::episodeOf) == ep
-    } ?: return null
-    val i = donor.lastFileIndex!!
+    // Any file of another release that is this one — a pack's episode, not only the last it played.
+    val (donor, i) = items.filter { it.uri != target.uri && it.titleKey == target.titleKey }.flatMap { d ->
+        val files = if (ep == null) d.files?.filter { it.index == d.lastFileIndex } else d.files?.filter { episodeOf(it.name) == ep }
+        files.orEmpty().filter { (d.positions[it.index] ?: 0.0) > 0.0 }.map { d to it.index }
+    }.maxByOrNull { (d, i) -> d.playedAt(i) }?.takeIf { (d, i) -> d.playedAt(i) > since } ?: return null
     val duration = donor.durations[i]
     // Watched through is not a place to start a new copy from.
     if (duration != null && donor.positions[i]!! >= duration * 0.95) return null
@@ -598,6 +609,7 @@ object History {
             lastFileIndex = index,
             positions = it.positions + (index to seconds),
             byteAts = if (byteAt >= 0) it.byteAts + (index to byteAt) else it.byteAts,
+            played = it.played + (index to System.currentTimeMillis()),
         )
     }
 

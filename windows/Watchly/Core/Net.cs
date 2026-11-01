@@ -82,6 +82,18 @@ public static class Net
         return JsonNode.Parse(text);
     }
 
+    /// <summary>A JSON POST, its JSON answer — whatever the status, as APIs like Stremio's say what went wrong in the body. Quiet.</summary>
+    public static async Task<JsonNode?> PostJson(string url, JsonNode body, CancellationToken ct = default)
+    {
+        using var timer = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timer.CancelAfter(TimeSpan.FromSeconds(30));
+        using var content = new StringContent(body.ToJsonString(), System.Text.Encoding.UTF8, "application/json");
+        using var res = await Http.PostAsync(url, content, timer.Token).ConfigureAwait(false);
+        var text = await res.Content.ReadAsStringAsync(timer.Token).ConfigureAwait(false);
+        try { return JsonNode.Parse(text); }
+        catch { throw new HttpRequestException($"{new Uri(url).Host} returned {(int)res.StatusCode}"); }
+    }
+
     /// <summary>Poll until something answers, then flip back. One loop at a time.</summary>
     static async Task ProbeLoop()
     {

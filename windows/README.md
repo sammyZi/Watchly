@@ -4,6 +4,11 @@ The phone app as a native Windows desktop app, in the look the phone and the TV 
 catalogue, plus a BitTorrent-style download manager. Like the phone and the TV it ships with no sources:
 streams and subtitles come from the Stremio-protocol addons you add under Settings → Addons, or from a
 link you paste into Search → Streams. A torrent stream goes to the torrent engine; a link plays as it is.
+Addon catalogues become home rows and are searched too. An addon site's Install button (`stremio://`)
+opens in Watchly when the installer's "Open addon Install links" box is ticked (offered only when
+Stremio doesn't already own those links). Settings → Stremio account signs in by Stremio's link code,
+with a QR for approving on a phone; the library, Continue Watching and My List then stay in step, and
+the account's addons can be imported.
 
 | Part | Library |
 |---|---|

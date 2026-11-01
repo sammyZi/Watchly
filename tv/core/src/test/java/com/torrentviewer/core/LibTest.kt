@@ -499,6 +499,16 @@ class LibTest {
         assertEquals(1300.0 to null, carryOver(listOf(e1124, next), next, "[Erai-raws] One Piece - 1124 [1080p].mkv"))
         // Watched through: start the new copy from the top.
         assertNull(carryOver(listOf(first.copy(positions = mapOf(0 to 5900.0)), second), second, "Film.1080p.mkv"))
+        // One spot per title: a release left at 10 min loses to another played since, at 40 min — and wins over an older one.
+        val old = Item("h", "Film.720p", at = 9, imdb = "tt9", files = f("Film.720p.mkv"), lastFileIndex = 0, positions = mapOf(0 to 600.0), played = mapOf(0 to 100L))
+        val newer = Item("i", "Film.1080p", at = 5, imdb = "tt9", files = f("Film.1080p.mkv"), lastFileIndex = 0, positions = mapOf(0 to 2400.0), played = mapOf(0 to 200L))
+        assertEquals(2400.0 to null, carryOver(listOf(old, newer), old, "Film.720p.mkv", old.playedAt(0)))
+        assertNull(carryOver(listOf(old, newer), newer, "Film.1080p.mkv", newer.playedAt(0)))
+        // A pack's episode counts, not only the file it played last.
+        val pack2 = Item("j", "Show.S01", at = 1, imdb = "tt6", files = f("Show.S01E01.mkv") + StoredFile(1, "Show.S01E02.mkv", 1, true, false, null), lastFileIndex = 1, positions = mapOf(0 to 120.0, 1 to 50.0))
+        assertEquals(120.0 to null, carryOver(listOf(pack2, pack), pack, "Show.S01E01.1080p.mkv"))
+        // Continue Watching shows the release played last, not the one opened last.
+        assertEquals("i", latestPerTitle(listOf(old, newer)).single().uri)
     }
 
     @Test fun episodesWatched() {

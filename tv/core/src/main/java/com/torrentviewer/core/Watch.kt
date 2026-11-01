@@ -192,13 +192,19 @@ class Watch(val engine: TorrentStream) {
         play(index, started.resumeRatio(index), bitrateOf(size, started.durations[index] ?: runtimeSeconds(from?.runtime)))
     }
 
-    /** A release never played here takes the spot another release of the title was left at. */
+    /**
+     * One spot per title on this device, whichever release opens it: this release's own, unless another
+     * release of the title was played since — then that one's. Never played here at all: Stremio's.
+     */
     private fun carried(uri: String, found: TorrentMeta, index: Int): Item {
         val now = History.find(uri) ?: return item!!
-        if ((now.positions[index] ?: 0.0) > 0.0) return now
         val name = found.files.find { it.index == index }?.name ?: return now
-        val (at, duration) = carryOver(History.items.value, now, name) ?: return fromStremio(now, index, name)
+        val own = (now.positions[index] ?: 0.0) > 0.0
+        val (at, duration) = carryOver(History.items.value, now, name, if (own) now.playedAt(index) else -1L)
+            ?: return if (own) now else fromStremio(now, index, name)
         History.setPosition(uri, index, at)
+        // Its own byte spot was for its own old time: the new time is all that's known now.
+        History.patch(uri) { it.copy(byteAts = it.byteAts - index) }
         duration?.let { History.setDuration(uri, index, it) }
         return (History.find(uri) ?: now).also { item = it }
     }
@@ -293,10 +299,13 @@ class Watch(val engine: TorrentStream) {
             ++gen
             source = uriOf(target.uri)
             item = target
-            meta = TorrentMeta(target.torrentName, target.files.map { TorrentFile(it.index, it.path ?: it.name, it.name, it.size, it.isVideo, it.isSubtitle) })
+            val stored = TorrentMeta(target.torrentName, target.files.map { TorrentFile(it.index, it.path ?: it.name, it.name, it.size, it.isVideo, it.isSubtitle) })
+            meta = stored
             torboxIndexed = target.torboxFiles
             val size = target.files.find { it.index == known }?.size ?: 0
-            play(known, target.resumeRatio(known), bitrateOf(size, target.durations[known] ?: 0.0))
+            // An older release's row resumes where the title was last left, not where that release was.
+            val started = carried(target.uri, stored, known)
+            play(known, started.resumeRatio(known), bitrateOf(size, started.durations[known] ?: 0.0))
             return@launch
         }
         val found = inspect(target) ?: return@launch
@@ -308,7 +317,8 @@ class Watch(val engine: TorrentStream) {
         }
         remember(target.uri, found, index)
         val size = found.files.find { it.index == index }?.size ?: 0
-        play(index, target.resumeRatio(index), bitrateOf(size, target.durations[index] ?: 0.0))
+        val started = carried(target.uri, found, index)
+        play(index, started.resumeRatio(index), bitrateOf(size, started.durations[index] ?: 0.0))
     }
 
     /** From the "which file?" sheet. */

@@ -36,6 +36,15 @@ public sealed record Title
     public string? Logo { get; init; }
     public string? Runtime { get; init; }
     public List<Episode> Episodes { get; init; } = new();
+    /// <summary>Its Stremio type — "movie", "series", "channel", "tv" or an addon's own — which addons are asked by. Null is the kind's.</summary>
+    public string? Type { get; init; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string StremioType => Type ?? (Kind == "movie" ? "movie" : "series");
+
+    /// <summary>A landscape picture: MetaHub carries a background for nearly every IMDb id; an addon's own ids, their poster.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? Wide => Backdrop ?? (Imdb.StartsWith("tt") ? $"https://images.metahub.space/background/medium/{Imdb}/img" : Poster);
 
     /// <summary>Long-running anime, listed by each episode's number through the show rather than by season.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
@@ -145,9 +154,16 @@ public static class Meta
         return titles.Where(t => !string.IsNullOrEmpty(t.Imdb) && seen.Add(t.Imdb)).ToList();
     }
 
+    /// <summary>
+    /// A title's full entry: from the viewer's meta addons first, in their order and by the types they
+    /// list for the id, so an addon's own ids ("kitsu:…", a channel's) open too; Cinemeta for an IMDb id
+    /// none of them knows.
+    /// </summary>
     public static Task<Title?> LoadTitle(string imdb, string kind) =>
         Once<Title?>($"title-{kind}-{imdb}", () => Remember($"title-{kind}-{imdb}", async () =>
         {
+            if (await FromAddons(imdb, kind) is { } mine) return mine;
+            if (!imdb.StartsWith("tt")) return null;
             using var res = await Net.Send($"{Base}/{(kind == "tv" ? "series" : "movie")}/{imdb}.json");
             if (!res.IsSuccessStatusCode) return null;
             var body = JsonNode.Parse(await res.Content.ReadAsStringAsync());
@@ -156,6 +172,42 @@ public static class Meta
             var title = ToTitles(new JsonArray(meta.DeepClone()), kind, true).FirstOrDefault();
             return title is { NumberedThrough: true } ? await WithStills(title) : title;
         }), null);
+
+    static async Task<Title?> FromAddons(string id, string kind)
+    {
+        var first = kind == "tv" ? "series" : "movie";
+        foreach (var a in Addons.List)
+            foreach (var type in a.MetaTypes(id, first))
+            {
+                JsonObject? meta;
+                try { meta = (await a.Get("meta", type, id))?["meta"] as JsonObject; }
+                catch { continue; }
+                if (meta is null) continue;
+                // Kept under the id it was asked by: History, My List and the page all know it so.
+                meta["imdb_id"] = id;
+                var real = S(meta["type"]) ?? type;
+                if (ToTitles(new JsonArray(meta.DeepClone()), Addons.KindOfType(real), true, true, real).FirstOrDefault() is { } t) return t;
+            }
+        return null;
+    }
+
+    /// <summary>Every addon catalogue that takes a search, at once; one failing is normal.</summary>
+    public static async Task<List<Title>> SearchAddons(string query)
+    {
+        var jobs = Addons.Searchable().Select(async x =>
+        {
+            try
+            {
+                var body = await Net.Json($"{x.Addon.Url}/catalog/{x.Catalog.Type}/{Uri.EscapeDataString(x.Catalog.Id)}/search={Uri.EscapeDataString(query)}.json", default, true);
+                return body?["metas"] is JsonArray metas ? ToTitles(metas, Addons.KindOfType(x.Catalog.Type), anyId: true, type: x.Catalog.Type) : new List<Title>();
+            }
+            catch
+            {
+                return new List<Title>();
+            }
+        });
+        return (await Task.WhenAll(jobs)).SelectMany(t => t).ToList();
+    }
 
     /// <summary>
     /// Long anime: Cinemeta's episode stills are mostly 404s, TVmaze has nearly every one.
@@ -244,9 +296,24 @@ public static class Meta
     public static List<Title>? PeekCatalog(string kind, string? genre) =>
         Settled.TryGetValue($"shelf-{kind}-{genre}", out var v) ? v : null;
 
+    /// <summary>A <paramref name="genre"/> starting <see cref="Addons.ShelfPrefix"/> is one of the viewer's addons' catalogues, by <see cref="Addons.Shelves"/>' key.</summary>
     public static Task<List<Title>> LoadCatalog(string kind, string? genre = null)
     {
         var key = $"shelf-{kind}-{genre}";
+        if (genre?.StartsWith(Addons.ShelfPrefix) == true)
+            return Once(key, async () =>
+            {
+                var titles = await Remember("pool-" + key, async () =>
+                {
+                    var (addon, list) = Addons.Shelf(genre) ?? throw new InvalidOperationException("addon gone");
+                    var body = await Net.Json($"{addon.Url}/catalog/{list.Type}/{Uri.EscapeDataString(list.Id)}.json", default, true);
+                    var found = body?["metas"] is JsonArray metas ? ToTitles(metas, Addons.KindOfType(list.Type), anyId: true, type: list.Type) : new List<Title>();
+                    if (found.Count == 0) throw new InvalidOperationException("empty shelf");
+                    return found;
+                });
+                Settled[key] = titles;
+                return titles;
+            }, new List<Title>());
         var type = kind == "tv" ? "series" : "movie";
         // Cinemeta pages by 50: top/genre=Action&skip=50.json, or top/skip=50.json without a genre.
         string Page(int skip)
@@ -358,21 +425,32 @@ public static class Meta
         return string.IsNullOrEmpty(s) ? null : s;
     }
 
-    public static List<Title> ToTitles(JsonArray metas, string kind, bool withEpisodes = false)
+    /// <summary>
+    /// Rows without art are unusable on a shelf. One row per id. Episodes only from /meta.
+    /// Cinemeta's own lists keep IMDb ids only; an addon's (<paramref name="anyId"/>) are whatever it uses.
+    /// </summary>
+    public static List<Title> ToTitles(JsonArray metas, string kind, bool withEpisodes = false, bool anyId = false, string? type = null)
     {
         var seen = new HashSet<string>();
         var @out = new List<Title>();
         foreach (var m in metas)
         {
-            if (m is null || S(m["poster"]) is null) continue;
+            if (m is null || (S(m["poster"]) is null && !withEpisodes)) continue;
             var id = S(m["imdb_id"]) ?? S(m["id"]) ?? "";
-            if (!Regex.IsMatch(id, @"^tt\d+$") || !seen.Add(id)) continue;
+            if (id.Length == 0 || (!anyId && !Regex.IsMatch(id, @"^tt\d+$")) || !seen.Add(id)) continue;
             var genres = (m["genre"] ?? m["genres"]) as JsonArray;
+            var stremioType = S(m["type"]) ?? type ?? (kind == "movie" ? "movie" : "series");
+            var name = S(m["name"]) ?? "";
+            var episodes = withEpisodes ? ToEpisodes(m["videos"] as JsonArray) : new();
+            // A type of an addon's own with no videos plays its own id, as one "episode".
+            if (withEpisodes && episodes.Count == 0 && kind == "tv" && stremioType != "series")
+                episodes.Add(new Episode { Id = id, Season = 1, Number = 1, Name = name });
             @out.Add(new Title
             {
                 Imdb = id,
                 Kind = kind,
-                Name = S(m["name"]) ?? "",
+                Type = stremioType,
+                Name = name,
                 Year = S(m["year"]) ?? S(m["releaseInfo"]) ?? (S(m["released"]) is { Length: >= 4 } r ? r[..4] : null),
                 Rating = S(m["imdbRating"]),
                 Genres = genres?.Take(3).Select(g => S(g) ?? "").Where(g => g.Length > 0).ToList() ?? new(),
@@ -384,7 +462,7 @@ public static class Meta
                 Backdrop = S(m["background"]),
                 Logo = S(m["logo"]),
                 Runtime = S(m["runtime"]),
-                Episodes = withEpisodes ? ToEpisodes(m["videos"] as JsonArray) : new(),
+                Episodes = episodes,
             });
         }
         return @out;
@@ -417,9 +495,24 @@ public static class Meta
         return list.FindIndex(e => AbsoluteNumber(list, e.Season, e.Number) == n);
     }
 
+    /// <summary>
+    /// Broadcast order. Season 0 (specials) keeps its own group. A channel's videos carry no
+    /// numbers: they become one season, numbered in the addon's own order.
+    /// </summary>
     public static List<Episode> ToEpisodes(JsonArray? videos)
     {
         if (videos is null) return new();
+        if (!videos.Any(v => v is not null && int.TryParse(S(v["season"]), out var s) && s >= 0 && int.TryParse(S(v["episode"]), out _)))
+            return videos.Where(v => S(v?["id"]) is not null).Select((v, i) => new Episode
+            {
+                Id = S(v!["id"])!,
+                Season = 1,
+                Number = i + 1,
+                Name = S(v["title"]) ?? S(v["name"]) ?? $"Video {i + 1}",
+                Overview = S(v["overview"]) ?? S(v["description"]),
+                Thumbnail = S(v["thumbnail"]),
+                Released = S(v["released"]),
+            }).ToList();
         var @out = new List<Episode>();
         foreach (var v in videos)
         {
