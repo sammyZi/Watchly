@@ -67,9 +67,9 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
     val seasons = remember(title.episodes) { title.episodes.map { it.season }.filter { it > 0 }.distinct().sorted() }
     val history by History.items.collectAsState()
     /** Where this series was left: the episode after the last one finished, or the one stopped part-way. */
-    // What Simkl has seen counts too: after a reinstall, this TV's own history is empty.
-    val simkl by Simkl.library.collectAsState()
-    val continueAt = remember(history, title.episodes, simkl) { continueEpisode(title, history, simkl) }
+    // What Stremio has seen counts too: after a reinstall, this TV's own history is empty.
+    val stremio by Stremio.library.collectAsState()
+    val continueAt = remember(history, title.episodes, stremio) { continueEpisode(title, history, stremio) }
     var season by rememberSaveable(title.imdb) { mutableStateOf<Int?>(null) }
     // Not while the episode list is still loading: that would throw away the season being come back to.
     LaunchedEffect(seasons) {
@@ -87,7 +87,7 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
         if (block == 0) continueAt?.let { c -> blocks.indexOfFirst { b -> b.any { it.id == c.id } }.takeIf { it > 0 }?.let { block = it } }
     }
     val episodes = if (through) blocks.getOrNull(block).orEmpty() else title.episodes.filter { it.season == season }
-    val progress = remember(history, title.imdb, simkl) { episodeProgress(history, title.imdb, simkl) }
+    val progress = remember(history, title.imdb, stremio) { episodeProgress(history, title.imdb, stremio) }
 
     var episode by remember(title.imdb) { mutableStateOf<Episode?>(null) }
     // Back from the player: the episode that was picked, once the list is in.

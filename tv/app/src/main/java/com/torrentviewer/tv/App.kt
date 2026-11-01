@@ -121,7 +121,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         Kv.useProfile(profile.id, profile.isGuest)
         History.load()
         SavedStore.load()
-        Simkl.load(profile.id, profile.isGuest)
+        Stremio.load(profile.id, profile.isGuest)
         Kids.use(profile)
         // Rows loaded for the last profile: a kids profile must not inherit a grown-up's, nor the reverse.
         if (who?.kids != profile.kids) {

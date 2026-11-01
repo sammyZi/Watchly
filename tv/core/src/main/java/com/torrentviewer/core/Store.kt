@@ -225,7 +225,7 @@ object Secrets {
         _subdl.value = k
     }
 
-    /** Anything else kept the same way — Simkl's tokens, one entry per profile. Null forgets it. */
+    /** Anything else kept the same way — Stremio's tokens, one entry per profile. Null forgets it. */
     fun get(name: String): String? = read(name)
 
     fun put(name: String, value: String?) = write(name, value)
@@ -321,7 +321,7 @@ object Profiles {
     fun remove(id: String) {
         write(_list.value.filter { it.id != id })
         Kv.wipeProfile(id)
-        Simkl.forget(id)
+        Stremio.forget(id)
     }
 }
 
@@ -473,12 +473,12 @@ fun episodeOfFile(list: List<Episode>, name: String): Episode? {
  * What a series' Play button offers: the episode last played if it was left part-way,
  * else the one after it. Null when nothing of [title] was played, or it was the last.
  */
-fun continueEpisode(title: Title, items: List<Item>, simkl: SimklLibrary = SimklLibrary()): Episode? {
+fun continueEpisode(title: Title, items: List<Item>, stremio: StremioLibrary = StremioLibrary()): Episode? {
     val last = items.filter { it.imdb == title.imdb }.sortedByDescending { it.at }.firstNotNullOfOrNull { item ->
         val i = item.lastFileIndex ?: return@firstNotNullOfOrNull null
         val name = item.files?.find { it.index == i }?.name ?: item.title
         episodeOfFile(title.episodes, name)?.let { it to item }
-    } ?: return simklContinue(title, simkl)
+    } ?: return stremioContinue(title, stremio)
     val (ep, item) = last
     val i = item.lastFileIndex!!
     val done = item.durations[i]?.let { d -> d > 0 && (item.positions[i] ?: 0.0) >= d * 0.95 } ?: false
@@ -487,12 +487,12 @@ fun continueEpisode(title: Title, items: List<Item>, simkl: SimklLibrary = Simkl
     return inOrder.getOrNull(inOrder.indexOf(ep) + 1)
 }
 
-/** Nothing played here: Simkl's paused episode (newest first), else the one after the furthest it has as watched. */
-private fun simklContinue(title: Title, simkl: SimklLibrary): Episode? {
-    simkl.paused.firstOrNull { it.imdb == title.imdb && it.ep != null }?.ep?.let { p ->
+/** Nothing played here: Stremio's paused episode (newest first), else the one after the furthest it has as watched. */
+private fun stremioContinue(title: Title, stremio: StremioLibrary): Episode? {
+    stremio.paused.firstOrNull { it.imdb == title.imdb && it.ep != null }?.ep?.let { p ->
         title.episodes.find { it.season == p.season && it.episode == p.episode }?.let { return it }
     }
-    val seen = simkl.episodes[title.imdb]?.takeIf { it.isNotEmpty() } ?: return null
+    val seen = stremio.episodes[title.imdb]?.takeIf { it.isNotEmpty() } ?: return null
     val inOrder = title.episodes.filter { it.season > 0 }.sortedWith(compareBy({ it.season }, { it.episode }))
     val furthest = inOrder.indexOfLast { Ep(it.season, it.episode) in seen }
     return if (furthest < 0) null else inOrder.getOrNull(furthest + 1)
@@ -500,12 +500,12 @@ private fun simklContinue(title: Title, simkl: SimklLibrary): Episode? {
 
 /**
  * How far through each episode of [imdb] anyone got, 0–1, by its file name — the furthest of every
- * release it was played from, and of what Simkl has: watched is 1, paused its percent.
+ * release it was played from, and of what Stremio has: watched is 1, paused its percent.
  */
-fun episodeProgress(items: List<Item>, imdb: String, simkl: SimklLibrary = SimklLibrary()): Map<Ep, Double> {
+fun episodeProgress(items: List<Item>, imdb: String, stremio: StremioLibrary = StremioLibrary()): Map<Ep, Double> {
     val out = mutableMapOf<Ep, Double>()
-    simkl.episodes[imdb]?.forEach { out[it] = 1.0 }
-    for (p in simkl.paused) if (p.imdb == imdb && p.ep != null) out[p.ep] = maxOf(out[p.ep] ?: 0.0, p.progress / 100)
+    stremio.episodes[imdb]?.forEach { out[it] = 1.0 }
+    for (p in stremio.paused) if (p.imdb == imdb && p.ep != null) out[p.ep] = maxOf(out[p.ep] ?: 0.0, p.progress / 100)
     for (item in items) if (item.imdb == imdb) for (file in item.files.orEmpty()) {
         val ep = parseEpisode(file.name) ?: continue
         val at = item.positions[file.index] ?: continue
@@ -635,12 +635,15 @@ object SavedStore {
     fun toggle(title: Title, list: String = "later") {
         val all = _items.value
         val without = all.filter { !(it.imdb == title.imdb && it.list == list) }
-        val next = if (without.size == all.size) {
+        val adding = without.size == all.size
+        val next = if (adding) {
             listOf(Saved(title.imdb, title.kind, title.title, title.poster, title.year, title.rating, list, System.currentTimeMillis())) + without
         } else {
             without
         }
         _items.value = next
+        // My List is the Stremio library, when an account is signed in.
+        if (list == "later") Stremio.setInLibrary(title, adding)
         Kv.set(
             KEY,
             JSONArray(next.map {

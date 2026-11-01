@@ -184,10 +184,10 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit) {
 
     // One card per title — its newest started episode or release — while that one is part-watched.
     val resumable = latestPerTitle(history).filter(::inProgress).take(8)
-    // Left part-way somewhere this TV never saw — another device, before a reinstall: Simkl kept the spot.
-    val simkl by Simkl.library.collectAsState()
-    val fromSimkl = Kids.only(simkl.paused.filter { p -> history.none { it.imdb == p.imdb } }.distinctBy { it.imdb }) { Title(it.imdb, it.kind, it.title) }.take(8)
-    val resuming = resumable.isNotEmpty() || fromSimkl.isNotEmpty()
+    // Left part-way somewhere this TV never saw — another device, before a reinstall: Stremio kept the spot.
+    val stremio by Stremio.library.collectAsState()
+    val fromStremio = Kids.only(stremio.paused.filter { p -> history.none { it.imdb == p.imdb } }.distinctBy { it.imdb }) { Title(it.imdb, it.kind, it.title) }.take(8)
+    val resuming = resumable.isNotEmpty() || fromStremio.isNotEmpty()
     var releases by remember { mutableStateOf<List<Item>?>(null) }
     val watchlist = saved.filter { it.list == "later" }.map { it.asTitle() }
     val fallback = { shelves.firstNotNullOfOrNull { state.loaded[it.key]?.firstOrNull() } ?: watchlist.firstOrNull() }
@@ -212,7 +212,7 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit) {
             var at = 0
             if (resuming) item(key = "resume") {
                 Rail("Continue Watching", pin(0)) {
-                    ResumeRow(state, resumable, fromSimkl, firstKey != null, onResume = { item ->
+                    ResumeRow(state, resumable, fromStremio, firstKey != null, onResume = { item ->
                         releasesOf(history, item).let { all -> if (all.size > 1) releases = all else watch.resume(item) }
                     }, onFocus = aim, onOpen = onOpen)
                 }
@@ -412,7 +412,7 @@ private fun LandscapeCard(art: String?, name: String, focused: Boolean, stamp: S
 }
 
 @Composable
-private fun ResumeRow(state: HomeState, items: List<Item>, fromSimkl: List<Paused>, claimFirst: Boolean, onResume: (Item) -> Unit, onFocus: (Title) -> Unit, onOpen: (Title) -> Unit) {
+private fun ResumeRow(state: HomeState, items: List<Item>, fromStremio: List<Paused>, claimFirst: Boolean, onResume: (Item) -> Unit, onFocus: (Title) -> Unit, onOpen: (Title) -> Unit) {
     val fallback = remember { FocusRequester() }
     CompositionLocalProvider(LocalBringIntoViewSpec provides rowScroll()) {
     LazyRow(
@@ -438,8 +438,8 @@ private fun ResumeRow(state: HomeState, items: List<Item>, fromSimkl: List<Pause
             }
             if (claimFirst && i == 0) fallback.claim()
         }
-        // No release to resume from yet: the title opens, and the one picked starts at Simkl's spot.
-        itemsIndexed(fromSimkl, key = { _, it -> "simkl:${it.imdb}" }) { i, p ->
+        // No release to resume from yet: the title opens, and the one picked starts at Stremio's spot.
+        itemsIndexed(fromStremio, key = { _, it -> "stremio:${it.imdb}" }) { i, p ->
             val title = Title(p.imdb, p.kind, p.title, year = p.year)
             val first = items.isEmpty() && i == 0
             Focusable(

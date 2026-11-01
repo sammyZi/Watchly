@@ -198,9 +198,9 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
 
     // One card per title — its latest episode or release — and only if that one is part-watched.
     val resumable = latestPerTitle(history).filter(::inProgress).take(10)
-    // Left part-way somewhere this phone never saw — another device, before a reinstall: Simkl kept the spot.
-    val simkl by com.torrentviewer.core.Simkl.library.collectAsState()
-    val fromSimkl = com.torrentviewer.core.Kids.only(simkl.paused.filter { p -> history.none { it.imdb == p.imdb } }.distinctBy { it.imdb }) { Title(it.imdb, it.kind, it.title) }.take(10)
+    // Left part-way somewhere this phone never saw — another device, before a reinstall: Stremio kept the spot.
+    val stremio by com.torrentviewer.core.Stremio.library.collectAsState()
+    val fromStremio = com.torrentviewer.core.Kids.only(stremio.paused.filter { p -> history.none { it.imdb == p.imdb } }.distinctBy { it.imdb }) { Title(it.imdb, it.kind, it.title) }.take(10)
     val watchlist = saved.filter { it.list == "later" }.map { it.asTitle() }
     val heroes = shelves.firstNotNullOfOrNull { state.loaded[it.key]?.takeIf { l -> l.isNotEmpty() } }.orEmpty().take(HEROES)
     SideEffect { state.heroCount = heroes.size }
@@ -218,7 +218,7 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
                 if (heroes.isEmpty()) Box(Modifier.fillMaxWidth().height(if (isWide()) 320.dp else 420.dp))
                 else Hero(state.hero, heroes, onOpen)
             }
-            if (resumable.isNotEmpty() || fromSimkl.isNotEmpty()) item(key = "resume") {
+            if (resumable.isNotEmpty() || fromStremio.isNotEmpty()) item(key = "resume") {
                 Rail("Continue Watching") {
                     LazyRow(state = state.row("resume"), contentPadding = PaddingValues(horizontal = EDGE), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         items(resumable, key = { it.uri }) { item ->
@@ -233,8 +233,8 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
                                 Text(item.label.substringBefore(" · "), Modifier.padding(top = 6.dp), style = Type.label.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
-                        // No release to resume from yet: the title opens, and the one picked starts at Simkl's spot.
-                        items(fromSimkl, key = { "simkl:${it.imdb}" }) { p ->
+                        // No release to resume from yet: the title opens, and the one picked starts at Stremio's spot.
+                        items(fromStremio, key = { "stremio:${it.imdb}" }) { p ->
                             Column(Modifier.width(posterWidth())) {
                                 Tap({ onOpen(Title(p.imdb, p.kind, p.title, year = p.year)) }, Modifier.fillMaxWidth().aspectRatio(2f / 3f), RoundedCornerShape(6.dp)) {
                                     LandscapeCard(
