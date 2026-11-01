@@ -169,8 +169,8 @@ public sealed class DetailView : UserControl, IDisposable
         var key = PickKey;
         error = null;
         var job = picked is not null
-            ? Search.SearchEpisode(title.Name, picked.Season, picked.Number, cts.Token, title.Imdb, PickedAbsolute, lang)
-            : Search.SearchTorrents(title.Name, cts.Token, title.Imdb, title.Kind == "movie" ? title.Year?[..Math.Min(4, title.Year.Length)] : null, lang: lang);
+            ? Search.SearchEpisode(picked.Id, title.Name, picked.Season, cts.Token, lang)
+            : Search.SearchStreams(title.Name, cts.Token, title.Imdb, lang: lang);
         job.ContinueWith(t => Dispatcher.BeginInvoke(() =>
         {
             if (mine != searchGen) return;
@@ -181,7 +181,8 @@ public sealed class DetailView : UserControl, IDisposable
             if (saveWhenFound)
             {
                 saveWhenFound = false;
-                if (sources.FirstOrDefault() is { } hit) { Save(hit.Magnet); return; }
+                // Downloads are torrents; a link is streamed only.
+                if (sources.FirstOrDefault(h => !h.Direct) is { } hit) { Save(hit.Uri); return; }
                 var what = picked is null ? title.Name : Short(picked);
                 shell.Toast(lang is null ? $"No sources found for {what}" : $"No {what} in {lang.Name} — change the language and try again", true);
             }
@@ -215,6 +216,7 @@ public sealed class DetailView : UserControl, IDisposable
         var fresh = sourceKey == PickKey;
         var shown = wanted is not null ? sources?.Where(h => h.Quality == wanted).ToList() : sources;
         var best = fresh ? shown?.FirstOrDefault() : null;
+        var bestTorrent = fresh ? shown?.FirstOrDefault(h => !h.Direct) : null;
         var seen = picked is not null ? progress.GetValueOrDefault(picked.Id) : resume is { } r ? Math.Min(100, r.Position / r.Duration * 100) : 0;
         var canResume = seen >= 1 && seen < EpisodeLinks.Watched;
         var wait = shell.IsOpening || saving;
@@ -231,13 +233,13 @@ public sealed class DetailView : UserControl, IDisposable
             : best is null ? fresh && sources is not null ? "No sources" : "Finding sources…"
             : canResume ? "Resume  ·  " + (picked is null ? "" : Short(picked) + "  ·  ") + $"{Math.Round(seen)}%"
             : picked is not null ? $"Play {Short(picked)}" : "Play";
-        var play = Ui.Action(label, "play", () => { if (best is not null) Start(best.Magnet, false); }, primary: true);
+        var play = Ui.Action(label, "play", () => { if (best is not null) Start(best, false); }, primary: true);
         play.IsHitTestVisible = live;
         play.Opacity = live ? 1 : 0.6;
         head.Children.Add(play);
         if (canResume)
         {
-            var over = Ui.Action("Start over", "rotate-ccw", () => { if (best is not null) Start(best.Magnet, true); });
+            var over = Ui.Action("Start over", "rotate-ccw", () => { if (best is not null) Start(best, true); });
             over.Margin = new Thickness(0, 8, 0, 0);
             over.IsEnabled = live;
             head.Children.Add(over);
@@ -282,8 +284,9 @@ public sealed class DetailView : UserControl, IDisposable
         if (title.Kind != "tv")
             actions.Children.Add(Ui.IconAction("download", "Download", () =>
             {
-                if (best is not null) Save(best.Magnet);
+                if (bestTorrent is not null) Save(bestTorrent.Uri);
                 else shell.Toast(!(fresh && sources is not null) ? "Still finding sources…"
+                    : sources.Count > 0 ? "Links stream only — there is no torrent here to download."
                     : lang is null ? "No sources to download." : $"Nothing in {lang.Name} — change the language and try again.");
             }, width: double.NaN));
         actions.Children.Add(LanguageAction());
@@ -615,17 +618,18 @@ public sealed class DetailView : UserControl, IDisposable
             words.Margin = new Thickness(12, 0, 0, 0);
             return new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 12), Children = { Ui.Spinner(24), words } };
         }
-        if (wait) block.Children.Add(Busy(saving ? "Starting download…" : "Reading torrent…"));
-        if (sources is null || !fresh) block.Children.Add(Busy("Asking every index…"));
+        if (wait) block.Children.Add(Busy(saving ? "Starting download…" : "Opening…"));
+        if (sources is null || !fresh) block.Children.Add(Busy("Asking your addons…"));
         else if (error is not null) block.Children.Add(Note(error, "Danger"));
-        else if (sources.Count == 0) block.Children.Add(Note(lang is not null
-            ? $"Nothing found in {lang.Name}. Change the language and try again."
-            : "Nothing found. Try another episode, or search for the release by name."));
+        else if (sources.Count == 0) block.Children.Add(Note(
+            !Addons.HasStreams ? "No addons to ask yet. Add one under Settings → Addons to find streams."
+            : lang is not null ? $"Nothing found in {lang.Name}. Change the language and try again."
+            : "Nothing found. Try another episode, or add another addon under Settings → Addons."));
 
         if (fresh && shown is not null)
         {
             // Which of these TorBox has cached: the rows say Instant once it answers.
-            _ = TorBox.Check(shown.Take(MaxSources).Select(h => h.Id));
+            _ = TorBox.Check(shown.Take(MaxSources).Where(h => !h.Direct).Select(h => h.Id));
             foreach (var hit in shown.Take(MaxSources)) block.Children.Add(SourceRow(hit));
         }
         content.Children.Add(block);
@@ -643,12 +647,16 @@ public sealed class DetailView : UserControl, IDisposable
             dock.Children.Add(tag);
         }
         var captured = hit;
-        var download = Ui.Round("download", () => Save(captured.Magnet), "Muted", "Transparent", 36, 20, "Download this release");
-        download.Background = Brushes.Transparent;
-        download.Margin = new Thickness(4, 0, 0, 0);
-        DockPanel.SetDock(download, Dock.Right);
-        dock.Children.Add(download);
-        var grade = Ui.Text(tone.Label, "Meta", tone.Fg, 13, FontWeights.Bold);
+        // The download engine is a torrent client; a link is streamed only.
+        if (!hit.Direct)
+        {
+            var download = Ui.Round("download", () => Save(captured.Uri), "Muted", "Transparent", 36, 20, "Download this release");
+            download.Background = Brushes.Transparent;
+            download.Margin = new Thickness(4, 0, 0, 0);
+            DockPanel.SetDock(download, Dock.Right);
+            dock.Children.Add(download);
+        }
+        var grade = hit.Direct ? Ui.Text("Direct", "Meta", "Good", 13, FontWeights.Bold) : Ui.Text(tone.Label, "Meta", tone.Fg, 13, FontWeights.Bold);
         grade.VerticalAlignment = VerticalAlignment.Center;
         grade.Margin = new Thickness(10, 0, 0, 0);
         DockPanel.SetDock(grade, Dock.Right);
@@ -658,13 +666,19 @@ public sealed class DetailView : UserControl, IDisposable
         name.ToolTip = hit.Name;
         // A film's scope is "episode" only by default — it says nothing there.
         var scope = picked is null && hit.Scope == "episode" ? null : hit.Scope switch { "season" => "Season pack", "complete" => "Complete series", _ => "Episode" };
-        var meta = Ui.Text(string.Join("  ·  ", new[] { scope, Format.Bytes(TorrentBytes(hit)), $"{hit.Seeders} seeds" }.Where(s => s is not null)), "Meta", "Faint", 12);
+        var meta = Ui.Text(string.Join("  ·  ", new[]
+        {
+            scope,
+            hit.Size > 0 ? Format.Bytes(TorrentBytes(hit)) : null,
+            hit.Direct ? null : $"{hit.Seeders} seeds",
+            hit.Addon.Length > 0 ? hit.Addon : null,
+        }.Where(s => s is not null)), "Meta", "Faint", 12);
         meta.Margin = new Thickness(0, 2, 0, 0);
         var lines = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { name, meta } };
-        if (TorBox.IsCached(hit.Id)) lines.Children.Add(Ui.Text("Instant · TorBox", "Meta", "Good", 12, FontWeights.SemiBold));
+        if (!hit.Direct && TorBox.IsCached(hit.Id)) lines.Children.Add(Ui.Text("Instant · TorBox", "Meta", "Good", 12, FontWeights.SemiBold));
         dock.Children.Add(lines);
 
-        var row = Ui.Button(Ui.Card(dock, "Surface", 8, new Thickness(14, 11, 8, 11)), () => Start(captured.Magnet, false));
+        var row = Ui.Button(Ui.Card(dock, "Surface", 8, new Thickness(14, 11, 8, 11)), () => Start(captured, false));
         row.Margin = new Thickness(0, 0, 0, 8);
         return row;
     }
@@ -691,7 +705,7 @@ public sealed class DetailView : UserControl, IDisposable
         content.Children.Add(new StackPanel { Margin = new Thickness(0, 26, 0, 0), Width = ListWidth, HorizontalAlignment = HorizontalAlignment.Left, Children = { Heading("Reviews"), links } });
     }
 
-    /// <summary>Torrentio's size is one file; a pack's torrent is that times its episodes.</summary>
+    /// <summary>An addon's size is one file; a pack's torrent is that times its episodes.</summary>
     long TorrentBytes(Hit hit)
     {
         if (!hit.PerFileSize || hit.Scope == "episode" || hit.Size == 0) return hit.Size;
@@ -720,9 +734,9 @@ public sealed class DetailView : UserControl, IDisposable
     /// <summary>An episode's own download: its best release, looked up first if the list shows another's.</summary>
     void DownloadEpisode(Episode ep)
     {
-        if (picked?.Id == ep.Id && sourceKey == PickKey && sources?.FirstOrDefault() is { } ready)
+        if (picked?.Id == ep.Id && sourceKey == PickKey && sources?.FirstOrDefault(h => !h.Direct) is { } ready)
         {
-            Save(ready.Magnet);
+            Save(ready.Uri);
             return;
         }
         picked = ep;
@@ -731,11 +745,12 @@ public sealed class DetailView : UserControl, IDisposable
         Render();
     }
 
-    async void Start(string magnet, bool startOver)
+    async void Start(Hit hit, bool startOver)
     {
         var episodeId = picked?.Id;
-        var local = await shell.StreamUri(magnet, new OpenOptions
+        var local = await shell.StreamUri(hit.Uri, new OpenOptions
         {
+            Name = hit.Name,
             Auto = PickedTag ?? "best",
             KeepProgress = startOver,
             Imdb = title.Imdb,
@@ -762,15 +777,15 @@ public sealed class DetailView : UserControl, IDisposable
         });
     }
 
-    /// <summary>The season whose packs are listed under its Download link, and those packs (null while searching).</summary>
+    /// <summary>The season whose packs are listed under its Download link.</summary>
     int? packSeason;
-    List<Hit>? packs;
 
     /// <summary>
     /// Download season: the season packs to choose from — quality, size and how well each is seeded —
-    /// rather than the first one found. Clicked again, it closes.
+    /// rather than the first one found. The addons list them with the picked episode's streams.
+    /// Clicked again, it closes.
     /// </summary>
-    async void SaveSeason()
+    void SaveSeason()
     {
         if (season is not int which) return;
         if (packSeason == which)
@@ -780,24 +795,27 @@ public sealed class DetailView : UserControl, IDisposable
             return;
         }
         packSeason = which;
-        packs = null;
         Render();
+    }
+
+    /// <summary>This season's packs among the picked episode's streams; null until they are in.</summary>
+    List<Hit>? PacksOf(int which)
+    {
+        if (picked?.Season != which || sourceKey != PickKey || sources is null) return null;
         bool IsPack(Hit h)
         {
-            if (h.Scope is not ("season" or "complete")) return false;
+            if (h.Direct || h.Scope is not ("season" or "complete")) return false;
             var claims = Search.SeasonsIn(h.Name);
             return claims.Count == 0 || claims.Contains(which);
         }
-        var found = await Search.SearchTorrents(title.Name, suffix: $"S{which:00}", lang: lang).ContinueWith(t => t.IsCompletedSuccessfully ? t.Result : new List<Hit>());
-        if (packSeason != which) return;
-        packs = (sources ?? new()).Concat(found).Where(IsPack).DistinctBy(h => h.Id).OrderByDescending(h => h.Seeders).ToList();
-        Render();
+        return sources.Where(IsPack).OrderByDescending(h => h.Seeders).ToList();
     }
 
     /// <summary>The packs for <see cref="packSeason"/>, under its Download link.</summary>
     FrameworkElement PackList(int which)
     {
         var list = new StackPanel { Margin = new Thickness(0, 4, 0, 12) };
+        var packs = PacksOf(which);
         if (packs is null)
         {
             var words = Ui.Text($"Finding season {which} packs…", "Body");
@@ -848,7 +866,7 @@ public sealed class DetailView : UserControl, IDisposable
         packSeason = null;
         shell.BeginDownload(new DownloadJob
         {
-            Uri = pack.Magnet,
+            Uri = pack.Uri,
             Season = which,
             Imdb = title.Imdb,
             Kind = title.Kind,
