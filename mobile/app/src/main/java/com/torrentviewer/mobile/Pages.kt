@@ -996,6 +996,16 @@ fun StremioSection(me: Profile, onLater: (() -> Unit)? = null) {
                         )
                     }
                 }, Modifier.fillMaxWidth(), icon = L.drawable.lucide_ic_puzzle, primary = true)
+                // The other way: the account's list made this phone's, for every device that signs in after.
+                Button("Send my addons to Stremio", {
+                    note = "Sending your addons…"
+                    scope.launch {
+                        note = runCatching { Stremio.pushAddons() }.fold(
+                            { "Your Stremio account now has this phone's $it addon${if (it == 1) "" else "s"}" },
+                            { it.message ?: "Couldn't reach Stremio" },
+                        )
+                    }
+                }, Modifier.padding(top = 10.dp).fillMaxWidth(), icon = L.drawable.lucide_ic_upload)
                 Button("Sign out", {
                     Stremio.disconnect(me.id)
                     changed++

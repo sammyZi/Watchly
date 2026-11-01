@@ -166,6 +166,8 @@ public static class Addons
             }
         }
         Changed?.Invoke();
+        // Added, removed or moved here: the signed-in Stremio account follows, so other devices get the same list.
+        Stremio.AddonsChanged();
     }
 
     /// <summary>Fetches the manifest and keeps the addon; one already here is refreshed in place. Throws with a message to show.</summary>
@@ -206,12 +208,8 @@ public static class Addons
 
     public static void Toggle(string url) => Save(List.Select(a => a.Url == url ? a with { On = !a.On } : a).ToList());
 
-    /// <summary>Gone here, and from the Stremio account's collection when one is signed in, so an import won't bring it back.</summary>
-    public static void Remove(string url)
-    {
-        Save(List.Where(a => a.Url != url).ToList());
-        Stremio.RemoveAddon(url);
-    }
+    /// <summary>Gone here — and from the Stremio account too, as every change is (<see cref="Save"/>), so an import won't bring it back.</summary>
+    public static void Remove(string url) => Save(List.Where(a => a.Url != url).ToList());
 
     /// <summary>One place up (−1) or down (+1).</summary>
     public static void Move(string url, int step)

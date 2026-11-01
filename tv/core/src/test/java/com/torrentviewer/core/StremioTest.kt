@@ -97,19 +97,28 @@ class StremioTest {
         assertEquals("series", out.getValue("tt4").getString("type"))
     }
 
-    @Test fun removingAnAddonLeavesTheRestAlone() {
-        val all = listOf(
-            JSONObject("""{"transportUrl":"https://v3-cinemeta.strem.io/manifest.json","flags":{"official":true,"protected":true},"manifest":{"id":"c"}}"""),
-            JSONObject("""{"transportUrl":"https://torrentio.strem.fun/sort=qualitysize/manifest.json","flags":{},"manifest":{"id":"t","x":1}}"""),
-            JSONObject("""{"transportUrl":"https://subs.example/manifest.json","manifest":{"id":"s"}}"""),
+    @Test fun accountAddonsFollowThisDevice() {
+        val account = listOf(
+            JSONObject("""{"transportUrl":"https://v3-cinemeta.strem.io/manifest.json","flags":{"official":true,"protected":true},"manifest":{"id":"com.linvo.cinemeta"}}"""),
+            JSONObject("""{"transportUrl":"https://youtube.example/manifest.json","flags":{"official":true,"protected":false},"manifest":{"id":"yt"}}"""),
+            JSONObject("""{"transportUrl":"http://127.0.0.1:11470/local-addon/manifest.json","flags":{"official":true,"protected":false},"manifest":{"id":"org.stremio.local"}}"""),
+            JSONObject("""{"transportUrl":"https://subs.example/manifest.json","flags":{},"manifest":{"id":"s","x":1}}"""),
         )
-        val keep = withoutAddon(all, "https://torrentio.strem.fun/sort=qualitysize")
-        assertEquals(listOf("c", "s"), keep.map { it.getJSONObject("manifest").getString("id") })
-        // Untouched, field for field.
-        assertEquals(all[2].toString(), keep[1].toString())
-        // Stremio's own stays, even asked for by its address.
-        assertEquals(3, withoutAddon(all, "https://v3-cinemeta.strem.io").size)
-        assertEquals(3, withoutAddon(all, "https://other.example").size)
+        fun mine(url: String, id: String) = toAddon(url, JSONObject("""{"id":"$id","name":"$id","resources":["stream"],"types":["movie"]}"""))!!
+        // Here: subtitles kept, Torrentio added, YouTube removed — in this order.
+        val next = mirrored(account, listOf(mine("https://torrentio.example/c=1", "t"), mine("https://subs.example", "s")))
+        assertEquals(
+            listOf("https://v3-cinemeta.strem.io/manifest.json", "http://127.0.0.1:11470/local-addon/manifest.json", "https://torrentio.example/c=1/manifest.json", "https://subs.example/manifest.json"),
+            next.map { it.getString("transportUrl") },
+        )
+        // What the account had is sent back exactly; the new one is a whole entry Stremio can read.
+        assertEquals(account[3].toString(), next[3].toString())
+        assertEquals("http", next[2].getString("transportName"))
+        assertEquals("t", next[2].getJSONObject("manifest").getString("id"))
+        assertFalse(next[2].getJSONObject("flags").getBoolean("protected"))
+        // Stremio's own are never taken away, even with nothing here.
+        assertEquals(2, mirrored(account, emptyList()).size)
+        assertTrue(stremioKeeps(account[0]) && stremioKeeps(account[2]) && !stremioKeeps(account[1]))
     }
 
     @Test fun resumeOrPlay() {

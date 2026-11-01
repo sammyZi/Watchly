@@ -175,8 +175,12 @@ static class Smoke
             (JsonObject)JsonNode.Parse("""{"transportUrl":"https://own.example.org/manifest.json","flags":{"protected":true},"manifest":{"id":"c"}}""")!,
             (JsonObject)JsonNode.Parse("""{"transportUrl":"https://a.example.org/cfg/manifest.json","manifest":{"id":"a"}}""")!,
         };
-        Eq(Stremio.WithoutAddon(collection, "https://a.example.org/cfg").Count, 1, "addon removed from the account");
-        Eq(Stremio.WithoutAddon(collection, "https://own.example.org").Count, 2, "a protected addon stays");
+        // The account follows this PC: a removed one goes, a new one is added whole, Stremio's own stays.
+        var t = Addons.ToAddon("https://t.example.org/c=1", JsonNode.Parse("""{"id":"t","name":"T","resources":["stream"],"types":["movie"]}"""))!;
+        var mirrored = Stremio.Mirrored(collection, new[] { t });
+        Eq(string.Join(" ", mirrored.Select(e => e["transportUrl"]!.GetValue<string>())), "https://own.example.org/manifest.json https://t.example.org/c=1/manifest.json", "account addons follow this PC");
+        Eq(mirrored[1]["transportName"]!.GetValue<string>(), "http", "a new addon is a whole entry");
+        Eq(Stremio.Mirrored(collection, Array.Empty<Addon>()).Count, 1, "a protected addon stays");
 
         // One resume spot per title on this PC, whichever release opens it.
         var older = new HistoryItem { Uri = "a", Title = "Film.720p", Imdb = "tt9", Files = new() { F(0, "Film.720p.mkv", 1) }, LastFileIndex = 0, Positions = new() { [0] = 600 }, Durations = new() { [0] = 6000 }, Played = new() { [0] = 100 } };

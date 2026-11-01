@@ -769,7 +769,18 @@ fun StremioSection(me: Profile, onLater: (() -> Unit)? = null, requester: FocusR
                 )
                 if (connected) {
                     Spacer(Modifier.width(10.dp))
-                    // Gone once pressed: focus goes back to the button beside it, not off to the rail.
+                    // The other way: the account's list made this TV's, for every device that signs in after.
+                    TvButton("Send my addons to Stremio", {
+                        note = "Sending your addons…"
+                        scope.launch {
+                            note = runCatching { Stremio.pushAddons() }.fold(
+                                { "Your Stremio account now has this TV's $it addon${if (it == 1) "" else "s"}." },
+                                { it.message ?: "Couldn't reach Stremio." },
+                            )
+                        }
+                    }, icon = L.drawable.lucide_ic_upload)
+                    Spacer(Modifier.width(10.dp))
+                    // Gone once pressed: focus goes back to the first button, not off to the rail.
                     TvButton("Sign out", { Stremio.disconnect(); main.requestFocus() }, icon = L.drawable.lucide_ic_link)
                 }
                 if (!connected && c == null) onLater?.let {

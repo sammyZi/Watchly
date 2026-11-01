@@ -133,6 +133,8 @@ object Addons {
         val o = runCatching { JSONObject(Kv.global(SETTINGS) ?: "{}") }.getOrDefault(JSONObject())
         o.put(KEY, JSONArray(next.map { JSONObject().put("url", it.url).put("on", it.on).put("manifest", it.manifest) }))
         Kv.setGlobal(SETTINGS, o.toString())
+        // Added, removed or moved here: the signed-in Stremio account follows, so other devices get the same list.
+        Stremio.addonsChanged()
     }
 
     /** Fetches the manifest and keeps the addon; one already here is refreshed in place. Throws with a message to show. */
@@ -190,11 +192,8 @@ object Addons {
 
     fun toggle(url: String) = save(_list.value.map { if (it.url == url) it.copy(on = !it.on) else it })
 
-    /** Gone here, and from the Stremio account's collection when one is signed in, so an import won't bring it back. */
-    fun remove(url: String) {
-        save(_list.value.filterNot { it.url == url })
-        Stremio.removeAddon(url)
-    }
+    /** Gone here — and from the Stremio account too, as every change is ([save]), so an import won't bring it back. */
+    fun remove(url: String) = save(_list.value.filterNot { it.url == url })
 
     /** One place up (−1) or down (+1); order is the order streams are asked for and listed in. */
     fun move(url: String, step: Int) {
