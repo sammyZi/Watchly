@@ -180,6 +180,14 @@ object Addons {
         return if (copied == links.size) "Copied $copied addon${if (copied == 1) "" else "s"} to the TV." else "Copied $copied of ${links.size} addons — the rest didn't answer."
     }
 
+    /** Addons already read elsewhere (a Stremio account's), added after these; one here already is left be. How many were new. */
+    fun merge(more: List<Addon>): Int {
+        val now = _list.value
+        val fresh = more.filter { a -> now.none { it.url == a.url } }.distinctBy { it.url }
+        if (fresh.isNotEmpty()) save(now + fresh)
+        return fresh.size
+    }
+
     fun toggle(url: String) = save(_list.value.map { if (it.url == url) it.copy(on = !it.on) else it })
 
     fun remove(url: String) = save(_list.value.filterNot { it.url == url })

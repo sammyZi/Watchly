@@ -289,15 +289,15 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit) {
     val history by History.items.collectAsState()
     // One card per title, however many releases it was played from.
     val items = latestPerTitle(history)
-    // After a reinstall this TV's history is empty; what Simkl has still belongs here.
-    val simklLibrary by Simkl.library.collectAsState()
-    val fromSimkl = remember(simklLibrary, history, Kids.on, Kids.allowed) { Kids.only(simklLibrary.notIn(history)) { Title(it.imdb, it.kind, it.title) } }
+    // After a reinstall this TV's history is empty; what Stremio has still belongs here.
+    val stremioLibrary by Stremio.library.collectAsState()
+    val fromStremio = remember(stremioLibrary, history, Kids.on, Kids.allowed) { Kids.only(stremioLibrary.notIn(history)) { Title(it.imdb, it.kind, it.title) } }
     var focusedUri by remember { mutableStateOf<String?>(null) }
     val first = remember { FocusRequester() }
     var releases by remember { mutableStateOf<List<Item>?>(null) }
-    val simkl by Simkl.connected.collectAsState()
+    val stremio by Stremio.connected.collectAsState()
     /** Per profile; the guest is offered nothing it would lose on exit. */
-    var simklLater by remember(me.id) { mutableStateOf(me.isGuest || Kv.get(SIMKL_LATER) != null) }
+    var stremioLater by remember(me.id) { mutableStateOf(me.isGuest || Kv.get(STREMIO_LATER) != null) }
 
     CompositionLocalProvider(LocalBringIntoViewSpec provides rememberEdgeScroll(110.dp)) {
     LazyVerticalGrid(
@@ -317,16 +317,16 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit) {
             }
         }
         // Where the history is, the history's sync is offered.
-        if (Simkl.available && !simkl && !simklLater) item(span = { GridItemSpan(maxLineSpan) }) {
-            SimklSection(me, onLater = {
-                Kv.set(SIMKL_LATER, "1")
-                simklLater = true
+        if (Stremio.available && !stremio && !stremioLater) item(span = { GridItemSpan(maxLineSpan) }) {
+            StremioSection(me, onLater = {
+                Kv.set(STREMIO_LATER, "1")
+                stremioLater = true
             })
         }
-        if (simkl) item(span = { GridItemSpan(maxLineSpan) }) {
-            Text("✓ Simkl connected — finished films and episodes are marked watched", style = Type.meta.copy(color = Ink.faint))
+        if (stremio) item(span = { GridItemSpan(maxLineSpan) }) {
+            Text("✓ Signed in to Stremio — your library and where you stopped are below", style = Type.meta.copy(color = Ink.faint))
         }
-        if (items.isEmpty() && fromSimkl.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+        if (items.isEmpty() && fromStremio.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
             Note("Nothing here yet. Anything you play turns up in this list.", Modifier.padding(top = 20.dp))
         }
         items(items, key = { it.uri }) { item ->
@@ -361,18 +361,18 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit) {
                 }
             }
         }
-        if (fromSimkl.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
-            Text("From Simkl", Modifier.padding(top = 14.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
+        if (fromStremio.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+            Text("From Stremio", Modifier.padding(top = 14.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
         }
-        // Never played on this TV: no release to resume, so the title opens; one picked there starts at Simkl's spot.
-        items(fromSimkl, key = { "simkl:${it.imdb}" }) { s ->
-            val paused = simklLibrary.paused.find { it.imdb == s.imdb }
+        // Never played on this TV: no release to resume, so the title opens; one picked there starts at Stremio's spot.
+        items(fromStremio, key = { "stremio:${it.imdb}" }) { s ->
+            val paused = stremioLibrary.paused.find { it.imdb == s.imdb }
             Focusable(
                 onClick = { onOpen(Title(s.imdb, s.kind, s.title, year = s.year)) },
                 modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
                 shape = RoundedCornerShape(8.dp),
                 scale = 1.08f,
-                requester = if (items.isEmpty() && s == fromSimkl.first()) first else null,
+                requester = if (items.isEmpty() && s == fromStremio.first()) first else null,
             ) {
                 Artwork("https://images.metahub.space/background/medium/${s.imdb}/img", s.title, Modifier.fillMaxSize())
                 Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(0.4f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.85f))))
@@ -383,7 +383,7 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit) {
                         s.kind == "movie" -> "Watched"
                         else -> s.last?.let { "Last watched $it" } ?: "Watched"
                     }
-                    Text("$state  ·  on Simkl", style = Type.meta.copy(fontSize = 11.sp), maxLines = 1)
+                    Text("$state  ·  on Stremio", style = Type.meta.copy(fontSize = 11.sp), maxLines = 1)
                     paused?.let {
                         Spacer(Modifier.height(5.dp))
                         ProgressLine((it.progress / 100).toFloat())
@@ -393,7 +393,7 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit) {
         }
     }
     }
-    if (items.isNotEmpty() || fromSimkl.isNotEmpty()) first.claim()
+    if (items.isNotEmpty() || fromStremio.isNotEmpty()) first.claim()
     releases?.let { all -> ReleasesSheet(all, watch) { releases = null } }
 }
 
@@ -561,7 +561,7 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
 
-        if (Simkl.available) SimklSection(me)
+        if (Stremio.available) StremioSection(me)
 
         Section("Extra trackers","Attach public trackers to bare magnet links so they resolve faster.") {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -634,8 +634,8 @@ private fun AddonsList() {
     }
 }
 
-/** The Library's Simkl card was put off with "Not now"; Settings still offers it. */
-private const val SIMKL_LATER = "simkl:later"
+/** The Library's Stremio card was put off with "Not now"; Settings still offers it. */
+private const val STREMIO_LATER = "stremio:later"
 
 /**
  * A key or link pasted on a phone rather than typed with the remote: a QR of a page the TV serves on
@@ -693,12 +693,14 @@ private fun Qr(text: String, size: androidx.compose.ui.unit.Dp) {
 }
 
 /**
- * Connect by device code: the code shows here, the viewer approves on their phone, this page notices.
+ * Sign in to Stremio by its link code: a QR of link.stremio.com with the code in it, where the viewer
+ * signs in on their phone and approves; this page notices, then brings the account's addons. No
+ * password, and no typing with the remote.
  * [onLater] makes it the Library's card, with a Not now; without it, a Settings section.
  */
 @Composable
-fun SimklSection(me: Profile, onLater: (() -> Unit)? = null) {
-    val connected by Simkl.connected.collectAsState()
+fun StremioSection(me: Profile, onLater: (() -> Unit)? = null) {
+    val connected by Stremio.connected.collectAsState()
     var code by remember { mutableStateOf<DeviceCode?>(null) }
     var note by remember { mutableStateOf<String?>(null) }
     var job by remember { mutableStateOf<Job?>(null) }
@@ -709,41 +711,54 @@ fun SimklSection(me: Profile, onLater: (() -> Unit)? = null) {
         job?.cancel()
         job = scope.launch {
             try {
-                val c = Simkl.start()
+                val c = Stremio.start()
                 code = c
-                if (!Simkl.await(c)) note = "That code ran out — connect again for a new one."
+                if (!Stremio.await(c)) note = "That code ran out — sign in again for a new one."
             } catch (e: Exception) {
-                if (e !is kotlinx.coroutines.CancellationException) note = e.message ?: "Couldn't reach Simkl."
+                if (e !is kotlinx.coroutines.CancellationException) note = e.message ?: "Couldn't reach Stremio."
             } finally {
                 code = null
             }
         }
     }
 
+    val email by Stremio.email.collectAsState()
     val hint = when {
-        connected -> "Connected — films and episodes you watch to the end are marked watched on Simkl."
-        me.isGuest -> "Marks what you finish as watched on your Simkl account. As Guest it's forgotten when the app closes."
-        else -> "Films and episodes you finish get marked watched on your Simkl account, and Continue Watching follows you to other devices."
+        connected -> "Signed in${email?.let { " as $it" }.orEmpty()} — your Stremio library and where you stopped are here, My List is your library there, and what you finish is marked watched."
+        me.isGuest -> "Your Stremio library, Continue Watching and addons on this TV. As Guest it's forgotten when the app closes."
+        else -> "Your Stremio library, Continue Watching and addons on this TV, kept in step both ways. You sign in on your phone — no password on the TV."
     }
     val body: @Composable () -> Unit = {
         Column {
             val c = code
             if (c != null) Row(Modifier.padding(bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                // Scanned, it opens Simkl with the code filled in; the code itself is for typing on any device.
+                // Scanned, it opens Stremio's page with the code in it; the address is for typing on any device.
                 Qr(c.uriComplete, 168.dp)
                 Spacer(Modifier.width(24.dp))
                 Column(Modifier.widthIn(max = 560.dp)) {
-                    Text("Scan with your phone's camera — or go to ${c.uri.removePrefix("https://")} and enter", style = Type.meta.copy(color = Ink.faint))
-                    Text(c.userCode, Modifier.padding(vertical = 8.dp), style = Type.display)
-                    Text("Signing in? Simkl emails that account a link — open it and confirm, then press Allow.", style = Type.meta.copy(color = Ink.faint))
+                    Text("Scan with your phone's camera, sign in to Stremio and approve — or go to", style = Type.meta.copy(color = Ink.faint))
+                    Text(c.uriComplete.removePrefix("https://"), Modifier.padding(vertical = 8.dp), style = Type.display)
+                    Text("This page notices by itself once you've approved.", style = Type.meta.copy(color = Ink.faint))
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 when {
-                    connected -> TvButton("Disconnect", { Simkl.disconnect() }, icon = L.drawable.lucide_ic_link)
+                    connected -> {
+                        TvButton("Import addons", {
+                            note = "Bringing your addons…"
+                            scope.launch {
+                                note = runCatching { Stremio.importAddons() }.fold(
+                                    { if (it == 0) "Every addon is here already." else "Added $it addon${if (it == 1) "" else "s"}." },
+                                    { it.message ?: "Couldn't reach Stremio." },
+                                )
+                            }
+                        }, icon = L.drawable.lucide_ic_puzzle)
+                        Spacer(Modifier.width(10.dp))
+                        TvButton("Sign out", { Stremio.disconnect() }, icon = L.drawable.lucide_ic_link)
+                    }
                     c != null -> TvButton("Cancel", { job?.cancel() })
                     else -> {
-                        TvButton("Connect Simkl", ::connect, icon = L.drawable.lucide_ic_link)
+                        TvButton("Sign in to Stremio", ::connect, icon = L.drawable.lucide_ic_link)
                         onLater?.let {
                             Spacer(Modifier.width(10.dp))
                             TvButton("Not now", it)
@@ -754,9 +769,9 @@ fun SimklSection(me: Profile, onLater: (() -> Unit)? = null) {
             note?.let { Text(it, Modifier.padding(top = 10.dp), style = Type.meta.copy(color = Ink.faint)) }
         }
     }
-    if (onLater == null) Section("Simkl", hint, body)
+    if (onLater == null) Section("Stremio account", hint, body)
     else Column(Modifier.fillMaxWidth().background(Ink.surface, RoundedCornerShape(14.dp)).padding(24.dp)) {
-        Text("Sync your history with Simkl", style = Type.title.copy(fontWeight = FontWeight.Bold))
+        Text("Bring your Stremio library", style = Type.title.copy(fontWeight = FontWeight.Bold))
         Text(hint, Modifier.padding(top = 4.dp, bottom = 16.dp).widthIn(max = 760.dp), style = Type.meta.copy(color = Ink.faint))
         body()
     }

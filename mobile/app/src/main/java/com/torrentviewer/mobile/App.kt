@@ -85,7 +85,7 @@ import com.torrentviewer.core.Lc
 import com.torrentviewer.core.Phase
 import com.torrentviewer.core.Profile
 import com.torrentviewer.core.Profiles
-import com.torrentviewer.core.Simkl
+import com.torrentviewer.core.Stremio
 import com.torrentviewer.core.Kids
 import com.torrentviewer.core.Addons
 import com.torrentviewer.core.AppScope
@@ -144,7 +144,7 @@ private fun open(profile: Profile) {
     Kv.useProfile(profile.id, profile.isGuest)
     History.load()
     SavedStore.load()
-    Simkl.load(profile.id, profile.isGuest)
+    Stremio.load(profile.id, profile.isGuest)
     Kids.use(profile)
     if (!profile.isGuest) Kv.setGlobal(LAST_PROFILE, profile.id)
 }
