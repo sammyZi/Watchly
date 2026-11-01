@@ -118,7 +118,7 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
         val run: suspend (OnHits) -> List<Hit> = { onHits ->
             try {
                 if (ep != null) searchEpisode(title, ep.season, ep.episode, onHits, searchLang())
-                else searchStreams(title.title, title.imdb, title.year?.take(4), lang = searchLang(), onHits = onHits)
+                else searchStreams(title.title, title.imdb, title.year?.take(4), lang = searchLang(), onHits = onHits, type = title.type)
             } finally {
                 if (mine == ticket) busy = false
             }
@@ -395,7 +395,7 @@ fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0
                     listOfNotNull(
                         hit.scope.label.takeIf { hit.kind == "tv" || hit.scope != Scope.EPISODE },
                         bytes(hit.size).takeIf { hit.size > 0 },
-                        "${hit.seeders} seeds".takeIf { !hit.direct },
+                        "${hit.seeders} seeds".takeIf { !hit.direct && !hit.external },
                         hit.addon.ifEmpty { null },
                     ).joinToString("   ·   "),
                     style = Type.meta.copy(color = if (focused) Color.Black.copy(alpha = 0.6f) else Ink.faint),
@@ -404,8 +404,8 @@ fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0
             Spacer(Modifier.width(14.dp))
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    when { hit.direct -> "Direct"; instant -> "Instant"; else -> grade.label },
-                    style = Type.meta.copy(color = if (focused) Color.Black else if (hit.direct || instant) Ink.good else tint, fontWeight = FontWeight.Bold),
+                    when { hit.external -> "Opens app"; hit.direct -> "Direct"; instant -> "Instant"; else -> grade.label },
+                    style = Type.meta.copy(color = if (focused) Color.Black else if (hit.external) Ink.muted else if (hit.direct || instant) Ink.good else tint, fontWeight = FontWeight.Bold),
                 )
                 if (instant) Text("TorBox", style = Type.meta.copy(color = if (focused) Color.Black.copy(alpha = 0.6f) else Ink.faint))
                 if (mbps >= HEAVY_MBPS) {

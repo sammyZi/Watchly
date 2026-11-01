@@ -63,6 +63,8 @@ class Watch(val engine: TorrentStream) {
         private set
 
     val notes = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    /** Links for another app to open — a YouTube video, an addon's page: the app shell starts them. */
+    val opens = MutableSharedFlow<String>(extraBufferCapacity = 1)
 
     private var source: String? = null
     /** Bumped by every open and exit, so a file list that lands after backing out is dropped. */
@@ -153,6 +155,10 @@ class Watch(val engine: TorrentStream) {
 
     /** A chosen release becomes a stream. `tag` (S01E02) picks the file inside a pack. */
     fun stream(hit: Hit, from: Title?, tag: String? = null, episode: Episode? = null) = AppScope.launch {
+        if (hit.external) {
+            opens.tryEmit(hit.uri)
+            return@launch
+        }
         title = from
         val fresh = History.put(
             Item(
@@ -168,12 +174,13 @@ class Watch(val engine: TorrentStream) {
                 seeders = hit.seeders.takeIf { !hit.direct },
             ),
         )
-        if (hit.direct) return@launch playLink(fresh, hit.name, hit.size)
+        if (hit.direct) return@launch playLink(fresh, hit.name, hit.size, hit.headers)
         val found = inspect(fresh) ?: return@launch
         if (found.files.none { it.isVideo }) return@launch fail("This torrent holds no video.")
         // A pack of anime names its files by the number through the show: let that pick too.
         val pick = if (episode != null && from != null) pickTag(episode.season, episode.episode, absoluteNumber(from.episodes, episode.season, episode.episode)) else tag
-        val index = pickFile(found.files, pick)
+        // The addon's own file index settles it when the names can't.
+        val index = pickFile(found.files, pick) ?: hit.fileIdx?.takeIf { i -> found.files.any { it.index == i && it.isVideo } }
         if (index == null) {
             phase = Phase.IDLE
             choose = fresh to found
@@ -244,7 +251,9 @@ class Watch(val engine: TorrentStream) {
      * A link that plays as it is — an addon's debrid stream, a file on the viewer's own server:
      * one file, no torrent, so the engine only has to let go of whatever it was streaming.
      */
-    private suspend fun playLink(target: Item, name: String, size: Long) {
+    // ponytail: [headers] aren't kept in History, so a link that needs them may not resume from Continue
+    // Watching; keep them on the Item if an addon that needs them gets common.
+    private suspend fun playLink(target: Item, name: String, size: Long, headers: Map<String, String> = emptyMap()) {
         val ticket = ++gen
         withContext(Dispatchers.IO) { engine.stop() }
         if (ticket != gen) return
@@ -256,7 +265,8 @@ class Watch(val engine: TorrentStream) {
         via = null
         torboxIndexed = false
         engine.progress.value = null
-        engine.ready.value = Ready(target.uri, name, emptyList(), lanUrl = target.uri)
+        // A link that needs headers can't go to a Cast receiver, which won't send them.
+        engine.ready.value = Ready(target.uri, name, emptyList(), lanUrl = target.uri.takeIf { headers.isEmpty() }, headers = headers)
         playId++
         phase = Phase.PLAYING
     }

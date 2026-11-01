@@ -37,6 +37,22 @@ class LibTest {
         assertEquals("a.example", a.host)
         assertNull(toAddon("https://a.example", JSONObject("""{"name":"Empty","resources":[]}""")))
         assertNull(toAddon("https://a.example", JSONObject("""{"resources":["stream"]}""")))
+
+        // Catalogues: one that needs a genre picked isn't a home row; search is either shape.
+        val lists = toAddon(
+            "https://a.example",
+            JSONObject(
+                """{"name":"Lists","resources":["catalog"],"types":["movie"],"catalogs":[
+                   {"type":"movie","id":"top","name":"Top","extra":[{"name":"search"},{"name":"skip"}]},
+                   {"type":"series","id":"by-genre","name":"Genre","extra":[{"name":"genre","isRequired":true}]},
+                   {"type":"channel","id":"old","extraSupported":["search"],"extraRequired":[]}]}""",
+            ),
+        )!!
+        assertEquals(listOf(false, true, false), lists.catalogs.map { it.required })
+        assertEquals(listOf(true, false, true), lists.catalogs.map { it.search })
+        assertEquals("old", lists.catalogs[2].name)
+        assertEquals("movie", kindOfType("tv"))
+        assertEquals("tv", kindOfType("channel"))
     }
 
     @Test fun qualityKindHealth() {
@@ -146,10 +162,22 @@ class LibTest {
         assertEquals("Show.S01E02.WEB.mkv", link.name)
         assertEquals(1234L, link.size)
         assertEquals("1080p", link.quality)
-        // Needs headers we can't send, or no way to play at all: left out.
-        val headed = JSONObject().put("title", "x").put("url", "https://d.example/a").put("behaviorHints", JSONObject().put("proxyHeaders", JSONObject()))
-        assertEquals(0, toStreamHits(JSONArray().put(headed), "movie").size)
-        assertEquals(0, toStreamHits(JSONArray().put(JSONObject().put("title", "trailer").put("ytId", "abc")), "movie").size)
+        // A link's headers go with it; YouTube and outside pages go to another app; nothing playable is left out.
+        val headed = JSONObject().put("title", "x").put("url", "https://d.example/a")
+            .put("behaviorHints", JSONObject().put("proxyHeaders", JSONObject().put("request", JSONObject().put("Referer", "https://d.example"))))
+        assertEquals(mapOf("Referer" to "https://d.example"), toStreamHits(JSONArray().put(headed), "movie").single().headers)
+        val yt = toStreamHits(JSONArray().put(JSONObject().put("title", "trailer").put("ytId", "abc")), "movie").single()
+        assertTrue(yt.external)
+        assertFalse(yt.direct)
+        assertEquals("https://www.youtube.com/watch?v=abc", yt.uri)
+        assertEquals(0, toStreamHits(JSONArray().put(JSONObject().put("title", "nothing")), "movie").size)
+        // A torrent's own trackers and file index come along.
+        val tracked = toStreamHits(
+            JSONArray().put(JSONObject(stream.toString()).put("fileIdx", 3).put("sources", JSONArray().put("tracker:udp://t.example:1337/announce").put("dht:abc"))),
+            "movie",
+        ).single()
+        assertEquals(3, tracked.fileIdx)
+        assertTrue(tracked.uri.contains("t.example"))
 
         // Pasted links: a magnet goes to the swarm, a video URL plays as it is, words are a search.
         assertTrue(linkHit("http://192.168.1.5:8096/Videos/1/stream.mkv")!!.direct)

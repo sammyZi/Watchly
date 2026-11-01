@@ -188,7 +188,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
         val run: suspend (OnHits) -> List<Hit> = { onHits ->
             try {
                 if (ep != null) searchEpisode(title, ep.season, ep.episode, onHits, searchLang())
-                else searchStreams(title.title, title.imdb, title.year?.take(4), lang = searchLang(), onHits = onHits)
+                else searchStreams(title.title, title.imdb, title.year?.take(4), lang = searchLang(), onHits = onHits, type = title.type)
             } finally {
                 if (mine == ticket) busy = false
             }
@@ -544,9 +544,9 @@ private fun LazyListScope.sources(
                 busy -> Note("${shown.size} so far · finding more…", Modifier.padding(bottom = 8.dp))
                 hits?.isEmpty() == true -> Note(
                     when {
-                        !Addons.hasStreams -> "No addons to ask yet. Add one under Settings → Addons to find streams."
+                        !Addons.hasStreams -> "No addons to ask yet. Add one in the Addons tab to find streams."
                         language != null -> "Nothing found in $language. Change the language and try again."
-                        else -> "Nothing found. Try another episode, or add another addon under Settings → Addons."
+                        else -> "Nothing found. Try another episode, or add another addon in the Addons tab."
                     },
                 )
                 hits == null && episode == null && title.isSeries -> Note("Choose an episode to see what is available.")
@@ -700,7 +700,7 @@ fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0
                     listOfNotNull(
                         hit.scope.label.takeIf { hit.kind == "tv" || hit.scope != Scope.EPISODE },
                         bytes(hit.size).takeIf { hit.size > 0 },
-                        "${hit.seeders} seeds".takeIf { !hit.direct },
+                        "${hit.seeders} seeds".takeIf { !hit.direct && !hit.external },
                         hit.addon.ifEmpty { null },
                     ).joinToString("  ·  "),
                     Modifier.padding(top = 2.dp),
@@ -710,14 +710,14 @@ fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0
             Spacer(Modifier.width(10.dp))
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    when { hit.direct -> "Direct"; instant -> "Instant"; else -> grade.label },
-                    style = Type.meta.copy(color = if (hit.direct || instant) Ink.good else tint, fontWeight = FontWeight.Bold),
+                    when { hit.external -> "Opens app"; hit.direct -> "Direct"; instant -> "Instant"; else -> grade.label },
+                    style = Type.meta.copy(color = if (hit.external) Ink.muted else if (hit.direct || instant) Ink.good else tint, fontWeight = FontWeight.Bold),
                 )
                 if (instant) Text("TorBox", style = Type.meta.copy(fontSize = 11.sp, color = Ink.faint))
                 if (mbps >= HEAVY_MBPS) Text("Needs ${mbps.toInt()} Mb/s", style = Type.meta.copy(fontSize = 11.sp, color = if (mbps >= TOO_HEAVY_MBPS) Ink.danger else Ink.warn))
             }
             // The download engine is a torrent client; a link is streamed only.
-            if (onDownload != null && !hit.direct) Tap(onDownload, Modifier.padding(start = 4.dp), CircleShape) { Lc(L.drawable.lucide_ic_download, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp) }
+            if (onDownload != null && !hit.direct && !hit.external) Tap(onDownload, Modifier.padding(start = 4.dp), CircleShape) { Lc(L.drawable.lucide_ic_download, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp) }
         }
     }
 }

@@ -338,6 +338,7 @@ private fun Player(watch: Watch) {
     LaunchedEffect(ready, view.value) {
         val r = ready ?: return@LaunchedEffect
         val v = view.value ?: return@LaunchedEffect
+        v.headers = r.headers
         v.open(r.url, (at * 1000).toLong(), cacheMsFor(bitrate), r.subtitleFiles + external.map { it.path })
     }
 
