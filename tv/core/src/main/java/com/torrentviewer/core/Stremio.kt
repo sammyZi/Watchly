@@ -176,6 +176,14 @@ fun libraryItem(old: JSONObject?, id: String, name: String, type: String, poster
 }
 
 /**
+ * The account's addon collection without the one at [url] (by its base, as Watchly keeps it), every
+ * other entry exactly as Stremio sent it. Protected ones — Stremio's own — stay whatever the URL.
+ */
+fun withoutAddon(collection: List<JSONObject>, url: String): List<JSONObject> = collection.filterNot { a ->
+    addonBase(a.optString("transportUrl")) == url && a.optJSONObject("flags")?.optBoolean("protected") != true
+}
+
+/**
  * [up] with My List added to the account's library: each title saved here that isn't in it — absent,
  * removed, or only seen once (temp) — goes in, unless it was sent before ([sent]): one taken out
  * there on purpose stays out. Nothing is ever removed this way. Merged into [up], by id.
@@ -337,6 +345,25 @@ object Stremio {
             toAddon(base, manifest)
         }
         return Addons.merge(addons)
+    }
+
+    /**
+     * An addon removed here goes from the account's collection too, so the next import doesn't bring it
+     * back: the collection as it stands, less that one, written back whole. Fire and forget.
+     */
+    fun removeAddon(url: String) {
+        if (key == null) return
+        val owner = profile
+        AppScope.launch {
+            runCatching {
+                val got = call("addonCollectionGet", JSONObject().put("type", "AddonCollectionGet").put("update", true), owner)
+                val all = got.optJSONObject("result")?.optJSONArray("addons")?.objects() ?: return@runCatching
+                val keep = withoutAddon(all, url)
+                if (keep.size == all.size) return@runCatching
+                call("addonCollectionSet", JSONObject().put("type", "AddonCollectionSet").put("addons", JSONArray(keep)), owner)
+                Log.i("stremio", "removed an addon from the account")
+            }.onFailure { Log.w("stremio", "remove addon: ${it.message}") }
+        }
     }
 
     fun disconnect(owner: String = profile) {
