@@ -15,6 +15,30 @@ swarm, and the comments beside them say what went wrong before.
 
 ---
 
+## 0. Which streams reach the engine
+
+Watchly ships no sources: every stream comes from an addon the viewer added
+(`Addons.kt`, the Stremio addon protocol), or from a link pasted into Search.
+`Watch.kt` routes each one by what it is:
+
+| stream | goes to |
+|---|---|
+| `infoHash` (a magnet), or a `.torrent` link | **TorBox** first if the viewer has a key and TorBox has it cached; otherwise this engine |
+| `url` — a debrid service's link, or the viewer's own media server | straight to the player (`Watch.playLink`): no torrent, no local server, nothing on disk |
+| `ytId` / `externalUrl` | handed to another app; Watchly does not play it |
+
+A **TorBox** link plays over HTTPS from TorBox's servers. If the picture has not
+moved after `TORBOX_STALL_MS` (45 s) — a video the device cannot decode leaves
+VLC silent rather than failing — or TorBox drops mid-film, `leaveTorBox` hands the
+same file to this engine at the same spot. TorBox numbers a pack's files its own
+way, so the swarm's index is found by size and name first (`swarmIndex`).
+
+A **direct link** may carry the headers its server wants (an addon's
+`behaviorHints.proxyHeaders`); see section 7. Everything below is about the
+torrent case only.
+
+---
+
 ## 1. The shape
 
 ```
@@ -43,13 +67,17 @@ where the player is reading.
 `play(uri, fileIndex, PlayOptions)`:
 
 1. **Metadata.** A `.torrent` seen before is read from `torrent-cache/meta/`;
-   a magnet is resolved through the swarm. A torrent `inspect()` already added to
-   list its files is adopted rather than re-added, so its peers carry over.
-2. **Files.** Only the chosen video and its sidecar subtitles (same folder, same
+   a magnet is resolved through the swarm, with the trackers the addon listed in
+   its `sources` added to it. A torrent `inspect()` already added to list its
+   files is adopted rather than re-added, so its peers carry over.
+2. **Which file.** In a pack, the episode asked for is picked by its name
+   (`pickFile`); when the names cannot say, the addon's own `fileIdx` decides,
+   and failing that the viewer is asked.
+3. **Files.** Only the chosen video and its sidecar subtitles (same folder, same
    stem) are wanted; every other file and piece is `IGNORE`. Sequential mode is
    switched off — piece deadlines do the ordering, and sequential mode hands
    piece 0 to the slowest peer.
-3. **Buffers, sized by bitrate** when the file's size and running time are known
+4. **Buffers, sized by bitrate** when the file's size and running time are known
    (from history, or the title's runtime):
 
    | | rule |
@@ -58,12 +86,12 @@ where the player is reading.
    | readahead | bitrate × 60 s, between 128 MB and 768 MB |
    | rush window | max(32 MB, bitrate × 15 s), in pieces |
 
-4. **Pre-roll.** Only what the first frame needs, each its own one-piece zone:
+5. **Pre-roll.** Only what the first frame needs, each its own one-piece zone:
    the file's first piece (the container header) and the prepare window at the
    resume point — not at byte 0, because buffering a head the viewer skips is dead
    time. The first ~2 MB of the tail (Matroska Cues, an MP4 `moov` at the end) is
    asked for at a distant deadline.
-5. **Ready.** Once the head piece and the prepare window are contiguous on disk,
+6. **Ready.** Once the head piece and the prepare window are contiguous on disk,
    the HTTP server starts and the player gets its URL.
 
 ---
@@ -107,7 +135,7 @@ set once — deadlines are absolute. Deadlines no longer wanted are reset.
 
 | problem | response |
 |---|---|
-| the piece the player waits on is stuck for 20 s (4 s in pre-roll, once all its blocks are out with peers) | re-arm that piece alone: `TOP_PRIORITY`, deadline 0, so its blocks go to faster peers too. Pausing the torrent instead dropped the swarm (71 peers → 18) |
+| the piece the player waits on is stuck for 5 s (4 s in pre-roll, once all its blocks are out with peers) | re-arm that piece alone: `TOP_PRIORITY`, deadline 0, so its blocks go to faster peers too. Pausing the torrent instead dropped the swarm (71 peers → 18). It was 20 s, but a 4K player holds only ~8 s of buffer: the TV sat out 20 s on a piece one 16 KB block short, that block out with a single slow peer |
 | waiting on a piece for over 5 s | narrow fetching to the rushed pieces until it lands; a thin swarm spread over the readahead starves the one the player needs |
 | no data at all before the first frame | re-announce every 10 s; give up after 90 s |
 | a file error on the torrent | clear it and carry on |
@@ -117,8 +145,9 @@ set once — deadlines are absolute. Deadlines no longer wanted are reset.
 
 ## 4. The rolling cache
 
-**Settings → Storage for one film**: 2, 4, 8 or 16 GB (4 by default), clamped to
-the free space less 1.5 GB. The readahead never exceeds half the cap.
+**Settings → Storage for one film**: Auto (the default), 2, 4, 8 or 16 GB. Auto is
+the free space less 1.5 GB; a fixed size is clamped to that too. The readahead
+never exceeds half the cap.
 
 When the bytes on disk reach the cap — or free space drops under 1.5 GB — and the
 viewer is not in whole-file mode, at most every 30 s:
@@ -200,6 +229,14 @@ note in `rollCache`.
 - **libVLC** on request, or as that fallback: the widest format support and full
   ASS styling. Its network cache is 3 s, or 6 s above 4 MB/s.
 
+The same two players take the other streams of section 0 unchanged: a TorBox,
+debrid or own-server link is opened as a URL rather than through
+`LocalFileServer`. A link's headers (`Ready.headers`, set before `open`) go with
+every request Media3 makes; libVLC can send only the `User-Agent` and `Referer`
+of them. Headers are not kept in History, so a link that needs them may not
+resume from Continue Watching, and it is not offered to a Cast receiver, which
+would not send them.
+
 ---
 
 ## 8. What is on disk
@@ -231,6 +268,10 @@ The Windows app streams with MonoTorrent and libVLC (`windows/Watchly/Engine/`):
   playhead to 5 minutes ahead, moved on the player's tick — and nothing else of
   the film. "Whole file" lifts the window; so does a download of the same torrent.
 - There is no cap to roll: the stream's files are deleted when the player closes.
+- Streams come from the viewer's addons here too (`Core/Addons.cs`). A `url`
+  stream plays straight in libVLC (`PlayLink` in `MainWindow.xaml.cs`), never
+  through the engine; streams that need `proxyHeaders`, and `ytId` /
+  `externalUrl` ones, are skipped on Windows.
 
 ---
 
@@ -243,11 +284,12 @@ The Windows app streams with MonoTorrent and libVLC (`windows/Watchly/Engine/`):
 | `WINDOW_BYTES` / `WINDOW_SECONDS` | 32 MB / 15 s | |
 | `REWIND_BYTES` | 32 MB | |
 | `REACH_SECONDS` | 16 s | |
-| `STUCK_PIECE_MS` / `PREROLL_STUCK_MS` / `STARVE_MS` | 20 s / 4 s / 5 s | |
+| `STUCK_PIECE_MS` / `PREROLL_STUCK_MS` / `STARVE_MS` | 5 s / 4 s / 5 s | |
 | `STALL_NO_DATA_MS` / `SHAKE_INTERVAL_MS` | 90 s / 10 s | |
 | `READER_LINGER_MS` / `SEEK_AIM_MS` / `REOPEN_HEAD_BYTES` | 10 s / 30 s / 16 MB | |
 | `FREE_SPACE_MIN` | 512 MB (rolls under 3×) | |
 | tail fetched | file size / 200, between 2 and 16 MB | `tailBytesFor` |
-| `CACHE_CAPS` | 2, 4, 8, 16 GB; 4 by default | `Store.kt` |
+| `CACHE_CAPS` | Auto (free space less 1.5 GB), 2, 4, 8, 16 GB; Auto by default | `Store.kt` |
+| `TORBOX_STALL_MS` | 45 s without the picture moving: TorBox gives way to the swarm | `Watch.kt` |
 | `AIM_SECONDS` / `SEEK_CHECK_MS` | 30 s / 2.5 s | the players' `Player.kt` |
 | `WindowSeconds` / `BehindSeconds` | 5 min / 5 s | `windows/…/TorrentEngine.cs` |
