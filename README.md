@@ -147,5 +147,11 @@ player, and the streaming cache the apps share.
 > does not run, endorse or control any of them. You are responsible for what you add and play, and for
 > following the copyright laws where you live. Please only watch what you have the right to.
 >
+> Watchly is an independent project. It is not affiliated with, endorsed by or sponsored by Stremio,
+> any addon, debrid service or metadata provider, Google, Microsoft or any studio. Names and logos of
+> those products are trademarks of their owners and are used here only to describe compatibility.
+> Titles, posters, artwork and other metadata shown inside the apps come from the services you use
+> and belong to their respective owners.
+>
 > Copyright holders: Watchly holds nothing to take down. Notices about content belong with the addon
 > or server that serves it; for anything about this repository itself, open an issue.
