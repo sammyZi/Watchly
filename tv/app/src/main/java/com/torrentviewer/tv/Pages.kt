@@ -436,11 +436,14 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             style = Type.meta.copy(color = Ink.faint),
         )
 
+        // First: the account everything else on this TV comes from. Focus arrives here from the rail.
+        StremioSection(me, requester = first)
+
         Section("Profile", if (me.isGuest) "Guest keeps nothing — history and My List go when the app closes." else "Library, My List and resume points belong to this profile.") {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Avatar(me, 44.dp)
                 Spacer(Modifier.width(16.dp))
-                TvButton("Watching as ${me.name} — switch", onSwitchProfile, icon = L.drawable.lucide_ic_users, requester = first)
+                TvButton("Watching as ${me.name} — switch", onSwitchProfile, icon = L.drawable.lucide_ic_users)
             }
         }
 
@@ -561,8 +564,6 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
 
-        if (Stremio.available) StremioSection(me)
-
         Section("Extra trackers","Attach public trackers to bare magnet links so they resolve faster.") {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Chip("On", settings.addTrackers, onClick = { set(settings.copy(addTrackers = true)) })
@@ -649,6 +650,8 @@ private fun PhoneKey(what: String, several: Boolean = false, label: String = "Pa
     // One button that changes its label, not a button swapped for another: a focused button taken
     // away left focus nowhere, and the page sent it back to the top.
     TvButton(if (open) (if (several) "Done" else "Cancel") else label, { open = !open }, Modifier.padding(top = 12.dp), icon = if (open) L.drawable.lucide_ic_x else L.drawable.lucide_ic_smartphone)
+    // Back closes the QR here, rather than leaving the page and losing the place on it.
+    androidx.activity.compose.BackHandler(open) { open = false }
     if (!open) return
     var address by remember { mutableStateOf<String?>(null) }
     var tried by remember { mutableStateOf(false) }
@@ -697,14 +700,28 @@ private fun Qr(text: String, size: androidx.compose.ui.unit.Dp) {
  * signs in on their phone and approves; this page notices, then brings the account's addons. No
  * password, and no typing with the remote.
  * [onLater] makes it the Library's card, with a Not now; without it, a Settings section.
+ * [requester] is its first button, where focus lands coming in from the rail.
  */
 @Composable
-fun StremioSection(me: Profile, onLater: (() -> Unit)? = null) {
+fun StremioSection(me: Profile, onLater: (() -> Unit)? = null, requester: FocusRequester? = null) {
     val connected by Stremio.connected.collectAsState()
     var code by remember { mutableStateOf<DeviceCode?>(null) }
     var note by remember { mutableStateOf<String?>(null) }
     var job by remember { mutableStateOf<Job?>(null) }
     val scope = rememberCoroutineScope()
+    // Back while the QR is up closes it right here, rather than leaving the page (which went back to its top).
+    androidx.activity.compose.BackHandler(code != null) { job?.cancel() }
+    val main = requester ?: remember { FocusRequester() }
+
+    fun importAddons() {
+        note = "Bringing your addons…"
+        scope.launch {
+            note = runCatching { Stremio.importAddons() }.fold(
+                { if (it == 0) "Every addon is here already." else "Added $it addon${if (it == 1) "" else "s"}." },
+                { it.message ?: "Couldn't reach Stremio." },
+            )
+        }
+    }
 
     fun connect() {
         note = null
@@ -742,28 +759,22 @@ fun StremioSection(me: Profile, onLater: (() -> Unit)? = null) {
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                when {
-                    connected -> {
-                        TvButton("Import addons", {
-                            note = "Bringing your addons…"
-                            scope.launch {
-                                note = runCatching { Stremio.importAddons() }.fold(
-                                    { if (it == 0) "Every addon is here already." else "Added $it addon${if (it == 1) "" else "s"}." },
-                                    { it.message ?: "Couldn't reach Stremio." },
-                                )
-                            }
-                        }, icon = L.drawable.lucide_ic_puzzle)
-                        Spacer(Modifier.width(10.dp))
-                        TvButton("Sign out", { Stremio.disconnect() }, icon = L.drawable.lucide_ic_link)
-                    }
-                    c != null -> TvButton("Cancel", { job?.cancel() })
-                    else -> {
-                        TvButton("Sign in to Stremio", ::connect, icon = L.drawable.lucide_ic_link)
-                        onLater?.let {
-                            Spacer(Modifier.width(10.dp))
-                            TvButton("Not now", it)
-                        }
-                    }
+                // One button that changes its label and action, not one swapped for another: a focused
+                // button taken away left focus nowhere, and the rail opened.
+                TvButton(
+                    when { connected -> "Import addons"; c != null -> "Cancel"; else -> "Sign in to Stremio" },
+                    { when { connected -> importAddons(); c != null -> job?.cancel(); else -> connect() } },
+                    icon = when { connected -> L.drawable.lucide_ic_puzzle; c != null -> L.drawable.lucide_ic_x; else -> L.drawable.lucide_ic_link },
+                    requester = main,
+                )
+                if (connected) {
+                    Spacer(Modifier.width(10.dp))
+                    // Gone once pressed: focus goes back to the button beside it, not off to the rail.
+                    TvButton("Sign out", { Stremio.disconnect(); main.requestFocus() }, icon = L.drawable.lucide_ic_link)
+                }
+                if (!connected && c == null) onLater?.let {
+                    Spacer(Modifier.width(10.dp))
+                    TvButton("Not now", it)
                 }
             }
             note?.let { Text(it, Modifier.padding(top = 10.dp), style = Type.meta.copy(color = Ink.faint)) }
