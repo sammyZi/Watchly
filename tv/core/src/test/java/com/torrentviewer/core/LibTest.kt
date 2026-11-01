@@ -545,6 +545,17 @@ class LibTest {
         val other = Item("c", "Other.S01E01", at = 3, imdb = "tt7", files = listOf(files[0]), positions = mapOf(0 to 10.0), durations = mapOf(0 to 100.0))
         // The furthest release wins; another show's history stays out.
         assertEquals(mapOf(Ep(1, 1) to 1.0, Ep(1, 2) to 0.75), episodeProgress(listOf(pack, single, other), "tt6"))
+
+        // An addon's link names no episode: the one it was played as places it.
+        val link = Item("https://debrid.example/x", "1080p", at = 4, imdb = "tt6", titleName = "Show · S01E03", files = listOf(StoredFile(0, "1080p", 1, true, false, "1080p")), positions = mapOf(0 to 2300.0), durations = mapOf(0 to 2400.0))
+        assertEquals(2300.0 / 2400.0, episodeProgress(listOf(link), "tt6")[Ep(1, 3)]!!, 1e-9)
+        // A pack's file with no episode in its name isn't put on the episode the pack was opened for.
+        val extras = Item("d", "Show.S01", at = 5, imdb = "tt6", titleName = "Show · S01E01", files = files + StoredFile(2, "Featurette.mkv", 1, true, false, null), positions = mapOf(2 to 100.0), durations = mapOf(2 to 100.0))
+        assertEquals(emptyMap<Ep, Double>(), episodeProgress(listOf(extras), "tt6"))
+        // Anime named by the number through the show: placed among the series' episodes.
+        val eps = listOf(Episode("tt8:1:1", 1, 1, "One", null, null, null), Episode("tt8:1:2", 1, 2, "Two", null, null, null), Episode("tt8:2:1", 2, 1, "Three", null, null, null))
+        val anime = Item("e", "Anime - 03", at = 6, imdb = "tt8", files = listOf(StoredFile(0, "[Group] Anime - 03 [1080p].mkv", 1, true, false, null)), positions = mapOf(0 to 1400.0), durations = mapOf(0 to 1400.0))
+        assertEquals(mapOf(Ep(2, 1) to 1.0), episodeProgress(listOf(anime), "tt8", episodes = eps))
     }
 
     @Test fun introWindow() {

@@ -154,7 +154,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
         if (block == 0) continueAt?.let { c -> blocks.indexOfFirst { b -> b.any { it.first.id == c.id } }.takeIf { it > 0 }?.let { block = it } }
     }
     var numberQuery by rememberSaveable(title.imdb) { mutableStateOf("") }
-    val progress = remember(history, title.imdb, stremio) { episodeProgress(history, title.imdb, stremio) }
+    val progress = remember(history, title.imdb, stremio, title.episodes) { episodeProgress(history, title.imdb, stremio, title.episodes) }
 
     var episode by remember(title.imdb) { mutableStateOf<Episode?>(null) }
     // Back from the player: the episode that was picked, once the list is in.

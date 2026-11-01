@@ -531,15 +531,18 @@ private fun stremioContinue(title: Title, stremio: StremioLibrary): Episode? {
 }
 
 /**
- * How far through each episode of [imdb] anyone got, 0–1, by its file name — the furthest of every
- * release it was played from, and of what Stremio has: watched is 1, paused its percent.
+ * How far through each episode of [imdb] anyone got, 0–1 — the furthest of every release it was
+ * played from, and of what Stremio has: watched is 1, paused its percent. A file is placed by its
+ * name, or by its number through the show among [episodes] (anime); a release of one file whose
+ * name says neither — an addon's link named "1080p" — by the episode it was played as.
  */
-fun episodeProgress(items: List<Item>, imdb: String, stremio: StremioLibrary = StremioLibrary()): Map<Ep, Double> {
+fun episodeProgress(items: List<Item>, imdb: String, stremio: StremioLibrary = StremioLibrary(), episodes: List<Episode> = emptyList()): Map<Ep, Double> {
     val out = mutableMapOf<Ep, Double>()
     stremio.episodes[imdb]?.forEach { out[it] = 1.0 }
     for (p in stremio.paused) if (p.imdb == imdb && p.ep != null) out[p.ep] = maxOf(out[p.ep] ?: 0.0, p.progress / 100)
+    fun placed(name: String): Ep? = parseEpisode(name) ?: episodes.takeIf { it.isNotEmpty() }?.let { episodeOfFile(it, name) }?.let { Ep(it.season, it.episode) }
     for (item in items) if (item.imdb == imdb) for (file in item.files.orEmpty()) {
-        val ep = parseEpisode(file.name) ?: continue
+        val ep = placed(file.name) ?: item.titleName?.takeIf { item.files.orEmpty().size == 1 }?.let(::parseEpisode) ?: continue
         val at = item.positions[file.index] ?: continue
         val of = item.durations[file.index]?.takeIf { it > 0 } ?: continue
         out[ep] = maxOf(out[ep] ?: 0.0, (at / of).coerceIn(0.0, 1.0))
