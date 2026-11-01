@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="docs/images/banner-media-player.jpg" alt="Watchly on Android: Home, a film, a series and its episodes">
-</p>
-
 <h1 align="center">Watchly</h1>
 
 <p align="center">
@@ -102,42 +98,6 @@ when Android asks.
 2. **Sign in to Stremio** (or skip). You approve on Stremio's own page; your library, Continue Watching and addons come with you.
 3. No Stremio account? Open the **Addons** tab and paste an addon's link, or tap **Install** on an addon's site and choose Watchly.
 4. On the TV, **Settings → Addons → Copy addons from phone** brings every addon over with one QR scan.
-
-<a name="screenshots"></a>
-<h2><img src="https://img.shields.io/badge/Screenshots-F5A623?style=for-the-badge" alt="Screenshots" height="34"></h2>
-
-### 📱 Phone
-
-<table>
-  <tr>
-    <td><img src="docs/images/screen-1-home.jpg" alt="Home" width="400"></td>
-    <td><img src="docs/images/screen-2-title.jpg" alt="A film's page" width="400"></td>
-  </tr>
-  <tr>
-    <td><img src="docs/images/screen-3-series.jpg" alt="A series' page" width="400"></td>
-    <td><img src="docs/images/screen-4-episodes.jpg" alt="Episodes" width="400"></td>
-  </tr>
-</table>
-
-### 📺 TV
-
-<table>
-  <tr>
-    <td align="center"><img src="docs/images/tv-0-profiles.jpg" alt="Who's watching" width="800"></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/images/tv-1-home.jpg" alt="Home" width="800"></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/images/tv-2-title.jpg" alt="A film's page" width="800"></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/images/tv-6-series.jpg" alt="A series' page" width="800"></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/images/tv-7-episodes.jpg" alt="Episodes" width="800"></td>
-  </tr>
-</table>
 
 <a name="the-apps"></a>
 <h2><img src="https://img.shields.io/badge/The_apps-3ECF8E?style=for-the-badge" alt="The apps" height="34"></h2>
