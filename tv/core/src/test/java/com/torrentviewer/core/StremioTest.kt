@@ -74,6 +74,29 @@ class StremioTest {
         assertEquals(t, isoMs("2026-01-10T00:00:00Z"))
     }
 
+    @Test fun myListGoesIntoTheLibraryOnce() {
+        fun saved(id: String, kind: String = "movie", list: String = "later") = Saved(id, kind, "T$id", null, null, null, list, 0)
+        val remote = mapOf(
+            "tt1" to JSONObject("""{"_id":"tt1","removed":false,"temp":false}"""), // already in the library
+            "tt2" to JSONObject("""{"_id":"tt2","removed":false,"temp":true,"state":{"timeOffset":7}}"""), // only seen once
+            "tt3" to JSONObject("""{"_id":"tt3","removed":true,"temp":false}"""), // taken out there…
+        )
+        val played = mapOf("tt5" to libraryItem(null, "tt5", "Played", "series", null))
+        val out = withMyList(
+            played, remote,
+            listOf(saved("tt1"), saved("tt2"), saved("tt3"), saved("tt4", "tv"), saved("tt5", "tv"), saved("tt6", list = "favorite")),
+            sent = setOf("tt3"), // …after it was sent: stays out
+        )
+        assertEquals(setOf("tt2", "tt4", "tt5"), out.keys)
+        for (id in listOf("tt2", "tt4", "tt5")) {
+            assertFalse(out.getValue(id).getBoolean("temp"))
+            assertFalse(out.getValue(id).getBoolean("removed"))
+        }
+        // What was there is kept; a series is a series.
+        assertEquals(7, out.getValue("tt2").getJSONObject("state").getInt("timeOffset"))
+        assertEquals("series", out.getValue("tt4").getString("type"))
+    }
+
     @Test fun episodeIds() {
         assertEquals(Ep(1, 2), epOfVideo("tt0944947:1:2"))
         assertEquals(Ep(1, 5), epOfVideo("kitsu:123:1:5"))
