@@ -359,6 +359,8 @@ data class Item(
     val torboxFiles: Boolean = false,
     /** When each file's spot was last saved, ms: which of a title's releases was played last. */
     val played: Map<Int, Long> = emptyMap(),
+    /** For an addon's debrid link: the manifest link of the addon it came from — see [Addons.stillServes]. */
+    val addon: String? = null,
 ) {
     val label get() = titleName ?: title
 
@@ -400,7 +402,7 @@ data class Item(
             subtitles.forEach { (k, v) -> o.put(k.toString(), JSONArray(v.map { JSONObject().put("path", it.path).put("label", it.label) })) }
         })
         .put("imdb", imdb).put("kind", kind).put("poster", poster).put("backdrop", backdrop).put("titleName", titleName)
-        .put("seeders", seeders).put("torboxFiles", torboxFiles)
+        .put("seeders", seeders).put("torboxFiles", torboxFiles).put("addon", addon)
         .put("played", JSONObject().also { o -> played.forEach { (k, v) -> o.put(k.toString(), v) } })
 
     companion object {
@@ -428,6 +430,7 @@ data class Item(
             titleName = o.str("titleName"),
             seeders = if (o.has("seeders") && !o.isNull("seeders")) o.optInt("seeders") else null,
             torboxFiles = o.optBoolean("torboxFiles", false),
+            addon = o.str("addon"),
             played = o.optJSONObject("played")?.let { p -> p.keys().asSequence().mapNotNull { k -> k.toIntOrNull()?.let { it to p.optLong(k) } }.toMap() }.orEmpty(),
         )
     }
@@ -595,6 +598,7 @@ object History {
             kind = item.kind ?: prev?.kind ?: kin?.kind,
             titleName = item.titleName ?: prev?.titleName ?: kin?.titleName,
             seeders = item.seeders ?: prev?.seeders,
+            addon = item.addon ?: prev?.addon,
         )
         write(listOf(merged) + rest.filter { it.uri != item.uri })
         return merged

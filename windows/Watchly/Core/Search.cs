@@ -30,6 +30,8 @@ public sealed record Hit
     public Dictionary<string, string> Headers { get; init; } = new();
     /// <summary>The file the addon meant, by the torrent's own numbering — for when names can't say.</summary>
     public int? FileIdx { get; init; }
+    /// <summary>The manifest link of the addon it came from: a debrid link only plays while that addon (and its key) is still added.</summary>
+    public string AddonUrl { get; init; } = "";
 
     /// <summary>Plays straight from its link: no swarm, no seeders to count, nothing to download.</summary>
     public bool Direct => !External && Search.IsDirectLink(Uri);
@@ -127,13 +129,52 @@ public static class Search
         return n is > 0 and < 1900 ? n : null;
     }
 
-    /// <summary>"Show (01-24) [Batch]", "Show - 01~12": the episodes an anime batch claims.</summary>
+    const string SpanMark = @"(?:s\d{1,2}[ ._-]*e|ep?)?";
+
+    /// <summary>"Show (01-24) [Batch]", "Show EP1144-EP1155", "Show S01E1144-E1155": the episodes an anime batch claims.</summary>
     public static (int From, int To)? EpisodeSpan(string name)
     {
-        var m = Regex.Match(name, @"(?<![\w.])(\d{1,4})\s*[-~–]\s*(\d{1,4})(?![\w.])", I);
+        var m = Regex.Match(name, $@"(?<![\w.]){SpanMark}(\d{{1,4}})\s*[-~–]\s*{SpanMark}(\d{{1,4}})(?![\w.])", I);
         if (!m.Success) return null;
         var (from, to) = (int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value));
         return from < to && to < 1900 ? (from, to) : null;
+    }
+
+    /// <summary>
+    /// Does a batch hold this episode? Null when it is no batch. Without a season label the
+    /// span counts through the show; "S01E1144-E1155" is either that season's or, as season 1
+    /// of a show listed in arcs, the running number.
+    /// </summary>
+    public static bool? SpanHolds(string name, int season, int episode, int? absolute)
+    {
+        if (EpisodeSpan(name) is not { } span) return null;
+        bool In(int n) => n >= span.From && n <= span.To;
+        var claims = SeasonsIn(name);
+        if (claims.Count == 0) return In(absolute ?? episode);
+        return claims.Contains(season) && In(episode) || claims.Contains(1) && absolute is int a && In(a);
+    }
+
+    /// <summary>
+    /// Does release <paramref name="name"/> say it is this episode? Null when it names none (a
+    /// season pack): a batch holds it or not, a single release names it or another one.
+    /// </summary>
+    public static bool? ReleaseIs(string name, int season, int episode, int? absolute) =>
+        SpanHolds(name, season, episode, absolute) ?? NamesEpisode(name, season, episode, absolute);
+
+    /// <summary>
+    /// The addons number a long anime their own way, and can sit one off the episode list: asked
+    /// for 1001, they answer with "- 1002". <paramref name="own"/> (the answers for this episode's
+    /// id) keeps all but the releases naming another episode; <paramref name="near"/> (the
+    /// neighbours' answers) gives those naming this one. If that leaves nothing, <paramref name="own"/> as it was.
+    /// </summary>
+    public static List<Hit> SameEpisode(List<Hit> own, IEnumerable<Hit> near, int season, int episode, int absolute)
+    {
+        var kept = Merge(new[]
+        {
+            own.Where(h => ReleaseIs(h.Name, season, episode, absolute) != false),
+            near.Where(h => ReleaseIs(h.Name, season, episode, absolute) == true),
+        });
+        return kept.Count > 0 ? kept : own;
     }
 
     /// <summary>
@@ -204,9 +245,13 @@ public static class Search
     static bool IsHash(string? s) => s is not null && Regex.IsMatch(s, "^[0-9a-f]{40}$", I);
 
     /// <summary>The addon's own trackers (its <c>sources</c>) first, then the well-known open ones.</summary>
-    static string MagnetOf(string hash, string name, IEnumerable<string>? trackers = null) =>
+    public static string MagnetOf(string hash, string name, IEnumerable<string>? trackers = null) =>
         TitleText.WithTrackers($"magnet:?xt=urn:btih:{hash}&dn={Uri.EscapeDataString(name)}"
             + string.Concat((trackers ?? Enumerable.Empty<string>()).Select(t => "&tr=" + Uri.EscapeDataString(t))));
+
+    /// <summary>The info hash a debrid link names in its path (Torrentio's ".../resolve/torbox/&lt;key&gt;/&lt;hash&gt;/..."), if any.</summary>
+    public static string? LinkHash(string link) =>
+        link.Split('?')[0].Split('/').FirstOrDefault(IsHash)?.ToLowerInvariant();
 
     /// <summary>A video served over http(s), as opposed to a magnet, a .torrent or a path.</summary>
     public static bool IsDirectLink(string uri) => Regex.IsMatch(uri, "^https?://", I) && !TitleText.IsTorrentSource(uri);
@@ -272,7 +317,7 @@ public static class Search
     /// display text — "name\n👤 84 💾 51.3 GB ⚙️ 1337x" — and <c>behaviorHints</c> carry the file's real name and size.
     /// ponytail: archive (rarUrls…) and nzbUrl streams are skipped; few addons send them yet.
     /// </summary>
-    public static List<Hit> ToStreamHits(JsonArray streams, string kind, string addon = "")
+    public static List<Hit> ToStreamHits(JsonArray streams, string kind, string addon = "", string addonUrl = "")
     {
         var @out = new List<Hit>();
         foreach (var s in streams.OfType<JsonObject>())
@@ -312,6 +357,7 @@ public static class Search
                 Kind = kind,
                 PerFileSize = true,
                 Addon = addon,
+                AddonUrl = addonUrl,
             });
         }
         return @out;
@@ -391,7 +437,7 @@ public static class Search
             return lang is null ? all : all.Where(lang.Says).ToList();
         }
         async Task<List<Hit>> Ask(Addon a) =>
-            (await a.Get("stream", type, id, ct))?["streams"] is JsonArray streams ? ToStreamHits(streams, kind, a.Name) : new();
+            (await a.Get("stream", type, id, ct))?["streams"] is JsonArray streams ? ToStreamHits(streams, kind, a.Name, a.Url) : new();
 
         var pending = Addons.Serving("stream", type, id).Select(a => Timed(a.Name, Limited(Ask(a), SourceMs, new List<Hit>()))).ToList();
         var arrived = new List<List<Hit>>();
@@ -432,15 +478,17 @@ public static class Search
 
     /// <summary>
     /// Every stream the addons have for one episode, by the episode's own id ("tt0944947:1:2"): packs
-    /// included, since a pack streams just as well — only the one file is fetched.
+    /// included, since a pack streams just as well — only the one file is fetched. Long anime
+    /// (<paramref name="title"/> numbered through) also asks for the episodes either side, and keeps
+    /// only releases numbered as this one (<see cref="SameEpisode"/>).
     /// </summary>
-    public static Task<List<Hit>> SearchEpisode(string id, string show, int season, CancellationToken ct = default, Lang? lang = null, string type = "series")
+    public static Task<List<Hit>> SearchEpisode(string id, string show, int season, CancellationToken ct = default, Lang? lang = null, string type = "series", Title? title = null)
     {
         var key = $"{id}:{lang?.Code}";
         lock (EpisodeMemo)
         {
             if (EpisodeMemo.TryGetValue(key, out var cached)) return cached;
-            var pending = FromAddons(type, id, ct, lang, null, hits => RankEpisode(hits, show, season)).ContinueWith(t =>
+            var pending = Find().ContinueWith(t =>
             {
                 var hits = t.IsCompletedSuccessfully ? t.Result : new List<Hit>();
                 if (hits.Count == 0) lock (EpisodeMemo) EpisodeMemo.Remove(key);
@@ -448,6 +496,17 @@ public static class Search
             });
             EpisodeMemo[key] = pending;
             return pending;
+        }
+
+        async Task<List<Hit>> Find()
+        {
+            List<Hit> Order(List<Hit> hits) => RankEpisode(hits, show, season);
+            var numbers = title is { NumberedThrough: true } && title.Episodes.Any(e => e.Id == id) ? Meta.AbsoluteNumbers(title.Episodes) : new();
+            var at = numbers.FirstOrDefault(n => n.Episode.Id == id);
+            if (at.Episode is null) return await FromAddons(type, id, ct, lang, null, Order);
+            var near = numbers.Where(n => n.Number == at.Number - 1 || n.Number == at.Number + 1).Select(n => n.Episode.Id).Where(n => n != id).Distinct().ToList();
+            var asked = await Task.WhenAll(new[] { id }.Concat(near).Select(each => FromAddons(type, each, ct, lang, null, hits => hits)));
+            return Order(SameEpisode(asked[0], asked.Skip(1).SelectMany(h => h), at.Episode.Season, at.Episode.Number, at.Number));
         }
     }
 }

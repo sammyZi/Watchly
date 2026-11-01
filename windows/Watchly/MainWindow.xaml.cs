@@ -38,6 +38,10 @@ public sealed record OpenOptions
     public int? FileIdx { get; init; }
     /// <summary>What a link's server wants with every request (an addon's proxyHeaders).</summary>
     public Dictionary<string, string>? Headers { get; init; }
+    /// <summary>The manifest link of the addon a debrid link came from, kept so Resume knows when it's gone.</summary>
+    public string? AddonUrl { get; init; }
+    /// <summary>The file to play by its exact name, before any tag decides.</summary>
+    public string? FileName { get; init; }
 }
 
 /// <summary>Everything the player needs for one file — a torrent file or one already on disk.</summary>
@@ -580,7 +584,7 @@ public partial class MainWindow : Window
     /// <summary>A stream an addon offered: a YouTube video or a page goes to the browser; the rest is streamed.</summary>
     public Task<string?> StreamHit(Hit hit, OpenOptions opts)
     {
-        if (!hit.External) return StreamUri(hit.Uri, opts with { Name = hit.Name, FileIdx = hit.FileIdx, Headers = hit.Headers });
+        if (!hit.External) return StreamUri(hit.Uri, opts with { Name = hit.Name, FileIdx = hit.FileIdx, Headers = hit.Headers, AddonUrl = hit.Direct && hit.AddonUrl.Length > 0 ? hit.AddonUrl : null });
         Ui.Open(hit.Uri);
         return Task.FromResult<string?>(null);
     }
@@ -596,6 +600,7 @@ public partial class MainWindow : Window
             Kind = opts.Kind,
             Poster = opts.Poster,
             TitleName = opts.TitleName,
+            Addon = opts.AddonUrl,
         }, null, opts);
         return ok ? uri : null;
     }
@@ -615,6 +620,30 @@ public partial class MainWindow : Window
         var fresh = HistoryList.First(h => h.Uri == next.Uri);
         if (Search.IsDirectLink(fresh.Uri))
         {
+            // A debrid link from an addon since removed — Torrentio with TorBox swapped for plain Torrentio — only
+            // asks that service again ("no active subscription"): the same release (the hash in the link) from
+            // peers instead. Its spot carries over, as between any two releases of a title.
+            if (Search.LinkHash(fresh.Uri) is { } hash && !Addons.StillServes(fresh.Uri, fresh.Addon))
+            {
+                var name = fresh.TorrentName ?? fresh.Title;
+                Toast("The addon behind that link was removed — streaming the same release from peers.");
+                return await Open(new HistoryItem
+                {
+                    Uri = Search.MagnetOf(hash, name),
+                    Title = name,
+                    At = Store.Now,
+                    Imdb = fresh.Imdb,
+                    Kind = fresh.Kind,
+                    Poster = fresh.Poster,
+                    TitleName = fresh.TitleName,
+                }, null, opts with
+                {
+                    Auto = Search.ParseEpisode(name) is { } at ? Search.EpisodeTag(at.Season, at.Episode) : "best",
+                    FileName = name,
+                    Headers = null,
+                    AddonUrl = null,
+                });
+            }
             PlayLink(fresh, opts.KeepProgress, opts.Headers);
             return true;
         }
@@ -655,7 +684,8 @@ public partial class MainWindow : Window
         if (opts.Auto is not null)
         {
             var indices = opts.Season is not null ? Pick.SeasonFiles(meta.Files, opts.Season) : null;
-            var chosen = indices is { Count: > 0 } ? indices[0] : Pick.PickFile(meta.Files, opts.Auto == "best" ? null : opts.Auto)
+            var named = opts.FileName is { } wanted ? meta.Files.FirstOrDefault(x => x.IsVideo && x.Name == wanted) : null;
+            var chosen = indices is { Count: > 0 } ? indices[0] : named is not null ? named.Index : Pick.PickFile(meta.Files, opts.Auto == "best" ? null : opts.Auto)
                 // The addon's own file index settles it when the names can't.
                 ?? (opts.FileIdx is int f && meta.Files.Any(x => x.Index == f && x.IsVideo) ? f : (int?)null);
             if (chosen is int pick)
@@ -856,7 +886,7 @@ public partial class MainWindow : Window
         var absolute = Meta.AbsoluteNumber(list, next.Season, next.Number);
         return ($"{tag} · {next.Name}", async () =>
         {
-            var hits = await Search.SearchEpisode(next.Id, detail.Name, next.Season, type: detail.StremioType);
+            var hits = await Search.SearchEpisode(next.Id, detail.Name, next.Season, type: detail.StremioType, title: detail);
             if (hits.Count == 0)
             {
                 Toast($"No streams found for {tag}", true);

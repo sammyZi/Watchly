@@ -224,6 +224,23 @@ public static class Addons
         Save(l);
     }
 
+    /// <summary>
+    /// Would <paramref name="link"/> — a stream an addon handed over, a debrid one with the viewer's key in it —
+    /// still come from an addon that is added and on? By <paramref name="manifest"/> when it was kept; else
+    /// (entries from before it was) an addon on the link's host whose own link holds every key-like part of
+    /// the link's path. Torrentio with TorBox swapped for plain Torrentio is the same host without that key: no.
+    /// </summary>
+    public static bool StillServes(string link, string? manifest)
+    {
+        var on = List.Where(a => a.On).ToList();
+        if (manifest is not null) return on.Any(a => a.Url == manifest);
+        if (!System.Uri.TryCreate(link, UriKind.Absolute, out var uri)) return true;
+        var keys = uri.AbsolutePath.Split('/', '=', '|', ',', ';').Where(part =>
+            part.Length >= 20 && part.Any(char.IsDigit) && part.All(c => char.IsLetterOrDigit(c) || c is '-' or '_') &&
+            !System.Text.RegularExpressions.Regex.IsMatch(part, "^[0-9a-fA-F]{40}$")).ToList();
+        return on.Any(a => System.Uri.TryCreate(a.Url, UriKind.Absolute, out var u) && u.Host == uri.Host && keys.All(k => a.Url.Contains(k)));
+    }
+
     public static List<Addon> Serving(string resource, string type, string id) => List.Where(a => a.Serves(resource, type, id)).ToList();
 
     /// <summary>Every list that shows without a genre or search picked first, as home rows.</summary>
