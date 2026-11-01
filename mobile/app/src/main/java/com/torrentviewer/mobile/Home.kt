@@ -175,11 +175,14 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
     }
     val chosen = settings.genres.map { Shelf(if (it == ANIME_GENRE) "Anime" else it, kindOfGenre(it), it) }
     val kids = com.torrentviewer.core.Kids
-    val shelves = remember(chosen, state.picks, kids.on) {
+    val addons by com.torrentviewer.core.Addons.list.collectAsState()
+    val shelves = remember(chosen, state.picks, kids.on, addons) {
         if (kids.on) return@remember com.torrentviewer.core.KIDS_SHELVES.map { (title, kind, genre) -> Shelf(title, kind, genre) }
+        // The viewer's addons' own lists lead, as on Stremio's board.
+        val mine = com.torrentviewer.core.Addons.shelves().map { (title, kind, key) -> Shelf(title, kind, key) }
         val taken = chosen.map { it.key }.toMutableSet()
         val rest = state.picks.filter { taken.add(it.key) }
-        chosen + rest + SHELVES.filter { it.key !in taken }
+        chosen + mine + rest + SHELVES.filter { it.key !in taken }
     }
 
     // Top-down, not all at once: a phone on mobile data and a burst of parallel fetches do not mix.

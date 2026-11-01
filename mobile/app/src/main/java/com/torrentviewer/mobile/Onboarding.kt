@@ -66,7 +66,7 @@ private enum class Art { WALL, FILM, SERIES, WALL_AGAIN }
 
 private val STEPS = listOf(
     Step("Your media player", "Browse trending films, series and anime, and play them from the sources you choose.", Art.WALL),
-    Step("Bring your own sources", "Add an addon in Settings → Addons, or paste a link from your own media server. Watchly comes with none.", Art.FILM, listOf("Addons", "Your server", "Links")),
+    Step("Bring your own sources", "Add an addon in the Addons tab, or paste a link from your own media server. Watchly comes with none.", Art.FILM, listOf("Addons", "Your server", "Links")),
     Step("A profile for everyone", "Each with its own history and My List. A Kids profile shows family films only.", Art.SERIES),
     Step("Pick up anywhere", "Continue Watching follows you to your TV and PC. Connect Simkl or TorBox any time in Settings.", Art.WALL_AGAIN),
 )

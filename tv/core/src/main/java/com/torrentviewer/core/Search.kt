@@ -216,9 +216,15 @@ data class Hit(
     val perFileSize: Boolean = false,
     /** The addon it came from, by name. */
     val addon: String = "",
+    /** Not ours to play: a YouTube video or a page the addon sends to another app. */
+    val external: Boolean = false,
+    /** What the link's server wants with every request (an addon's `proxyHeaders`). */
+    val headers: Map<String, String> = emptyMap(),
+    /** The file the addon meant, by the torrent's own numbering — for when names can't say. */
+    val fileIdx: Int? = null,
 ) {
     /** Plays straight from its link: no swarm, no seeders to count. */
-    val direct get() = isDirectLink(uri)
+    val direct get() = !external && isDirectLink(uri)
 }
 
 /** A video served over http(s), as opposed to a magnet, a .torrent or a path. */
@@ -248,27 +254,38 @@ private val SIZE = Regex("""\x{1F4BE}\s*([\d.]+)\s*(TB|GB|MB|KB)""", RegexOption
 private val UNIT = mapOf("kb" to 1024.0, "mb" to 1024.0 * 1024, "gb" to 1024.0 * 1024 * 1024, "tb" to 1024.0 * 1024 * 1024 * 1024)
 
 /**
- * An addon's streams (the Stremio protocol): a torrent by `infoHash`, or a `url` that plays as it is.
- * The numbers most addons give sit inside the display text — "name\n👤 84 💾 51.3 GB ⚙️ 1337x" — and
- * `behaviorHints` carry the file's real name and size when the addon knows them.
- * ponytail: `ytId`, `externalUrl` and `proxyHeaders` streams are skipped; add them when an addon needs one.
+ * An addon's streams, every shape the Stremio protocol has: a torrent by `infoHash` (with its
+ * `fileIdx` and `sources` trackers), a `url` that plays as it is (with any `proxyHeaders`), and a
+ * `ytId` or `externalUrl` handed to another app. The numbers most addons give sit inside the display
+ * text — "name\n👤 84 💾 51.3 GB ⚙️ 1337x" — and `behaviorHints` carry the file's real name and size.
+ * ponytail: archive (`rarUrls`…) and `nzbUrl` streams are skipped; few addons send them yet.
  */
 fun toStreamHits(streams: JSONArray, kind: String, addon: String = ""): List<Hit> = streams.objects().mapNotNull { s ->
     val hash = s.optString("infoHash").lowercase().takeIf { HASH.matches(it) }
     val url = s.str("url")?.takeIf { isDirectLink(it) || isTorrentSource(it) }
-    if (hash == null && url == null) return@mapNotNull null
+    val outside = s.str("ytId")?.let { "https://www.youtube.com/watch?v=$it" } ?: s.str("externalUrl")
+    if (hash == null && url == null && outside == null) return@mapNotNull null
     val hints = s.optJSONObject("behaviorHints")
-    if (url != null && hints?.optJSONObject("proxyHeaders") != null) return@mapNotNull null
     val text = (s.str("title") ?: s.str("description")).orEmpty()
     val label = s.optString("name").replace('\n', ' ').trim()
     val name = hints?.str("filename") ?: text.lineSequence().firstOrNull()?.trim().orEmpty().ifEmpty { label }
     if (name.isEmpty()) return@mapNotNull null
     val size = hints?.optLong("videoSize")?.takeIf { it > 0 }
         ?: SIZE.find(text)?.let { (it.groupValues[1].toDouble() * (UNIT[it.groupValues[2].lowercase()] ?: 0.0)).roundToLong() } ?: 0L
+    val trackers = s.strings("sources").filter { it.startsWith("tracker:") }.map { it.removePrefix("tracker:") }
+    val headers = hints?.optJSONObject("proxyHeaders")?.optJSONObject("request")
+        ?.let { h -> h.keys().asSequence().associateWith { h.optString(it) } }.orEmpty()
     Hit(
-        id = hash ?: url!!, name = name, uri = if (hash != null) magnetFor(hash, name) else url!!,
+        id = hash ?: url ?: outside!!, name = name,
+        uri = when {
+            hash != null -> withTrackers(magnetFor(hash, name), trackers)
+            url != null -> url
+            else -> outside!!
+        },
         seeders = SEEDERS.find(text)?.groupValues?.get(1)?.toIntOrNull() ?: 0, leechers = 0, size = size,
         quality = quality(name) ?: quality("$label $text"), kind = kind, scope = scopeOf(name), imdb = null, perFileSize = true, addon = addon,
+        external = hash == null && url == null, headers = if (url != null) headers else emptyMap(),
+        fileIdx = s.optInt("fileIdx", -1).takeIf { hash != null && it >= 0 },
     )
 }
 
@@ -299,14 +316,14 @@ fun merge(lists: List<List<Hit>>): List<Hit> {
     return best.values.toList()
 }
 
-/** Links first — they play at once — then seeders over leechers; a name matching every word typed doubles. */
+/** Links first — they play at once — then seeders over leechers, other apps' last; a name matching every word typed doubles. */
 fun rank(hits: List<Hit>, query: String = ""): List<Hit> {
     val words = query.lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
     fun score(h: Hit): Double {
         val full = words.isNotEmpty() && words.all { h.name.lowercase().contains(it) }
         return (h.seeders + h.leechers / 4.0) * if (full) 2 else 1
     }
-    return hits.sortedWith(compareByDescending<Hit> { it.direct }.thenByDescending(::score))
+    return hits.sortedWith(compareByDescending<Hit> { it.direct }.thenBy { it.external }.thenByDescending(::score))
 }
 
 /** Links first, then this season's pack, then loose episodes, whole-series dumps last. */
@@ -340,7 +357,7 @@ private suspend fun source(name: String, ms: Long, job: suspend () -> List<Hit>)
  * each time one answers, so the page fills as they land. One addon being unreachable is the normal case.
  */
 private suspend fun fromAddons(type: String, id: String, lang: Lang?, onHits: OnHits?, order: (List<Hit>) -> List<Hit>): List<Hit> {
-    val kind = if (type == "movie") "movie" else "tv"
+    val kind = kindOfType(type)
     val bags = mutableListOf<List<Hit>>()
     // A language is picked by name ("Hindi"), and only streams that say it count.
     fun now() = synchronized(bags) { order(merge(bags.toList())) }.let { all -> if (lang == null) all else all.filter { lang.match.containsMatchIn(it.name) } }
@@ -360,10 +377,10 @@ private suspend fun fromAddons(type: String, id: String, lang: Lang?, onHits: On
  * A film's streams from the viewer's addons. Without an id, [title] is looked up by name first;
  * a link pasted instead — a magnet, or a video on the viewer's own server — is the one stream.
  */
-suspend fun searchStreams(title: String, imdb: String? = null, year: String? = null, lang: Lang? = null, onHits: OnHits? = null): List<Hit> {
+suspend fun searchStreams(title: String, imdb: String? = null, year: String? = null, lang: Lang? = null, type: String = "movie", onHits: OnHits? = null): List<Hit> {
     linkHit(title)?.let { return listOf(it).also { one -> onHits?.invoke(one) } }
     val id = imdb ?: Meta.resolve(listOfNotNull(title, year).joinToString(" "))?.takeIf { !it.isSeries }?.imdb ?: return emptyList()
-    return fromAddons("movie", id, lang, onHits) { rank(it, title) }
+    return fromAddons(type, id, lang, onHits) { rank(it, title) }
 }
 
 private val episodeMemo = java.util.concurrent.ConcurrentHashMap<String, List<Hit>>()
@@ -376,7 +393,7 @@ suspend fun searchEpisode(title: Title, season: Int, episode: Int, onHits: OnHit
     val id = title.episodes.find { it.season == season && it.episode == episode }?.id ?: "${title.imdb}:$season:$episode"
     val key = "$id:${lang?.code}"
     episodeMemo[key]?.let { return it }
-    return fromAddons("series", id, lang, onHits) { rankEpisode(it, title.title, season) }.also { if (it.isNotEmpty()) episodeMemo[key] = it }
+    return fromAddons(title.type, id, lang, onHits) { rankEpisode(it, title.title, season) }.also { if (it.isNotEmpty()) episodeMemo[key] = it }
 }
 
 /**

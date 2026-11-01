@@ -226,7 +226,9 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
             results = coroutineScope {
                 val films = async { Meta.search(q, "movie") }
                 val series = async { Meta.search(q, "tv") }
-                Kids.only((films.await() + series.await()).distinctBy { it.imdb }.sortedBy { relevance(it.title, q) })
+                // And every addon catalogue that searches, as Stremio asks them all.
+                val mine = async { Meta.searchAddons(q) }
+                Kids.only((films.await() + series.await() + mine.await()).distinctBy { it.imdb }.sortedBy { relevance(it.title, q) })
             }
         }
         busy = false
@@ -357,7 +359,8 @@ private enum class Shelfs(val label: String) { HISTORY("History"), LATER("My Lis
 
 /** Everything played (the only way back to a magnet watched once), and the two saved lists. */
 @Composable
-fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit) {
+fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit, onDownloads: () -> Unit) {
+    val downloading by Downloads.live.collectAsState()
     val simkl by Simkl.connected.collectAsState()
     val simklLibrary by Simkl.library.collectAsState()
     /** Per profile; the guest is offered nothing it would lose on exit. */
@@ -388,6 +391,13 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit) {
                 Heading("Library") {
                     if (shelf == Shelfs.HISTORY && items.isNotEmpty()) Tap({ clearing = true }, shape = CircleShape) {
                         Lc(L.drawable.lucide_ic_trash_2, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp)
+                    }
+                    // Downloads live here now, off the tab bar; the dot says one is running.
+                    Tap(onDownloads, shape = CircleShape) {
+                        Box {
+                            Lc(L.drawable.lucide_ic_download, Modifier.padding(8.dp), tint = Ink.muted, size = 22.dp)
+                            if (downloading.isNotEmpty()) Box(Modifier.align(Alignment.TopEnd).padding(6.dp).size(8.dp).clip(CircleShape).background(Ink.accent))
+                        }
                     }
                 }
                 // Where the history is, the history's sync is offered.
@@ -556,6 +566,7 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = EDGE).padding(bottom = 32.dp)) {
         Heading("Settings")
 
+        Group("Profile") {
         Section(
             "Profile",
             when {
@@ -616,25 +627,9 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
 
         // With the profile: the connection is this profile's.
         if (Simkl.available) SimklSection(me)
-
-        // A kids profile plays what it can browse to; where streams come from is the grown-ups' call.
-        if (!Kids.on) Section(
-            "Addons",
-            "Where streams and subtitles come from. Paste an addon's link — a public one, your debrid service's, or your own media server's. Watchly comes with none.",
-        ) { AddonsList(watch) }
-
-        Section("Welcome tour", "The four pages a new install opens with: what Watchly does, over what's trending now.") {
-            Button("Show the welcome tour", { tourAgain = true }, icon = L.drawable.lucide_ic_sparkles)
         }
 
-        Section("Appearance", "Light or dark pages, or whichever the phone is set to. The player stays dark either way.") {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("system" to "System", "light" to "Light", "dark" to "Dark").forEach { (mode, label) ->
-                    Chip(label, settings.themeMode == mode, onClick = { set(settings.copy(themeMode = mode)) })
-                }
-            }
-        }
-
+        Group("Streaming") {
         Section(
             "Storage for one film",
             "How much of a film may sit on this phone at once. When it fills, what you've watched is let go to make room. Auto uses the free space, keeping a few GB spare.",
@@ -650,6 +645,15 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
 
+        Section("Extra trackers","Attach public trackers to bare magnet links so they resolve faster.") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Chip("On", settings.addTrackers, onClick = { set(settings.copy(addTrackers = true)) })
+                Chip("Off", !settings.addTrackers, onClick = { set(settings.copy(addTrackers = false)) })
+            }
+        }
+        }
+
+        Group("Playback") {
         Section("Player", "Media3 hands a file it can't play to VLC by itself. VLC from the start plays the most formats and full ASS subtitle styling.") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Chip("Media3", !settings.vlcPlayer, onClick = { set(settings.copy(vlcPlayer = false)) })
@@ -661,13 +665,6 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Chip("Automatically", settings.autoSkipIntro, onClick = { set(settings.copy(autoSkipIntro = true)) })
                 Chip("Show the button", !settings.autoSkipIntro, onClick = { set(settings.copy(autoSkipIntro = false)) })
-            }
-        }
-
-        Section("Extra trackers","Attach public trackers to bare magnet links so they resolve faster.") {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Chip("On", settings.addTrackers, onClick = { set(settings.copy(addTrackers = true)) })
-                Chip("Off", !settings.addTrackers, onClick = { set(settings.copy(addTrackers = false)) })
             }
         }
 
@@ -689,7 +686,9 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
                 Chip("Box behind", style.box, onClick = { set(settings.copy(subtitles = style.copy(box = !style.box))) })
             }
         }
+        }
 
+        Group("Services") {
         Section(
             "SubDL key",
             if (subdl.isNotEmpty()) "Saved, encrypted on this phone — Find subtitles searches SubDL too. Enter another to replace it."
@@ -742,7 +741,9 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
                 watch.notes.tryEmit("TorBox key removed")
             }, Modifier.padding(top = 10.dp))
         }
+        }
 
+        Group("Downloads") {
         Section("Downloads", "Wi-Fi only holds a download on mobile data — it waits, and carries on when Wi-Fi is back. Use mobile data on a waiting download to let that one through.") {
             var wifiOnly by remember { mutableStateOf(Downloads.wifiOnly) }
             var sdCard by remember { mutableStateOf(Downloads.sdCard) }
@@ -792,6 +793,16 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
                 }
             }
         }
+        }
+
+        Group("App") {
+        Section("Appearance", "Light or dark pages, or whichever the phone is set to. The player stays dark either way.") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("system" to "System", "light" to "Light", "dark" to "Dark").forEach { (mode, label) ->
+                    Chip(label, settings.themeMode == mode, onClick = { set(settings.copy(themeMode = mode)) })
+                }
+            }
+        }
 
         Section("Backup", "History, resume points, lists, settings, searches and intro marks as one file. Downloads are not in it — they are files on this phone.") {
             val context = LocalContext.current
@@ -825,6 +836,11 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
                     })
                 }
             }
+        }
+
+        Section("Welcome tour", "The four pages a new install opens with: what Watchly does, over what's trending now.") {
+            Button("Show the welcome tour", { tourAgain = true }, icon = L.drawable.lucide_ic_sparkles)
+        }
         }
 
         Text(
@@ -993,26 +1009,18 @@ fun SimklSection(me: Profile, onLater: (() -> Unit)? = null) {
     }
 }
 
-/** The viewer's addons, in the order they are asked, and a field to paste another's link into. */
+/* --------------------------------------------------------------- addons */
+
+/**
+ * The Addons tab: where everything played comes from. Add one by its link (or an addon site's
+ * Install button, which opens here), then switch, order or remove each. Order is the order asked.
+ */
 @Composable
-private fun AddonsList(watch: Watch) {
+fun AddonsScreen(watch: Watch) {
     val addons by Addons.list.collectAsState()
-    var link by remember { mutableStateOf("") }
+    var link by rememberSaveable { mutableStateOf("") }
     var adding by remember { mutableStateOf(false) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    addons.forEachIndexed { i, a ->
-        Row(Modifier.padding(bottom = 8.dp).fillMaxWidth().background(Ink.surface, RoundedCornerShape(8.dp)).padding(start = 14.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(a.name, style = Type.label.copy(fontWeight = FontWeight.SemiBold, color = if (a.on) Ink.text else Ink.faint), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                // The host only: the rest of the link can be the viewer's own key.
-                Text("${a.host}  ·  ${a.offers}", style = Type.meta.copy(color = Ink.faint, fontSize = 12.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            Tap({ Addons.toggle(a.url) }, shape = CircleShape) { Lc(if (a.on) L.drawable.lucide_ic_circle_check else L.drawable.lucide_ic_circle, Modifier.padding(8.dp), tint = if (a.on) Ink.good else Ink.faint, size = 20.dp) }
-            if (i > 0) Tap({ Addons.move(a.url, -1) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_chevron_up, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp) }
-            if (i < addons.lastIndex) Tap({ Addons.move(a.url, 1) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_chevron_down, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp) }
-            Tap({ Addons.remove(a.url); watch.notes.tryEmit("Removed ${a.name}") }, shape = CircleShape) { Lc(L.drawable.lucide_ic_trash_2, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp) }
-        }
-    }
     fun add() {
         if (adding) return
         if (link.isEmpty()) {
@@ -1027,16 +1035,71 @@ private fun AddonsList(watch: Watch) {
             adding = false
         }
     }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Field(link, { link = it.trim() }, "https://…/manifest.json", Modifier.weight(1f), onSubmit = ::add)
-        Spacer(Modifier.width(10.dp))
-        Button(if (adding) "Adding…" else "Add", ::add, icon = L.drawable.lucide_ic_plus)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).imePadding().padding(horizontal = EDGE).padding(bottom = 32.dp)) {
+        Heading("Addons")
+        Text(
+            "Streams, subtitles and extra catalogues come from addons — public ones, your debrid service's, or your own media server's. Watchly comes with none.",
+            Modifier.padding(bottom = 18.dp), style = Type.meta.copy(color = Ink.faint),
+        )
+        Group("Add an addon") {
+            Column(Modifier.padding(bottom = 18.dp)) {
+                Field(link, { link = it.trim() }, "https://…/manifest.json", Modifier.fillMaxWidth(), onSubmit = ::add, leading = L.drawable.lucide_ic_link)
+                Button(if (adding) "Adding…" else "Add addon", ::add, Modifier.padding(top = 10.dp).fillMaxWidth(), icon = L.drawable.lucide_ic_plus, primary = true)
+                Text(
+                    "Or tap Install on an addon's site and pick Watchly.",
+                    Modifier.padding(top = 10.dp), style = Type.meta.copy(color = Ink.faint, fontSize = 12.sp),
+                )
+            }
+        }
+        Text(if (addons.isEmpty()) "No addons yet" else "Installed · ${addons.size}", Modifier.padding(start = 4.dp, top = 6.dp, bottom = 10.dp), style = Type.overline.copy(color = Ink.faint))
+        if (addons.isEmpty()) Note("Add one to find streams for every film and episode. Without any, only links you paste in Search will play.")
+        addons.forEachIndexed { i, a -> AddonCard(a, first = i == 0, last = i == addons.lastIndex, onRemoved = { watch.notes.tryEmit("Removed ${a.name}") }) }
     }
+}
+
+/** One addon: its logo, name, where it lives and what it offers, then its switch and order. */
+@Composable
+private fun AddonCard(a: com.torrentviewer.core.Addon, first: Boolean, last: Boolean, onRemoved: () -> Unit) {
+    val m = remember(a.manifest) { runCatching { org.json.JSONObject(a.manifest) }.getOrNull() }
+    Column(Modifier.padding(bottom = 10.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Ink.surface).padding(14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).background(Ink.text.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
+                Text(a.name.take(1).uppercase(), style = Type.title.copy(fontWeight = FontWeight.Bold, color = Ink.muted))
+                m?.optString("logo")?.takeIf { it.startsWith("http") }?.let { Artwork(it, a.name, Modifier.fillMaxSize(), fill = false) }
+            }
+            Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                Text(a.name, style = Type.label.copy(fontWeight = FontWeight.SemiBold, color = if (a.on) Ink.text else Ink.faint), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // The host only: the rest of the link can be the viewer's own key.
+                Text(
+                    listOfNotNull(m?.optString("version")?.takeIf { it.isNotBlank() }?.let { "v$it" }, a.host).joinToString("  ·  "),
+                    style = Type.meta.copy(color = Ink.faint, fontSize = 12.sp), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Chip(if (a.on) "On" else "Off", a.on, onClick = { Addons.toggle(a.url) })
+        }
+        m?.optString("description")?.takeIf { it.isNotBlank() }?.let {
+            Text(it, Modifier.padding(top = 10.dp), style = Type.meta.copy(color = Ink.muted, fontSize = 13.sp), maxLines = 3, overflow = TextOverflow.Ellipsis)
+        }
+        Text(a.offers.replaceFirstChar(Char::uppercase), Modifier.padding(top = 8.dp), style = Type.meta.copy(color = Ink.faint, fontSize = 12.sp))
+        Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Spacer(Modifier.weight(1f))
+            if (!first) Tap({ Addons.move(a.url, -1) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_chevron_up, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp) }
+            if (!last) Tap({ Addons.move(a.url, 1) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_chevron_down, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp) }
+            Tap({ Addons.remove(a.url); onRemoved() }, shape = CircleShape) { Lc(L.drawable.lucide_ic_trash_2, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp) }
+        }
+    }
+}
+
+/** A heading and a card holding the settings that belong together. */
+@Composable
+private fun Group(title: String, content: @Composable () -> Unit) {
+    Text(title, Modifier.padding(start = 4.dp, top = 6.dp, bottom = 10.dp), style = Type.overline.copy(color = Ink.faint))
+    Column(Modifier.padding(bottom = 22.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Ink.surface).padding(start = 16.dp, end = 16.dp, top = 18.dp)) { content() }
 }
 
 @Composable
 private fun Section(title: String, hint: String, content: @Composable () -> Unit) {
-    Column(Modifier.padding(bottom = 28.dp)) {
+    Column(Modifier.padding(bottom = 22.dp)) {
         Text(title, style = Type.title.copy(fontWeight = FontWeight.Bold))
         Text(hint, Modifier.padding(top = 4.dp, bottom = 12.dp), style = Type.meta.copy(color = Ink.faint))
         content()

@@ -134,16 +134,28 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
 
     // Engine failures would otherwise be invisible: the player just goes away.
     LaunchedEffect(Unit) { watch.engine.errors.collect { watch.fail(it) } }
+    // An addon's YouTube or outside link: whichever app on the TV takes it.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(Unit) {
+        watch.opens.collect { link ->
+            runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(link))) }
+                .onFailure { watch.notes.tryEmit("No app on this TV can open that link") }
+        }
+    }
 
-    // Another app handed us a torrent.
+    // Another app handed us a torrent, or a stremio:// addon link.
     LaunchedEffect(incoming.value, who) {
         val uri = incoming.value ?: return@LaunchedEffect
         if (who == null) return@LaunchedEffect
         incoming.value = null
         // A magnet is anything at all: a kids profile plays only what it can browse to.
-        if (Kids.on) return@LaunchedEffect watch.fail("A kids profile can't open torrents from other apps.")
+        if (Kids.on) return@LaunchedEffect watch.fail("A kids profile can't open torrents or addons from other apps.")
         detail = null
         val raw = uri.toString()
+        if (raw.startsWith("stremio://", ignoreCase = true)) {
+            watch.notes.tryEmit(runCatching { Addons.add(raw) }.fold({ "Added ${it.name} — see Settings → Addons" }, { it.message ?: "Couldn't add that addon" }))
+            return@LaunchedEffect
+        }
         if (!isTorrentSource(raw)) return@LaunchedEffect
         val path = runCatching { withContext(Dispatchers.IO) { watch.engine.importSource(raw) } }
             .getOrElse { return@LaunchedEffect watch.fail(it.message ?: "Couldn't read that file.") }

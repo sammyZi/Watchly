@@ -144,11 +144,14 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit) {
         }
     }
     val chosen = settings.genres.map { Shelf(if (it == ANIME_GENRE) "Anime" else it, kindOfGenre(it), it) }
-    val shelves = remember(chosen, state.picks, Kids.on) {
+    val addons by Addons.list.collectAsState()
+    val shelves = remember(chosen, state.picks, Kids.on, addons) {
         if (Kids.on) return@remember KIDS_SHELVES.map { (title, kind, genre) -> Shelf(title, kind, genre) }
+        // The viewer's addons' own lists lead, as on Stremio's board.
+        val mine = Addons.shelves().map { (title, kind, key) -> Shelf(title, kind, key) }
         val taken = chosen.map { it.key }.toMutableSet()
         val rest = state.picks.filter { taken.add(it.key) }
-        chosen + rest + SHELVES.filter { it.key !in taken }
+        chosen + mine + rest + SHELVES.filter { it.key !in taken }
     }
 
     // Top-down, not all at once: a 2GB television and a burst of parallel fetches do not mix.

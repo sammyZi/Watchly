@@ -187,7 +187,9 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
             results = coroutineScope {
                 val films = async { Meta.search(q, "movie") }
                 val series = async { Meta.search(q, "tv") }
-                Kids.only((films.await() + series.await()).distinctBy { it.imdb }.sortedBy { relevance(it.title, q) })
+                // And every addon catalogue that searches, as Stremio asks them all.
+                val mine = async { Meta.searchAddons(q) }
+                Kids.only((films.await() + series.await() + mine.await()).distinctBy { it.imdb }.sortedBy { relevance(it.title, q) })
             }
         }
         busy = false

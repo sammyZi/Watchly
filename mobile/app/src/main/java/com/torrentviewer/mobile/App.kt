@@ -87,6 +87,7 @@ import com.torrentviewer.core.Profile
 import com.torrentviewer.core.Profiles
 import com.torrentviewer.core.Simkl
 import com.torrentviewer.core.Kids
+import com.torrentviewer.core.Addons
 import com.torrentviewer.core.SavedStore
 import com.torrentviewer.core.Spinner
 import com.torrentviewer.core.Title
@@ -105,20 +106,25 @@ import com.composables.icons.lucide.R as L
 enum class Tab(val label: String, @DrawableRes val icon: Int) {
     HOME("Home", L.drawable.lucide_ic_house),
     SEARCH("Search", L.drawable.lucide_ic_search),
+    ADDONS("Addons", L.drawable.lucide_ic_puzzle),
     LIBRARY("Library", L.drawable.lucide_ic_library),
-    DOWNLOADS("Downloads", L.drawable.lucide_ic_download),
     SETTINGS("Settings", L.drawable.lucide_ic_settings),
 }
 
-/** What is stacked over the tabs: a title, or a whole shelf. */
+/** A kids profile has no say in where streams come from. */
+private fun tabs() = Tab.entries.filter { it != Tab.ADDONS || !Kids.on }
+
+/** What is stacked over the tabs: a title, a whole shelf, or the downloads (reached from Library). */
 sealed interface Page {
     data class Detail(val title: Title) : Page
     data class Catalog(val shelf: Shelf) : Page
+    data object Downloads : Page
 }
 
 private fun keyOf(index: Int, page: Page) = when (page) {
     is Page.Detail -> "detail:$index:${page.title.imdb}"
     is Page.Catalog -> "shelf:$index:${page.shelf.key}"
+    Page.Downloads -> "downloads:$index"
 }
 
 /** The profile opened last on this phone, so a phone with one owner never asks. */
@@ -225,15 +231,26 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
 
     // Engine failures would otherwise be invisible: the player just goes away.
     LaunchedEffect(Unit) { watch.engine.errors.collect { watch.fail(it) } }
+    // An addon's YouTube or outside link: whichever app takes it.
+    LaunchedEffect(Unit) {
+        watch.opens.collect { link ->
+            runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(link))) }
+                .onFailure { watch.notes.tryEmit("No app here can open that link") }
+        }
+    }
 
-    // Another app handed us a torrent.
+    // Another app handed us a torrent, or an addon page's Install button a stremio:// link.
     LaunchedEffect(incoming.value, who) {
         val uri = incoming.value ?: return@LaunchedEffect
         if (who == null) return@LaunchedEffect
         incoming.value = null
         // A magnet is anything at all: a kids profile plays only what it can browse to.
-        if (Kids.on) return@LaunchedEffect watch.fail("A kids profile can't open torrents from other apps.")
+        if (Kids.on) return@LaunchedEffect watch.fail("A kids profile can't open torrents or addons from other apps.")
         val raw = uri.toString()
+        if (raw.startsWith("stremio://", ignoreCase = true)) {
+            watch.notes.tryEmit(runCatching { Addons.add(raw) }.fold({ "Added ${it.name} — see the Addons tab" }, { it.message ?: "Couldn't add that addon" }))
+            return@LaunchedEffect
+        }
         if (!isTorrentSource(raw)) return@LaunchedEffect
         val path = runCatching { withContext(Dispatchers.IO) { watch.engine.importSource(raw) } }
             .getOrElse { return@LaunchedEffect watch.fail(it.message ?: "Couldn't read that file.") }
@@ -281,6 +298,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
                 when (top) {
                     is Page.Detail -> DetailScreen(top.title, watch, onBack = ::pop)
                     is Page.Catalog -> CatalogScreen(top.shelf, onOpen = openTitle, onBack = ::pop)
+                    Page.Downloads -> DownloadsScreen(watch, onBack = ::pop)
                 }
             }
         } else {
@@ -298,8 +316,8 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
                     when (t) {
                         Tab.HOME -> HomeScreen(home, watch, me, onOpen = openTitle, onShelf = { pages.add(Page.Catalog(it)) }, onProfile = { switching = true })
                         Tab.SEARCH -> SearchScreen(watch, onOpen = openTitle)
-                        Tab.LIBRARY -> LibraryScreen(watch, me, onOpen = openTitle)
-                        Tab.DOWNLOADS -> DownloadsScreen(watch)
+                        Tab.ADDONS -> AddonsScreen(watch)
+                        Tab.LIBRARY -> LibraryScreen(watch, me, onOpen = openTitle, onDownloads = { pages.add(Page.Downloads) })
                         Tab.SETTINGS -> SettingsScreen(watch, me, onSwitchProfile = { switching = true })
                     }
                 }
@@ -343,7 +361,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
 @Composable
 private fun TabBar(tab: Tab, onTab: (Tab) -> Unit) {
     Row(Modifier.fillMaxWidth().background(Ink.bg).grain().navigationBarsPadding().height(58.dp)) {
-        Tab.entries.forEach { t ->
+        tabs().forEach { t ->
             val on = t == tab
             Tap({ onTab(t) }, Modifier.weight(1f).fillMaxHeight(), RoundedCornerShape(0.dp)) {
                 Box {
@@ -367,7 +385,7 @@ private fun NavRail(tab: Tab, who: Profile, onTab: (Tab) -> Unit, onProfile: () 
     ) {
         Tap(onProfile, shape = RoundedCornerShape(8.dp)) { Avatar(who, 34.dp) }
         Spacer(Modifier.weight(1f))
-        Tab.entries.forEach { t ->
+        tabs().forEach { t ->
             val on = t == tab
             Tap({ onTab(t) }, Modifier.fillMaxWidth().height(60.dp), RoundedCornerShape(0.dp)) {
                 Box {

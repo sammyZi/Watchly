@@ -54,6 +54,8 @@ abstract class Video(context: Context) : FrameLayout(context) {
     var onPlaying: (Boolean) -> Unit = {}
     /** Subtitle text; null is the player's own default. Set before [open] — libVLC reads it only when it starts. */
     open var subtitleStyle: SubtitleStyle? = null
+    /** What a link's server wants with each request (an addon's `proxyHeaders`). Set before [open]. */
+    var headers: Map<String, String> = emptyMap()
 
     abstract fun open(url: String, startAt: Long, cacheMs: Int, subtitles: List<String>)
     abstract fun reload(ms: Long)
@@ -361,6 +363,13 @@ class VlcView(context: Context) : Video(context) {
             media.setHWDecoderEnabled(true, true)
             // Start the demuxer there rather than seeking after play.
             if (startMs > 0) media.addOption(":start-time=${startMs / 1000.0}")
+            // ponytail: libVLC sends only these two of a link's headers; Media3 sends them all.
+            headers.entries.forEach { (k, v) ->
+                when (k.lowercase()) {
+                    "user-agent" -> media.addOption(":http-user-agent=$v")
+                    "referer" -> media.addOption(":http-referrer=$v")
+                }
+            }
             attachedSubs.clear()
             subRetries = 0
             removeCallbacks(attachSubs)

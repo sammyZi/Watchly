@@ -8,24 +8,57 @@ import org.json.JSONObject
 /** One resource an addon serves, for these types and ids starting so; null prefixes is any id. */
 data class AddonResource(val name: String, val types: List<String>, val idPrefixes: List<String>?)
 
+/** A list an addon offers. [required] needs an extra (a genre, a search) before it lists anything; [search] takes a query. */
+data class AddonCatalog(val type: String, val id: String, val name: String, val required: Boolean, val search: Boolean)
+
+/** Watchly's own kind for a Stremio type: "movie" plays the id itself — films, and live "tv" channels — the rest hold videos. */
+fun kindOfType(type: String) = if (type == "movie" || type == "tv") "movie" else "tv"
+
+/** The home row's key for one of an addon's catalogues: a hash, so the link (and any key in it) stays out of storage keys. */
+const val ADDON_SHELF = "addon:"
+
 /**
  * A Stremio-protocol addon, added by its manifest link. Watchly ships none: the streams and
  * subtitles it plays come from these — public addons, a debrid service's, or the viewer's own
  * media server. [url] can hold the viewer's own config (a debrid key), so the UI shows [host] only.
  */
-data class Addon(val url: String, val name: String, val resources: List<AddonResource>, val on: Boolean, val manifest: String) {
+data class Addon(
+    val url: String,
+    val name: String,
+    val resources: List<AddonResource>,
+    val on: Boolean,
+    val manifest: String,
+    val catalogs: List<AddonCatalog> = emptyList(),
+) {
     val host: String get() = runCatching { java.net.URI(url).host }.getOrNull() ?: "?"
 
     fun serves(resource: String, type: String, id: String) = on && resources.any { r ->
         r.name == resource && type in r.types && (r.idPrefixes == null || r.idPrefixes.any { id.startsWith(it) })
     }
 
+    /** The types it answers /meta for this id with, [first] tried first. */
+    fun metaTypes(id: String, first: String) = if (!on) emptyList() else resources
+        .filter { r -> r.name == "meta" && (r.idPrefixes == null || r.idPrefixes.any { id.startsWith(it) }) }
+        .flatMap { it.types }.distinct().sortedBy { if (it == first) 0 else 1 }
+
+    fun shelfKey(c: AddonCatalog) = ADDON_SHELF + "$url|${c.type}|${c.id}".hashCode().toUInt().toString(36)
+
     /** /{resource}/{type}/{id}.json — the protocol's one shape of request. */
     suspend fun get(resource: String, type: String, id: String): JSONObject =
         JSONObject(Net.get("$url/$resource/$type/${enc(id)}.json", quiet = true))
 
     /** What it offers, for its row in Settings. */
-    val offers: String get() = resources.map { it.name }.distinct().joinToString(" · ") { if (it == "stream") "streams" else it }
+    val offers: String get() = (resources.map { it.name } + if (catalogs.isNotEmpty()) listOf("catalog") else emptyList())
+        .distinct().joinToString(" · ") { if (it == "stream") "streams" else it }
+}
+
+/** "movie" → "Films": a home row's second half. */
+fun typeLabel(type: String) = when (type) {
+    "movie" -> "Films"
+    "series" -> "Series"
+    "tv" -> "Live TV"
+    "channel" -> "Channels"
+    else -> type.replaceFirstChar { it.uppercase() }
 }
 
 /** "stremio://host/x/manifest.json", "https://host/x/" or "host/x" → "https://host/x"; null for any other scheme. */
@@ -53,7 +86,16 @@ fun toAddon(url: String, m: JSONObject, on: Boolean = true): Addon? {
             else -> null
         }
     }
-    return if (resources.isEmpty()) null else Addon(url, name, resources, on, m.toString())
+    val catalogs = m.optJSONArray("catalogs")?.objects().orEmpty().mapNotNull { c ->
+        val type = c.str("type") ?: return@mapNotNull null
+        val id = c.str("id") ?: return@mapNotNull null
+        // Two shapes: `extra` objects, and the older `extraRequired` / `extraSupported` name lists.
+        val extra = c.optJSONArray("extra")?.objects().orEmpty()
+        val required = extra.any { it.optBoolean("isRequired") } || c.strings("extraRequired").isNotEmpty()
+        val search = extra.any { it.optString("name") == "search" } || "search" in c.strings("extraSupported")
+        AddonCatalog(type, id, c.str("name") ?: id, required, search)
+    }
+    return if (resources.isEmpty() && catalogs.isEmpty()) null else Addon(url, name, resources, on, m.toString(), catalogs)
 }
 
 /**
@@ -110,6 +152,18 @@ object Addons {
     }
 
     fun serving(resource: String, type: String, id: String) = _list.value.filter { it.serves(resource, type, id) }
+
+    /** Every list that shows without a genre or search picked first, as (row title, kind, shelf key). */
+    fun shelves(): List<Triple<String, String, String>> = _list.value.filter { it.on }.flatMap { a ->
+        a.catalogs.filter { !it.required }.map { c -> Triple("${c.name} · ${typeLabel(c.type)}", kindOfType(c.type), a.shelfKey(c)) }
+    }
+
+    /** The addon and catalogue behind a home row's key. */
+    fun shelf(key: String): Pair<Addon, AddonCatalog>? =
+        _list.value.firstNotNullOfOrNull { a -> a.catalogs.find { a.shelfKey(it) == key }?.let { a to it } }
+
+    /** Catalogues that take a search query. */
+    fun searchable(): List<Pair<Addon, AddonCatalog>> = _list.value.filter { it.on }.flatMap { a -> a.catalogs.filter { it.search }.map { a to it } }
 
     /** Any addon that can find streams at all: without one, there is nothing to play but links. */
     val hasStreams get() = _list.value.any { a -> a.on && a.resources.any { it.name == "stream" } }
