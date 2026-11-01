@@ -293,9 +293,10 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                                 watch.resume(History.find(last.uri) ?: last)
                             }, Modifier.fillMaxWidth().padding(top = 8.dp), icon = L.drawable.lucide_ic_rotate_ccw)
                         }
+                        // Left part-way on Stremio, never here: still Resume — the release picked starts at that spot.
                         !title.isSeries -> Button(
                             label = when {
-                                shown.isNotEmpty() -> "Play"
+                                shown.isNotEmpty() -> com.torrentviewer.core.resumeLabel(title.imdb, history, stremio) ?: "Play"
                                 busy -> "Finding sources…"
                                 else -> "No sources"
                             },
@@ -306,8 +307,11 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                         )
                         upNext != null -> Button(
                             label = if (busy && episode?.id == upNext.id && shown.isEmpty()) "Finding sources…"
-                                else if (through) "Play episode ${numbered.find { it.first.id == upNext.id }?.second ?: upNext.episode}"
-                                else "Play S${upNext.season}:E${upNext.episode}",
+                                else {
+                                    val which = if (through) "episode ${numbered.find { it.first.id == upNext.id }?.second ?: upNext.episode}" else "S${upNext.season}:E${upNext.episode}"
+                                    com.torrentviewer.core.resumeLabel(title.imdb, history, stremio, com.torrentviewer.core.Ep(upNext.season, upNext.episode))
+                                        ?.let { "Resume $which" + it.removePrefix("Resume") } ?: "Play $which"
+                                },
                             onClick = { playEpisode(upNext) },
                             modifier = Modifier.fillMaxWidth(),
                             icon = L.drawable.lucide_ic_play,

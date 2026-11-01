@@ -470,6 +470,24 @@ fun episodeOfFile(list: List<Episode>, name: String): Episode? {
 }
 
 /**
+ * "Resume · 40m left" when [imdb] — or its episode [ep] — was left part-way, here or on Stremio
+ * (a reinstall, another device); null when Play is the word. Pressing either resumes: [Watch] carries
+ * the spot over. The time left only when it is known.
+ */
+fun resumeLabel(imdb: String, items: List<Item>, stremio: StremioLibrary, ep: Ep? = null): String? {
+    val local = latestPerTitle(items.filter { it.imdb == imdb }).firstOrNull()?.takeIf { it.ratio > 0.02 && it.ratio < 0.95 }
+        ?.takeIf { item -> ep == null || item.files?.find { it.index == item.lastFileIndex }?.name?.let(::parseEpisode) == ep }
+    val leftSeconds = if (local != null) {
+        val i = local.lastFileIndex!!
+        (local.durations[i] ?: 0.0) - (local.positions[i] ?: 0.0)
+    } else {
+        val p = stremio.paused.find { it.imdb == imdb && it.ep == ep } ?: return null
+        p.seconds?.takeIf { p.progress > 0 }?.let { it / (p.progress / 100) - it }
+    }
+    return "Resume" + (leftSeconds?.takeIf { it > 0 }?.let { "  ·  ${left(it)}" } ?: "")
+}
+
+/**
  * What a series' Play button offers: the episode last played if it was left part-way,
  * else the one after it. Null when nothing of [title] was played, or it was the last.
  */
