@@ -229,12 +229,41 @@ public static class Stremio
         return @out;
     }
 
+    /// <summary>Stremio's own addons Watchly has its own of, so never brings across (nor takes away).</summary>
+    static readonly HashSet<string> StremioOwn = new() { "com.linvo.cinemeta", "org.stremio.local" };
+
     /// <summary>
-    /// The account's addon collection without the one at <paramref name="url"/> (by its base, as Watchly keeps it),
-    /// every other entry exactly as Stremio sent it. Protected ones — Stremio's own — stay whatever the URL.
+    /// An entry of the account's collection that is Stremio's business, not Watchly's: protected, one Watchly has
+    /// its own of, or on the viewer's own machine. Never imported here, and never removed from there.
     /// </summary>
-    public static List<JsonObject> WithoutAddon(IEnumerable<JsonObject> collection, string url) => collection
-        .Where(a => !(Addons.Base(Str(a["transportUrl"]) ?? "") == url && !Bool(a["flags"]?["protected"]))).ToList();
+    public static bool StremioKeeps(JsonObject entry) =>
+        Bool(entry["flags"]?["protected"]) ||
+        (Str(entry["manifest"]?["id"]) is { } id && StremioOwn.Contains(id)) ||
+        Regex.IsMatch(Str(entry["transportUrl"]) ?? "", @"^https?://(127\.0\.0\.1|localhost)", RegexOptions.IgnoreCase);
+
+    /// <summary>One of Watchly's addons as an entry in a Stremio account's collection.</summary>
+    public static JsonObject Descriptor(Addon a) => new()
+    {
+        ["transportUrl"] = $"{a.Url}/manifest.json",
+        ["transportName"] = "http",
+        ["manifest"] = JsonNode.Parse(a.Manifest),
+        ["flags"] = new JsonObject { ["official"] = false, ["protected"] = false },
+    };
+
+    /// <summary>
+    /// The account's collection made to match <paramref name="mine"/>, in its order: what <see cref="StremioKeeps"/>
+    /// stays first and as it was; an addon the account already had keeps its entry exactly as Stremio sent it; one
+    /// it hadn't is added; the rest — removed here — go.
+    /// </summary>
+    public static List<JsonObject> Mirrored(IReadOnlyList<JsonObject> collection, IEnumerable<Addon> mine)
+    {
+        var kept = collection.Where(StremioKeeps).ToList();
+        var keptBases = kept.Select(e => Addons.Base(Str(e["transportUrl"]) ?? "")).Where(b => b is not null).ToHashSet();
+        var theirs = new Dictionary<string, JsonObject>();
+        foreach (var e in collection.Where(e => !StremioKeeps(e)))
+            if (Addons.Base(Str(e["transportUrl"]) ?? "") is { } b) theirs.TryAdd(b, e);
+        return kept.Concat(mine.Where(a => !keptBases.Contains(a.Url)).Select(a => theirs.TryGetValue(a.Url, out var e) ? e : Descriptor(a))).ToList();
+    }
 
     /// <summary>
     /// <paramref name="up"/> with My List added to the account's library: each title saved here that isn't in it —
@@ -409,46 +438,67 @@ public static class Stremio
         return false;
     }
 
+    static async Task<List<JsonObject>> Collection(string owner)
+    {
+        var got = await Call("addonCollectionGet", new JsonObject { ["type"] = "AddonCollectionGet", ["update"] = true }, owner).ConfigureAwait(false);
+        return (got["result"]?["addons"] as JsonArray ?? throw new IOException("Stremio sent no addons")).OfType<JsonObject>().ToList();
+    }
+
     /// <summary>
-    /// The account's installed addons, added here (one already here is left be). Cinemeta and Stremio's local-files
-    /// addon stay out: Watchly has its own of both. How many came across.
+    /// The account's installed addons, added here (one already here is left be) — less what <see cref="StremioKeeps"/>.
+    /// Adding them changes this list, so the account then gets this PC's too (<see cref="AddonsChanged"/>): signing in
+    /// leaves both sides with everything either had. How many came across.
     /// </summary>
     public static async Task<int> ImportAddons()
     {
-        var got = await Call("addonCollectionGet", new JsonObject { ["type"] = "AddonCollectionGet", ["update"] = true }, profile).ConfigureAwait(false);
         var addons = new List<Addon>();
-        foreach (var a in (got["result"]?["addons"] as JsonArray ?? new JsonArray()).OfType<JsonObject>())
-        {
-            if (a["manifest"] is not JsonObject manifest || Str(manifest["id"]) is "com.linvo.cinemeta" or "org.stremio.local") continue;
-            if (Addons.Base(Str(a["transportUrl"]) ?? "") is not { } url || Regex.IsMatch(url, @"^https?://(127\.0\.0\.1|localhost)", RegexOptions.IgnoreCase)) continue;
-            if (Addons.ToAddon(url, manifest) is { } addon) addons.Add(addon);
-        }
+        foreach (var a in (await Collection(profile).ConfigureAwait(false)).Where(e => !StremioKeeps(e)))
+            if (a["manifest"] is JsonObject manifest && Addons.Base(Str(a["transportUrl"]) ?? "") is { } url && Addons.ToAddon(url, manifest) is { } addon)
+                addons.Add(addon);
         return Addons.Merge(addons);
     }
 
     /// <summary>
-    /// An addon removed here goes from the account's collection too, so the next import doesn't bring it back:
-    /// the collection as it stands, less that one, written back whole. Fire and forget.
+    /// The account's collection made to match this PC's addons (<see cref="Mirrored"/>) — the button, and every change
+    /// here. Only what differs is written. How many of this PC's addons the account now has.
     /// </summary>
-    public static void RemoveAddon(string url)
+    public static async Task<int> PushAddons(string? owner = null)
+    {
+        owner ??= profile;
+        var all = await Collection(owner).ConfigureAwait(false);
+        var mine = Addons.List;
+        var next = Mirrored(all, mine);
+        if (!next.Select(e => Str(e["transportUrl"])).SequenceEqual(all.Select(e => Str(e["transportUrl"]))))
+        {
+            await Call("addonCollectionSet", new JsonObject { ["type"] = "AddonCollectionSet", ["addons"] = new JsonArray(next.Select(e => (JsonNode)e.DeepClone()).ToArray()) }, owner).ConfigureAwait(false);
+            Log.Info("stremio", $"account addons now {next.Count}, {mine.Count} of them this PC's");
+        }
+        return mine.Count;
+    }
+
+    static CancellationTokenSource? addonsCts;
+
+    /// <summary>
+    /// This PC's list changed — added, removed, moved: the account follows, a moment later, so a burst of changes (an
+    /// import) is one write. Not on open: then whichever device opened last would overwrite the rest.
+    /// </summary>
+    public static void AddonsChanged()
     {
         if (key is null) return;
         var owner = profile;
+        addonsCts?.Cancel();
+        var cts = addonsCts = new CancellationTokenSource();
         _ = Task.Run(async () =>
         {
             try
             {
-                var got = await Call("addonCollectionGet", new JsonObject { ["type"] = "AddonCollectionGet", ["update"] = true }, owner);
-                if (got["result"]?["addons"] is not JsonArray all) return;
-                var list = all.OfType<JsonObject>().ToList();
-                var keep = WithoutAddon(list, url);
-                if (keep.Count == list.Count) return;
-                await Call("addonCollectionSet", new JsonObject { ["type"] = "AddonCollectionSet", ["addons"] = new JsonArray(keep.Select(k => (JsonNode)k.DeepClone()).ToArray()) }, owner);
-                Log.Info("stremio", "removed an addon from the account");
+                await Task.Delay(1500, cts.Token);
+                await PushAddons(owner);
             }
+            catch (OperationCanceledException) { }
             catch (Exception e)
             {
-                Log.Warn("stremio", $"remove addon: {e.Message}");
+                Log.Warn("stremio", $"addons: {e.Message}");
             }
         });
     }

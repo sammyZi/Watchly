@@ -175,11 +175,26 @@ public sealed class SettingsView : UserControl
                     shell.Toast(e.Message, true);
                 }
             });
+            // The other way: the account's list made this PC's, for every device that signs in after.
+            var send = Ui.Button(Ui.Text("Send my addons to Stremio", "Label", "Accent", 13, FontWeights.SemiBold), async () =>
+            {
+                shell.Toast("Sending your addons…");
+                try
+                {
+                    var n = await Stremio.PushAddons();
+                    shell.Toast($"Your Stremio account now has this PC's {n} addon{(n == 1 ? "" : "s")}");
+                }
+                catch (Exception e)
+                {
+                    shell.Toast(e.Message, true);
+                }
+            });
+            send.Margin = new Thickness(20, 0, 0, 0);
             var signOut = Ui.Button(Ui.Text("Sign out", "Label", "Muted", 13), () => { Stremio.Disconnect(); Render(); });
             signOut.Margin = new Thickness(20, 0, 0, 0);
             box.Children.Add(Row($"Signed in{(Stremio.Email is { } email ? $" as {email}" : "")}",
-                "Your Stremio library and where you stopped are here, My List is your library there, and what you finish is marked watched.",
-                new StackPanel { Orientation = Orientation.Horizontal, Children = { import, signOut } }));
+                "Your Stremio library and where you stopped are here, My List is your library there, and what you finish is marked watched. Addons you add or remove here change on your account too.",
+                new StackPanel { Orientation = Orientation.Horizontal, Children = { import, send, signOut } }));
         }
         else if (shell.StremioPending is { } code)
         {

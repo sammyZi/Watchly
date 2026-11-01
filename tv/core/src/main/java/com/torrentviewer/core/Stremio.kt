@@ -1,6 +1,7 @@
 package com.torrentviewer.core
 
 import android.util.Log
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -175,12 +176,34 @@ fun libraryItem(old: JSONObject?, id: String, name: String, type: String, poster
     return o
 }
 
+/** Stremio's own addons Watchly has its own of, so never brings across (nor takes away). */
+private val STREMIO_OWN = setOf("com.linvo.cinemeta", "org.stremio.local")
+
 /**
- * The account's addon collection without the one at [url] (by its base, as Watchly keeps it), every
- * other entry exactly as Stremio sent it. Protected ones — Stremio's own — stay whatever the URL.
+ * An entry of the account's collection that is Stremio's business, not Watchly's: protected, one Watchly
+ * has its own of, or on the viewer's own machine (a local server Watchly can't reach). Never imported here,
+ * and never removed from there.
  */
-fun withoutAddon(collection: List<JSONObject>, url: String): List<JSONObject> = collection.filterNot { a ->
-    addonBase(a.optString("transportUrl")) == url && a.optJSONObject("flags")?.optBoolean("protected") != true
+fun stremioKeeps(entry: JSONObject): Boolean =
+    entry.optJSONObject("flags")?.optBoolean("protected") == true ||
+        entry.optJSONObject("manifest")?.optString("id") in STREMIO_OWN ||
+        Regex("^https?://(127\\.0\\.0\\.1|localhost)").containsMatchIn(entry.optString("transportUrl"))
+
+/** One of Watchly's addons as an entry in a Stremio account's collection. */
+fun descriptor(a: Addon): JSONObject = JSONObject()
+    .put("transportUrl", "${a.url}/manifest.json").put("transportName", "http")
+    .put("manifest", JSONObject(a.manifest)).put("flags", JSONObject().put("official", false).put("protected", false))
+
+/**
+ * The account's collection made to match [mine], in its order: what [stremioKeeps] stays first and as it
+ * was; an addon the account already had keeps its entry exactly as Stremio sent it; one it hadn't is added;
+ * the rest — removed here — go.
+ */
+fun mirrored(collection: List<JSONObject>, mine: List<Addon>): List<JSONObject> {
+    val kept = collection.filter(::stremioKeeps)
+    val keptBases = kept.mapNotNull { addonBase(it.optString("transportUrl")) }.toSet()
+    val theirs = collection.filterNot(::stremioKeeps).associateBy { addonBase(it.optString("transportUrl")) }
+    return kept + mine.filter { it.url !in keptBases }.map { theirs[it.url] ?: descriptor(it) }
 }
 
 /**
@@ -331,38 +354,47 @@ object Stremio {
         return false
     }
 
-    /**
-     * The account's installed addons, added here (one already here is left be). Cinemeta and Stremio's
-     * local-files addon stay out: Watchly has its own of both. How many came across.
-     */
-    suspend fun importAddons(): Int {
-        val got = call("addonCollectionGet", JSONObject().put("type", "AddonCollectionGet").put("update", true))
-        val addons = got.optJSONObject("result")?.optJSONArray("addons")?.objects().orEmpty().mapNotNull { a ->
-            val manifest = a.optJSONObject("manifest") ?: return@mapNotNull null
-            if (manifest.optString("id") in setOf("com.linvo.cinemeta", "org.stremio.local")) return@mapNotNull null
-            val base = addonBase(a.optString("transportUrl")) ?: return@mapNotNull null
-            if (Regex("^https?://(127\\.0\\.0\\.1|localhost)").containsMatchIn(base)) return@mapNotNull null
-            toAddon(base, manifest)
-        }
-        return Addons.merge(addons)
-    }
+    private suspend fun collection(owner: String = profile): List<JSONObject> =
+        call("addonCollectionGet", JSONObject().put("type", "AddonCollectionGet").put("update", true), owner)
+            .optJSONObject("result")?.optJSONArray("addons")?.objects() ?: throw IOException("Stremio sent no addons")
 
     /**
-     * An addon removed here goes from the account's collection too, so the next import doesn't bring it
-     * back: the collection as it stands, less that one, written back whole. Fire and forget.
+     * The account's installed addons, added here (one already here is left be) — less what [stremioKeeps].
+     * Adding them changes this list, so the account then gets this device's too ([addonsChanged]): signing
+     * in leaves both sides with everything either had. How many came across.
      */
-    fun removeAddon(url: String) {
+    suspend fun importAddons(): Int = Addons.merge(collection().filterNot(::stremioKeeps).mapNotNull { a ->
+        val manifest = a.optJSONObject("manifest") ?: return@mapNotNull null
+        toAddon(addonBase(a.optString("transportUrl")) ?: return@mapNotNull null, manifest)
+    })
+
+    /**
+     * The account's collection made to match this device's addons ([mirrored]) — the button, and every change
+     * here. Only what differs is written. How many of this device's addons the account now has.
+     */
+    suspend fun pushAddons(owner: String = profile): Int {
+        val all = collection(owner)
+        val next = mirrored(all, Addons.list.value)
+        if (next.map { it.optString("transportUrl") } != all.map { it.optString("transportUrl") }) {
+            call("addonCollectionSet", JSONObject().put("type", "AddonCollectionSet").put("addons", JSONArray(next)), owner)
+            Log.i("stremio", "account addons now ${next.size}, ${Addons.list.value.size} of them this device's")
+        }
+        return Addons.list.value.size
+    }
+
+    private var addonsJob: Job? = null
+
+    /**
+     * This device's list changed — added, removed, moved: the account follows, a moment later, so a burst of
+     * changes (an import) is one write. Not on open: then whichever device opened last would overwrite the rest.
+     */
+    fun addonsChanged() {
         if (key == null) return
         val owner = profile
-        AppScope.launch {
-            runCatching {
-                val got = call("addonCollectionGet", JSONObject().put("type", "AddonCollectionGet").put("update", true), owner)
-                val all = got.optJSONObject("result")?.optJSONArray("addons")?.objects() ?: return@runCatching
-                val keep = withoutAddon(all, url)
-                if (keep.size == all.size) return@runCatching
-                call("addonCollectionSet", JSONObject().put("type", "AddonCollectionSet").put("addons", JSONArray(keep)), owner)
-                Log.i("stremio", "removed an addon from the account")
-            }.onFailure { Log.w("stremio", "remove addon: ${it.message}") }
+        addonsJob?.cancel()
+        addonsJob = AppScope.launch {
+            delay(1500)
+            runCatching { pushAddons(owner) }.onFailure { Log.w("stremio", "addons: ${it.message}") }
         }
     }
 
