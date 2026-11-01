@@ -89,6 +89,8 @@ import com.torrentviewer.core.Simkl
 import com.torrentviewer.core.Kids
 import com.torrentviewer.core.Addons
 import com.torrentviewer.core.AppScope
+import com.torrentviewer.core.Net
+import com.torrentviewer.core.tvDropUrl
 import com.torrentviewer.core.SavedStore
 import com.torrentviewer.core.Spinner
 import com.torrentviewer.core.Title
@@ -240,7 +242,11 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         }
     }
 
-    // Another app handed us a torrent, or an addon page's Install button a stremio:// link.
+    /** The TV page asking for this phone's addons, from its QR, until the viewer says yes or no. */
+    var sendTo by remember { mutableStateOf<String?>(null) }
+
+    // Another app handed us a torrent, or an addon page's Install button a stremio:// link,
+    // or the TV's QR page its watchly:// link asking for the addons.
     LaunchedEffect(incoming.value, who) {
         val uri = incoming.value ?: return@LaunchedEffect
         if (who == null) return@LaunchedEffect
@@ -253,6 +259,10 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
             AppScope.launch {
                 watch.notes.tryEmit(runCatching { Addons.add(raw) }.fold({ "Added ${it.name} — see the Addons tab" }, { it.message ?: "Couldn't add that addon" }))
             }
+            return@LaunchedEffect
+        }
+        if (raw.startsWith("watchly://tv-addons", ignoreCase = true)) {
+            sendTo = tvDropUrl(raw) ?: return@LaunchedEffect watch.fail("That isn't a Watchly TV on your home network.")
             return@LaunchedEffect
         }
         if (!isTorrentSource(raw)) return@LaunchedEffect
@@ -356,6 +366,33 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
                 empty = "This torrent holds no video.",
                 onPick = { watch.pick(item, meta, it) },
                 onDismiss = { watch.choose = null },
+            )
+        }
+
+        // The TV asked for the addons: asked first, since their links can carry the viewer's keys.
+        sendTo?.let { to ->
+            val n = Addons.list.value.size
+            Sheet(
+                title = "Copy your addons to the TV?",
+                options = listOf(
+                    Option(true, if (n == 0) "No addons on this phone yet" else "Send $n addon${if (n == 1) "" else "s"}", to.substringAfter("//").substringBefore(':')),
+                    Option(false, "Cancel"),
+                ),
+                selected = null,
+                onPick = { yes ->
+                    sendTo = null
+                    if (yes && n > 0) AppScope.launch {
+                        watch.notes.tryEmit("Sending to the TV…")
+                        // The TV fetches each addon before it answers: give it time.
+                        runCatching { Net.postForm(to, mapOf("key" to Addons.linksJson()), 120_000) }
+                            .onSuccess { page ->
+                                val said = Regex("<p class=note>(.*?)</p>").find(page)?.groupValues?.get(1)?.replace("&lt;", "<")?.replace("&gt;", ">")?.replace("&amp;", "&")
+                                watch.notes.tryEmit(said ?: "Sent $n addons to the TV")
+                            }
+                            .onFailure { watch.notes.tryEmit("Couldn't reach the TV — is the phone on the same Wi-Fi?") }
+                    }
+                },
+                onDismiss = { sendTo = null },
             )
         }
     }

@@ -626,7 +626,11 @@ private fun AddonsList() {
             }, icon = L.drawable.lucide_ic_plus)
         }
         note?.let { Text(it, Modifier.padding(top = 10.dp), style = Type.meta.copy(color = Ink.muted)) }
-        PhoneKey("addon link", several = true) { add(it).also { s -> note = s } }
+        // One QR for both: the phone app sends its whole list (JSON), or a single link is pasted.
+        PhoneKey("addon link", several = true, label = "Copy addons from phone", fromApp = "Copy all addons from Watchly on this phone") { text ->
+            (if (text.trimStart().startsWith("[")) runCatching { Addons.importLinks(text) }.getOrElse { "That list didn't read." } else add(text))
+                .also { s -> note = s }
+        }
     }
 }
 
@@ -636,19 +640,20 @@ private const val SIMKL_LATER = "simkl:later"
 /**
  * A key or link pasted on a phone rather than typed with the remote: a QR of a page the TV serves on
  * the home network ([KeyDrop]), open only while this shows. [onKey]'s answer goes back to the phone;
- * it closes once one arrives, unless [several] (addons: paste one after another).
+ * it closes once one arrives, unless [several] (addons: paste one after another). [fromApp] is the
+ * page's button that has the phone app send what it has instead.
  */
 @Composable
-private fun PhoneKey(what: String, several: Boolean = false, onKey: suspend (String) -> String) {
+private fun PhoneKey(what: String, several: Boolean = false, label: String = "Paste from phone", fromApp: String? = null, onKey: suspend (String) -> String) {
     var open by remember { mutableStateOf(false) }
     // One button that changes its label, not a button swapped for another: a focused button taken
     // away left focus nowhere, and the page sent it back to the top.
-    TvButton(if (open) (if (several) "Done" else "Cancel") else "Paste from phone", { open = !open }, Modifier.padding(top = 12.dp), icon = if (open) L.drawable.lucide_ic_x else L.drawable.lucide_ic_smartphone)
+    TvButton(if (open) (if (several) "Done" else "Cancel") else label, { open = !open }, Modifier.padding(top = 12.dp), icon = if (open) L.drawable.lucide_ic_x else L.drawable.lucide_ic_smartphone)
     if (!open) return
     var address by remember { mutableStateOf<String?>(null) }
     var tried by remember { mutableStateOf(false) }
     DisposableEffect(Unit) {
-        val drop = KeyDrop(what) {
+        val drop = KeyDrop(what, fromApp) {
             onKey(it).also { if (!several) open = false }
         }
         address = drop.open()
@@ -661,6 +666,7 @@ private fun PhoneKey(what: String, several: Boolean = false, onKey: suspend (Str
         Column(Modifier.widthIn(max = 520.dp)) {
             Text(
                 when {
+                    address != null && fromApp != null -> "Scan with your phone's camera and tap \"$fromApp\" on the page that opens — or paste one $what there. Your phone needs to be on the same Wi-Fi as the TV."
                     address != null -> "Scan with your phone's camera, paste your $what on the page that opens, and tap Save. Your phone needs to be on the same Wi-Fi as the TV."
                     tried -> "The TV isn't on a network a phone can reach."
                     else -> "Opening…"

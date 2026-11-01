@@ -51,6 +51,13 @@ class LibTest {
         assertEquals(listOf(false, true, false), lists.catalogs.map { it.required })
         assertEquals(listOf(true, false, true), lists.catalogs.map { it.search })
         assertEquals("old", lists.catalogs[2].name)
+        // The TV's QR link: sent only to a TV page on the home network.
+        val tv = "http://192.168.1.5:40123/" + "ab".repeat(12)
+        assertEquals(tv, tvDropUrl("watchly://tv-addons?to=" + java.net.URLEncoder.encode(tv, "UTF-8")))
+        assertEquals("http://10.0.0.7:5000/" + "0".repeat(24), tvDropUrl("watchly://tv-addons?to=http%3A%2F%2F10.0.0.7%3A5000%2F" + "0".repeat(24)))
+        assertNull(tvDropUrl("watchly://tv-addons?to=" + java.net.URLEncoder.encode("https://evil.example/" + "ab".repeat(12), "UTF-8")))
+        assertNull(tvDropUrl("watchly://tv-addons?to=" + java.net.URLEncoder.encode("http://8.8.8.8:80/" + "ab".repeat(12), "UTF-8")))
+        assertNull(tvDropUrl("watchly://tv-addons"))
         assertEquals("movie", kindOfType("tv"))
         assertEquals("tv", kindOfType("channel"))
     }
