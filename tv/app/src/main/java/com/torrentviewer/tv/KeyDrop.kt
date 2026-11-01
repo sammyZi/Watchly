@@ -18,12 +18,15 @@ import kotlin.concurrent.thread
  * page posts the text straight back. Nothing goes through the internet; a wrong code gets nothing.
  * [what] names it ("TorBox key", "addon link"); [onKey] runs on the main thread and its answer is what
  * the phone shows, over the form again for another. Whoever opened it closes it.
+ * With [fromApp], the page leads with that button: a watchly:// link that opens the phone app, which
+ * posts what it has (its addons) to this same address.
  * ponytail: plain HTTP on the home network, as any TV's own pairing page is; TLS would need a
  * certificate the phone trusts.
  */
-class KeyDrop(private val what: String, private val onKey: suspend (String) -> String) {
+class KeyDrop(private val what: String, private val fromApp: String? = null, private val onKey: suspend (String) -> String) {
     private val token = ByteArray(12).also(SecureRandom()::nextBytes).joinToString("") { "%02x".format(it) }
     @Volatile private var server: ServerSocket? = null
+    @Volatile private var address = ""
 
     /** Opens it; the address for the QR, or null when the TV has no network. */
     fun open(): String? {
@@ -36,7 +39,8 @@ class KeyDrop(private val what: String, private val onKey: suspend (String) -> S
                 runCatching { client.use(::answer) }
             }
         }
-        return "http://$ip:${socket.localPort}/$token"
+        address = "http://$ip:${socket.localPort}/$token"
+        return address
     }
 
     fun close() {
@@ -79,7 +83,11 @@ class KeyDrop(private val what: String, private val onKey: suspend (String) -> S
     private fun form(note: String?) = page(
         what.replaceFirstChar { it.uppercase() },
         (note?.let { "<p class=note>${escape(it)}</p>" } ?: "") +
-            """<form method=post action="/$token"><label for=k>Paste your $what, then Save. It goes straight to the TV.</label>""" +
+            (fromApp?.let {
+                """<a class=app href="watchly://tv-addons?to=${java.net.URLEncoder.encode(address, "UTF-8")}">$it</a>""" +
+                    "<p><small>Opens Watchly on this phone, which asks before it sends anything.</small></p>"
+            } ?: "") +
+            """<form method=post action="/$token"><label for=k>${if (fromApp != null) "Or paste" else "Paste"} your $what, then Save. It goes straight to the TV.</label>""" +
             """<input id=k name=key autocomplete=off autocapitalize=off spellcheck=false autofocus><button>Save</button></form>""",
     )
 
@@ -89,7 +97,8 @@ body{margin:0;padding:28px 20px;background:#0b0b0d;color:#f2f2f2;font:16px/1.45 
 h1{font-size:22px;margin:0 0 6px}small{color:#8a8a90}label{display:block;margin:18px 0 10px;color:#c9c9cf}
 input{box-sizing:border-box;width:100%;padding:14px;border-radius:10px;border:1px solid #333;background:#16161a;color:#fff;font:15px ui-monospace,monospace}
 button{margin-top:14px;width:100%;padding:14px;border:0;border-radius:10px;background:#e50914;color:#fff;font-size:16px;font-weight:600}
-.note{padding:12px 14px;border-radius:10px;background:#1c1c22;color:#f2f2f2}</style></head><body><small>Watchly TV</small><h1>$title</h1>$body</body></html>"""
+.note{padding:12px 14px;border-radius:10px;background:#1c1c22;color:#f2f2f2}
+.app{display:block;margin-top:18px;padding:14px;border-radius:10px;background:#e50914;color:#fff;font-weight:600;text-align:center;text-decoration:none}</style></head><body><small>Watchly TV</small><h1>$title</h1>$body</body></html>"""
 
     private fun escape(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 

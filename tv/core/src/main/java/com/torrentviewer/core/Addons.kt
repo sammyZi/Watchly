@@ -71,6 +71,20 @@ fun addonBase(raw: String): String? {
     return s.takeIf { runCatching { java.net.URI(it).host }.getOrNull().orEmpty().isNotEmpty() }
 }
 
+/**
+ * The TV page a `watchly://tv-addons?to=…` link names, from the TV's QR. Only a page on the home
+ * network, in the TV's own shape, is ever sent the addons — their links can carry keys, and any
+ * web page could hand the phone such a link.
+ */
+fun tvDropUrl(link: String): String? {
+    val to = runCatching { java.net.URI(link).rawQuery }.getOrNull()?.split('&')
+        ?.firstOrNull { it.startsWith("to=") }?.substringAfter('=')
+        ?.let { runCatching { java.net.URLDecoder.decode(it, "UTF-8") }.getOrNull() } ?: return null
+    return to.takeIf { TV_DROP.matches(it) }
+}
+
+private val TV_DROP = Regex("""^http://(?:10\.\d{1,3}|192\.168|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}:\d{1,5}/[0-9a-f]{24}$""")
+
 /** A manifest as an addon; null when it isn't one (no name, or nothing it serves). */
 fun toAddon(url: String, m: JSONObject, on: Boolean = true): Addon? {
     val name = m.str("name") ?: return null
@@ -145,6 +159,25 @@ object Addons {
         val now = _list.value
         save(if (now.any { it.url == base }) now.map { if (it.url == base) addon.copy(on = it.on) else it } else now + addon)
         return addon
+    }
+
+    /** The list as links only, for another device to fetch afresh: [importLinks] reads it. */
+    fun linksJson(): String = JSONArray(_list.value.map { JSONObject().put("url", it.url).put("on", it.on) }).toString()
+
+    /**
+     * Another device's [linksJson]: each addon is fetched and added (one here already is refreshed),
+     * switched off if it was off there. One at a time, as [add] reads and writes the whole list.
+     * What came across, and how many of how many, for the sender to be told.
+     */
+    suspend fun importLinks(json: String): String {
+        val links = JSONArray(json).objects().mapNotNull { o -> o.str("url")?.let { it to o.optBoolean("on", true) } }
+        var copied = 0
+        for ((url, on) in links) {
+            val added = runCatching { add(url) }.getOrNull() ?: continue
+            if (!on && _list.value.find { it.url == added.url }?.on == true) toggle(added.url)
+            copied++
+        }
+        return if (copied == links.size) "Copied $copied addon${if (copied == 1) "" else "s"} to the TV." else "Copied $copied of ${links.size} addons — the rest didn't answer."
     }
 
     fun toggle(url: String) = save(_list.value.map { if (it.url == url) it.copy(on = !it.on) else it })
