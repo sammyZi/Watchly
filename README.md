@@ -138,6 +138,8 @@ player, and the streaming cache the apps share.
 | 💬 Subtitles | Subtitle addons you add · [SubDL](https://subdl.com) with your own free key |
 | 🔗 Peer streams | For addons that send them: [libtorrent](https://libtorrent.org) via [libtorrent4j](https://github.com/aldenml/libtorrent4j) on Android · [MonoTorrent](https://github.com/alanmcgovern/monotorrent) on Windows |
 
+Licenses for all of these are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 <a name="disclaimer"></a>
 <h2><img src="https://img.shields.io/badge/Disclaimer-5B6472?style=for-the-badge" alt="Disclaimer" height="34"></h2>
 

@@ -482,12 +482,14 @@ class LibTest {
 
     @Test fun castAndAwards() {
         val answer = JSONObject(
-            """{"d":[{"i":{"imageUrl":"https://m.media-amazon.com/images/M/b._V1_.jpg"},"id":"nm2","rank":40626},
-               {"i":{"imageUrl":"https://m.media-amazon.com/images/M/a._V1_.jpg"},"id":"nm1","rank":208},
-               {"id":"nm3","rank":5},{"i":{"imageUrl":"https://x/t.jpg"},"id":"tt9","rank":1}]}""",
+            """{"query":{"pages":{"123":{"title":"Simon Baker","description":"Australian actor (born 1969)",
+               "thumbnail":{"source":"https://upload.wikimedia.org/a/200px-Simon_Baker.jpg"}}}}}""",
         )
-        assertEquals("https://m.media-amazon.com/images/M/a._V1_UY300_.jpg", photoFrom(answer))
-        assertNull(photoFrom(JSONObject("""{"d":[{"id":"nm3","rank":5}]}""")))
+        assertEquals("https://upload.wikimedia.org/a/200px-Simon_Baker.jpg", photoFrom(answer))
+        // Not a performer's page — a disambiguation or another person with the name — and a page with no picture.
+        assertNull(photoFrom(JSONObject("""{"query":{"pages":{"1":{"title":"Simon Baker","description":"Topics referred to by the same term","thumbnail":{"source":"https://x/t.jpg"}}}}}""")))
+        assertNull(photoFrom(JSONObject("""{"query":{"pages":{"2":{"title":"A","description":"American actress"}}}}""")))
+        assertNull(photoFrom(JSONObject("""{"query":{"pages":{"-1":{"title":"Nobody","missing":""}}}}""")))
 
         assertEquals(Awards("Nominated for 1 Primetime Emmy", 4, 16), awardsOf("Nominated for 1 Primetime Emmy. 4 wins & 16 nominations total"))
         assertEquals(Awards("Won 2 Oscars", 120, 200), awardsOf("Won 2 Oscars. 120 wins & 200 nominations total"))

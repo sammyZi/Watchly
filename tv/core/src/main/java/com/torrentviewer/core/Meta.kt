@@ -328,26 +328,32 @@ fun toTitles(metas: JSONArray, kind: String, withEpisodes: Boolean = false, anyI
 private val photos = ConcurrentHashMap<String, String>()
 
 /**
- * An actor's photo, by name. Cinemeta lists the cast without pictures; IMDb's public
- * search suggestions carry one, keyless. Of everyone with the name, the best-known with a
- * picture — "Simon Baker" the actor, not the camera operator. Null when there is none.
+ * An actor's photo, by name, from Wikipedia — Cinemeta lists the cast without pictures. The same
+ * source as the Windows app, through Wikipedia's public API; its page images are freely licensed
+ * ones only. A name whose page isn't clearly a performer's (a disambiguation, or someone else with
+ * that name) gets none, and keeps its initials. Null when there is none.
  */
 suspend fun castPhoto(name: String): String? {
     photos[name]?.let { return it.ifEmpty { null } }
     val found = runCatching {
-        photoFrom(JSONObject(Net.get("https://v3.sg.media-imdb.com/suggestion/x/${enc(name.lowercase())}.json", quiet = true)))
+        photoFrom(JSONObject(Net.get("https://en.wikipedia.org/w/api.php?action=query&format=json&redirects=1&prop=pageimages%7Cdescription&pithumbsize=200&titles=${enc(name)}", quiet = true)))
     }.getOrNull()
     photos[name] = found.orEmpty()
     return found
 }
 
-/** The most popular person (lowest rank) in a suggestion answer who has a picture, sized for a small avatar. */
-fun photoFrom(answer: JSONObject): String? = answer.optJSONArray("d")?.objects().orEmpty()
-    .filter { it.optString("id").startsWith("nm") && it.optJSONObject("i")?.str("imageUrl") != null }
-    .minByOrNull { it.optInt("rank", Int.MAX_VALUE) }
-    ?.optJSONObject("i")?.str("imageUrl")
-    // Amazon's image server scales on request: a 300px-tall copy, not the full-size original.
-    ?.replace(Regex("\\._V1_.*\\.jpg$"), "._V1_UY300_.jpg")
+private val PERFORMER = Regex(
+    "\\b(actor|actress|comedian|performer|voice|entertainer|singer|rapper|model|filmmaker|director|presenter|personality|wrestler)\\b",
+    RegexOption.IGNORE_CASE,
+)
+
+/** The thumbnail of the page in a Wikipedia answer whose description names a performer, or null. */
+fun photoFrom(answer: JSONObject): String? {
+    val pages = answer.optJSONObject("query")?.optJSONObject("pages") ?: return null
+    return pages.keys().asSequence().mapNotNull { pages.optJSONObject(it) }
+        .firstOrNull { PERFORMER.containsMatchIn(it.str("description").orEmpty()) }
+        ?.optJSONObject("thumbnail")?.str("source")
+}
 
 /** "Won 2 Oscars. 120 wins & 200 nominations total" — the headline, and the two counts. */
 data class Awards(val headline: String?, val wins: Int?, val nominations: Int?)

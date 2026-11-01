@@ -65,6 +65,8 @@
 
   <ItemGroup>
     <Resource Include="Assets\Fonts\*.ttf" />
+    <!-- Noto Sans is under the SIL Open Font License, which travels with the fonts. -->
+    <Resource Include="Assets\Fonts\OFL.txt" />
     <Resource Include="Assets\app.ico" />
     <!-- The profile faces, drawn from the same file as the phone's and the TV's. -->
     <EmbeddedResource Include="..\..\tv\core\src\main\resources\avatars.json" LogicalName="avatars.json" />
