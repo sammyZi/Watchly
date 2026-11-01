@@ -97,6 +97,21 @@ class StremioTest {
         assertEquals("series", out.getValue("tt4").getString("type"))
     }
 
+    @Test fun removingAnAddonLeavesTheRestAlone() {
+        val all = listOf(
+            JSONObject("""{"transportUrl":"https://v3-cinemeta.strem.io/manifest.json","flags":{"official":true,"protected":true},"manifest":{"id":"c"}}"""),
+            JSONObject("""{"transportUrl":"https://torrentio.strem.fun/sort=qualitysize/manifest.json","flags":{},"manifest":{"id":"t","x":1}}"""),
+            JSONObject("""{"transportUrl":"https://subs.example/manifest.json","manifest":{"id":"s"}}"""),
+        )
+        val keep = withoutAddon(all, "https://torrentio.strem.fun/sort=qualitysize")
+        assertEquals(listOf("c", "s"), keep.map { it.getJSONObject("manifest").getString("id") })
+        // Untouched, field for field.
+        assertEquals(all[2].toString(), keep[1].toString())
+        // Stremio's own stays, even asked for by its address.
+        assertEquals(3, withoutAddon(all, "https://v3-cinemeta.strem.io").size)
+        assertEquals(3, withoutAddon(all, "https://other.example").size)
+    }
+
     @Test fun episodeIds() {
         assertEquals(Ep(1, 2), epOfVideo("tt0944947:1:2"))
         assertEquals(Ep(1, 5), epOfVideo("kitsu:123:1:5"))

@@ -190,7 +190,11 @@ object Addons {
 
     fun toggle(url: String) = save(_list.value.map { if (it.url == url) it.copy(on = !it.on) else it })
 
-    fun remove(url: String) = save(_list.value.filterNot { it.url == url })
+    /** Gone here, and from the Stremio account's collection when one is signed in, so an import won't bring it back. */
+    fun remove(url: String) {
+        save(_list.value.filterNot { it.url == url })
+        Stremio.removeAddon(url)
+    }
 
     /** One place up (−1) or down (+1); order is the order streams are asked for and listed in. */
     fun move(url: String, step: Int) {
