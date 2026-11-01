@@ -169,8 +169,8 @@ public sealed class DetailView : UserControl, IDisposable
         var key = PickKey;
         error = null;
         var job = picked is not null
-            ? Search.SearchEpisode(picked.Id, title.Name, picked.Season, cts.Token, lang)
-            : Search.SearchStreams(title.Name, cts.Token, title.Imdb, lang: lang);
+            ? Search.SearchEpisode(picked.Id, title.Name, picked.Season, cts.Token, lang, title.StremioType)
+            : Search.SearchStreams(title.Name, cts.Token, title.Imdb, lang: lang, type: title.StremioType);
         job.ContinueWith(t => Dispatcher.BeginInvoke(() =>
         {
             if (mine != searchGen) return;
@@ -182,7 +182,7 @@ public sealed class DetailView : UserControl, IDisposable
             {
                 saveWhenFound = false;
                 // Downloads are torrents; a link is streamed only.
-                if (sources.FirstOrDefault(h => !h.Direct) is { } hit) { Save(hit.Uri); return; }
+                if (sources.FirstOrDefault(h => h.IsTorrent) is { } hit) { Save(hit.Uri); return; }
                 var what = picked is null ? title.Name : Short(picked);
                 shell.Toast(lang is null ? $"No sources found for {what}" : $"No {what} in {lang.Name} — change the language and try again", true);
             }
@@ -204,8 +204,8 @@ public sealed class DetailView : UserControl, IDisposable
         var offset = scroll.VerticalOffset;
         content.Children.Clear();
 
-        var url = title.Backdrop ?? $"https://images.metahub.space/background/medium/{title.Imdb}/img";
-        if (url != backdropUrl && ImageUrl.Load(url, 1920) is { } image)
+        var url = title.Wide;
+        if (url is not null && url != backdropUrl && ImageUrl.Load(url, 1920) is { } image)
         {
             backdropUrl = url;
             backdrop.Background = new ImageBrush(image) { Stretch = Stretch.UniformToFill, AlignmentY = AlignmentY.Top };
@@ -216,8 +216,11 @@ public sealed class DetailView : UserControl, IDisposable
         var fresh = sourceKey == PickKey;
         var shown = wanted is not null ? sources?.Where(h => h.Quality == wanted).ToList() : sources;
         var best = fresh ? shown?.FirstOrDefault() : null;
-        var bestTorrent = fresh ? shown?.FirstOrDefault(h => !h.Direct) : null;
-        var seen = picked is not null ? progress.GetValueOrDefault(picked.Id) : resume is { } r ? Math.Min(100, r.Position / r.Duration * 100) : 0;
+        var bestTorrent = fresh ? shown?.FirstOrDefault(h => h.IsTorrent) : null;
+        // A film left part-way on Stremio, never here, still says Resume: the release picked starts at that spot.
+        var seen = picked is not null ? progress.GetValueOrDefault(picked.Id)
+            : resume is { } r ? Math.Min(100, r.Position / r.Duration * 100)
+            : Stremio.Library.PausedAt(title.Imdb, null) ?? 0;
         var canResume = seen >= 1 && seen < EpisodeLinks.Watched;
         var wait = shell.IsOpening || saving;
         var live = best is not null && !wait;
@@ -231,7 +234,7 @@ public sealed class DetailView : UserControl, IDisposable
         // The one thing most people want: start the healthiest release — or carry on.
         var label = wait ? saving ? "Starting download…" : "Opening…"
             : best is null ? fresh && sources is not null ? "No sources" : "Finding sources…"
-            : canResume ? "Resume  ·  " + (picked is null ? "" : Short(picked) + "  ·  ") + $"{Math.Round(seen)}%"
+            : canResume ? "Resume  ·  " + (picked is null ? "" : Short(picked) + "  ·  ") + (TimeLeft() ?? $"{Math.Round(seen)}%")
             : picked is not null ? $"Play {Short(picked)}" : "Play";
         var play = Ui.Action(label, "play", () => { if (best is not null) Start(best, false); }, primary: true);
         play.IsHitTestVisible = live;
@@ -301,6 +304,22 @@ public sealed class DetailView : UserControl, IDisposable
         RenderSources(fresh, shown, wait);
 
         Dispatcher.BeginInvoke(() => scroll.ScrollToVerticalOffset(offset), DispatcherPriority.Loaded);
+    }
+
+    /// <summary>
+    /// "40m left" where the film — or the picked episode — was left: the release played last here
+    /// (core resumeLabel), else Stremio's spot; null when the time isn't known.
+    /// </summary>
+    string? TimeLeft()
+    {
+        (int, int)? ep = picked is null ? null : (picked.Season, picked.Number);
+        var local = History.LatestPerTitle(shell.HistoryList.Where(h => h.Imdb == title.Imdb)).FirstOrDefault();
+        if (local?.LastFileIndex is int i && local.Ratio is > 0.02 and < 0.95 && local.DurationOf(i) is double of && local.PositionOf(i) is double at
+            && (ep is null || Search.ParseEpisode(local.Files?.FirstOrDefault(f => f.Index == i)?.Name) == ep))
+            return Format.Left(of - at);
+        return Stremio.Library.Paused.FirstOrDefault(p => p.Imdb == title.Imdb && p.Ep == ep) is { Seconds: double s, Progress: > 0 } paused
+            ? Format.Left(s / (paused.Progress / 100) - s)
+            : null;
     }
 
     /// <summary>The releases' language, from a menu; picking one looks again.</summary>
@@ -629,7 +648,7 @@ public sealed class DetailView : UserControl, IDisposable
         if (fresh && shown is not null)
         {
             // Which of these TorBox has cached: the rows say Instant once it answers.
-            _ = TorBox.Check(shown.Take(MaxSources).Where(h => !h.Direct).Select(h => h.Id));
+            _ = TorBox.Check(shown.Take(MaxSources).Where(h => h.IsTorrent).Select(h => h.Id));
             foreach (var hit in shown.Take(MaxSources)) block.Children.Add(SourceRow(hit));
         }
         content.Children.Add(block);
@@ -648,7 +667,7 @@ public sealed class DetailView : UserControl, IDisposable
         }
         var captured = hit;
         // The download engine is a torrent client; a link is streamed only.
-        if (!hit.Direct)
+        if (hit.IsTorrent)
         {
             var download = Ui.Round("download", () => Save(captured.Uri), "Muted", "Transparent", 36, 20, "Download this release");
             download.Background = Brushes.Transparent;
@@ -656,7 +675,9 @@ public sealed class DetailView : UserControl, IDisposable
             DockPanel.SetDock(download, Dock.Right);
             dock.Children.Add(download);
         }
-        var grade = hit.Direct ? Ui.Text("Direct", "Meta", "Good", 13, FontWeights.Bold) : Ui.Text(tone.Label, "Meta", tone.Fg, 13, FontWeights.Bold);
+        var grade = hit.Direct ? Ui.Text("Direct", "Meta", "Good", 13, FontWeights.Bold)
+            : hit.External ? Ui.Text("Browser", "Meta", "Muted", 13, FontWeights.Bold)
+            : Ui.Text(tone.Label, "Meta", tone.Fg, 13, FontWeights.Bold);
         grade.VerticalAlignment = VerticalAlignment.Center;
         grade.Margin = new Thickness(10, 0, 0, 0);
         DockPanel.SetDock(grade, Dock.Right);
@@ -670,12 +691,12 @@ public sealed class DetailView : UserControl, IDisposable
         {
             scope,
             hit.Size > 0 ? Format.Bytes(TorrentBytes(hit)) : null,
-            hit.Direct ? null : $"{hit.Seeders} seeds",
+            hit.IsTorrent ? $"{hit.Seeders} seeds" : null,
             hit.Addon.Length > 0 ? hit.Addon : null,
         }.Where(s => s is not null)), "Meta", "Faint", 12);
         meta.Margin = new Thickness(0, 2, 0, 0);
         var lines = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { name, meta } };
-        if (!hit.Direct && TorBox.IsCached(hit.Id)) lines.Children.Add(Ui.Text("Instant · TorBox", "Meta", "Good", 12, FontWeights.SemiBold));
+        if (hit.IsTorrent && TorBox.IsCached(hit.Id)) lines.Children.Add(Ui.Text("Instant · TorBox", "Meta", "Good", 12, FontWeights.SemiBold));
         dock.Children.Add(lines);
 
         var row = Ui.Button(Ui.Card(dock, "Surface", 8, new Thickness(14, 11, 8, 11)), () => Start(captured, false));
@@ -734,7 +755,7 @@ public sealed class DetailView : UserControl, IDisposable
     /// <summary>An episode's own download: its best release, looked up first if the list shows another's.</summary>
     void DownloadEpisode(Episode ep)
     {
-        if (picked?.Id == ep.Id && sourceKey == PickKey && sources?.FirstOrDefault(h => !h.Direct) is { } ready)
+        if (picked?.Id == ep.Id && sourceKey == PickKey && sources?.FirstOrDefault(h => h.IsTorrent) is { } ready)
         {
             Save(ready.Uri);
             return;
@@ -748,9 +769,8 @@ public sealed class DetailView : UserControl, IDisposable
     async void Start(Hit hit, bool startOver)
     {
         var episodeId = picked?.Id;
-        var local = await shell.StreamUri(hit.Uri, new OpenOptions
+        var local = await shell.StreamHit(hit, new OpenOptions
         {
-            Name = hit.Name,
             Auto = PickedTag ?? "best",
             KeepProgress = startOver,
             Imdb = title.Imdb,
@@ -804,7 +824,7 @@ public sealed class DetailView : UserControl, IDisposable
         if (picked?.Season != which || sourceKey != PickKey || sources is null) return null;
         bool IsPack(Hit h)
         {
-            if (h.Direct || h.Scope is not ("season" or "complete")) return false;
+            if (!h.IsTorrent || h.Scope is not ("season" or "complete")) return false;
             var claims = Search.SeasonsIn(h.Name);
             return claims.Count == 0 || claims.Contains(which);
         }

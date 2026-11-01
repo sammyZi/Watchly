@@ -144,6 +144,8 @@ public sealed class HomeView : UserControl
     {
         if (KidsMode.On) return KidsShelves.ToList();
         var chosen = Chosen();
+        // The viewer's addons' own lists lead, as on Stremio's board.
+        chosen.AddRange(Addons.Shelves());
         var taken = chosen.Select(s => s.Key).ToHashSet();
         var rest = picks.Where(p => taken.Add(p.Key)).ToList();
         var fixedList = Fixed.Where(s => taken.Add(s.Key)).ToList();
@@ -290,11 +292,11 @@ public sealed class HomeView : UserControl
             var position = item.PositionOf(index) ?? 0;
             return new ResumeTile(FromHistory(item), item, index, duration > 0 ? position / duration.Value * 100 : 0, ResumeStamp(item));
         }).ToList();
-        // Left part-way somewhere this PC never saw — another device, before a reinstall: Simkl kept the spot.
-        resumable.AddRange(KidsMode.Only(Simkl.Library.Paused.Where(p => shell.HistoryList.All(h => h.Imdb != p.Imdb)), p => new Title { Imdb = p.Imdb }).DistinctBy(p => p.Imdb).Take(10).Select(p =>
+        // Left part-way somewhere this PC never saw — another device, before a reinstall: Stremio kept the spot.
+        resumable.AddRange(KidsMode.Only(Stremio.Library.Paused.Where(p => shell.HistoryList.All(h => h.Imdb != p.Imdb)), p => new Title { Imdb = p.Imdb }).DistinctBy(p => p.Imdb).Take(10).Select(p =>
             new ResumeTile(
                 new Title { Imdb = p.Imdb, Kind = p.Kind, Name = p.Title, Year = p.Year, Poster = $"https://images.metahub.space/poster/medium/{p.Imdb}/img" },
-                new HistoryItem { Uri = $"simkl:{p.Imdb}", Title = p.Title, Imdb = p.Imdb, Kind = p.Kind },
+                new HistoryItem { Uri = $"stremio:{p.Imdb}", Title = p.Title, Imdb = p.Imdb, Kind = p.Kind },
                 0, p.Progress,
                 string.Join(" · ", new[] { p.Ep is { } e ? $"S{e.Season}:E{e.Episode}" : null, $"{(int)p.Progress}%" }.Where(s => s is not null)))));
         if (resumable.Count > 0) personal.Children.Add(Section("Continue Watching", () => shell.ShowTab("history"), resumable, "ResumeCard"));
@@ -436,7 +438,7 @@ public sealed class HomeView : UserControl
         // faded into the page at its left and foot, and the words down the left beside it.
         var art = new Grid { Cursor = Cursors.Hand };
         Grid.SetColumn(art, 1);
-        if (ImageUrl.Load(title.Backdrop ?? $"https://images.metahub.space/background/medium/{title.Imdb}/img", 1920) is { } image)
+        if (title.Wide is { } wide && ImageUrl.Load(wide, 1920) is { } image)
             art.Children.Add(new Border { Background = new ImageBrush(image) { Stretch = Stretch.UniformToFill, AlignmentY = AlignmentY.Top } });
         art.Children.Add(Ui.Brushed(new Border(), "FadeToBg"));
         art.Children.Add(Ui.Brushed(new Border(), "FadeLeft"));

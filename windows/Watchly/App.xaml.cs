@@ -49,8 +49,19 @@ public partial class App : Application
             args.SetObserved();
         };
 
-        var window = new MainWindow(e.Args.FirstOrDefault(TitleText.IsTorrentSource));
+        // A magnet, a .torrent, or an addon site's Install link (the installer registers stremio://).
+        var incoming = e.Args.FirstOrDefault(a => TitleText.IsTorrentSource(a) || a.StartsWith("stremio://", StringComparison.OrdinalIgnoreCase));
+        // A Watchly already open takes it: a second one would fight it for the torrent ports.
+        single = new Mutex(true, Pipe, out var first);
+        if (!first && incoming is not null && Forward(incoming))
+        {
+            Shutdown();
+            return;
+        }
+
+        var window = new MainWindow(incoming);
         MainWindow = window;
+        if (first) Listen(window);
         // Neither is needed for the first frame, and on a cold disk after boot both compete
         // with the window for it: libVLC loads, and old builds are cleared, once it is up.
         window.ContentRendered += (_, _) =>
@@ -60,6 +71,53 @@ public partial class App : Application
         };
         window.Show();
     }
+
+    /// <summary>One per Windows account: the pipe's name, and the mutex that says a Watchly is open.</summary>
+    static readonly string Pipe = $"Watchly-{Environment.UserName}";
+    /// <summary>Held for the app's life; let go, a second Watchly would think it was the first.</summary>
+    static Mutex? single;
+
+    /// <summary>Hands a link to the Watchly already open; false when none answered, so this one opens it.</summary>
+    static bool Forward(string link)
+    {
+        try
+        {
+            using var pipe = new System.IO.Pipes.NamedPipeClientStream(".", Pipe, System.IO.Pipes.PipeDirection.Out);
+            pipe.Connect(1500);
+            using var writer = new StreamWriter(pipe);
+            writer.Write(link);
+            return true;
+        }
+        catch (Exception e)
+        {
+            Log.Warn("app", $"no open Watchly took the link: {e.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>Links from a second Watchly, one at a time, for as long as this one is open.</summary>
+    static void Listen(MainWindow window) => _ = Task.Run(async () =>
+    {
+        while (true)
+        {
+            try
+            {
+                await using var server = new System.IO.Pipes.NamedPipeServerStream(Pipe, System.IO.Pipes.PipeDirection.In, 1,
+                    System.IO.Pipes.PipeTransmissionMode.Byte, System.IO.Pipes.PipeOptions.Asynchronous);
+                await server.WaitForConnectionAsync();
+                using var reader = new StreamReader(server);
+                var link = (await reader.ReadToEndAsync()).Trim();
+                // Only what the command line could have brought: nothing else is acted on.
+                if (link.Length > 0 && link.Length < 8192 && (TitleText.IsTorrentSource(link) || link.StartsWith("stremio://", StringComparison.OrdinalIgnoreCase)))
+                    _ = window.Dispatcher.BeginInvoke(() => window.Incoming(link));
+            }
+            catch (Exception e)
+            {
+                Log.Warn("app", $"link pipe: {e.Message}");
+                await Task.Delay(1000);
+            }
+        }
+    });
 
     /// <summary>
     /// The single-file exe unpacks itself (≈240 MB, libVLC and all) to %TEMP%\.net\Watchly\&lt;build id&gt;\
