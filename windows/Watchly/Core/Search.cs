@@ -30,6 +30,8 @@ public sealed record Hit
     public Dictionary<string, string> Headers { get; init; } = new();
     /// <summary>The file the addon meant, by the torrent's own numbering — for when names can't say.</summary>
     public int? FileIdx { get; init; }
+    /// <summary>The manifest link of the addon it came from: a debrid link only plays while that addon (and its key) is still added.</summary>
+    public string AddonUrl { get; init; } = "";
 
     /// <summary>Plays straight from its link: no swarm, no seeders to count, nothing to download.</summary>
     public bool Direct => !External && Search.IsDirectLink(Uri);
@@ -243,9 +245,13 @@ public static class Search
     static bool IsHash(string? s) => s is not null && Regex.IsMatch(s, "^[0-9a-f]{40}$", I);
 
     /// <summary>The addon's own trackers (its <c>sources</c>) first, then the well-known open ones.</summary>
-    static string MagnetOf(string hash, string name, IEnumerable<string>? trackers = null) =>
+    public static string MagnetOf(string hash, string name, IEnumerable<string>? trackers = null) =>
         TitleText.WithTrackers($"magnet:?xt=urn:btih:{hash}&dn={Uri.EscapeDataString(name)}"
             + string.Concat((trackers ?? Enumerable.Empty<string>()).Select(t => "&tr=" + Uri.EscapeDataString(t))));
+
+    /// <summary>The info hash a debrid link names in its path (Torrentio's ".../resolve/torbox/&lt;key&gt;/&lt;hash&gt;/..."), if any.</summary>
+    public static string? LinkHash(string link) =>
+        link.Split('?')[0].Split('/').FirstOrDefault(IsHash)?.ToLowerInvariant();
 
     /// <summary>A video served over http(s), as opposed to a magnet, a .torrent or a path.</summary>
     public static bool IsDirectLink(string uri) => Regex.IsMatch(uri, "^https?://", I) && !TitleText.IsTorrentSource(uri);
@@ -311,7 +317,7 @@ public static class Search
     /// display text — "name\n👤 84 💾 51.3 GB ⚙️ 1337x" — and <c>behaviorHints</c> carry the file's real name and size.
     /// ponytail: archive (rarUrls…) and nzbUrl streams are skipped; few addons send them yet.
     /// </summary>
-    public static List<Hit> ToStreamHits(JsonArray streams, string kind, string addon = "")
+    public static List<Hit> ToStreamHits(JsonArray streams, string kind, string addon = "", string addonUrl = "")
     {
         var @out = new List<Hit>();
         foreach (var s in streams.OfType<JsonObject>())
@@ -351,6 +357,7 @@ public static class Search
                 Kind = kind,
                 PerFileSize = true,
                 Addon = addon,
+                AddonUrl = addonUrl,
             });
         }
         return @out;
@@ -430,7 +437,7 @@ public static class Search
             return lang is null ? all : all.Where(lang.Says).ToList();
         }
         async Task<List<Hit>> Ask(Addon a) =>
-            (await a.Get("stream", type, id, ct))?["streams"] is JsonArray streams ? ToStreamHits(streams, kind, a.Name) : new();
+            (await a.Get("stream", type, id, ct))?["streams"] is JsonArray streams ? ToStreamHits(streams, kind, a.Name, a.Url) : new();
 
         var pending = Addons.Serving("stream", type, id).Select(a => Timed(a.Name, Limited(Ask(a), SourceMs, new List<Hit>()))).ToList();
         var arrived = new List<List<Hit>>();

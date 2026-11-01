@@ -26,6 +26,8 @@ public sealed record HistoryItem
     public string? TitleName { get; init; }
     /// <summary>When each file's spot was last saved, ms: which of a title's releases was played last.</summary>
     public Dictionary<int, long>? Played { get; init; }
+    /// <summary>For an addon's debrid link: the manifest link of the addon it came from — see <see cref="Addons.StillServes"/>.</summary>
+    public string? Addon { get; init; }
 
     public double? PositionOf(int index) => Positions is not null && Positions.TryGetValue(index, out var v) ? v : null;
     /// <summary>When this file was last played; an entry from before this was kept says when it was opened.</summary>
@@ -113,6 +115,7 @@ public static class History
                 Imdb = item.Imdb ?? prev?.Imdb ?? kin?.Imdb,
                 Kind = item.Kind ?? prev?.Kind ?? kin?.Kind,
                 TitleName = item.TitleName ?? prev?.TitleName ?? kin?.TitleName,
+                Addon = item.Addon ?? prev?.Addon,
             };
             return Write(rest.Where(x => x.Uri != item.Uri).Prepend(merged).ToList());
         }
