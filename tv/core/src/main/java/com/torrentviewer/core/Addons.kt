@@ -205,6 +205,24 @@ object Addons {
         save(l)
     }
 
+    /**
+     * Would [link] — a stream an addon handed over, a debrid one with the viewer's key in it — still
+     * come from an addon that is added and on? By [manifest] when it was kept; else (entries from before
+     * it was) an addon on the link's host whose own link holds every key-like part of [link]'s path.
+     * Torrentio with TorBox swapped for plain Torrentio is the same host without that key: no.
+     */
+    fun stillServes(link: String, manifest: String?): Boolean {
+        val on = _list.value.filter { it.on }
+        if (manifest != null) return on.any { it.url == manifest }
+        val uri = runCatching { java.net.URI(link) }.getOrNull() ?: return true
+        val host = uri.host ?: return true
+        val keys = uri.rawPath.orEmpty().split('/', '=', '|', ',', ';').filter { part ->
+            part.length >= 20 && part.any(Char::isDigit) && part.all { it.isLetterOrDigit() || it == '-' || it == '_' } &&
+                !Regex("^[0-9a-fA-F]{40}$").matches(part)
+        }
+        return on.any { a -> runCatching { java.net.URI(a.url).host }.getOrNull() == host && keys.all { a.url.contains(it) } }
+    }
+
     fun serving(resource: String, type: String, id: String) = _list.value.filter { it.serves(resource, type, id) }
 
     /** Every list that shows without a genre or search picked first, as (row title, kind, shelf key). */

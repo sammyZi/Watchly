@@ -172,6 +172,7 @@ class Watch(val engine: TorrentStream) {
                 backdrop = from?.backdrop,
                 titleName = if (episode != null && from != null) "${from.title} · ${episodeTag(episode.season, episode.episode)}" else from?.title,
                 seeders = hit.seeders.takeIf { !hit.direct },
+                addon = hit.addonUrl.takeIf { hit.direct && it.isNotEmpty() },
             ),
         )
         if (hit.direct) return@launch playLink(fresh, hit.name, hit.size, hit.headers)
@@ -293,7 +294,11 @@ class Watch(val engine: TorrentStream) {
         title = null
         item = target
         target.imdb?.let { id -> launch { Meta.title(id, target.kind ?: "movie")?.let { if (item?.uri == target.uri) title = it } } }
-        if (isDirectLink(target.uri)) return@launch playLink(target, target.torrentName ?: target.label, target.files?.firstOrNull()?.size ?: 0)
+        if (isDirectLink(target.uri)) {
+            val hash = linkHash(target.uri)
+            if (hash != null && !Addons.stillServes(target.uri, target.addon)) return@launch fromPeers(target, hash)
+            return@launch playLink(target, target.torrentName ?: target.label, target.files?.firstOrNull()?.size ?: 0)
+        }
         val known = target.lastFileIndex
         if (known != null && !target.files.isNullOrEmpty() && target.torrentName != null) {
             ++gen
@@ -318,6 +323,36 @@ class Watch(val engine: TorrentStream) {
         remember(target.uri, found, index)
         val size = found.files.find { it.index == index }?.size ?: 0
         val started = carried(target.uri, found, index)
+        play(index, started.resumeRatio(index), bitrateOf(size, started.durations[index] ?: 0.0))
+    }
+
+    /**
+     * Resume on an addon's debrid link whose addon is gone — Torrentio with TorBox removed for plain
+     * Torrentio: the link only asks that service again ("no active subscription"). The same release
+     * (the info hash in the link) from peers instead, from the same spot; the dead link's row goes.
+     */
+    private suspend fun fromPeers(old: Item, hash: String) {
+        notes.tryEmit("The addon behind that link was removed — streaming the same release from peers.")
+        val name = old.torrentName ?: old.title
+        val fresh = History.put(
+            Item(
+                uri = magnetFor(hash, name), title = name, at = System.currentTimeMillis(), imdb = old.imdb, kind = old.kind,
+                poster = old.poster, backdrop = old.backdrop, titleName = old.titleName,
+            ),
+        )
+        val found = inspect(fresh) ?: return
+        if (found.files.none { it.isVideo }) return fail("This torrent holds no video.")
+        val index = found.files.find { it.isVideo && it.name == name }?.index
+            ?: pickFile(found.files, parseEpisode(name)?.let { episodeTag(it.season, it.episode) })
+        if (index == null) {
+            phase = Phase.IDLE
+            choose = fresh to found
+            return
+        }
+        remember(fresh.uri, found, index)
+        val started = carried(fresh.uri, found, index)
+        History.drop(old.uri, engine)
+        val size = found.files.find { it.index == index }?.size ?: 0
         play(index, started.resumeRatio(index), bitrateOf(size, started.durations[index] ?: 0.0))
     }
 

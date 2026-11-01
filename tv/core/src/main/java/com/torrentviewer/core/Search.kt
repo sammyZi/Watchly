@@ -78,7 +78,7 @@ fun isTorrentSource(url: String): Boolean {
     return Regex("^(file|https?):").containsMatchIn(lower) && lower.substringBefore('?').endsWith(".torrent")
 }
 
-private fun magnetFor(hash: String, name: String) =
+fun magnetFor(hash: String, name: String) =
     withTrackers("magnet:?xt=urn:btih:$hash&dn=${java.net.URLEncoder.encode(name, "UTF-8").replace("+", "%20")}")
 
 /* -------------------------------------------------------------- episodes */
@@ -222,10 +222,16 @@ data class Hit(
     val headers: Map<String, String> = emptyMap(),
     /** The file the addon meant, by the torrent's own numbering — for when names can't say. */
     val fileIdx: Int? = null,
+    /** The manifest link of the addon it came from: a debrid link only plays while that addon (and its key) is still added. */
+    val addonUrl: String = "",
 ) {
     /** Plays straight from its link: no swarm, no seeders to count. */
     val direct get() = !external && isDirectLink(uri)
 }
+
+/** The info hash a debrid link names in its path (Torrentio's ".../resolve/torbox/<key>/<hash>/..."), if any. */
+fun linkHash(link: String): String? =
+    link.substringBefore('?').split('/').firstOrNull { Regex("^[0-9a-fA-F]{40}$").matches(it) }?.lowercase()
 
 /** A video served over http(s), as opposed to a magnet, a .torrent or a path. */
 fun isDirectLink(uri: String) = Regex("^https?://", RegexOption.IGNORE_CASE).containsMatchIn(uri) && !isTorrentSource(uri)
@@ -260,7 +266,7 @@ private val UNIT = mapOf("kb" to 1024.0, "mb" to 1024.0 * 1024, "gb" to 1024.0 *
  * text — "name\n👤 84 💾 51.3 GB ⚙️ 1337x" — and `behaviorHints` carry the file's real name and size.
  * ponytail: archive (`rarUrls`…) and `nzbUrl` streams are skipped; few addons send them yet.
  */
-fun toStreamHits(streams: JSONArray, kind: String, addon: String = ""): List<Hit> = streams.objects().mapNotNull { s ->
+fun toStreamHits(streams: JSONArray, kind: String, addon: String = "", addonUrl: String = ""): List<Hit> = streams.objects().mapNotNull { s ->
     val hash = s.optString("infoHash").lowercase().takeIf { HASH.matches(it) }
     val url = s.str("url")?.takeIf { isDirectLink(it) || isTorrentSource(it) }
     val outside = s.str("ytId")?.let { "https://www.youtube.com/watch?v=$it" } ?: s.str("externalUrl")
@@ -286,6 +292,7 @@ fun toStreamHits(streams: JSONArray, kind: String, addon: String = ""): List<Hit
         quality = quality(name) ?: quality("$label $text"), kind = kind, scope = scopeOf(name), imdb = null, perFileSize = true, addon = addon,
         external = hash == null && url == null, headers = if (url != null) headers else emptyMap(),
         fileIdx = s.optInt("fileIdx", -1).takeIf { hash != null && it >= 0 },
+        addonUrl = addonUrl,
     )
 }
 
@@ -364,7 +371,7 @@ private suspend fun fromAddons(type: String, id: String, lang: Lang?, onHits: On
     // Off the main thread: ranking reruns on every addon that lands, and on a TV that froze the remote.
     withContext(Dispatchers.Default) {
         for (a in Addons.serving("stream", type, id)) launch {
-            val hits = source(a.name, SOURCE_MS) { toStreamHits(a.get("stream", type, id).optJSONArray("streams") ?: JSONArray(), kind, a.name) }
+            val hits = source(a.name, SOURCE_MS) { toStreamHits(a.get("stream", type, id).optJSONArray("streams") ?: JSONArray(), kind, a.name, a.url) }
             if (hits.isEmpty()) return@launch
             synchronized(bags) { bags.add(hits) }
             onHits?.invoke(now())
