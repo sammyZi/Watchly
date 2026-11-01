@@ -46,8 +46,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.blur
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -265,23 +263,9 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
         LazyColumn(state = list, contentPadding = PaddingValues(bottom = 32.dp), modifier = Modifier.fillMaxSize()) {
             item(key = "head") {
                 if (!wide) {
-                    // The whole picture, uncut, under the status bar; the same picture blurred fills the larger
-                    // header behind it, and the logo sits below it instead of over it.
-                    Box(Modifier.fillMaxWidth()) {
-                        Artwork(
-                            title.wide, title.title,
-                            Modifier.matchParentSize().blur(36.dp).graphicsLayer { alpha = 0.6f }.bottomScrim(0.35f),
-                            fill = false,
-                        )
-                        Column {
-                            Spacer(Modifier.statusBarsPadding().height(8.dp))
-                            Artwork(
-                                title.wide, title.title,
-                                Modifier.fillMaxWidth().aspectRatio(16f / 9f),
-                                scale = androidx.compose.ui.layout.ContentScale.Fit, fill = false,
-                            )
-                            TitleMark(title, Modifier.padding(start = EDGE, end = EDGE, top = 16.dp, bottom = 4.dp).widthIn(max = 280.dp), maxHeight = 80.dp, style = Type.display)
-                        }
+                    Box(Modifier.fillMaxWidth().aspectRatio(16f / 11f)) {
+                        Artwork(title.wide, title.title, Modifier.fillMaxSize().bottomScrim(0.6f), fill = false)
+                        TitleMark(title, Modifier.align(Alignment.BottomStart).padding(horizontal = EDGE).widthIn(max = 260.dp), maxHeight = 72.dp, style = Type.display)
                     }
                 }
                 Column(
