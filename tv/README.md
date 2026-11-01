@@ -3,7 +3,9 @@
 The television build: a native Kotlin app (Jetpack Compose, libtorrent4j,
 Media3 with a libVLC fallback). Two modules: `app` is the TV shell and its
 D-pad UI; `core` is everything the Kotlin phone app in `../mobile` shares with it
-(engine, players, indexers, metadata, store, the look).
+(engine, players, addon client, metadata, store, the look). Like the phone, it
+ships with no sources: streams and subtitles come from the addons, debrid
+service or media server you add (see the [disclaimer](../README.md#disclaimer)).
 
 ```bash
 cd tv && ./gradlew compileDebugKotlin testDebugUnitTest
@@ -14,7 +16,7 @@ as the old Expo build, so it installs over it in place. On first launch the old
 build's AsyncStorage database (`RKStorage`) is imported once, so profiles,
 history, My List, recent searches and settings carry over.
 
-"Find subtitles online" searches OpenSubtitles with no key; a SubDL key in `tv/.env` (see `.env.example`) adds SubDL;
+"Find subtitles online" asks your subtitle addons; a SubDL key in `tv/.env` (see `.env.example`) adds SubDL;
 it is read into `BuildConfig.SUBDL_KEY` at build time and never committed.
 
 ## Layout
@@ -27,7 +29,7 @@ it is read into `BuildConfig.SUBDL_KEY` at build time and never committed.
 | `LocalFileServer.kt` | Loopback HTTP server that blocks on pieces that have not landed, so libVLC never reads holes. |
 | `VlcView.kt` | libVLC surface: AC3/DTS decoders, PGS subtitles, audio focus, stats. |
 | `Watch.kt` | One stream at a time: resolve, pick the file, play, next/previous episode. |
-| `Search.kt` / `Meta.kt` | Indexers (apibay, torrents-csv, Knaben, Nyaa, YTS, EZTV, Torrentio), Cinemeta metadata, OpenSubtitles and SubDL. |
+| `Addons.kt` / `Search.kt` / `Meta.kt` | The addons you add ([Stremio addon protocol](https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/protocol.md)): their catalogues, streams and subtitles; Cinemeta metadata; SubDL. |
 | `Store.kt` | SharedPreferences with the Expo build's keys and JSON; per-profile namespaces; guest in memory only. |
 | `ExoView.kt` | Media3 surface with the FFmpeg audio decoders; `VlcView` takes over when it cannot play a file. |
 | `Theme.kt` | Ink palette, type, artwork, title logos, facts row, progress line, hero scrims, avatars. |
@@ -42,7 +44,7 @@ it is read into `BuildConfig.SUBDL_KEY` at build time and never committed.
 
 ## The player
 
-Netflix-style, driven entirely by the remote:
+Built for the big screen, driven entirely by the remote:
 
 - **Bar down:** OK plays/pauses, ‹ › scrub (the step grows the longer the key is
   held: 10 s → 2 min) and commit 0.7 s after the last press, ▲ raises the bar on
@@ -50,17 +52,17 @@ Netflix-style, driven entirely by the remote:
 - **Bar up:** title and episode top-left; clock, "Ends at", speed and peers
   top-right; a red seek bar with time left, a scrub bubble showing the target
   and the jump; round controls whose names rise above them on focus.
-- **Audio & subtitles** side by side, with "Find subtitles online" (OpenSubtitles, and SubDL with a key);
+- **Audio & subtitles** side by side, with "Find subtitles online" (your subtitle addons, and SubDL with a key);
   speed, picture fit and "stats for nerds" (codecs, bitrate, dropped frames).
 - **Loading** over the title's own backdrop and logo with a ring that fills;
-  a stall spinner mid-film; Netflix's "You're watching" card when paused; an
+  a stall spinner mid-film; a "You're watching" card when paused; an
   Up Next card with the next episode's still and a filling Play button.
 - BACK closes a panel, then the bar, then the stats — and only then leaves.
 
 ## TorBox
 
 With a [torbox.app](https://torbox.app) API key in **Settings → TorBox**, a
-release TorBox already has cached shows **Instant** in the sources list and plays
+stream TorBox already has cached shows **Instant** in the sources list and plays
 from TorBox's servers over HTTPS instead of from peers; the loading screen says
 "Checking TorBox", then "from TorBox". Anything not cached — or any TorBox error —
 falls back to the swarm. `tv/core`'s `TorBox.kt` does the talking and `Watch`

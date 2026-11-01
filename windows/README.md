@@ -1,7 +1,8 @@
 # Watchly for Windows
 
 The phone app as a native Windows desktop app, in the look the phone and the TV share — same screens, same
-catalogue, plus a BitTorrent-style download manager. Like the phone and the TV it ships with no sources:
+catalogue, plus a download manager. Like the phone and the TV it ships with no sources
+(see the [disclaimer](../README.md#disclaimer)):
 streams and subtitles come from the Stremio-protocol addons you add under Settings → Addons, or from a
 link you paste into Search → Streams. A torrent stream goes to the torrent engine; a link plays as it is.
 Addon catalogues become home rows and are searched too. An addon site's Install button (`stremio://`)
