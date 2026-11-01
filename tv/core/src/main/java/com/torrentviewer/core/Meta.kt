@@ -39,12 +39,14 @@ data class Title(
     val trailer: String? = null,
     /** Series only, and only from /meta — a catalog row carries no episode list. */
     val episodes: List<Episode> = emptyList(),
+    /** Its Stremio type — "movie", "series", "channel", "tv" or an addon's own — which addons are asked by. */
+    val type: String = if (kind == "movie") "movie" else "series",
 ) {
     val isSeries get() = kind == "tv"
     val art get() = backdrop ?: poster
 
-    /** 16:9 art for a landscape card; MetaHub carries a background for nearly every id. */
-    val wide get() = backdrop ?: "https://images.metahub.space/background/medium/$imdb/img"
+    /** 16:9 art for a landscape card; MetaHub carries a background for nearly every IMDb id. */
+    val wide get() = backdrop ?: poster?.takeIf { !imdb.startsWith("tt") } ?: "https://images.metahub.space/background/medium/$imdb/img"
 
     /** Cinemeta files anime under "Animation"; nyaa answers nothing for a Western cartoon anyway. */
     val isAnime get() = genres.any { it == ANIME_GENRE || it == "Animation" }
@@ -77,7 +79,7 @@ object Meta {
     /** A day: charts move slowly and ratings slower. */
     private const val TTL = 24 * 60 * 60 * 1000L
     /** Bumped whenever Title gains a field, so old snapshots are never read back. */
-    private const val STORE = "meta:tv6:"
+    private const val STORE = "meta:tv7:"
 
     private val memory = ConcurrentHashMap<String, Any>()
 
@@ -111,22 +113,59 @@ object Meta {
     @Suppress("UNCHECKED_CAST")
     fun peekCatalog(kind: String, genre: String?): List<Title>? = memory["shelf:$kind:${genre.orEmpty()}"] as List<Title>?
 
+    /** A [genre] starting [ADDON_SHELF] is one of the viewer's addons' catalogues, by [Addons.shelves]' key. */
     suspend fun catalog(kind: String, genre: String? = null): List<Title> = runCatching {
-        val type = if (kind == "tv") "series" else "movie"
-        val url = if (genre == ANIME_GENRE) ANIME else "$CATALOG/$type/top${genre?.let { "/genre=${enc(it)}" }.orEmpty()}.json"
         remember("shelf:$kind:${genre.orEmpty()}", ::titlesFrom, ::titlesJson) {
+            if (genre?.startsWith(ADDON_SHELF) == true) {
+                val (addon, list) = Addons.shelf(genre) ?: error("addon gone")
+                val metas = JSONObject(Net.get("${addon.url}/catalog/${list.type}/${enc(list.id)}.json", quiet = true)).optJSONArray("metas") ?: JSONArray()
+                return@remember toTitles(metas, kindOfType(list.type), anyId = true, type = list.type)
+            }
+            val type = if (kind == "tv") "series" else "movie"
+            val url = if (genre == ANIME_GENRE) ANIME else "$CATALOG/$type/top${genre?.let { "/genre=${enc(it)}" }.orEmpty()}.json"
             toTitles(JSONObject(Net.get(url)).optJSONArray("metas") ?: JSONArray(), kind)
         }
     }.getOrDefault(emptyList())
 
+    /**
+     * A title's full entry: from the viewer's meta addons first, in their order and by the types they
+     * list for the id, so an addon's own ids ("kitsu:…", a channel's) open too; Cinemeta for an IMDb id
+     * none of them knows.
+     */
     suspend fun title(imdb: String, kind: String): Title? = runCatching {
         remember("title:$kind:$imdb", { titlesFrom(it).first() }, { titlesJson(listOf(it)) }) {
+            fromAddons(imdb, kind)?.let { return@remember it }
+            require(imdb.startsWith("tt")) { "no meta addon for $imdb" }
             val type = if (kind == "tv") "series" else "movie"
             val meta = JSONObject(Net.get("$BASE/$type/$imdb.json")).getJSONObject("meta")
             meta.put("imdb_id", imdb)
             toTitles(JSONArray().put(meta), kind, withEpisodes = true).first().let { if (it.numberedThrough) withStills(it) else it }
         }
     }.getOrNull()
+
+    private suspend fun fromAddons(id: String, kind: String): Title? {
+        val first = if (kind == "tv") "series" else "movie"
+        for (a in Addons.list.value) for (type in a.metaTypes(id, first)) {
+            val meta = runCatching { a.get("meta", type, id).optJSONObject("meta") }.getOrNull() ?: continue
+            // Kept under the id it was asked by: History, My List and the page all know it so.
+            meta.put("imdb_id", id)
+            val real = meta.str("type") ?: type
+            return toTitles(JSONArray().put(meta), kindOfType(real), withEpisodes = true, anyId = true, type = real).firstOrNull() ?: continue
+        }
+        return null
+    }
+
+    /** Every addon catalogue that takes a search, at once; one failing is normal. */
+    suspend fun searchAddons(query: String): List<Title> = coroutineScope {
+        Addons.searchable().map { (a, c) ->
+            async {
+                runCatching {
+                    val metas = JSONObject(Net.get("${a.url}/catalog/${c.type}/${enc(c.id)}/search=${enc(query)}.json", quiet = true)).optJSONArray("metas")
+                    toTitles(metas ?: JSONArray(), kindOfType(c.type), anyId = true, type = c.type)
+                }.getOrDefault(emptyList())
+            }
+        }.awaitAll().flatten()
+    }
 
     /**
      * Long anime: Cinemeta's episode stills are mostly 404s, TVmaze has nearly every one.
@@ -247,16 +286,22 @@ fun bestMatch(titles: List<Title>, query: String, year: String?): Title? {
     return best?.takeIf { it.second >= 45 }?.first
 }
 
-/** Rows without art are unusable on a shelf. One row per id. Episodes only from /meta. */
-fun toTitles(metas: JSONArray, kind: String, withEpisodes: Boolean = false): List<Title> {
+/**
+ * Rows without art are unusable on a shelf. One row per id. Episodes only from /meta.
+ * Cinemeta's own lists keep IMDb ids only; an addon's ([anyId]) are whatever it uses.
+ */
+fun toTitles(metas: JSONArray, kind: String, withEpisodes: Boolean = false, anyId: Boolean = false, type: String? = null): List<Title> {
     val seen = HashSet<String>()
     return metas.objects().mapNotNull { m ->
         val id = m.str("imdb_id") ?: m.str("id") ?: return@mapNotNull null
-        if (!Regex("^tt\\d+$").matches(id) || m.str("poster") == null || !seen.add(id)) return@mapNotNull null
+        if (!anyId && !Regex("^tt\\d+$").matches(id) || m.str("poster") == null && !withEpisodes || !seen.add(id)) return@mapNotNull null
+        val stremioType = m.str("type") ?: type ?: if (kind == "movie") "movie" else "series"
+        val name = m.optString("name")
         Title(
             imdb = id,
             kind = kind,
-            title = m.optString("name"),
+            type = stremioType,
+            title = name,
             // A series' releaseInfo is a range ("2020–2023"); the leading year matters.
             year = m.str("year") ?: m.str("releaseInfo") ?: m.str("released")?.take(4),
             rating = m.str("imdbRating"),
@@ -270,7 +315,10 @@ fun toTitles(metas: JSONArray, kind: String, withEpisodes: Boolean = false): Lis
             logo = m.str("logo"),
             runtime = m.str("runtime"),
             trailer = trailerOf(m),
-            episodes = if (withEpisodes) toEpisodes(m.optJSONArray("videos")) else emptyList(),
+            episodes = if (!withEpisodes) emptyList() else toEpisodes(m.optJSONArray("videos")).ifEmpty {
+                // A type of an addon's own with no videos plays its own id, as one "episode".
+                if (kind == "tv" && stremioType != "series") listOf(Episode(id, 1, 1, name, null, null, null)) else emptyList()
+            },
         )
     }
 }
@@ -359,10 +407,17 @@ fun absoluteNumbers(episodes: List<Episode>): Map<Episode, Int> {
     }.toMap()
 }
 
-/** Broadcast order. Season 0 (specials) keeps its own group. */
-fun toEpisodes(videos: JSONArray?): List<Episode> = videos?.objects().orEmpty()
-    .filter { it.has("season") && it.has("episode") && it.optInt("season", -1) >= 0 }
-    .map {
+/**
+ * Broadcast order. Season 0 (specials) keeps its own group. A channel's videos carry no
+ * numbers: they become one season, numbered in the addon's own order.
+ */
+fun toEpisodes(videos: JSONArray?): List<Episode> {
+    val all = videos?.objects().orEmpty()
+    val numbered = all.filter { it.has("season") && it.has("episode") && it.optInt("season", -1) >= 0 }
+    if (numbered.isEmpty()) return all.filter { it.str("id") != null }.mapIndexed { i, v ->
+        Episode(v.getString("id"), 1, i + 1, v.str("title") ?: v.str("name") ?: "Video ${i + 1}", v.str("overview") ?: v.str("description"), v.str("thumbnail"), v.str("released"))
+    }
+    return numbered.map {
         val s = it.optInt("season")
         val e = it.optInt("episode")
         Episode(
@@ -374,11 +429,11 @@ fun toEpisodes(videos: JSONArray?): List<Episode> = videos?.objects().orEmpty()
             thumbnail = it.str("thumbnail"),
             released = it.str("released"),
         )
-    }
-    .sortedWith(compareBy({ it.season }, { it.episode }))
+    }.sortedWith(compareBy({ it.season }, { it.episode }))
+}
 
 private fun titlesJson(list: List<Title>): String = JSONArray(list.map { t ->
-    JSONObject().put("imdb_id", t.imdb).put("kind", t.kind).put("name", t.title).put("year", t.year).put("imdbRating", t.rating)
+    JSONObject().put("imdb_id", t.imdb).put("kind", t.kind).put("type", t.type).put("name", t.title).put("year", t.year).put("imdbRating", t.rating)
         .put("genre", JSONArray(t.genres)).put("poster", t.poster).put("description", t.plot).put("cast", JSONArray(t.cast))
         .put("director", JSONArray(t.directors)).put("awards", t.awards).put("background", t.backdrop).put("logo", t.logo)
         .put("runtime", t.runtime).put("trailer", t.trailer)
@@ -390,5 +445,5 @@ private fun titlesJson(list: List<Title>): String = JSONArray(list.map { t ->
 
 private fun titlesFrom(raw: String): List<Title> {
     val a = JSONArray(raw)
-    return a.objects().flatMap { o -> toTitles(JSONArray().put(o), o.optString("kind", "movie"), withEpisodes = true) }
+    return a.objects().flatMap { o -> toTitles(JSONArray().put(o), o.optString("kind", "movie"), withEpisodes = true, anyId = true) }
 }

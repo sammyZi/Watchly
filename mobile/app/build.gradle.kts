@@ -11,8 +11,6 @@ fun env(vararg names: String): String = rootProject.file(".env").takeIf { it.exi
 
 // The Expo name still works.
 val subdlKey = env("SUBDL_KEY", "EXPO_PUBLIC_SUBDL_KEY")
-// An AUTH V2 app from simkl.com/settings/developer; unset leaves Simkl out of Settings.
-val simklClientId = env("SIMKL_CLIENT_ID")
 
 android {
     namespace = "com.torrentviewer.mobile"
@@ -27,7 +25,6 @@ android {
         versionCode = 4
         versionName = "2.2.0"
         buildConfigField("String", "SUBDL_KEY", "\"$subdlKey\"")
-        buildConfigField("String", "SIMKL_CLIENT_ID", "\"$simklClientId\"")
         buildConfigField("long", "BUILD_TIME", "${System.currentTimeMillis()}L")
         manifestPlaceholders["appLabel"] = "Watchly"
     }

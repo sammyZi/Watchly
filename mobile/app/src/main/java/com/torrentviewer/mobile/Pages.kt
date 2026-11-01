@@ -85,10 +85,11 @@ import com.torrentviewer.core.Profiles
 import com.torrentviewer.core.SavedStore
 import com.torrentviewer.core.Searches
 import com.torrentviewer.core.Secrets
-import com.torrentviewer.core.Simkl
+import com.torrentviewer.core.Stremio
 import com.torrentviewer.core.TorBox
 import com.torrentviewer.core.Kv
 import com.torrentviewer.core.Kids
+import com.torrentviewer.core.Addons
 import com.torrentviewer.core.bytes
 import com.torrentviewer.core.playedSize
 import com.torrentviewer.core.DeviceCode
@@ -105,7 +106,7 @@ import com.torrentviewer.core.Avatars
 import androidx.compose.foundation.border
 import com.torrentviewer.core.colorOf
 import com.torrentviewer.core.parseEpisode
-import com.torrentviewer.core.searchTorrents
+import com.torrentviewer.core.searchStreams
 import com.torrentviewer.core.sortTitles
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -220,12 +221,14 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
         busy = true
         // A kids profile has no torrent search (a release name can't be vetted) and sees family titles only.
         if (torrents && !Kids.on) {
-            hits = searchTorrents(q) { hits = it }
+            hits = searchStreams(q) { hits = it }
         } else {
             results = coroutineScope {
                 val films = async { Meta.search(q, "movie") }
                 val series = async { Meta.search(q, "tv") }
-                Kids.only((films.await() + series.await()).distinctBy { it.imdb }.sortedBy { relevance(it.title, q) })
+                // And every addon catalogue that searches, as Stremio asks them all.
+                val mine = async { Meta.searchAddons(q) }
+                Kids.only((films.await() + series.await() + mine.await()).distinctBy { it.imdb }.sortedBy { relevance(it.title, q) })
             }
         }
         busy = false
@@ -264,7 +267,7 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
                 Field(
                     query,
                     { query = it },
-                    if (torrents) "Release or torrent name" else "Movies, shows, anime",
+                    if (torrents) "A film, or a link to play" else "Movies, shows, anime",
                     Modifier.fillMaxWidth(),
                     leading = L.drawable.lucide_ic_search,
                     onSubmit = { recents = Searches.remember(query) },
@@ -278,7 +281,7 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
                 // A kids profile searches titles only.
                 if (!Kids.on) Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Chip("Titles", !torrents, onClick = { torrents = false; hits = null })
-                    Chip("Torrents", torrents, onClick = { torrents = true; results = null }, icon = L.drawable.lucide_ic_layers)
+                    Chip("Streams", torrents, onClick = { torrents = true; results = null }, icon = L.drawable.lucide_ic_layers)
                 }
                 // One chip per filter, red while it narrows anything.
                 Row(Modifier.padding(top = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -356,11 +359,12 @@ private enum class Shelfs(val label: String) { HISTORY("History"), LATER("My Lis
 
 /** Everything played (the only way back to a magnet watched once), and the two saved lists. */
 @Composable
-fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit) {
-    val simkl by Simkl.connected.collectAsState()
-    val simklLibrary by Simkl.library.collectAsState()
+fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit, onDownloads: () -> Unit) {
+    val downloading by Downloads.live.collectAsState()
+    val stremio by Stremio.connected.collectAsState()
+    val stremioLibrary by Stremio.library.collectAsState()
     /** Per profile; the guest is offered nothing it would lose on exit. */
-    var simklLater by remember(me.id) { mutableStateOf(me.isGuest || Kv.get(SIMKL_LATER) != null) }
+    var stremioLater by remember(me.id) { mutableStateOf(me.isGuest || Kv.get(STREMIO_LATER) != null) }
     val history by History.items.collectAsState()
     val saved by SavedStore.items.collectAsState()
     var shelf by rememberSaveable { mutableStateOf(Shelfs.HISTORY) }
@@ -369,8 +373,8 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit) {
     var releases by remember { mutableStateOf<List<Item>?>(null) }
     // One row per title, however many torrents it was played from: its latest one.
     val items = latestPerTitle(history)
-    // After a reinstall this phone's history is empty; what Simkl has still belongs here.
-    val fromSimkl = remember(simklLibrary, history, Kids.on, Kids.allowed) { Kids.only(simklLibrary.notIn(history)) { Title(it.imdb, it.kind, it.title) } }
+    // After a reinstall this phone's history is empty; what Stremio has still belongs here.
+    val fromStremio = remember(stremioLibrary, history, Kids.on, Kids.allowed) { Kids.only(stremioLibrary.notIn(history)) { Title(it.imdb, it.kind, it.title) } }
     val sources = history.groupingBy { it.titleKey }.eachCount()
     val listed = saved.filter { it.list == if (shelf == Shelfs.FAVORITE) "favorite" else "later" }.map { it.asTitle() }
 
@@ -388,22 +392,29 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit) {
                     if (shelf == Shelfs.HISTORY && items.isNotEmpty()) Tap({ clearing = true }, shape = CircleShape) {
                         Lc(L.drawable.lucide_ic_trash_2, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp)
                     }
+                    // Downloads live here now, off the tab bar; the dot says one is running.
+                    Tap(onDownloads, shape = CircleShape) {
+                        Box {
+                            Lc(L.drawable.lucide_ic_download, Modifier.padding(8.dp), tint = Ink.muted, size = 22.dp)
+                            if (downloading.isNotEmpty()) Box(Modifier.align(Alignment.TopEnd).padding(6.dp).size(8.dp).clip(CircleShape).background(Ink.accent))
+                        }
+                    }
                 }
                 // Where the history is, the history's sync is offered.
-                if (Simkl.available && !simkl && !simklLater) {
-                    SimklSection(me, onLater = {
-                        Kv.set(SIMKL_LATER, "1")
-                        simklLater = true
+                if (Stremio.available && !stremio && !stremioLater) {
+                    StremioSection(me, onLater = {
+                        Kv.set(STREMIO_LATER, "1")
+                        stremioLater = true
                     })
                 }
-                if (simkl) Text("✓ Simkl connected — finished films and episodes are marked watched", Modifier.padding(bottom = 10.dp), style = Type.meta.copy(color = Ink.faint))
+                if (stremio) Text("✓ Signed in to Stremio — your library and where you stopped are below", Modifier.padding(bottom = 10.dp), style = Type.meta.copy(color = Ink.faint))
                 Row(Modifier.padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Shelfs.entries.forEach { s -> Chip(s.label, s == shelf, onClick = { shelf = s }) }
                 }
             }
         }
         if (shelf == Shelfs.HISTORY) {
-            if (items.isEmpty() && fromSimkl.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) { Note("Nothing here yet. Anything you play turns up in this list.", Modifier.padding(top = 16.dp)) }
+            if (items.isEmpty() && fromStremio.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) { Note("Nothing here yet. Anything you play turns up in this list.", Modifier.padding(top = 16.dp)) }
             items(items, key = { it.titleKey }) { item ->
                 HistoryRow(item, sources[item.titleKey] ?: 1, onPlay = {
                     // Played from more than one release: ask which, as Continue watching does.
@@ -411,10 +422,10 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit) {
                     if (all.size > 1) releases = all else watch.resume(item)
                 }, onMore = { menu = item })
             }
-            if (fromSimkl.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
-                Text("From Simkl", Modifier.padding(top = 18.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
+            if (fromStremio.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+                Text("From Stremio", Modifier.padding(top = 18.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
             }
-            items(fromSimkl, key = { "simkl:${it.imdb}" }) { s -> SimklRow(s) { onOpen(Title(s.imdb, s.kind, s.title, year = s.year)) } }
+            items(fromStremio, key = { "stremio:${it.imdb}" }) { s -> StremioRow(s) { onOpen(Title(s.imdb, s.kind, s.title, year = s.year)) } }
         } else {
             if (listed.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
                 Note(if (shelf == Shelfs.LATER) "Titles you add to My List wait here." else "Titles you like collect here.", Modifier.padding(top = 16.dp))
@@ -473,12 +484,12 @@ fun whereLeft(item: Item): String? {
 }
 
 /**
- * A title Simkl has that this phone never played — a reinstall, another device. No release to resume,
- * so it opens the title; one picked there starts where Simkl says it was paused.
+ * A title Stremio has that this phone never played — a reinstall, another device. No release to resume,
+ * so it opens the title; one picked there starts where Stremio says it was paused.
  */
 @Composable
-private fun SimklRow(s: com.torrentviewer.core.Seen, onOpen: () -> Unit) {
-    val paused = com.torrentviewer.core.Simkl.library.collectAsState().value.paused.find { it.imdb == s.imdb }
+private fun StremioRow(s: com.torrentviewer.core.Seen, onOpen: () -> Unit) {
+    val paused = com.torrentviewer.core.Stremio.library.collectAsState().value.paused.find { it.imdb == s.imdb }
     Tap(onOpen, Modifier.fillMaxWidth(), RoundedCornerShape(10.dp)) { pressed ->
         Row(Modifier.background(if (pressed) Ink.surface2 else Ink.surface).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.width(64.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(6.dp))) {
@@ -493,7 +504,7 @@ private fun SimklRow(s: com.torrentviewer.core.Seen, onOpen: () -> Unit) {
                     else -> s.last?.let { "Last watched $it" } ?: "Watched"
                 }
                 Text(state, Modifier.padding(top = 3.dp), style = Type.meta.copy(color = if (paused == null) Ink.good else Ink.text.copy(alpha = 0.8f)), maxLines = 1)
-                Text(listOfNotNull(s.year?.take(4), "on Simkl").joinToString("  ·  "), Modifier.padding(top = 2.dp), style = Type.meta.copy(fontSize = 12.sp, color = Ink.faint), maxLines = 1)
+                Text(listOfNotNull(s.year?.take(4), "on Stremio").joinToString("  ·  "), Modifier.padding(top = 2.dp), style = Type.meta.copy(fontSize = 12.sp, color = Ink.faint), maxLines = 1)
             }
             Lc(L.drawable.lucide_ic_chevron_right, tint = Ink.muted, size = 20.dp)
         }
@@ -555,6 +566,7 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = EDGE).padding(bottom = 32.dp)) {
         Heading("Settings")
 
+        Group("Profile") {
         Section(
             "Profile",
             when {
@@ -614,20 +626,10 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
         }
 
         // With the profile: the connection is this profile's.
-        if (Simkl.available) SimklSection(me)
-
-        Section("Welcome tour", "The four pages a new install opens with: what Watchly does, over what's trending now.") {
-            Button("Show the welcome tour", { tourAgain = true }, icon = L.drawable.lucide_ic_sparkles)
+        if (Stremio.available) StremioSection(me)
         }
 
-        Section("Appearance", "Light or dark pages, or whichever the phone is set to. The player stays dark either way.") {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("system" to "System", "light" to "Light", "dark" to "Dark").forEach { (mode, label) ->
-                    Chip(label, settings.themeMode == mode, onClick = { set(settings.copy(themeMode = mode)) })
-                }
-            }
-        }
-
+        Group("Streaming") {
         Section(
             "Storage for one film",
             "How much of a film may sit on this phone at once. When it fills, what you've watched is let go to make room. Auto uses the free space, keeping a few GB spare.",
@@ -643,6 +645,15 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
 
+        Section("Extra trackers","Attach public trackers to bare magnet links so they resolve faster.") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Chip("On", settings.addTrackers, onClick = { set(settings.copy(addTrackers = true)) })
+                Chip("Off", !settings.addTrackers, onClick = { set(settings.copy(addTrackers = false)) })
+            }
+        }
+        }
+
+        Group("Playback") {
         Section("Player", "Media3 hands a file it can't play to VLC by itself. VLC from the start plays the most formats and full ASS subtitle styling.") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Chip("Media3", !settings.vlcPlayer, onClick = { set(settings.copy(vlcPlayer = false)) })
@@ -654,13 +665,6 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Chip("Automatically", settings.autoSkipIntro, onClick = { set(settings.copy(autoSkipIntro = true)) })
                 Chip("Show the button", !settings.autoSkipIntro, onClick = { set(settings.copy(autoSkipIntro = false)) })
-            }
-        }
-
-        Section("Extra trackers","Attach public trackers to bare magnet links so they resolve faster.") {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Chip("On", settings.addTrackers, onClick = { set(settings.copy(addTrackers = true)) })
-                Chip("Off", !settings.addTrackers, onClick = { set(settings.copy(addTrackers = false)) })
             }
         }
 
@@ -682,7 +686,9 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
                 Chip("Box behind", style.box, onClick = { set(settings.copy(subtitles = style.copy(box = !style.box))) })
             }
         }
+        }
 
+        Group("Services") {
         Section(
             "SubDL key",
             if (subdl.isNotEmpty()) "Saved, encrypted on this phone — Find subtitles searches SubDL too. Enter another to replace it."
@@ -735,7 +741,9 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
                 watch.notes.tryEmit("TorBox key removed")
             }, Modifier.padding(top = 10.dp))
         }
+        }
 
+        Group("Downloads") {
         Section("Downloads", "Wi-Fi only holds a download on mobile data — it waits, and carries on when Wi-Fi is back. Use mobile data on a waiting download to let that one through.") {
             var wifiOnly by remember { mutableStateOf(Downloads.wifiOnly) }
             var sdCard by remember { mutableStateOf(Downloads.sdCard) }
@@ -785,6 +793,16 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
                 }
             }
         }
+        }
+
+        Group("App") {
+        Section("Appearance", "Light or dark pages, or whichever the phone is set to. The player stays dark either way.") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("system" to "System", "light" to "Light", "dark" to "Dark").forEach { (mode, label) ->
+                    Chip(label, settings.themeMode == mode, onClick = { set(settings.copy(themeMode = mode)) })
+                }
+            }
+        }
 
         Section("Backup", "History, resume points, lists, settings, searches and intro marks as one file. Downloads are not in it — they are files on this phone.") {
             val context = LocalContext.current
@@ -818,6 +836,11 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
                     })
                 }
             }
+        }
+
+        Section("Welcome tour", "What a new install opens with: the welcome, your favourite genres, then signing in to Stremio.") {
+            Button("Show the welcome tour", { tourAgain = true }, icon = L.drawable.lucide_ic_sparkles)
+        }
         }
 
         Text(
@@ -895,21 +918,21 @@ private fun CopyButton(onCopy: () -> Unit) {
     }
 }
 
-/** The Library's Simkl card was put off with "Not now"; Settings still offers it. */
-private const val SIMKL_LATER = "simkl:later"
+/** The Library's Stremio card was put off with "Not now"; Settings still offers it. */
+private const val STREMIO_LATER = "stremio:later"
 
 /**
- * Connect by device code, as on the TV — but a phone has a browser, so Connect opens Simkl's
- * page with the code filled in; the code stays up to copy, and Open Simkl to go back to it.
- * This notices the approval when the viewer comes back.
+ * Sign in to Stremio by its link code, as on the TV — but a phone has a browser, so Sign in opens
+ * link.stremio.com with the code in it, where the viewer signs in and approves; no password comes
+ * here. This notices the approval when the viewer comes back, then brings the account's addons.
  * [onLater] makes it the Library's card, with a Not now; without it, a Settings section.
  */
 @Composable
-fun SimklSection(me: Profile, onLater: (() -> Unit)? = null) {
-    val live by Simkl.connected.collectAsState()
+fun StremioSection(me: Profile, onLater: (() -> Unit)? = null) {
+    val live by Stremio.connected.collectAsState()
     /** Bumped by connect and disconnect: a profile not being watched has no flow to say so. */
     var changed by remember { mutableStateOf(0) }
-    val connected = remember(me.id, live, changed) { Simkl.isConnected(me.id) }
+    val connected = remember(me.id, live, changed) { Stremio.isConnected(me.id) }
     var code by remember { mutableStateOf<DeviceCode?>(null) }
     var note by remember { mutableStateOf<String?>(null) }
     var job by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
@@ -920,7 +943,7 @@ fun SimklSection(me: Profile, onLater: (() -> Unit)? = null) {
     /** For typing it on another device. Android 13+ says "Copied" itself. */
     fun copy(text: String) {
         context.getSystemService(android.content.ClipboardManager::class.java)
-            ?.setPrimaryClip(android.content.ClipData.newPlainText("Simkl code", text))
+            ?.setPrimaryClip(android.content.ClipData.newPlainText("Stremio code", text))
         if (android.os.Build.VERSION.SDK_INT < 33) note = "Code copied"
     }
 
@@ -929,66 +952,199 @@ fun SimklSection(me: Profile, onLater: (() -> Unit)? = null) {
         job?.cancel()
         job = scope.launch {
             try {
-                val c = Simkl.start()
+                val c = Stremio.start()
                 code = c
-                // Straight to Simkl with the code filled in; the code stays here for another device.
+                // Straight to Stremio with the code filled in; the code stays here for another device.
                 runCatching { browser.openUri(c.uriComplete) }
-                if (Simkl.await(c, me.id)) changed++ else note = "That code ran out — connect again for a new one."
+                if (Stremio.await(c, me.id)) changed++ else note = "That code ran out — sign in again for a new one."
             } catch (e: Exception) {
-                if (e !is kotlinx.coroutines.CancellationException) note = e.message ?: "Couldn't reach Simkl."
+                if (e !is kotlinx.coroutines.CancellationException) note = e.message ?: "Couldn't reach Stremio."
             } finally {
                 code = null
             }
         }
     }
 
+    val email by Stremio.email.collectAsState()
     val hint = when {
-        connected -> "Connected — films and episodes you watch to the end are marked watched on Simkl."
-        me.isGuest -> "Marks what you finish as watched on your Simkl account. As Guest it's forgotten when the app closes."
-        else -> "Films and episodes you finish get marked watched on your Simkl account."
+        connected -> "Signed in${email?.takeIf { me.id == Stremio.profileId }?.let { " as $it" }.orEmpty()} — your Stremio library and where you stopped are here, My List is your library there, and what you finish is marked watched."
+        me.isGuest -> "Your Stremio library, Continue Watching and addons here. As Guest it's forgotten when the app closes."
+        else -> "Your Stremio library, Continue Watching and addons here, kept in step both ways. Sign in on Stremio's own page — your password never comes to Watchly."
     }
     val body: @Composable () -> Unit = {
         val c = code
         if (c != null) {
             Text(
-                "Signing in to Simkl? It emails that account a link — open it and confirm the login, then press Allow. " +
-                    "Or enter this code at ${c.uri.removePrefix("https://")} on another device.",
+                "Sign in and approve on the page that opened. Or open ${c.uriComplete.removePrefix("https://")} on another device.",
                 style = Type.meta.copy(color = Ink.faint),
             )
-            // The code and its copy on a line of their own: beside Open Simkl, a narrow card cut both.
+            // The code and its copy on a line of their own: beside Open Stremio, a narrow card cut both.
             Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(c.userCode, style = Type.display, maxLines = 1)
                 CopyButton { copy(c.userCode) }
             }
         }
         when {
-            connected -> Button("Disconnect", {
-                Simkl.disconnect(me.id)
-                changed++
-            }, icon = L.drawable.lucide_ic_link)
+            // Stacked: side by side, a narrow card cut "Sign out" to "Sign …".
+            connected -> Column {
+                Button("Import addons", {
+                    note = "Bringing your addons…"
+                    scope.launch {
+                        note = runCatching { Stremio.importAddons() }.fold(
+                            { if (it == 0) "Every addon is here already" else "Added $it addon${if (it == 1) "" else "s"} — see the Addons tab" },
+                            { it.message ?: "Couldn't reach Stremio" },
+                        )
+                    }
+                }, Modifier.fillMaxWidth(), icon = L.drawable.lucide_ic_puzzle, primary = true)
+                Button("Sign out", {
+                    Stremio.disconnect(me.id)
+                    changed++
+                }, Modifier.padding(top = 10.dp).fillMaxWidth(), icon = L.drawable.lucide_ic_link)
+            }
             c != null -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button("Open Simkl", { runCatching { browser.openUri(c.uriComplete) } }, icon = L.drawable.lucide_ic_link, primary = true)
+                Button("Open Stremio", { runCatching { browser.openUri(c.uriComplete) } }, icon = L.drawable.lucide_ic_link, primary = true)
                 Button("Cancel", { job?.cancel() })
             }
             else -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // The card's heading already says Simkl, and a dialog is narrow: "Not now" was cut to "Not …".
-                Button(if (onLater != null) "Connect" else "Connect Simkl", ::connect, icon = L.drawable.lucide_ic_link, primary = true)
+                // The card's heading already says Stremio, and a dialog is narrow: "Not now" was cut to "Not …".
+                Button(if (onLater != null) "Sign in" else "Sign in to Stremio", ::connect, icon = L.drawable.lucide_ic_link, primary = true)
                 onLater?.let { Button("Not now", it) }
             }
         }
         note?.let { Text(it, Modifier.padding(top = 8.dp), style = Type.meta.copy(color = Ink.faint)) }
     }
-    if (onLater == null) Section("Simkl", hint, body)
+    if (onLater == null) Section("Stremio account", hint, body)
     else Column(Modifier.fillMaxWidth().padding(bottom = 14.dp).background(Ink.surface, RoundedCornerShape(12.dp)).padding(16.dp)) {
-        Text("Sync your history with Simkl", style = Type.title.copy(fontWeight = FontWeight.Bold))
+        Text("Bring your Stremio library", style = Type.title.copy(fontWeight = FontWeight.Bold))
         Text(hint, Modifier.padding(top = 4.dp, bottom = 12.dp), style = Type.meta.copy(color = Ink.faint))
         body()
     }
 }
 
+/* --------------------------------------------------------------- addons */
+
+/**
+ * The Addons tab: where everything played comes from. Add one by its link (or an addon site's
+ * Install button, which opens here), then switch, order or remove each. Order is the order asked.
+ */
+@Composable
+fun AddonsScreen(watch: Watch) {
+    val addons by Addons.list.collectAsState()
+    var link by rememberSaveable { mutableStateOf("") }
+    var adding by remember { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    fun add() {
+        if (adding) return
+        if (link.isEmpty()) {
+            watch.notes.tryEmit("Paste an addon link first")
+            return
+        }
+        adding = true
+        scope.launch {
+            runCatching { Addons.add(link) }
+                .onSuccess { link = ""; watch.notes.tryEmit("Added ${it.name}") }
+                .onFailure { watch.notes.tryEmit(it.message ?: "Couldn't add that addon") }
+            adding = false
+        }
+    }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).imePadding().padding(horizontal = EDGE).padding(bottom = 32.dp)) {
+        Heading("Addons")
+        Text(
+            "Streams, subtitles and extra catalogues come from addons — public ones, your debrid service's, or your own media server's. Watchly comes with none.",
+            Modifier.padding(bottom = 18.dp), style = Type.meta.copy(color = Ink.faint),
+        )
+        Group("Add an addon") {
+            Column(Modifier.padding(bottom = 18.dp)) {
+                Field(link, { link = it.trim() }, "https://…/manifest.json", Modifier.fillMaxWidth(), onSubmit = ::add, leading = L.drawable.lucide_ic_link)
+                Button(if (adding) "Adding…" else "Add addon", ::add, Modifier.padding(top = 10.dp).fillMaxWidth(), icon = L.drawable.lucide_ic_plus, primary = true)
+                Text(
+                    "Or tap Install on an addon's site and pick Watchly.",
+                    Modifier.padding(top = 10.dp), style = Type.meta.copy(color = Ink.faint, fontSize = 12.sp),
+                )
+            }
+        }
+        if (addons.isEmpty()) {
+            Text("No addons yet", Modifier.padding(start = 4.dp, top = 6.dp, bottom = 10.dp), style = Type.overline.copy(color = Ink.faint))
+            Note("Add one to find streams for every film and episode. Without any, only links you paste in Search will play.")
+            return@Column
+        }
+        // Stremio's list: a search over what is installed, and a pill per type they serve.
+        var query by rememberSaveable { mutableStateOf("") }
+        var type by rememberSaveable { mutableStateOf<String?>(null) }
+        val types = addons.flatMap { a -> a.resources.flatMap { it.types } + a.catalogs.map { it.type } }.distinct()
+        Field(query, { query = it }, "Search installed addons", Modifier.fillMaxWidth(), leading = L.drawable.lucide_ic_search)
+        Row(Modifier.padding(top = 12.dp, bottom = 14.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip("All · ${addons.size}", type == null, onClick = { type = null })
+            types.forEach { t -> Chip(com.torrentviewer.core.typeLabel(t), type == t, onClick = { type = t }) }
+        }
+        val shown = addons.filter { a ->
+            (query.isBlank() || a.name.contains(query.trim(), ignoreCase = true)) &&
+                (type == null || a.resources.any { type in it.types } || a.catalogs.any { it.type == type })
+        }
+        if (shown.isEmpty()) Note("No installed addon matches.")
+        shown.forEach { a ->
+            val at = addons.indexOf(a)
+            AddonCard(a, first = at == 0, last = at == addons.lastIndex, onRemoved = { watch.notes.tryEmit("Uninstalled ${a.name}") })
+        }
+    }
+}
+
+/**
+ * One addon, as Stremio lists it: logo, name with a tick while it is on, the types it serves and its
+ * version, what it says it does, then Uninstall — with its switch and place in the order beside it.
+ */
+@Composable
+private fun AddonCard(a: com.torrentviewer.core.Addon, first: Boolean, last: Boolean, onRemoved: () -> Unit) {
+    val m = remember(a.manifest) { runCatching { org.json.JSONObject(a.manifest) }.getOrNull() }
+    val types = remember(a) { (a.resources.flatMap { it.types } + a.catalogs.map { it.type }).distinct().joinToString(", ") { com.torrentviewer.core.typeLabel(it) } }
+    Column(Modifier.padding(bottom = 12.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Ink.surface).padding(16.dp)) {
+        Row(verticalAlignment = Alignment.Top) {
+            Box(Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(Ink.text.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
+                Lc(L.drawable.lucide_ic_puzzle, tint = Ink.muted, size = 24.dp)
+                m?.optString("logo")?.takeIf { it.startsWith("http") }?.let { Artwork(it, a.name, Modifier.fillMaxSize(), fill = false) }
+            }
+            Column(Modifier.weight(1f).padding(start = 14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(a.name, Modifier.weight(1f, fill = false), style = Type.title.copy(fontWeight = FontWeight.Bold, color = if (a.on) Ink.text else Ink.faint), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (a.on) Lc(L.drawable.lucide_ic_circle_check, Modifier.padding(start = 8.dp), tint = Ink.muted, size = 16.dp)
+                }
+                Text(types.ifEmpty { a.offers }, Modifier.padding(top = 2.dp), style = Type.meta.copy(color = Ink.muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            m?.optString("version")?.takeIf { it.isNotBlank() }?.let {
+                Text("v$it", Modifier.padding(start = 8.dp, top = 2.dp), style = Type.label.copy(fontWeight = FontWeight.SemiBold, color = Ink.muted))
+            }
+        }
+        m?.optString("description")?.takeIf { it.isNotBlank() }?.let {
+            Text(it, Modifier.padding(top = 14.dp), style = Type.body.copy(color = Ink.muted), maxLines = 3, overflow = TextOverflow.Ellipsis)
+        }
+        // The host only: the rest of the link can be the viewer's own key.
+        Text(a.host, Modifier.padding(top = 8.dp), style = Type.meta.copy(color = Ink.faint, fontSize = 12.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Tap({ Addons.remove(a.url); onRemoved() }, Modifier.weight(1f), RoundedCornerShape(24.dp)) { pressed ->
+                Box(
+                    Modifier.fillMaxWidth().height(46.dp).border(1.dp, Ink.text.copy(alpha = 0.3f), RoundedCornerShape(24.dp))
+                        .background(Ink.text.copy(alpha = if (pressed) 0.12f else 0f)),
+                    contentAlignment = Alignment.Center,
+                ) { Text("Uninstall", style = Type.label.copy(fontWeight = FontWeight.SemiBold, color = Ink.muted)) }
+            }
+            Spacer(Modifier.width(8.dp))
+            Chip(if (a.on) "On" else "Off", a.on, onClick = { Addons.toggle(a.url) })
+            if (!first) Tap({ Addons.move(a.url, -1) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_chevron_up, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp) }
+            if (!last) Tap({ Addons.move(a.url, 1) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_chevron_down, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp) }
+        }
+    }
+}
+
+/** A heading and a card holding the settings that belong together. */
+@Composable
+private fun Group(title: String, content: @Composable () -> Unit) {
+    Text(title, Modifier.padding(start = 4.dp, top = 6.dp, bottom = 10.dp), style = Type.overline.copy(color = Ink.faint))
+    Column(Modifier.padding(bottom = 22.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Ink.surface).padding(start = 16.dp, end = 16.dp, top = 18.dp)) { content() }
+}
+
 @Composable
 private fun Section(title: String, hint: String, content: @Composable () -> Unit) {
-    Column(Modifier.padding(bottom = 28.dp)) {
+    Column(Modifier.padding(bottom = 22.dp)) {
         Text(title, style = Type.title.copy(fontWeight = FontWeight.Bold))
         Text(hint, Modifier.padding(top = 4.dp, bottom = 12.dp), style = Type.meta.copy(color = Ink.faint))
         content()
@@ -1140,13 +1296,13 @@ private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, Strin
                 Chip("Everything", !kids, onClick = { kids = false })
             }
             Text(
-                if (kids) "Family films and series only. No torrent search or links from other apps — give your own profile a PIN so it stays that way."
-                else "Every title, torrent search included.",
+                if (kids) "Family films and series only. No addons, stream search or links from other apps — give your own profile a PIN so it stays that way."
+                else "Every title, addons and stream search included.",
                 Modifier.fillMaxWidth().padding(top = 8.dp),
                 style = Type.meta.copy(color = Ink.faint),
             )
             // A profile not saved yet has no id to keep a connection under.
-            if (profile != null && Simkl.available) Box(Modifier.fillMaxWidth().padding(top = 24.dp)) { SimklSection(profile) }
+            if (profile != null && Stremio.available) Box(Modifier.fillMaxWidth().padding(top = 24.dp)) { StremioSection(profile) }
         }
         Button("Save", { onSave(name, icon, colour, kids) }, Modifier.fillMaxWidth().padding(top = 20.dp), icon = L.drawable.lucide_ic_check, primary = true)
         Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {

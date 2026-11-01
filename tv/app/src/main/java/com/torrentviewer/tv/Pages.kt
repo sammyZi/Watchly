@@ -182,12 +182,14 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
         busy = true
         // A kids profile has no torrent search (a release name can't be vetted) and sees family titles only.
         if (torrents && !Kids.on) {
-            hits = searchTorrents(q) { hits = it }
+            hits = searchStreams(q) { hits = it }
         } else {
             results = coroutineScope {
                 val films = async { Meta.search(q, "movie") }
                 val series = async { Meta.search(q, "tv") }
-                Kids.only((films.await() + series.await()).distinctBy { it.imdb }.sortedBy { relevance(it.title, q) })
+                // And every addon catalogue that searches, as Stremio asks them all.
+                val mine = async { Meta.searchAddons(q) }
+                Kids.only((films.await() + series.await() + mine.await()).distinctBy { it.imdb }.sortedBy { relevance(it.title, q) })
             }
         }
         busy = false
@@ -211,7 +213,7 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
                     Field(
                         query,
                         { query = it },
-                        if (torrents) "Release or torrent name" else "Movies, shows, anime",
+                        if (torrents) "A film, or a link to play" else "Movies, shows, anime",
                         Modifier.weight(1f).widthIn(max = 640.dp),
                         requester = field,
                         leading = L.drawable.lucide_ic_search,
@@ -221,7 +223,7 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
                     )
                     if (!Kids.on) {
                         Spacer(Modifier.width(14.dp))
-                        Chip("Torrents", torrents, onClick = { torrents = !torrents; results = null; hits = null }, icon = L.drawable.lucide_ic_layers)
+                        Chip("Streams", torrents, onClick = { torrents = !torrents; results = null; hits = null }, icon = L.drawable.lucide_ic_layers)
                     }
                 }
                 if (recents.isNotEmpty() && results == null && hits == null) {
@@ -287,15 +289,15 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit) {
     val history by History.items.collectAsState()
     // One card per title, however many releases it was played from.
     val items = latestPerTitle(history)
-    // After a reinstall this TV's history is empty; what Simkl has still belongs here.
-    val simklLibrary by Simkl.library.collectAsState()
-    val fromSimkl = remember(simklLibrary, history, Kids.on, Kids.allowed) { Kids.only(simklLibrary.notIn(history)) { Title(it.imdb, it.kind, it.title) } }
+    // After a reinstall this TV's history is empty; what Stremio has still belongs here.
+    val stremioLibrary by Stremio.library.collectAsState()
+    val fromStremio = remember(stremioLibrary, history, Kids.on, Kids.allowed) { Kids.only(stremioLibrary.notIn(history)) { Title(it.imdb, it.kind, it.title) } }
     var focusedUri by remember { mutableStateOf<String?>(null) }
     val first = remember { FocusRequester() }
     var releases by remember { mutableStateOf<List<Item>?>(null) }
-    val simkl by Simkl.connected.collectAsState()
+    val stremio by Stremio.connected.collectAsState()
     /** Per profile; the guest is offered nothing it would lose on exit. */
-    var simklLater by remember(me.id) { mutableStateOf(me.isGuest || Kv.get(SIMKL_LATER) != null) }
+    var stremioLater by remember(me.id) { mutableStateOf(me.isGuest || Kv.get(STREMIO_LATER) != null) }
 
     CompositionLocalProvider(LocalBringIntoViewSpec provides rememberEdgeScroll(110.dp)) {
     LazyVerticalGrid(
@@ -315,16 +317,16 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit) {
             }
         }
         // Where the history is, the history's sync is offered.
-        if (Simkl.available && !simkl && !simklLater) item(span = { GridItemSpan(maxLineSpan) }) {
-            SimklSection(me, onLater = {
-                Kv.set(SIMKL_LATER, "1")
-                simklLater = true
+        if (Stremio.available && !stremio && !stremioLater) item(span = { GridItemSpan(maxLineSpan) }) {
+            StremioSection(me, onLater = {
+                Kv.set(STREMIO_LATER, "1")
+                stremioLater = true
             })
         }
-        if (simkl) item(span = { GridItemSpan(maxLineSpan) }) {
-            Text("✓ Simkl connected — finished films and episodes are marked watched", style = Type.meta.copy(color = Ink.faint))
+        if (stremio) item(span = { GridItemSpan(maxLineSpan) }) {
+            Text("✓ Signed in to Stremio — your library and where you stopped are below", style = Type.meta.copy(color = Ink.faint))
         }
-        if (items.isEmpty() && fromSimkl.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+        if (items.isEmpty() && fromStremio.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
             Note("Nothing here yet. Anything you play turns up in this list.", Modifier.padding(top = 20.dp))
         }
         items(items, key = { it.uri }) { item ->
@@ -359,18 +361,18 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit) {
                 }
             }
         }
-        if (fromSimkl.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
-            Text("From Simkl", Modifier.padding(top = 14.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
+        if (fromStremio.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+            Text("From Stremio", Modifier.padding(top = 14.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
         }
-        // Never played on this TV: no release to resume, so the title opens; one picked there starts at Simkl's spot.
-        items(fromSimkl, key = { "simkl:${it.imdb}" }) { s ->
-            val paused = simklLibrary.paused.find { it.imdb == s.imdb }
+        // Never played on this TV: no release to resume, so the title opens; one picked there starts at Stremio's spot.
+        items(fromStremio, key = { "stremio:${it.imdb}" }) { s ->
+            val paused = stremioLibrary.paused.find { it.imdb == s.imdb }
             Focusable(
                 onClick = { onOpen(Title(s.imdb, s.kind, s.title, year = s.year)) },
                 modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
                 shape = RoundedCornerShape(8.dp),
                 scale = 1.08f,
-                requester = if (items.isEmpty() && s == fromSimkl.first()) first else null,
+                requester = if (items.isEmpty() && s == fromStremio.first()) first else null,
             ) {
                 Artwork("https://images.metahub.space/background/medium/${s.imdb}/img", s.title, Modifier.fillMaxSize())
                 Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(0.4f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.85f))))
@@ -381,7 +383,7 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit) {
                         s.kind == "movie" -> "Watched"
                         else -> s.last?.let { "Last watched $it" } ?: "Watched"
                     }
-                    Text("$state  ·  on Simkl", style = Type.meta.copy(fontSize = 11.sp), maxLines = 1)
+                    Text("$state  ·  on Stremio", style = Type.meta.copy(fontSize = 11.sp), maxLines = 1)
                     paused?.let {
                         Spacer(Modifier.height(5.dp))
                         ProgressLine((it.progress / 100).toFloat())
@@ -391,7 +393,7 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit) {
         }
     }
     }
-    if (items.isNotEmpty() || fromSimkl.isNotEmpty()) first.claim()
+    if (items.isNotEmpty() || fromStremio.isNotEmpty()) first.claim()
     releases?.let { all -> ReleasesSheet(all, watch) { releases = null } }
 }
 
@@ -434,11 +436,14 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             style = Type.meta.copy(color = Ink.faint),
         )
 
+        // First: the account everything else on this TV comes from. Focus arrives here from the rail.
+        StremioSection(me, requester = first)
+
         Section("Profile", if (me.isGuest) "Guest keeps nothing — history and My List go when the app closes." else "Library, My List and resume points belong to this profile.") {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Avatar(me, 44.dp)
                 Spacer(Modifier.width(16.dp))
-                TvButton("Watching as ${me.name} — switch", onSwitchProfile, icon = L.drawable.lucide_ic_users, requester = first)
+                TvButton("Watching as ${me.name} — switch", onSwitchProfile, icon = L.drawable.lucide_ic_users)
             }
         }
 
@@ -464,6 +469,12 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
                 }
             }
         }
+
+        // A kids profile plays what it can browse to; where streams come from is the grown-ups' call.
+        if (!Kids.on) Section(
+            "Addons",
+            "Where streams and subtitles come from. Add an addon by its link — a public one, your debrid service's, or your own media server's. Watchly comes with none.",
+        ) { AddonsList() }
 
         Section(
             "Storage for one film",
@@ -517,7 +528,7 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
                     TvButton("Remove", { Secrets.setSubdl("") })
                 }
             }
-            PhoneKey("SubDL") { Secrets.setSubdl(it) }
+            PhoneKey("SubDL key") { Secrets.setSubdl(it); "Saved — your SubDL key is on the TV now. You can close this page." }
             }
         }
 
@@ -549,11 +560,9 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
                     TvButton("Remove", { TorBox.setKey("") })
                 }
             }
-            PhoneKey("TorBox") { TorBox.setKey(it) }
+            PhoneKey("TorBox key") { TorBox.setKey(it); "Saved — your TorBox key is on the TV now. You can close this page." }
             }
         }
-
-        if (Simkl.available) SimklSection(me)
 
         Section("Extra trackers","Attach public trackers to bare magnet links so they resolve faster.") {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -576,26 +585,79 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
     first.claim()
 }
 
-/** The Library's Simkl card was put off with "Not now"; Settings still offers it. */
-private const val SIMKL_LATER = "simkl:later"
-
 /**
- * A key pasted on a phone rather than typed with the remote: a QR of a page the TV serves on the
- * home network ([KeyDrop]), open only while this shows. It closes itself once the key arrives.
+ * The viewer's addons, each a row of buttons the D-pad can reach, then the ways to add one: pasted
+ * from a phone (links run long, and often carry a key), or typed for a short one.
  */
 @Composable
-private fun PhoneKey(what: String, onKey: (String) -> Unit) {
+private fun AddonsList() {
+    val addons by Addons.list.collectAsState()
+    var link by remember { mutableStateOf("") }
+    var note by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    suspend fun add(raw: String): String = runCatching { Addons.add(raw) }.fold({ "Added ${it.name}." }, { it.message ?: "Couldn't add that addon." })
+    Column {
+        addons.forEachIndexed { i, a ->
+            Row(Modifier.padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.width(420.dp)) {
+                    Text(a.name, style = Type.label.copy(fontWeight = FontWeight.SemiBold, color = if (a.on) Ink.text else Ink.faint), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    // The host only: the rest of the link can be the viewer's own key.
+                    Text("${a.host}   ·   ${a.offers}", style = Type.meta.copy(color = Ink.faint), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Spacer(Modifier.width(14.dp))
+                TvButton(if (a.on) "On" else "Off", { Addons.toggle(a.url) }, icon = if (a.on) L.drawable.lucide_ic_circle_check else L.drawable.lucide_ic_circle)
+                Spacer(Modifier.width(10.dp))
+                // Kept at the ends, where they do nothing, rather than taken away: focus never lands on nothing.
+                TvButton("Up", { Addons.move(a.url, -1) }, icon = L.drawable.lucide_ic_chevron_up)
+                Spacer(Modifier.width(10.dp))
+                TvButton("Down", { Addons.move(a.url, 1) }, icon = L.drawable.lucide_ic_chevron_down)
+                Spacer(Modifier.width(10.dp))
+                TvButton("Remove", { Addons.remove(a.url) }, icon = L.drawable.lucide_ic_trash_2)
+            }
+        }
+        Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Field(link, { link = it.trim() }, "https://…/manifest.json", Modifier.width(420.dp), keyboardOnFocus = false)
+            Spacer(Modifier.width(14.dp))
+            TvButton(if (link.isNotEmpty()) "Add addon" else "Type a link", {
+                if (link.isNotEmpty()) scope.launch {
+                    note = "Checking…"
+                    note = add(link)
+                    if (note!!.startsWith("Added")) link = ""
+                }
+            }, icon = L.drawable.lucide_ic_plus)
+        }
+        note?.let { Text(it, Modifier.padding(top = 10.dp), style = Type.meta.copy(color = Ink.muted)) }
+        // One QR for both: the phone app sends its whole list (JSON), or a single link is pasted.
+        PhoneKey("addon link", several = true, label = "Copy addons from phone", fromApp = "Copy all addons from Watchly on this phone") { text ->
+            (if (text.trimStart().startsWith("[")) runCatching { Addons.importLinks(text) }.getOrElse { "That list didn't read." } else add(text))
+                .also { s -> note = s }
+        }
+    }
+}
+
+/** The Library's Stremio card was put off with "Not now"; Settings still offers it. */
+private const val STREMIO_LATER = "stremio:later"
+
+/**
+ * A key or link pasted on a phone rather than typed with the remote: a QR of a page the TV serves on
+ * the home network ([KeyDrop]), open only while this shows. [onKey]'s answer goes back to the phone;
+ * it closes once one arrives, unless [several] (addons: paste one after another). [fromApp] is the
+ * page's button that has the phone app send what it has instead.
+ */
+@Composable
+private fun PhoneKey(what: String, several: Boolean = false, label: String = "Paste from phone", fromApp: String? = null, onKey: suspend (String) -> String) {
     var open by remember { mutableStateOf(false) }
     // One button that changes its label, not a button swapped for another: a focused button taken
     // away left focus nowhere, and the page sent it back to the top.
-    TvButton(if (open) "Cancel" else "Paste from phone", { open = !open }, Modifier.padding(top = 12.dp), icon = if (open) L.drawable.lucide_ic_x else L.drawable.lucide_ic_smartphone)
+    TvButton(if (open) (if (several) "Done" else "Cancel") else label, { open = !open }, Modifier.padding(top = 12.dp), icon = if (open) L.drawable.lucide_ic_x else L.drawable.lucide_ic_smartphone)
+    // Back closes the QR here, rather than leaving the page and losing the place on it.
+    androidx.activity.compose.BackHandler(open) { open = false }
     if (!open) return
     var address by remember { mutableStateOf<String?>(null) }
     var tried by remember { mutableStateOf(false) }
     DisposableEffect(Unit) {
-        val drop = KeyDrop(what) {
-            onKey(it)
-            open = false
+        val drop = KeyDrop(what, fromApp) {
+            onKey(it).also { if (!several) open = false }
         }
         address = drop.open()
         tried = true
@@ -607,7 +669,8 @@ private fun PhoneKey(what: String, onKey: (String) -> Unit) {
         Column(Modifier.widthIn(max = 520.dp)) {
             Text(
                 when {
-                    address != null -> "Scan with your phone's camera, paste your $what key on the page that opens, and tap Save. Your phone needs to be on the same Wi-Fi as the TV."
+                    address != null && fromApp != null -> "Scan with your phone's camera and tap \"$fromApp\" on the page that opens — or paste one $what there. Your phone needs to be on the same Wi-Fi as the TV."
+                    address != null -> "Scan with your phone's camera, paste your $what on the page that opens, and tap Save. Your phone needs to be on the same Wi-Fi as the TV."
                     tried -> "The TV isn't on a network a phone can reach."
                     else -> "Opening…"
                 },
@@ -633,70 +696,93 @@ private fun Qr(text: String, size: androidx.compose.ui.unit.Dp) {
 }
 
 /**
- * Connect by device code: the code shows here, the viewer approves on their phone, this page notices.
+ * Sign in to Stremio by its link code: a QR of link.stremio.com with the code in it, where the viewer
+ * signs in on their phone and approves; this page notices, then brings the account's addons. No
+ * password, and no typing with the remote.
  * [onLater] makes it the Library's card, with a Not now; without it, a Settings section.
+ * [requester] is its first button, where focus lands coming in from the rail.
  */
 @Composable
-fun SimklSection(me: Profile, onLater: (() -> Unit)? = null) {
-    val connected by Simkl.connected.collectAsState()
+fun StremioSection(me: Profile, onLater: (() -> Unit)? = null, requester: FocusRequester? = null) {
+    val connected by Stremio.connected.collectAsState()
     var code by remember { mutableStateOf<DeviceCode?>(null) }
     var note by remember { mutableStateOf<String?>(null) }
     var job by remember { mutableStateOf<Job?>(null) }
     val scope = rememberCoroutineScope()
+    // Back while the QR is up closes it right here, rather than leaving the page (which went back to its top).
+    androidx.activity.compose.BackHandler(code != null) { job?.cancel() }
+    val main = requester ?: remember { FocusRequester() }
+
+    fun importAddons() {
+        note = "Bringing your addons…"
+        scope.launch {
+            note = runCatching { Stremio.importAddons() }.fold(
+                { if (it == 0) "Every addon is here already." else "Added $it addon${if (it == 1) "" else "s"}." },
+                { it.message ?: "Couldn't reach Stremio." },
+            )
+        }
+    }
 
     fun connect() {
         note = null
         job?.cancel()
         job = scope.launch {
             try {
-                val c = Simkl.start()
+                val c = Stremio.start()
                 code = c
-                if (!Simkl.await(c)) note = "That code ran out — connect again for a new one."
+                if (!Stremio.await(c)) note = "That code ran out — sign in again for a new one."
             } catch (e: Exception) {
-                if (e !is kotlinx.coroutines.CancellationException) note = e.message ?: "Couldn't reach Simkl."
+                if (e !is kotlinx.coroutines.CancellationException) note = e.message ?: "Couldn't reach Stremio."
             } finally {
                 code = null
             }
         }
     }
 
+    val email by Stremio.email.collectAsState()
     val hint = when {
-        connected -> "Connected — films and episodes you watch to the end are marked watched on Simkl."
-        me.isGuest -> "Marks what you finish as watched on your Simkl account. As Guest it's forgotten when the app closes."
-        else -> "Films and episodes you finish get marked watched on your Simkl account, and Continue Watching follows you to other devices."
+        connected -> "Signed in${email?.let { " as $it" }.orEmpty()} — your Stremio library and where you stopped are here, My List is your library there, and what you finish is marked watched."
+        me.isGuest -> "Your Stremio library, Continue Watching and addons on this TV. As Guest it's forgotten when the app closes."
+        else -> "Your Stremio library, Continue Watching and addons on this TV, kept in step both ways. You sign in on your phone — no password on the TV."
     }
     val body: @Composable () -> Unit = {
         Column {
             val c = code
             if (c != null) Row(Modifier.padding(bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                // Scanned, it opens Simkl with the code filled in; the code itself is for typing on any device.
+                // Scanned, it opens Stremio's page with the code in it; the address is for typing on any device.
                 Qr(c.uriComplete, 168.dp)
                 Spacer(Modifier.width(24.dp))
                 Column(Modifier.widthIn(max = 560.dp)) {
-                    Text("Scan with your phone's camera — or go to ${c.uri.removePrefix("https://")} and enter", style = Type.meta.copy(color = Ink.faint))
-                    Text(c.userCode, Modifier.padding(vertical = 8.dp), style = Type.display)
-                    Text("Signing in? Simkl emails that account a link — open it and confirm, then press Allow.", style = Type.meta.copy(color = Ink.faint))
+                    Text("Scan with your phone's camera, sign in to Stremio and approve — or go to", style = Type.meta.copy(color = Ink.faint))
+                    Text(c.uriComplete.removePrefix("https://"), Modifier.padding(vertical = 8.dp), style = Type.display)
+                    Text("This page notices by itself once you've approved.", style = Type.meta.copy(color = Ink.faint))
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                when {
-                    connected -> TvButton("Disconnect", { Simkl.disconnect() }, icon = L.drawable.lucide_ic_link)
-                    c != null -> TvButton("Cancel", { job?.cancel() })
-                    else -> {
-                        TvButton("Connect Simkl", ::connect, icon = L.drawable.lucide_ic_link)
-                        onLater?.let {
-                            Spacer(Modifier.width(10.dp))
-                            TvButton("Not now", it)
-                        }
-                    }
+                // One button that changes its label and action, not one swapped for another: a focused
+                // button taken away left focus nowhere, and the rail opened.
+                TvButton(
+                    when { connected -> "Import addons"; c != null -> "Cancel"; else -> "Sign in to Stremio" },
+                    { when { connected -> importAddons(); c != null -> job?.cancel(); else -> connect() } },
+                    icon = when { connected -> L.drawable.lucide_ic_puzzle; c != null -> L.drawable.lucide_ic_x; else -> L.drawable.lucide_ic_link },
+                    requester = main,
+                )
+                if (connected) {
+                    Spacer(Modifier.width(10.dp))
+                    // Gone once pressed: focus goes back to the button beside it, not off to the rail.
+                    TvButton("Sign out", { Stremio.disconnect(); main.requestFocus() }, icon = L.drawable.lucide_ic_link)
+                }
+                if (!connected && c == null) onLater?.let {
+                    Spacer(Modifier.width(10.dp))
+                    TvButton("Not now", it)
                 }
             }
             note?.let { Text(it, Modifier.padding(top = 10.dp), style = Type.meta.copy(color = Ink.faint)) }
         }
     }
-    if (onLater == null) Section("Simkl", hint, body)
+    if (onLater == null) Section("Stremio account", hint, body)
     else Column(Modifier.fillMaxWidth().background(Ink.surface, RoundedCornerShape(14.dp)).padding(24.dp)) {
-        Text("Sync your history with Simkl", style = Type.title.copy(fontWeight = FontWeight.Bold))
+        Text("Bring your Stremio library", style = Type.title.copy(fontWeight = FontWeight.Bold))
         Text(hint, Modifier.padding(top = 4.dp, bottom = 16.dp).widthIn(max = 760.dp), style = Type.meta.copy(color = Ink.faint))
         body()
     }
@@ -862,8 +948,8 @@ private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, Strin
                     Chip("Everything", !kids, onClick = { kids = false })
                 }
                 Text(
-                    if (kids) "Family films and series only. No torrent search or links from other apps — give your own profile a PIN so it stays that way."
-                    else "Every title, torrent search included.",
+                    if (kids) "Family films and series only. No addons, stream search or links from other apps — give your own profile a PIN so it stays that way."
+                    else "Every title, addons and stream search included.",
                     Modifier.padding(top = 8.dp),
                     style = Type.meta.copy(color = Ink.faint),
                 )

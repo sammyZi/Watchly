@@ -10,38 +10,62 @@ import org.junit.Test
 
 /** Ported from the Expo build's lib tests (search, pick, title, magnet, format, subdl). */
 class LibTest {
-    private fun row(vararg over: Pair<String, Any>) = JSONObject(
-        mapOf<String, Any>(
-            "id" to "1", "name" to "A Movie 1080p", "info_hash" to "C39FE3EEFBDB62DA9C27EB6398FF4A7D2E26E7AB",
-            "seeders" to "5", "leechers" to "1", "size" to "1024", "category" to "207",
-        ) + over,
-    )
-
-    private fun hit(id: String = "x", name: String = "n", seeders: Int = 0, leechers: Int = 0, size: Long = 0, scope: Scope = Scope.EPISODE) =
-        Hit(id, name, "m", seeders, leechers, size, null, "movie", scope, null)
+    private fun hit(id: String = "x", name: String = "n", seeders: Int = 0, leechers: Int = 0, size: Long = 0, scope: Scope = Scope.EPISODE, uri: String = "m") =
+        Hit(id, name, uri, seeders, leechers, size, null, "movie", scope, null)
 
     private fun f(index: Int, name: String, size: Long, video: Boolean = true) = TorrentFile(index, name, name, size, video, false)
 
-    @Test fun apibayRows() {
-        assertEquals(0, toHits(JSONArray().put(row("id" to "0", "info_hash" to "0".repeat(40))).put(row("id" to "2", "category" to "101"))).size)
-        val numeric = toHits(JSONArray().put(row("id" to 42, "seeders" to 7, "leechers" to 2, "size" to 9, "category" to 207))).single()
-        assertEquals("c39fe3eefbdb62da9c27eb6398ff4a7d2e26e7ab", numeric.id)
-        assertEquals(7, numeric.seeders)
-        assertTrue(numeric.magnet.startsWith("magnet:?xt=urn:btih:c39fe3eefbdb62da9c27eb6398ff4a7d2e26e7ab&dn="))
-        assertTrue(numeric.magnet.contains("&tr="))
-        val tagged = toHits(JSONArray().put(row("category" to 205, "imdb" to "tt0133093"))).single()
-        assertEquals("tv", tagged.kind)
-        assertEquals("tt0133093", tagged.imdb)
-        assertNull(toHits(JSONArray().put(row("imdb" to ""))).single().imdb)
+    @Test fun addonManifests() {
+        assertEquals("https://a.example/x", addonBase("stremio://a.example/x/manifest.json"))
+        assertEquals("https://a.example/x", addonBase("  https://a.example/x/  "))
+        assertEquals("https://a.example", addonBase("a.example/manifest.json"))
+        assertEquals("http://192.168.1.5:7000/c=1", addonBase("http://192.168.1.5:7000/c=1/manifest.json"))
+        assertNull(addonBase("ftp://a.example/manifest.json"))
+        assertNull(addonBase("   "))
+
+        val m = JSONObject(
+            """{"name":"Mine","types":["movie","series"],"idPrefixes":["tt"],
+               "resources":["stream",{"name":"subtitles","types":["movie"]},{"name":"meta","types":["series"],"idPrefixes":["kitsu:"]}]}""",
+        )
+        val a = toAddon("https://a.example", m)!!
+        assertTrue(a.serves("stream", "series", "tt1:1:2"))
+        assertFalse(a.serves("stream", "series", "kitsu:1:2"))
+        assertTrue(a.serves("subtitles", "movie", "tt1"))
+        assertFalse(a.serves("subtitles", "series", "tt1:1:2"))
+        assertTrue(a.serves("meta", "series", "kitsu:9"))
+        assertFalse(a.copy(on = false).serves("stream", "movie", "tt1"))
+        assertEquals("a.example", a.host)
+        assertNull(toAddon("https://a.example", JSONObject("""{"name":"Empty","resources":[]}""")))
+        assertNull(toAddon("https://a.example", JSONObject("""{"resources":["stream"]}""")))
+
+        // Catalogues: one that needs a genre picked isn't a home row; search is either shape.
+        val lists = toAddon(
+            "https://a.example",
+            JSONObject(
+                """{"name":"Lists","resources":["catalog"],"types":["movie"],"catalogs":[
+                   {"type":"movie","id":"top","name":"Top","extra":[{"name":"search"},{"name":"skip"}]},
+                   {"type":"series","id":"by-genre","name":"Genre","extra":[{"name":"genre","isRequired":true}]},
+                   {"type":"channel","id":"old","extraSupported":["search"],"extraRequired":[]}]}""",
+            ),
+        )!!
+        assertEquals(listOf(false, true, false), lists.catalogs.map { it.required })
+        assertEquals(listOf(true, false, true), lists.catalogs.map { it.search })
+        assertEquals("old", lists.catalogs[2].name)
+        // The TV's QR link: sent only to a TV page on the home network.
+        val tv = "http://192.168.1.5:40123/" + "ab".repeat(12)
+        assertEquals(tv, tvDropUrl("watchly://tv-addons?to=" + java.net.URLEncoder.encode(tv, "UTF-8")))
+        assertEquals("http://10.0.0.7:5000/" + "0".repeat(24), tvDropUrl("watchly://tv-addons?to=http%3A%2F%2F10.0.0.7%3A5000%2F" + "0".repeat(24)))
+        assertNull(tvDropUrl("watchly://tv-addons?to=" + java.net.URLEncoder.encode("https://evil.example/" + "ab".repeat(12), "UTF-8")))
+        assertNull(tvDropUrl("watchly://tv-addons?to=" + java.net.URLEncoder.encode("http://8.8.8.8:80/" + "ab".repeat(12), "UTF-8")))
+        assertNull(tvDropUrl("watchly://tv-addons"))
+        assertEquals("movie", kindOfType("tv"))
+        assertEquals("tv", kindOfType("channel"))
     }
 
     @Test fun qualityKindHealth() {
         assertEquals("4K", quality("Some.Film.2160p.WEB"))
         assertEquals("720p", quality("Some.Film.720p"))
         assertNull(quality("Some.Film.DVDRip"))
-        assertEquals("movie", kindOf(207))
-        assertEquals("tv", kindOf(208))
-        assertEquals("other", kindOf(203))
         assertEquals(Health.FAST, health(500))
         assertEquals(Health.GOOD, health(20))
         assertEquals(Health.WEAK, health(1))
@@ -77,6 +101,10 @@ class LibTest {
         )
         assertEquals("Prison Break 2005 Season 1 Complete 720p AMZN WEB-DL x264 [i_c]", ranked[0].name)
         assertTrue(ranked.indexOfFirst { it.scope == Scope.EPISODE } < ranked.indexOfFirst { "Season 2" in it.name })
+        // A link plays at once: ahead of any swarm, film or episode.
+        val link = hit("link", uri = "https://debrid.example/x.mkv")
+        assertEquals("link", rank(listOf(hit("seed", seeders = 900), link)).first().id)
+        assertEquals("link", rankEpisode(listOf(hit("pack", "Show S01", 40, scope = Scope.SEASON), link), "", 1).first().id)
     }
 
     @Test fun scopesAndEpisodes() {
@@ -111,47 +139,57 @@ class LibTest {
         assertEquals(emptyList<Int>(), seasonsIn("Ocean's 8 2018 1080p"))
     }
 
-    @Test fun otherIndexes() {
+    @Test fun addonStreams() {
         val stream = JSONObject()
-            .put("name", "Torrentio\n4k HDR")
-            .put("title", "The.Matrix.1999.2160p.BluRay.x265\n👤 84 💾 51.3 GB ⚙️ 1337x")
-            .put("infoHash", "aa0fd381c944a72cabb3e962d5f727c8694d7dd6")
-        val one = toTorrentioHits(JSONArray().put(stream), "movie").single()
+            .put("name", "Some addon\n4k HDR")
+            .put("title", "The.Matrix.1999.2160p.BluRay.x265\n👤 84 💾 51.3 GB ⚙️ somewhere")
+            .put("infoHash", "AA0FD381C944A72CABB3E962D5F727C8694D7DD6")
+        val one = toStreamHits(JSONArray().put(stream), "movie", "Some addon").single()
+        assertEquals("aa0fd381c944a72cabb3e962d5f727c8694d7dd6", one.id)
+        assertTrue(one.uri.startsWith("magnet:?xt=urn:btih:aa0fd381c944a72cabb3e962d5f727c8694d7dd6&dn="))
+        assertFalse(one.direct)
         assertEquals("The.Matrix.1999.2160p.BluRay.x265", one.name)
         assertEquals(84, one.seeders)
         assertEquals(Math.round(51.3 * 1024 * 1024 * 1024), one.size)
         assertEquals("4K", one.quality)
-        assertEquals(0, toTorrentioHits(JSONArray().put(JSONObject(stream.toString()).put("title", "Some.Release.720p")), "movie").single().seeders)
-        assertEquals(0, toTorrentioHits(JSONArray().put(JSONObject(stream.toString()).put("infoHash", "nope")), "movie").size)
+        assertEquals("Some addon", one.addon)
+        assertEquals(0, toStreamHits(JSONArray().put(JSONObject(stream.toString()).put("title", "Some.Release.720p")), "movie").single().seeders)
+        assertEquals(0, toStreamHits(JSONArray().put(JSONObject(stream.toString()).put("infoHash", "nope")), "movie").size)
 
-        val yts = toYtsHits(
+        // A debrid or own-server link: the file's name and size from behaviorHints, quality from the addon's label.
+        val link = toStreamHits(
             JSONArray().put(
-                JSONObject().put("title_long", "The Matrix (1999)").put("imdb_code", "tt0133093").put(
-                    "torrents",
-                    JSONArray()
-                        .put(JSONObject().put("hash", "C39FE3EEFBDB62DA9C27EB6398FF4A7D2E26E7AB").put("quality", "1080p").put("type", "bluray").put("seeds", 40).put("peers", 3).put("size_bytes", 2000))
-                        .put(JSONObject().put("hash", "nope").put("quality", "720p").put("seeds", 1)),
-                ),
+                JSONObject().put("name", "Debrid 1080p").put("title", "cached").put("url", "https://d.example/dl/abc")
+                    .put("behaviorHints", JSONObject().put("filename", "Show.S01E02.WEB.mkv").put("videoSize", 1234L)),
             ),
+            "tv",
         ).single()
-        assertEquals(40, yts.seeders)
-        assertEquals("1080p", yts.quality)
-
-        val eztv = toEztvHits(JSONArray().put(JSONObject().put("hash", "C39FE3EEFBDB62DA9C27EB6398FF4A7D2E26E7AB").put("title", "Show.S01E02.1080p").put("seeds", 12))).single()
-        assertEquals("tv", eztv.kind)
-        assertEquals(Scope.EPISODE, eztv.scope)
-
-        val csv = toCsvHits(JSONArray().put(JSONObject().put("infohash", "C39FE3EEFBDB62DA9C27EB6398FF4A7D2E26E7AB").put("name", "The.Matrix.1999.1080p").put("seeders", 9).put("size_bytes", 3000))).single()
-        assertEquals(9, csv.seeders)
-        assertEquals(3000L, csv.size)
-
-        val nyaa = toNyaaHits(
-            "<item><title>[Sub] Show - 05 &amp; more</title><nyaa:infoHash>C39FE3EEFBDB62DA9C27EB6398FF4A7D2E26E7AB</nyaa:infoHash>" +
-                "<nyaa:seeders>12</nyaa:seeders><nyaa:leechers>3</nyaa:leechers><nyaa:size>389.7 MiB</nyaa:size></item>",
+        assertTrue(link.direct)
+        assertEquals("https://d.example/dl/abc", link.uri)
+        assertEquals("Show.S01E02.WEB.mkv", link.name)
+        assertEquals(1234L, link.size)
+        assertEquals("1080p", link.quality)
+        // A link's headers go with it; YouTube and outside pages go to another app; nothing playable is left out.
+        val headed = JSONObject().put("title", "x").put("url", "https://d.example/a")
+            .put("behaviorHints", JSONObject().put("proxyHeaders", JSONObject().put("request", JSONObject().put("Referer", "https://d.example"))))
+        assertEquals(mapOf("Referer" to "https://d.example"), toStreamHits(JSONArray().put(headed), "movie").single().headers)
+        val yt = toStreamHits(JSONArray().put(JSONObject().put("title", "trailer").put("ytId", "abc")), "movie").single()
+        assertTrue(yt.external)
+        assertFalse(yt.direct)
+        assertEquals("https://www.youtube.com/watch?v=abc", yt.uri)
+        assertEquals(0, toStreamHits(JSONArray().put(JSONObject().put("title", "nothing")), "movie").size)
+        // A torrent's own trackers and file index come along.
+        val tracked = toStreamHits(
+            JSONArray().put(JSONObject(stream.toString()).put("fileIdx", 3).put("sources", JSONArray().put("tracker:udp://t.example:1337/announce").put("dht:abc"))),
+            "movie",
         ).single()
-        assertEquals("[Sub] Show - 05 & more", nyaa.name)
-        assertEquals(12, nyaa.seeders)
-        assertEquals(Math.round(389.7 * 1024 * 1024), nyaa.size)
+        assertEquals(3, tracked.fileIdx)
+        assertTrue(tracked.uri.contains("t.example"))
+
+        // Pasted links: a magnet goes to the swarm, a video URL plays as it is, words are a search.
+        assertTrue(linkHit("http://192.168.1.5:8096/Videos/1/stream.mkv")!!.direct)
+        assertFalse(linkHit("magnet:?xt=urn:btih:aa0fd381c944a72cabb3e962d5f727c8694d7dd6&dn=X")!!.direct)
+        assertNull(linkHit("The Matrix"))
     }
 
     @Test fun merging() {
@@ -159,26 +197,6 @@ class LibTest {
         assertEquals(2, merged.size)
         assertEquals(900, merged.first { it.id == "a" }.seeders)
         assertEquals(100L, merged.first { it.id == "a" }.size)
-    }
-
-    @Test fun titleMatching() {
-        assertEquals("Dune", aliasOf("Dune: Part One"))
-        assertEquals("Star Wars", aliasOf("Star Wars - A New Hope"))
-        assertNull(aliasOf("The Matrix"))
-        assertNull(aliasOf("Spider-Man"))
-        assertEquals("Spider-Man", aliasOf("Spider-Man: No Way Home"))
-
-        assertTrue(namesTitle("Interstellar.2014.PROPER.IMAX.2160p", "Interstellar"))
-        assertTrue(namesTitle("Interstellar (2014) [1080p] [WEBRip]", "Interstellar"))
-        assertFalse(namesTitle("Imdb top 263 movies hindi english dual audio", "Interstellar"))
-        assertFalse(namesTitle("IMDB Top 250 - 2024 Edition", "Interstellar"))
-        assertTrue(namesTitle("Dune (2021) [1080p] [WEBRip]", aliasOf("Dune: Part One")!!))
-        assertFalse(namesTitle("The Matrix Reloaded 2003", "The Matrix Revolutions"))
-        assertTrue(namesTitle("The.Matrix.1999.1080p", "The Matrix"))
-
-        assertTrue(sameTitle("House.S01E01.1080p", "House"))
-        assertTrue(sameTitle("House M.D. S01 1080p", "House"))
-        assertFalse(sameTitle("House.of.the.Dragon.S01E01", "House"))
     }
 
     @Test fun picking() {
@@ -220,7 +238,6 @@ class LibTest {
         assertEquals(false, spanHolds("[Group] Show (01-24) [Batch]", 2, 5, 29))
         assertNull(spanHolds("[Erai-raws] One Piece - 1100 [1080p]", 21, 10, 1100))
         assertEquals(Scope.EPISODE, scopeOf("[SubsPlease] One Piece - 1071 (1080p)"))
-        assertTrue(sameTitle("[SubsPlease] One Piece - 1071 (1080p)", "One Piece"))
 
         // Arc "seasons": S2E3 after an 8-episode S1 is the 11th.
         val eps = (1..8).map { Episode("a$it", 1, it, "", null, null, null) } + (1..5).map { Episode("b$it", 2, it, "", null, null, null) }
@@ -322,8 +339,8 @@ class LibTest {
         assertNull(subs[0].season)
     }
 
-    @Test fun openSubtitlesRows() {
-        val subs = OpenSubs.toSubs(
+    @Test fun addonSubtitleRows() {
+        val subs = toAddonSubs(
             JSONObject("""{"subtitles":[
                 {"id":"1","url":"https://subs5.strem.io/a","lang":"eng","subtitleFileName":"Show.S01E01.720p.BluRay.x264-DEMAND.srt","movieReleaseName":"Show.S01E01.720p.BluRay.x264-DEMAND","season":1,"episode":1},
                 {"id":"2","url":"https://subs5.strem.io/b","lang":"ger","subtitleFileName":"film_ger.srt","season":0,"episode":0},
@@ -482,6 +499,16 @@ class LibTest {
         assertEquals(1300.0 to null, carryOver(listOf(e1124, next), next, "[Erai-raws] One Piece - 1124 [1080p].mkv"))
         // Watched through: start the new copy from the top.
         assertNull(carryOver(listOf(first.copy(positions = mapOf(0 to 5900.0)), second), second, "Film.1080p.mkv"))
+        // One spot per title: a release left at 10 min loses to another played since, at 40 min — and wins over an older one.
+        val old = Item("h", "Film.720p", at = 9, imdb = "tt9", files = f("Film.720p.mkv"), lastFileIndex = 0, positions = mapOf(0 to 600.0), played = mapOf(0 to 100L))
+        val newer = Item("i", "Film.1080p", at = 5, imdb = "tt9", files = f("Film.1080p.mkv"), lastFileIndex = 0, positions = mapOf(0 to 2400.0), played = mapOf(0 to 200L))
+        assertEquals(2400.0 to null, carryOver(listOf(old, newer), old, "Film.720p.mkv", old.playedAt(0)))
+        assertNull(carryOver(listOf(old, newer), newer, "Film.1080p.mkv", newer.playedAt(0)))
+        // A pack's episode counts, not only the file it played last.
+        val pack2 = Item("j", "Show.S01", at = 1, imdb = "tt6", files = f("Show.S01E01.mkv") + StoredFile(1, "Show.S01E02.mkv", 1, true, false, null), lastFileIndex = 1, positions = mapOf(0 to 120.0, 1 to 50.0))
+        assertEquals(120.0 to null, carryOver(listOf(pack2, pack), pack, "Show.S01E01.1080p.mkv"))
+        // Continue Watching shows the release played last, not the one opened last.
+        assertEquals("i", latestPerTitle(listOf(old, newer)).single().uri)
     }
 
     @Test fun episodesWatched() {

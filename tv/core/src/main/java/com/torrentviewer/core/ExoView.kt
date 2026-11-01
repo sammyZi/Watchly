@@ -248,11 +248,12 @@ class ExoView(context: Context) : Video(context) {
         else -> mime.substringAfter('/').uppercase()
     }
 
+    private val http = DefaultHttpDataSource.Factory()
+        .setConnectTimeoutMs(15_000)
+        // A read waits on a torrent piece that has not arrived; the default 8 s ended the film.
+        .setReadTimeoutMs(120_000)
+
     private fun build(): ExoPlayer {
-        val http = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(15_000)
-            // A read waits on a torrent piece that has not arrived; the default 8 s ended the film.
-            .setReadTimeoutMs(120_000)
         val extractors = DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true)
         // The TV's own decoders first; FFmpeg for the audio it has none for (DTS, TrueHD, …).
         val renderers = DefaultRenderersFactory(context)
@@ -282,6 +283,8 @@ class ExoView(context: Context) : Video(context) {
         val uri = source?.takeIf { it.isNotBlank() } ?: return
         try {
             val p = player ?: build().also { player = it }
+            // Read by every request the next item makes, so a link's headers go with it — and none with the next file.
+            http.setDefaultRequestProperties(headers)
             val files = subtitleFiles.filter { subtitleMime(it) != null && File(it).let { f -> f.exists() && f.length() > 0L } }
             attached = files
             val item = MediaItem.Builder().setUri(uri).setSubtitleConfigurations(

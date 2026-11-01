@@ -56,7 +56,7 @@ import com.composables.icons.lucide.R as L
 
 /** A release to keep, labelled the way History labels a stream of it. */
 fun downloadJob(hit: Hit, from: Title?, episode: Episode? = null) = DownloadJob(
-    uri = hit.magnet,
+    uri = hit.uri,
     title = hit.name,
     titleName = if (episode != null && from != null) "${from.title} · ${episodeTag(episode.season, episode.episode)}" else from?.title,
     poster = from?.poster,
@@ -67,14 +67,18 @@ fun downloadJob(hit: Hit, from: Title?, episode: Episode? = null) = DownloadJob(
 
 /** What is downloading, and what is kept on this phone to watch without a connection. */
 @Composable
-fun DownloadsScreen(watch: Watch) {
+fun DownloadsScreen(watch: Watch, onBack: () -> Unit) {
     val live by Downloads.live.collectAsState()
     val finished by Downloads.finished.collectAsState()
     var cancelling by remember { mutableStateOf<LiveDownload?>(null) }
     var deleting by remember { mutableStateOf<Finished?>(null) }
 
     LazyColumn(state = rememberLazyListState(), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp)) {
-        item { Heading("Downloads") }
+        item {
+            Heading("Downloads") {
+                Tap(onBack, shape = CircleShape) { Lc(L.drawable.lucide_ic_x, Modifier.padding(8.dp), tint = Ink.muted, size = 22.dp) }
+            }
+        }
         if (live.isEmpty() && finished.isEmpty()) item {
             Note("Nothing downloaded yet. Download from a title's page, and it plays here without a connection.")
         }

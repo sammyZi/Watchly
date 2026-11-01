@@ -32,6 +32,12 @@ public sealed record OpenOptions
     public string? Poster { get; init; }
     public string? TitleName { get; init; }
     public int? Season { get; init; }
+    /// <summary>The stream's own name, when it knows one better than its link does.</summary>
+    public string? Name { get; init; }
+    /// <summary>The file the addon meant, for when the names can't pick one.</summary>
+    public int? FileIdx { get; init; }
+    /// <summary>What a link's server wants with every request (an addon's proxyHeaders).</summary>
+    public Dictionary<string, string>? Headers { get; init; }
 }
 
 /// <summary>Everything the player needs for one file — a torrent file or one already on disk.</summary>
@@ -49,6 +55,10 @@ public sealed record PlaybackRequest
     public string? LocalPath { get; init; }
     /// <summary>TorBox's HTTPS link for this file; the torrent is the fallback when it fails.</summary>
     public string? Remote { get; init; }
+    /// <summary>A link that plays as it is — an addon's debrid stream, a file on the viewer's own server.</summary>
+    public string? Link { get; init; }
+    /// <summary>What <see cref="Link"/>'s server wants with every request.</summary>
+    public Dictionary<string, string>? Headers { get; init; }
     public (string Name, Func<Task> Go)? Next { get; init; }
 }
 
@@ -74,6 +84,7 @@ public partial class MainWindow : Window
     {
         ("home", "Home", "home"),
         ("search", "Search", "search"),
+        ("addons", "Addons", "puzzle"),
         ("history", "Library", "library"),
         ("downloads", "Downloads", "download"),
         ("settings", "Settings", "settings"),
@@ -104,7 +115,9 @@ public partial class MainWindow : Window
 
         History.Changed += items => Dispatcher.BeginInvoke(() => { HistoryList = items; LibraryChanged?.Invoke(); });
         Saved.Changed += items => Dispatcher.BeginInvoke(() => { SavedList = items; LibraryChanged?.Invoke(); });
-        Simkl.Changed += () => Dispatcher.BeginInvoke(() => LibraryChanged?.Invoke());
+        Stremio.Changed += () => Dispatcher.BeginInvoke(() => LibraryChanged?.Invoke());
+        // New addons bring new home rows, and new answers for every page.
+        Addons.Changed += () => Dispatcher.BeginInvoke(() => LibraryChanged?.Invoke());
         // The Instant tag on a release, once TorBox has answered which it has cached.
         TorBox.Changed += () => Dispatcher.BeginInvoke(() => LibraryChanged?.Invoke());
         Net.OnlineChanged += () => Dispatcher.BeginInvoke(() => Offline.Visibility = Net.IsOnline ? Visibility.Collapsed : Visibility.Visible);
@@ -173,7 +186,7 @@ public partial class MainWindow : Window
         HistoryList = History.Load();
         SavedList = Saved.Load();
         Links = EpisodeLinks.Load();
-        Simkl.Load(profile.Id, profile.IsGuest);
+        Stremio.Load(profile.Id, profile.IsGuest);
         KidsMode.Use(profile);
         // Pages built for the last profile read its library; start again from Home.
         // ponytail: the old tab views stay subscribed to the shell's events; switching is rare, unhook them if it ever shows.
@@ -191,20 +204,23 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>Simkl's page opens in the browser with the code filled in; this waits for the approval. Settings shows the code meanwhile.</summary>
-    public async Task ConnectSimkl()
+    /// <summary>
+    /// Stremio's link page opens in the browser with the code filled in; this waits for the approval.
+    /// Settings shows the code and its QR meanwhile, for approving on a phone. No password ever comes here.
+    /// </summary>
+    public async Task ConnectStremio()
     {
-        SimklCode?.Cancel();
-        var cts = SimklCode = new CancellationTokenSource();
+        StremioCode?.Cancel();
+        var cts = StremioCode = new CancellationTokenSource();
         try
         {
-            var code = await Simkl.Start();
-            SimklPending = code;
+            var code = await Stremio.Start();
+            StremioPending = code;
             ShowTab("settings");
             SettingsChanged?.Invoke();
-            Process.Start(new ProcessStartInfo(code.UriComplete) { UseShellExecute = true });
-            var ok = await Simkl.Await(code, cts.Token);
-            Toast(ok ? "Simkl connected" : "That code ran out — connect again for a new one.", !ok);
+            Ui.Open(code.Link);
+            var ok = await Stremio.Await(code, cts.Token);
+            Toast(ok ? $"Signed in to Stremio{(Stremio.Email is { } email ? $" as {email}" : "")}" : "That code ran out — sign in again for a new one.", !ok);
         }
         catch (OperationCanceledException) { }
         catch (Exception e)
@@ -213,18 +229,18 @@ public partial class MainWindow : Window
         }
         finally
         {
-            if (SimklCode == cts)
+            if (StremioCode == cts)
             {
-                SimklCode = null;
-                SimklPending = null;
+                StremioCode = null;
+                StremioPending = null;
                 SettingsChanged?.Invoke();
             }
         }
     }
 
-    public CancellationTokenSource? SimklCode { get; private set; }
+    public CancellationTokenSource? StremioCode { get; private set; }
     /// <summary>The code being waited on, for Settings to show; null when nothing is.</summary>
-    public Simkl.DeviceCode? SimklPending { get; private set; }
+    public Stremio.DeviceCode? StremioPending { get; private set; }
 
     /// <summary>The profile in use was edited — its PIN in Settings, or its name, face or colour: the header shows it at once.</summary>
     public void ProfileEdited(Profile? next)
@@ -272,8 +288,11 @@ public partial class MainWindow : Window
             };
             TabButtons.Children.Add(button);
             tabParts[key] = (text, glyph, tick);
+            if (key == "addons") addonsTab = button;
         }
     }
+
+    Button? addonsTab;
 
     public void ShowTab(string key)
     {
@@ -284,6 +303,7 @@ public partial class MainWindow : Window
             {
                 "home" => new HomeView(),
                 "search" => new SearchView(),
+                "addons" => new AddonsView(),
                 "history" => new LibraryView(),
                 "downloads" => new DownloadsView(),
                 _ => new SettingsView(),
@@ -291,6 +311,8 @@ public partial class MainWindow : Window
             tabViews[key] = view;
             Tabs.Children.Add(view);
         }
+        // A kids profile has no say in where streams come from.
+        if (addonsTab is not null) addonsTab.Visibility = KidsMode.On ? Visibility.Collapsed : Visibility.Visible;
         foreach (var (k, v) in tabViews) v.Visibility = k == key ? Visibility.Visible : Visibility.Collapsed;
         foreach (var (k, parts) in tabParts)
         {
@@ -348,8 +370,8 @@ public partial class MainWindow : Window
 
     void OnPlayResume(object sender, ExecutedRoutedEventArgs e)
     {
-        // A Simkl card has no release yet: the title opens, and the one picked starts at Simkl's spot.
-        if (e.Parameter is ResumeTile tile) { if (tile.Item.Uri.StartsWith("simkl:")) OpenTitle(tile.Title); else PlayFile(tile.Item, tile.Index); }
+        // A Stremio card has no release yet: the title opens, and the one picked starts at Stremio's spot.
+        if (e.Parameter is ResumeTile tile) { if (tile.Item.Uri.StartsWith("stremio:")) OpenTitle(tile.Title); else PlayFile(tile.Item, tile.Index); }
     }
 
     public void OpenTitle(Title title) => PushLayer(new DetailView(title));
@@ -391,7 +413,13 @@ public partial class MainWindow : Window
         SettingsChanged?.Invoke();
     }
 
-    public void ToggleSaved(Title title, string list) => SavedList = Saved.Toggle(title, list);
+    public void ToggleSaved(Title title, string list)
+    {
+        var adding = !Saved.OnList(SavedList, title.Imdb, list);
+        SavedList = Saved.Toggle(title, list);
+        // My List is the Stremio library, when an account is signed in.
+        if (list == "later") Stremio.SetInLibrary(title, adding);
+    }
 
     /// <summary>
     /// How far through each episode you are, by Cinemeta episode id — the join of
@@ -401,17 +429,22 @@ public partial class MainWindow : Window
     /// </summary>
     public Dictionary<string, double> EpisodeProgress(List<Episode>? episodes = null)
     {
+        // One spot per episode on this PC: of every release it was played from, the one played last.
+        // Stremio's (when 0) only fills in what nothing here has played.
         var @out = new Dictionary<string, double>();
-        void Record(string id, double? position, double? duration)
+        var when = new Dictionary<string, long>();
+        void Record(string id, double? position, double? duration, long at = 0)
         {
-            if (duration is not > 0) return;
-            @out[id] = Math.Max(@out.GetValueOrDefault(id), Math.Min(100, (position ?? 0) / duration.Value * 100));
+            if (duration is not > 0 || position is not > 0) return;
+            if (when.TryGetValue(id, out var seen) && seen > at) return;
+            when[id] = at;
+            @out[id] = Math.Min(100, position.Value / duration.Value * 100);
         }
         foreach (var (id, uri) in Links)
         {
             var entry = HistoryList.FirstOrDefault(h => h.Uri == uri);
             if (entry?.LastFileIndex is not int index) continue;
-            Record(id, entry.PositionOf(index), entry.DurationOf(index));
+            Record(id, entry.PositionOf(index), entry.DurationOf(index), entry.PlayedAt(index));
         }
         foreach (var entry in HistoryList.Where(h => h.Kind == "tv" && h.Imdb is not null))
         {
@@ -420,19 +453,19 @@ public partial class MainWindow : Window
                 var i = episodes is { Count: > 0 } && episodes[0].Id.StartsWith(entry.Imdb + ":") ? Meta.IndexOfEpisode(episodes, file.Name, file.Path) : -1;
                 if (i >= 0)
                 {
-                    Record(episodes![i].Id, entry.PositionOf(file.Index), entry.DurationOf(file.Index));
+                    Record(episodes![i].Id, entry.PositionOf(file.Index), entry.DurationOf(file.Index), entry.PlayedAt(file.Index));
                     continue;
                 }
                 var at = Search.ParseEpisode(file.Name);
                 if (at is null) continue;
-                Record($"{entry.Imdb}:{at.Value.Season}:{at.Value.Episode}", entry.PositionOf(file.Index), entry.DurationOf(file.Index));
+                Record($"{entry.Imdb}:{at.Value.Season}:{at.Value.Episode}", entry.PositionOf(file.Index), entry.DurationOf(file.Index), entry.PlayedAt(file.Index));
             }
         }
-        // What Simkl has counts too: after a reinstall, this PC's own history is empty.
-        var simkl = Simkl.Library;
-        foreach (var (imdb, eps) in simkl.Episodes)
+        // What Stremio has counts too: after a reinstall, this PC's own history is empty.
+        var stremio = Stremio.Library;
+        foreach (var (imdb, eps) in stremio.Episodes)
             foreach (var (s, e) in eps) Record($"{imdb}:{s}:{e}", 1, 1);
-        foreach (var p in simkl.Paused)
+        foreach (var p in stremio.Paused)
             if (p.Ep is { } ep) Record($"{p.Imdb}:{ep.Season}:{ep.Episode}", p.Progress, 100);
         return @out;
     }
@@ -440,7 +473,8 @@ public partial class MainWindow : Window
     /// <summary>Where a film was left, by IMDb id.</summary>
     public (double Position, double Duration)? FilmProgress(string imdb)
     {
-        foreach (var entry in HistoryList)
+        // The release played last: the same spot Play resumes from, whichever release it picks.
+        foreach (var entry in HistoryList.OrderByDescending(h => h.LastPlayed))
         {
             if (entry.Imdb != imdb || entry.LastFileIndex is not int index) continue;
             if (entry.DurationOf(index) is double duration && duration > 0) return (entry.PositionOf(index) ?? 0, duration);
@@ -492,13 +526,40 @@ public partial class MainWindow : Window
         SetOpening(null);
     }
 
-    /// <summary>A magnet or .torrent from outside — the command line or a drop.</summary>
+    /// <summary>A link handed over by another Watchly the browser started (see App): opened once someone is in.</summary>
+    public void Incoming(string source)
+    {
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Activate();
+        if (Who is null) waitingToOpen = source;
+        else OpenIncoming(source);
+    }
+
+    /// <summary>A magnet or .torrent from outside — the command line or a drop — or an addon site's stremio:// Install link.</summary>
     void OpenIncoming(string source)
     {
         // A magnet is anything at all: a kids profile plays only what it can browse to.
-        if (KidsMode.On) { Toast("A kids profile can't open torrents or magnet links.", true); return; }
+        if (KidsMode.On) { Toast("A kids profile can't open torrents or addons from other apps.", true); return; }
+        if (source.StartsWith("stremio://", StringComparison.OrdinalIgnoreCase))
+        {
+            _ = InstallAddon(source);
+            return;
+        }
         torrentMode = null;
         _ = OpenUri(source, new OpenOptions());
+    }
+
+    async Task InstallAddon(string link)
+    {
+        try
+        {
+            var added = await Addons.Add(link);
+            Toast($"Added {added.Name} — see the Addons tab");
+        }
+        catch (Exception e)
+        {
+            Toast(e.Message, true);
+        }
     }
 
     void OnDropSource(object sender, DragEventArgs e)
@@ -516,12 +577,20 @@ public partial class MainWindow : Window
         return OpenUri(uri, opts);
     }
 
+    /// <summary>A stream an addon offered: a YouTube video or a page goes to the browser; the rest is streamed.</summary>
+    public Task<string?> StreamHit(Hit hit, OpenOptions opts)
+    {
+        if (!hit.External) return StreamUri(hit.Uri, opts with { Name = hit.Name, FileIdx = hit.FileIdx, Headers = hit.Headers });
+        Ui.Open(hit.Uri);
+        return Task.FromResult<string?>(null);
+    }
+
     public async Task<string?> OpenUri(string uri, OpenOptions opts)
     {
         var ok = await Open(new HistoryItem
         {
             Uri = uri,
-            Title = TitleText.TitleOf(uri),
+            Title = opts.Name ?? TitleText.TitleOf(uri),
             At = Store.Now,
             Imdb = opts.Imdb,
             Kind = opts.Kind,
@@ -544,6 +613,11 @@ public partial class MainWindow : Window
             TitleName = next.TitleName ?? detail?.Name,
         });
         var fresh = HistoryList.First(h => h.Uri == next.Uri);
+        if (Search.IsDirectLink(fresh.Uri))
+        {
+            PlayLink(fresh, opts.KeepProgress, opts.Headers);
+            return true;
+        }
 
         var cts = new CancellationTokenSource();
         SetOpening(cts);
@@ -581,7 +655,9 @@ public partial class MainWindow : Window
         if (opts.Auto is not null)
         {
             var indices = opts.Season is not null ? Pick.SeasonFiles(meta.Files, opts.Season) : null;
-            var chosen = indices is { Count: > 0 } ? indices[0] : Pick.PickFile(meta.Files, opts.Auto == "best" ? null : opts.Auto);
+            var chosen = indices is { Count: > 0 } ? indices[0] : Pick.PickFile(meta.Files, opts.Auto == "best" ? null : opts.Auto)
+                // The addon's own file index settles it when the names can't.
+                ?? (opts.FileIdx is int f && meta.Files.Any(x => x.Index == f && x.IsVideo) ? f : (int?)null);
             if (chosen is int pick)
             {
                 Play(fresh.Uri, torrent, meta, pick, opts.KeepProgress);
@@ -688,12 +764,10 @@ public partial class MainWindow : Window
         }
         var stored = HistoryList.FirstOrDefault(h => h.Uri == uri) ?? new HistoryItem { Uri = uri, Title = meta.Name };
         var file = meta.Files[index];
-        var ratio = stored.ResumeRatio(index);
-        // A release never played here starts where another release of the title was left.
+        // One spot per title on this PC, whichever release is opened: the one played last decides.
         var resumeAt = startOver ? 0
-            : ratio > 0 ? stored.PositionOf(index) ?? 0
-            : History.CarryOver(HistoryList, stored with { Imdb = detail?.Imdb ?? stored.Imdb, TitleName = stored.TitleName ?? detail?.Name }, file.Name)?.At
-              ?? FromSimkl(detail?.Imdb ?? stored.Imdb, detail, file.Name);
+            : History.ResumeAt(HistoryList, stored with { Imdb = detail?.Imdb ?? stored.Imdb, TitleName = stored.TitleName ?? detail?.Name }, index, file.Name)
+              ?? FromStremio(detail?.Imdb ?? stored.Imdb, detail, file.Name);
         var request = new PlaybackRequest
         {
             Title = file.Name,
@@ -718,26 +792,59 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Nothing here has played this title — a reinstall, another device — but Simkl kept where it was
-    /// paused: its percent of the runtime Cinemeta gives. Close, not to the second.
+    /// A link that plays as it is — an addon's debrid stream, a file on the viewer's own server: one
+    /// file, no torrent, kept as a one-file entry so Continue Watching and resume points work as ever.
     /// </summary>
-    static double FromSimkl(string? imdb, Title? detail, string fileName)
+    // ponytail: headers aren't kept in History, so a link that needs them may not resume from Continue
+    // Watching; keep them on the entry if an addon that needs them gets common.
+    void PlayLink(HistoryItem target, bool startOver, Dictionary<string, string>? headers = null)
+    {
+        var detail = CurrentDetail;
+        var name = target.TorrentName ?? target.Title;
+        var file = new TorrentFileInfo { Index = 0, Name = name, Path = name, IsVideo = true };
+        HistoryList = History.Patch(target.Uri, x => x with { TorrentName = name, LastFileIndex = 0, Files = new() { file } });
+        var stored = HistoryList.FirstOrDefault(h => h.Uri == target.Uri) ?? target;
+        var resumeAt = startOver ? 0
+            : History.ResumeAt(HistoryList, stored with { Imdb = detail?.Imdb ?? stored.Imdb, TitleName = stored.TitleName ?? detail?.Name }, 0, name)
+              ?? FromStremio(detail?.Imdb ?? stored.Imdb, detail, name);
+        OpenPlayer(new PlaybackRequest
+        {
+            Title = name,
+            MetaTitle = detail?.Name ?? stored.TitleName,
+            Imdb = detail?.Imdb ?? stored.Imdb,
+            Kind = detail?.Kind ?? stored.Kind,
+            ResumeAt = resumeAt,
+            FileIndex = 0,
+            HistoryUri = target.Uri,
+            SavedSubs = stored.Subtitles?.GetValueOrDefault(0) ?? new(),
+            Next = UpNext(stored, null, new TorrentMeta(name, new() { file }), 0, detail),
+            Link = target.Uri,
+            Headers = headers,
+        });
+    }
+
+    /// <summary>
+    /// Nothing here has played this title — a reinstall, another device — but Stremio kept where it was
+    /// paused: the very second, or its percent of the runtime Cinemeta gives when that's all there is.
+    /// </summary>
+    static double FromStremio(string? imdb, Title? detail, string fileName)
     {
         if (imdb is null || detail is null) return 0;
         (int, int)? ep = detail.Kind == "movie" ? null : Search.ParseEpisode(fileName);
         if (detail.Kind != "movie" && ep is null) return 0;
+        if (Stremio.Library.PausedSeconds(imdb, ep) is double seconds) return seconds;
         var minutes = System.Text.RegularExpressions.Regex.Match(detail.Runtime ?? "", @"(\d+)\s*min", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        if (!minutes.Success || Simkl.Library.PausedAt(imdb, ep) is not double percent) return 0;
+        if (!minutes.Success || Stremio.Library.PausedAt(imdb, ep) is not double percent) return 0;
         return int.Parse(minutes.Groups[1].Value) * 60 * percent / 100;
     }
 
     /// <summary>
     /// The episode after this one: inside this torrent first (instant), else the
-    /// next episode of the title page it came from, found by searching.
+    /// next episode of the title page it came from, found by asking the addons. A link (no torrent) is one file.
     /// </summary>
-    (string Name, Func<Task> Go)? UpNext(HistoryItem stored, Torrent torrent, TorrentMeta meta, int index, Title? detail)
+    (string Name, Func<Task> Go)? UpNext(HistoryItem stored, Torrent? torrent, TorrentMeta meta, int index, Title? detail)
     {
-        if (Pick.NextEpisode(meta.Files, index) is { } following)
+        if (torrent is not null && Pick.NextEpisode(meta.Files, index) is { } following)
             return (following.Name, () => { Play(stored.Uri, torrent, meta, following.Index, true); return Task.CompletedTask; });
 
         if (detail is not { Kind: "tv" }) return null;
@@ -749,13 +856,13 @@ public partial class MainWindow : Window
         var absolute = Meta.AbsoluteNumber(list, next.Season, next.Number);
         return ($"{tag} · {next.Name}", async () =>
         {
-            var hits = await Search.SearchEpisode(detail.Name, next.Season, next.Number, default, detail.Imdb, absolute);
+            var hits = await Search.SearchEpisode(next.Id, detail.Name, next.Season, type: detail.StremioType);
             if (hits.Count == 0)
             {
-                Toast($"No releases found for {tag}", true);
+                Toast($"No streams found for {tag}", true);
                 return;
             }
-            var local = await StreamUri(hits[0].Magnet, new OpenOptions
+            var local = await StreamHit(hits[0], new OpenOptions
             {
                 Auto = Search.PickTag(next.Season, next.Number, absolute),
                 KeepProgress = true,
@@ -778,7 +885,7 @@ public partial class MainWindow : Window
         var player = new PlayerView(request);
         player.Exited += async () =>
         {
-            PauseOnSimkl(request);
+            PauseOnStremio(request);
             if (PlayerHost.Content == player) PlayerHost.Visibility = Visibility.Collapsed;
             Layers.Visibility = Visibility.Visible;
             TabDock.Visibility = Visibility.Visible;
@@ -801,31 +908,31 @@ public partial class MainWindow : Window
         HistoryList = History.SetPosition(uri, index, seconds);
         var item = HistoryList.FirstOrDefault(h => h.Uri == uri);
         var of = item?.DurationOf(index);
-        if (item is null || of is not > 0 || seconds / of.Value < Simkl.WatchedAt || !simklMarked.Add($"{uri}#{index}")) return;
-        if (SimklEpisode(item, index) is var (ok, ep) && ok) Simkl.Watched(item.Imdb, ep);
+        if (item is null || of is not > 0 || seconds / of.Value < Stremio.WatchedAt || !stremioMarked.Add($"{uri}#{index}")) return;
+        if (EpisodeOf(item, index) is var (ok, ep) && ok) Stremio.Watched(item, ep);
     }
 
-    /// <summary>Files already sent to Simkl as watched this session, so a film goes up once however often its spot is saved.</summary>
-    readonly HashSet<string> simklMarked = new();
+    /// <summary>Files already sent to Stremio as watched this session, so a film goes up once however often its spot is saved.</summary>
+    readonly HashSet<string> stremioMarked = new();
 
     /// <summary>The episode a file is, by its S/E; (true, null) for a film; (false, _) for one that can't say.</summary>
-    static (bool Ok, (int, int)? Ep) SimklEpisode(HistoryItem item, int index)
+    static (bool Ok, (int, int)? Ep) EpisodeOf(HistoryItem item, int index)
     {
         if (item.Kind == "movie") return (true, null);
         var name = item.Files?.FirstOrDefault(f => f.Index == index)?.Name;
         return Search.ParseEpisode(name) is { } ep ? (true, ep) : (false, null);
     }
 
-    /// <summary>Closed part-way: Simkl keeps the spot, for a reinstall or another device. Finished went as watched instead.</summary>
-    void PauseOnSimkl(PlaybackRequest request)
+    /// <summary>Closed part-way: Stremio keeps the spot, for a reinstall or another device. Finished went as watched instead.</summary>
+    void PauseOnStremio(PlaybackRequest request)
     {
         if (request.HistoryUri is not { } uri || HistoryList.FirstOrDefault(h => h.Uri == uri) is not { } item) return;
         var index = request.FileIndex;
         var of = item.DurationOf(index);
         if (of is not > 0 || item.PositionOf(index) is not double at) return;
         var r = at / of.Value;
-        if (r < 0.02 || r >= Simkl.WatchedAt) return;
-        if (SimklEpisode(item, index) is var (ok, ep) && ok) Simkl.Pause(item.Imdb, ep, r * 100, item.DisplayName.Split(" · ")[0]);
+        if (r < 0.02 || r >= Stremio.WatchedAt) return;
+        if (EpisodeOf(item, index) is var (ok, ep) && ok) Stremio.Pause(item, ep, at, of.Value);
     }
     public void SaveDuration(string uri, int index, double seconds) => HistoryList = History.SetDuration(uri, index, seconds);
     public void SaveSubs(string uri, int index, List<SavedSub> subs) => HistoryList = History.SetFileSubs(uri, index, subs);

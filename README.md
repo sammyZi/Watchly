@@ -1,11 +1,12 @@
 <p align="center">
-  <img src="docs/images/banner.jpg" alt="Watchly on Android: Home, a film, a series and search">
+  <img src="docs/images/banner-media-player.jpg" alt="Watchly on Android: Home, a film, a series and its episodes">
 </p>
 
 <h1 align="center">Watchly</h1>
 
 <p align="center">
-  <b>Stream or download movies and series from torrents — on Android phones, Android TV and Windows.</b>
+  <b>A beautiful media player for Android phones, Android TV and Windows.</b><br>
+  Bring your own sources — Stremio-compatible addons, a debrid service, or your own media server — and your Stremio account comes along.
 </p>
 
 <p align="center">
@@ -28,14 +29,14 @@
 
 <table>
   <tr>
-    <td width="33%" valign="top">▶️ <b>Stream instantly</b><br>Press play and watch right away — and pick up where you left off.</td>
-    <td width="33%" valign="top">🎬 <b>Every detail</b><br>Ratings, cast, trailers and awards on every title.</td>
-    <td width="33%" valign="top">📺 <b>Binge-ready series</b><br>Seasons and episodes, what you've watched marked, and Skip intro.</td>
+    <td width="33%" valign="top">🧩 <b>Any Stremio addon</b><br>Catalogues, titles, streams and subtitles from the addons you add. Tap <i>Install</i> on an addon's site and pick Watchly.</td>
+    <td width="33%" valign="top">🔄 <b>Your Stremio account</b><br>Sign in with a code — no password in Watchly. Your library, Continue Watching and addons follow you, both ways.</td>
+    <td width="33%" valign="top">▶️ <b>Plays what you bring</b><br>Debrid links, your own media server, any link you paste. 4K, HDR and every format, on Media3 or VLC.</td>
   </tr>
   <tr>
-    <td valign="top">⬇️ <b>Download &amp; go</b><br>An episode or a whole season, to watch offline.</td>
-    <td valign="top">🔎 <b>Find anything</b><br>Search titles — or torrents by name.</td>
-    <td valign="top">👤 <b>Made yours</b><br>Profiles with PINs, light and dark themes, Media3 or VLC, subtitles in your language.</td>
+    <td valign="top">🎬 <b>Every detail</b><br>Ratings, cast, trailers and awards on every title — and Resume right where you stopped.</td>
+    <td valign="top">📺 <b>Binge-ready series</b><br>Seasons and episodes, what you've watched marked, and Skip intro.</td>
+    <td valign="top">👤 <b>Made yours</b><br>Profiles with PINs, Kids profiles, your favourite genres up front, light and dark themes, subtitles in your language.</td>
   </tr>
 </table>
 
@@ -62,7 +63,7 @@ The `universal` APKs fit every device at once, at a bigger download.
 
 1. Download `Watchly-windows-…-x64-setup.exe` and run it.
 2. Follow the setup — Watchly lands in the Start menu, and on the desktop if you tick it.
-3. Allow the Windows Firewall prompt on first launch, so other peers can connect.
+3. Allow the Windows Firewall prompt on first launch.
 
 > [!WARNING]
 > The installer isn't code-signed yet, so Windows may say **"Windows protected your PC"**.
@@ -95,6 +96,13 @@ when Android asks.
    go back, and press **Install**.
 6. Open Watchly from the TV's apps row. Later updates install the same way, over the old one.
 
+### ✨ First launch
+
+1. Pick a few favourite genres — the home screen leads with them.
+2. **Sign in to Stremio** (or skip). You approve on Stremio's own page; your library, Continue Watching and addons come with you.
+3. No Stremio account? Open the **Addons** tab and paste an addon's link, or tap **Install** on an addon's site and choose Watchly.
+4. On the TV, **Settings → Addons → Copy addons from phone** brings every addon over with one QR scan.
+
 <a name="screenshots"></a>
 <h2><img src="https://img.shields.io/badge/Screenshots-F5A623?style=for-the-badge" alt="Screenshots" height="34"></h2>
 
@@ -107,11 +115,7 @@ when Android asks.
   </tr>
   <tr>
     <td><img src="docs/images/screen-3-series.jpg" alt="A series' page" width="400"></td>
-    <td><img src="docs/images/screen-4-episodes.jpg" alt="Episodes and downloads" width="400"></td>
-  </tr>
-  <tr>
-    <td><img src="docs/images/screen-5-search.jpg" alt="Search" width="400"></td>
-    <td><img src="docs/images/screen-6-settings.jpg" alt="Settings" width="400"></td>
+    <td><img src="docs/images/screen-4-episodes.jpg" alt="Episodes" width="400"></td>
   </tr>
 </table>
 
@@ -128,19 +132,10 @@ when Android asks.
     <td align="center"><img src="docs/images/tv-2-title.jpg" alt="A film's page" width="800"></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/images/tv-4-sources-4k.jpg" alt="Sources filtered to 4K" width="800"></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/images/tv-5-search.jpg" alt="Search" width="800"></td>
-  </tr>
-  <tr>
     <td align="center"><img src="docs/images/tv-6-series.jpg" alt="A series' page" width="800"></td>
   </tr>
   <tr>
     <td align="center"><img src="docs/images/tv-7-episodes.jpg" alt="Episodes" width="800"></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/images/tv-8-settings.jpg" alt="Settings" width="800"></td>
   </tr>
 </table>
 
@@ -151,12 +146,12 @@ Three apps, each with its own README:
 
 | App | Folder | Stack |
 |---|---|---|
-| 📱 Phone (Android) | [`mobile/`](mobile/README.md) | Kotlin + Compose on `tv/core`; libtorrent4j + Media3 / libVLC |
-| 📺 Television (Android TV) | [`tv/`](tv/README.md) | Kotlin + Compose; libtorrent4j + Media3 / libVLC |
-| 🪟 Windows desktop | [`windows/`](windows/README.md) | MonoTorrent + LibVLCSharp (.NET 8, WPF) |
+| 📱 Phone (Android) | [`mobile/`](mobile/README.md) | Kotlin + Compose on `tv/core`; Media3 / libVLC |
+| 📺 Television (Android TV) | [`tv/`](tv/README.md) | Kotlin + Compose; Media3 / libVLC |
+| 🪟 Windows desktop | [`windows/`](windows/README.md) | LibVLCSharp (.NET 8, WPF) |
 
-The phone and the TV share one Gradle module, `tv/core`: the torrent engine,
-the players, indexers, metadata, the store and the look.
+The phone and the TV share one Gradle module, `tv/core`: the addon client, the
+Stremio account sync, the players, metadata, the store and the look.
 
 ```bash
 cd mobile && ./gradlew compileDebugKotlin
@@ -166,27 +161,31 @@ cd mobile && ./gradlew compileDebugKotlin
 cd tv && ./gradlew compileDebugKotlin testDebugUnitTest
 ```
 
-[`docs/`](docs/rolling-cache-architecture.md) has the rolling-cache design the
-apps share.
+[`docs/`](docs/rolling-cache-architecture.md) describes how streams reach the
+player, and the streaming cache the apps share.
 
 <a name="built-on"></a>
 <h2><img src="https://img.shields.io/badge/Built_on-A855F7?style=for-the-badge" alt="Built on" height="34"></h2>
 
 | | |
 |---|---|
-| 🧲 Torrents | [libtorrent](https://libtorrent.org) via [libtorrent4j](https://github.com/aldenml/libtorrent4j) on Android · [MonoTorrent](https://github.com/alanmcgovern/monotorrent) on Windows |
+| 🧩 Sources | The [Stremio addon protocol](https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/protocol.md): catalogues, titles, streams and subtitles from addons you add yourself |
+| 🔄 Sync | Your [Stremio](https://www.stremio.com) account: library, Continue Watching, watched marks and addons |
 | 🎞️ Players | [AndroidX Media3](https://github.com/androidx/media) with the [Jellyfin FFmpeg decoder](https://github.com/jellyfin/jellyfin-androidx-media) · [VLC / libVLC](https://www.videolan.org/vlc/libvlc.html) and [LibVLCSharp](https://github.com/videolan/libvlcsharp) |
 | 🎨 Look | [Jetpack Compose](https://developer.android.com/jetpack/compose) · [Coil](https://github.com/coil-kt/coil) · [Lucide](https://lucide.dev) icons |
 | 🗂️ Titles &amp; art | [Cinemeta](https://v3-cinemeta.strem.io), Stremio's public catalogue · [TVmaze](https://www.tvmaze.com) episode stills |
 | ⏭️ Intros | [IntroDB](https://introdb.app) |
-| 💬 Subtitles | [OpenSubtitles](https://www.opensubtitles.org) (through Stremio's add-on, no key needed) · [SubDL](https://subdl.com) with your own free key |
+| 💬 Subtitles | Subtitle addons you add · [SubDL](https://subdl.com) with your own free key |
+| 🔗 Peer streams | For addons that send them: [libtorrent](https://libtorrent.org) via [libtorrent4j](https://github.com/aldenml/libtorrent4j) on Android · [MonoTorrent](https://github.com/alanmcgovern/monotorrent) on Windows |
 
 <a name="disclaimer"></a>
 <h2><img src="https://img.shields.io/badge/Disclaimer-5B6472?style=for-the-badge" alt="Disclaimer" height="34"></h2>
 
 > [!CAUTION]
-> Watchly is only a player. It does not host, upload, share or own any videos or torrent files,
-> and none come with it. It searches public, third-party indexes and plays what you choose, through
-> the BitTorrent protocol, the way any torrent client does. You are responsible for what you stream
-> or download, and for following the copyright laws where you live. Please only watch what you have
-> the right to.
+> Watchly is only a media player. It does not host, upload, share, index or own any content, and it
+> ships with no sources: what it plays comes from addons, links and servers you add yourself. Watchly
+> does not run, endorse or control any of them. You are responsible for what you add and play, and for
+> following the copyright laws where you live. Please only watch what you have the right to.
+>
+> Copyright holders: Watchly holds nothing to take down. Notices about content belong with the addon
+> or server that serves it; for anything about this repository itself, open an issue.

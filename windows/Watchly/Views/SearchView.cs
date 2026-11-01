@@ -10,7 +10,7 @@ namespace Watchly.Views;
 
 /// <summary>
 /// src/screens/SearchScreen.tsx: titles first (posters from Cinemeta), with a
-/// Torrents switch that searches the indexes by release name instead.
+/// Streams switch that asks the viewer's addons for a film by name, or plays a pasted link.
 /// </summary>
 public sealed class SearchView : UserControl
 {
@@ -107,13 +107,13 @@ public sealed class SearchView : UserControl
         void Add(FrameworkElement e) { e.Margin = new Thickness(0, 0, 8, 6); chipRow.Children.Add(e); }
         // A kids profile searches titles only: a release name can't be vetted.
         if (KidsMode.On) torrents = false;
-        if (!KidsMode.On) Add(Ui.Chip("Torrents", torrents, () =>
+        if (!KidsMode.On) Add(Ui.Chip("Streams", torrents, () =>
         {
             torrents = !torrents;
             hits = null;
             titles = null;
             shownFor = "";
-            input.Tag = torrents ? "Release or torrent name" : "Films and series";
+            input.Tag = torrents ? "A film, or a link to play" : "Films and series";
             BuildChips();
             Run();
         }, "search"));
@@ -147,14 +147,14 @@ public sealed class SearchView : UserControl
             }
             shownFor = q;
             SetBusy(true);
-            // Show releases as each index answers; the spinner in the box stays until the last one has.
+            // Show streams as each addon answers; the spinner in the box stays until the last one has.
             void Arrived(List<Hit> sofar) => Dispatcher.BeginInvoke(() =>
             {
                 if (mine != latest) return;
                 hits = sofar;
                 Render();
             });
-            var found = await Search.SearchTorrents(q, progress: Arrived).ContinueWith(t => t.IsCompletedSuccessfully ? t.Result : new List<Hit>());
+            var found = await Search.SearchStreams(q, progress: Arrived).ContinueWith(t => t.IsCompletedSuccessfully ? t.Result : new List<Hit>());
             if (mine != latest) return;
             hits = found;
             SetBusy(false);
@@ -180,6 +180,8 @@ public sealed class SearchView : UserControl
         {
             var filmsJob = q.Length > 0 ? Meta.SearchTitles(q, "movie") : Meta.LoadCatalog("movie");
             var seriesJob = q.Length > 0 ? Meta.SearchTitles(q, "tv") : Meta.LoadCatalog("tv");
+            // And every addon catalogue that searches, as Stremio asks them all.
+            var addonsJob = q.Length > 0 && !KidsMode.On ? Meta.SearchAddons(q) : Task.FromResult(new List<Title>());
             var films = await filmsJob;
             var series = await seriesJob;
             // Interleaved: looking for a show should not mean scrolling past thirty films.
@@ -189,6 +191,7 @@ public sealed class SearchView : UserControl
                 if (i < films.Count) mixed.Add(films[i]);
                 if (i < series.Count) mixed.Add(series[i]);
             }
+            mixed = Meta.UniqueById(mixed.Concat(await addonsJob));
         }
         if (mine != latest) return;
         titles = KidsMode.Only(mixed);
@@ -209,14 +212,15 @@ public sealed class SearchView : UserControl
             var list = new StackPanel();
             if (hits is { Count: > 0 })
             {
-                list.Children.Add(Ui.Text($"{hits.Count} RELEASES", "Overline", "Faint"));
+                list.Children.Add(Ui.Text($"{hits.Count} STREAMS", "Overline", "Faint"));
                 foreach (var hit in hits) list.Children.Add(HitRow(hit));
             }
             else if (!busy)
             {
                 var note = Ui.Text(hits is null
-                    ? "Search the indexes by release name — anything they carry, whether the catalogue lists it or not. You can also drop a .torrent file or a magnet link anywhere on this window."
-                    : "No releases match that.", "Meta", "Faint", 13);
+                    ? "Ask your addons for a film by name, or paste a link to play it as it is — a video on your own media server, or a magnet. You can also drop a .torrent file or a magnet link anywhere on this window."
+                    : !Addons.HasStreams && Search.LinkHit(Query) is null ? "No addons to ask yet. Add one under Settings → Addons, or paste a link."
+                    : "No streams for that.", "Meta", "Faint", 13);
                 note.TextWrapping = TextWrapping.Wrap;
                 note.Margin = new Thickness(0, 24, 0, 0);
                 list.Children.Add(note);
@@ -250,48 +254,52 @@ public sealed class SearchView : UserControl
     FrameworkElement HitRow(Hit hit)
     {
         var tone = Ui.HealthTone(hit.Seeders);
-        var meta = string.Join("  ·  ", new[] { hit.Size > 0 ? Format.Bytes(hit.Size) : null, hit.Quality, $"{hit.Seeders} seeders" }.Where(s => s is not null));
+        var meta = string.Join("  ·  ", new[] { hit.Size > 0 ? Format.Bytes(hit.Size) : null, hit.Quality, hit.Direct ? "Direct" : hit.External ? "Opens in the browser" : $"{hit.Seeders} seeders", hit.Addon.Length > 0 ? hit.Addon : null }.Where(s => s is not null));
         var name = Ui.Text(hit.Name, "Label", "Text", 13);
         name.ToolTip = hit.Name;
         var body = new StackPanel { Children = { name, Ui.Text(meta, "Meta", "Faint") }, VerticalAlignment = VerticalAlignment.Center };
         ((TextBlock)body.Children[1]).Margin = new Thickness(0, 3, 0, 0);
 
-        var download = Ui.Round("download", () =>
-        {
-            if (Query.Length > 0) recent = Searches.Remember(Query);
-            shell.BeginDownload(new DownloadJob { Uri = hit.Magnet, Auto = "best", Title = hit.Name, TitleName = TitleText.SearchableName(hit.Name) });
-        }, "Accent", "SurfaceAlt", 32, 15, "Download");
         var copy = Ui.Round("copy", () =>
         {
             // The clipboard can be held open by another app for a moment; say so
             // rather than let the exception reach the whole window.
             try
             {
-                Clipboard.SetText(hit.Magnet);
-                shell.Toast("Magnet link copied");
+                Clipboard.SetText(hit.Uri);
+                shell.Toast(hit.Direct ? "Link copied" : "Magnet link copied");
             }
             catch (System.Runtime.InteropServices.ExternalException)
             {
                 shell.Toast("Couldn't reach the clipboard — try again", true);
             }
-        }, "Accent", "SurfaceAlt", 32, 15, "Copy magnet link");
+        }, "Accent", "SurfaceAlt", 32, 15, hit.Direct ? "Copy link" : "Copy magnet link");
         copy.Margin = new Thickness(0, 0, 8, 0);
-        var dot = Ui.Brushed(new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 4, 0) }, tone.Fg);
+        var dot = Ui.Brushed(new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 4, 0) }, hit.Direct ? "Good" : tone.Fg);
 
         var dock = new DockPanel { Margin = new Thickness(0, 12, 0, 12) };
         DockPanel.SetDock(dot, Dock.Right);
-        DockPanel.SetDock(download, Dock.Right);
-        DockPanel.SetDock(copy, Dock.Right);
         dock.Children.Add(dot);
-        dock.Children.Add(download);
+        // The download engine is a torrent client; a link is streamed only.
+        if (hit.IsTorrent)
+        {
+            var download = Ui.Round("download", () =>
+            {
+                if (Query.Length > 0) recent = Searches.Remember(Query);
+                shell.BeginDownload(new DownloadJob { Uri = hit.Uri, Auto = "best", Title = hit.Name, TitleName = TitleText.SearchableName(hit.Name) });
+            }, "Accent", "SurfaceAlt", 32, 15, "Download");
+            DockPanel.SetDock(download, Dock.Right);
+            dock.Children.Add(download);
+        }
+        DockPanel.SetDock(copy, Dock.Right);
         dock.Children.Add(copy);
         dock.Children.Add(body);
 
         var row = Ui.Button(new Border { Child = dock, BorderThickness = new Thickness(0, 0, 0, 1) }, () =>
         {
             if (Query.Length > 0) recent = Searches.Remember(Query);
-            // Straight to the file list — someone who tapped a release wants to see what is in it.
-            _ = shell.StreamUri(hit.Magnet, new OpenOptions { TitleName = TitleText.SearchableName(hit.Name) });
+            // A torrent goes straight to its file list — someone who tapped a release wants to see what is in it.
+            _ = shell.StreamHit(hit, new OpenOptions { TitleName = TitleText.SearchableName(hit.Name) });
         });
         ((Border)row.Content).SetResourceReference(Border.BorderBrushProperty, "Line");
         return row;

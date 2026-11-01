@@ -198,11 +198,13 @@ fun scopeOf(name: String): Scope {
 
 /* ------------------------------------------------------------------ hits */
 
+/** One stream an addon offered: a torrent, or a link that plays as it is. */
 data class Hit(
-    /** The info hash — the one id every index agrees on. */
+    /** The info hash for a torrent, so two addons' copies are one row; else the link. */
     val id: String,
     val name: String,
-    val magnet: String,
+    /** A magnet, or the http(s) link itself — a debrid service's, or the viewer's own server's. */
+    val uri: String,
     val seeders: Int,
     val leechers: Int,
     val size: Long,
@@ -210,11 +212,23 @@ data class Hit(
     val kind: String,
     val scope: Scope,
     val imdb: String?,
-    /** Torrentio's size is the one file it found, even inside a pack. */
+    /** An addon's size is the one file it found, even inside a pack. */
     val perFileSize: Boolean = false,
-    /** From nyaa.si: for anime, the releases to try first. */
-    val nyaa: Boolean = false,
-)
+    /** The addon it came from, by name. */
+    val addon: String = "",
+    /** Not ours to play: a YouTube video or a page the addon sends to another app. */
+    val external: Boolean = false,
+    /** What the link's server wants with every request (an addon's `proxyHeaders`). */
+    val headers: Map<String, String> = emptyMap(),
+    /** The file the addon meant, by the torrent's own numbering — for when names can't say. */
+    val fileIdx: Int? = null,
+) {
+    /** Plays straight from its link: no swarm, no seeders to count. */
+    val direct get() = !external && isDirectLink(uri)
+}
+
+/** A video served over http(s), as opposed to a magnet, a .torrent or a path. */
+fun isDirectLink(uri: String) = Regex("^https?://", RegexOption.IGNORE_CASE).containsMatchIn(uri) && !isTorrentSource(uri)
 
 private val HASH = Regex("^[0-9a-fA-F]{40}$")
 
@@ -235,121 +249,55 @@ fun health(seeders: Int) = when {
     else -> Health.DEAD
 }
 
-/** apibay subcategories: 201/202/204/207/209 films, 205/208 series. */
-fun kindOf(category: Int) = when (category) {
-    201, 202, 204, 207, 209 -> "movie"
-    205, 208 -> "tv"
-    else -> "other"
-}
-
-private fun JSONObject.num(key: String): Long = optString(key).toDoubleOrNull()?.toLong() ?: 0L
-
-fun toHits(rows: JSONArray): List<Hit> = rows.objects()
-    .filter { it.optString("id") != "0" && HASH.matches(it.optString("info_hash")) }
-    .filter { it.num("category") in 200..299 }
-    .map { r ->
-        val name = r.optString("name")
-        val hash = r.optString("info_hash").lowercase()
-        Hit(
-            id = hash, name = name, magnet = magnetFor(hash, name),
-            seeders = r.num("seeders").toInt(), leechers = r.num("leechers").toInt(), size = r.num("size"),
-            quality = quality(name), kind = kindOf(r.num("category").toInt()), scope = scopeOf(name),
-            imdb = r.optString("imdb").takeIf { Regex("^tt\\d+$").matches(it) },
-        )
-    }
-
 private val SEEDERS = Regex("""\x{1F464}\s*(\d+)""")
 private val SIZE = Regex("""\x{1F4BE}\s*([\d.]+)\s*(TB|GB|MB|KB)""", RegexOption.IGNORE_CASE)
 private val UNIT = mapOf("kb" to 1024.0, "mb" to 1024.0 * 1024, "gb" to 1024.0 * 1024 * 1024, "tb" to 1024.0 * 1024 * 1024 * 1024)
 
-/** Torrentio's numbers sit inside a display string: "name\n👤 84 💾 51.3 GB ⚙️ 1337x". */
-fun toTorrentioHits(streams: JSONArray, kind: String): List<Hit> = streams.objects()
-    .filter { HASH.matches(it.optString("infoHash")) }
-    .mapNotNull { s ->
-        val lines = s.optString("title").split('\n')
-        val name = lines.firstOrNull()?.trim().orEmpty().ifEmpty { s.optString("name").replace('\n', ' ') }
-        if (name.isEmpty()) return@mapNotNull null
-        val stats = lines.drop(1).joinToString(" ")
-        val size = SIZE.find(stats)
-        val hash = s.optString("infoHash").lowercase()
-        Hit(
-            id = hash, name = name, magnet = magnetFor(hash, name),
-            seeders = SEEDERS.find(stats)?.groupValues?.get(1)?.toIntOrNull() ?: 0, leechers = 0,
-            size = size?.let { (it.groupValues[1].toDouble() * (UNIT[it.groupValues[2].lowercase()] ?: 0.0)).roundToLong() } ?: 0L,
-            quality = quality(name), kind = kind, scope = scopeOf(name), imdb = null, perFileSize = true,
-        )
-    }
-
-fun toYtsHits(movies: JSONArray): List<Hit> = movies.objects().flatMap { movie ->
-    val title = movie.str("title_long") ?: movie.optString("title")
-    val imdb = movie.optString("imdb_code").takeIf { Regex("^tt\\d+$").matches(it) }
-    movie.optJSONArray("torrents")?.objects().orEmpty().mapNotNull { t ->
-        val hash = t.optString("hash").lowercase()
-        if (!HASH.matches(hash)) return@mapNotNull null
-        val name = listOfNotNull(title, t.str("quality"), t.str("type")).joinToString(" ")
-        Hit(hash, name, magnetFor(hash, name), t.num("seeds").toInt(), t.num("peers").toInt(), t.num("size_bytes"), quality(name), "movie", Scope.EPISODE, imdb)
-    }
-}
-
-fun toEztvHits(torrents: JSONArray): List<Hit> = torrents.objects()
-    .filter { HASH.matches(it.optString("hash")) && it.optString("title").isNotEmpty() }
-    .map { t ->
-        val name = t.optString("title")
-        val hash = t.optString("hash").lowercase()
-        Hit(hash, name, magnetFor(hash, name), t.num("seeds").toInt(), t.num("peers").toInt(), t.num("size_bytes"), quality(name), "tv", scopeOf(name), null)
-    }
-
-fun toCsvHits(rows: JSONArray): List<Hit> = rows.objects()
-    .filter { HASH.matches(it.str("infohash") ?: it.optString("info_hash")) && it.optString("name").isNotEmpty() }
-    .map { r ->
-        val name = r.optString("name")
-        val hash = (r.str("infohash") ?: r.optString("info_hash")).lowercase()
-        Hit(
-            hash, name, magnetFor(hash, name), r.num("seeders").toInt(), r.num("leechers").toInt(),
-            if (r.has("size_bytes")) r.num("size_bytes") else r.num("size"), quality(name),
-            if (parseEpisode(name) != null) "tv" else "movie", scopeOf(name), null,
-        )
-    }
-
-/** Knaben mixes in music, books and games. */
-private val WATCHABLE = Regex("^(tv|movies|anime)\\b", RegexOption.IGNORE_CASE)
-
-fun toKnabenHits(rows: JSONArray): List<Hit> = rows.objects()
-    .filter { HASH.matches(it.optString("hash")) && WATCHABLE.containsMatchIn(it.optString("category")) && it.optString("title").isNotEmpty() }
-    .map { r ->
-        val name = r.optString("title")
-        val hash = r.optString("hash").lowercase()
-        // Our own magnet: theirs still points at trackers that died years ago.
-        Hit(
-            hash, name, magnetFor(hash, name), r.num("seeders").toInt(), r.num("peers").toInt(), r.num("bytes"), quality(name),
-            if (r.optString("category").lowercase().startsWith("movies")) "movie" else "tv", scopeOf(name), null,
-        )
-    }
-
-private val NYAA_SIZE = Regex("""([\d.]+)\s*([KMGT])i?B""", RegexOption.IGNORE_CASE)
-
-private fun unescapeXml(s: String) = Regex("&(#\\d+|[a-z]+);", RegexOption.IGNORE_CASE).replace(s) { m ->
-    val code = m.groupValues[1]
-    if (code.startsWith("#")) code.drop(1).toIntOrNull()?.toChar()?.toString() ?: m.value
-    else mapOf("amp" to "&", "lt" to "<", "gt" to ">", "quot" to "\"", "apos" to "'")[code.lowercase()] ?: m.value
-}
-
-/** Nyaa's RSS feed, plain enough to read with a pattern. */
-fun toNyaaHits(xml: String): List<Hit> = Regex("<item>([\\s\\S]*?)</item>").findAll(xml).mapNotNull { m ->
-    val item = m.groupValues[1]
-    fun field(tag: String) = Regex("<$tag>([\\s\\S]*?)</$tag>").find(item)?.groupValues?.get(1)?.trim().orEmpty()
-    val hash = field("nyaa:infoHash").lowercase()
-    val name = unescapeXml(field("title"))
-    if (!HASH.matches(hash) || name.isEmpty()) return@mapNotNull null
-    val size = NYAA_SIZE.find(field("nyaa:size"))
+/**
+ * An addon's streams, every shape the Stremio protocol has: a torrent by `infoHash` (with its
+ * `fileIdx` and `sources` trackers), a `url` that plays as it is (with any `proxyHeaders`), and a
+ * `ytId` or `externalUrl` handed to another app. The numbers most addons give sit inside the display
+ * text — "name\n👤 84 💾 51.3 GB ⚙️ 1337x" — and `behaviorHints` carry the file's real name and size.
+ * ponytail: archive (`rarUrls`…) and `nzbUrl` streams are skipped; few addons send them yet.
+ */
+fun toStreamHits(streams: JSONArray, kind: String, addon: String = ""): List<Hit> = streams.objects().mapNotNull { s ->
+    val hash = s.optString("infoHash").lowercase().takeIf { HASH.matches(it) }
+    val url = s.str("url")?.takeIf { isDirectLink(it) || isTorrentSource(it) }
+    val outside = s.str("ytId")?.let { "https://www.youtube.com/watch?v=$it" } ?: s.str("externalUrl")
+    if (hash == null && url == null && outside == null) return@mapNotNull null
+    val hints = s.optJSONObject("behaviorHints")
+    val text = (s.str("title") ?: s.str("description")).orEmpty()
+    val label = s.optString("name").replace('\n', ' ').trim()
+    val name = hints?.str("filename") ?: text.lineSequence().firstOrNull()?.trim().orEmpty().ifEmpty { label }
+    if (name.isEmpty()) return@mapNotNull null
+    val size = hints?.optLong("videoSize")?.takeIf { it > 0 }
+        ?: SIZE.find(text)?.let { (it.groupValues[1].toDouble() * (UNIT[it.groupValues[2].lowercase()] ?: 0.0)).roundToLong() } ?: 0L
+    val trackers = s.strings("sources").filter { it.startsWith("tracker:") }.map { it.removePrefix("tracker:") }
+    val headers = hints?.optJSONObject("proxyHeaders")?.optJSONObject("request")
+        ?.let { h -> h.keys().asSequence().associateWith { h.optString(it) } }.orEmpty()
     Hit(
-        hash, name, magnetFor(hash, name), field("nyaa:seeders").toIntOrNull() ?: 0, field("nyaa:leechers").toIntOrNull() ?: 0,
-        size?.let { (it.groupValues[1].toDouble() * (UNIT["${it.groupValues[2].lowercase()}b"] ?: 0.0)).roundToLong() } ?: 0L,
-        quality(name), "tv", scopeOf(name), null, nyaa = true,
+        id = hash ?: url ?: outside!!, name = name,
+        uri = when {
+            hash != null -> withTrackers(magnetFor(hash, name), trackers)
+            url != null -> url
+            else -> outside!!
+        },
+        seeders = SEEDERS.find(text)?.groupValues?.get(1)?.toIntOrNull() ?: 0, leechers = 0, size = size,
+        quality = quality(name) ?: quality("$label $text"), kind = kind, scope = scopeOf(name), imdb = null, perFileSize = true, addon = addon,
+        external = hash == null && url == null, headers = if (url != null) headers else emptyMap(),
+        fileIdx = s.optInt("fileIdx", -1).takeIf { hash != null && it >= 0 },
     )
-}.toList()
+}
 
-/** Same torrent from two indexes is one row — keep the bigger swarm and the known size. */
+/** A pasted magnet or http(s) video link as a stream of its own: a file on the viewer's own server, say. */
+fun linkHit(text: String): Hit? {
+    val s = text.trim()
+    if (!s.startsWith("magnet:?", ignoreCase = true) && !Regex("^https?://\\S+$", RegexOption.IGNORE_CASE).matches(s)) return null
+    val name = titleOf(s)
+    return Hit(magnetHash(s) ?: s, name, s, 0, 0, 0, quality(name), if (isSeries(name)) "tv" else "movie", scopeOf(name), null, addon = "Link")
+}
+
+/** Same torrent from two addons is one row — keep the bigger swarm and the known size. */
 fun merge(lists: List<List<Hit>>): List<Hit> {
     val best = LinkedHashMap<String, Hit>()
     for (hit in lists.flatten()) {
@@ -363,82 +311,38 @@ fun merge(lists: List<List<Hit>>): List<Hit> {
             seeders = maxOf(hit.seeders, seen.seeders),
             size = bigger.size,
             perFileSize = bigger.perFileSize,
-            nyaa = hit.nyaa || seen.nyaa,
         )
     }
     return best.values.toList()
 }
 
-/** Seeders outweigh leechers; a name matching every word typed doubles. */
+/** Links first — they play at once — then seeders over leechers, other apps' last; a name matching every word typed doubles. */
 fun rank(hits: List<Hit>, query: String = ""): List<Hit> {
     val words = query.lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
     fun score(h: Hit): Double {
         val full = words.isNotEmpty() && words.all { h.name.lowercase().contains(it) }
         return (h.seeders + h.leechers / 4.0) * if (full) 2 else 1
     }
-    return hits.sortedByDescending(::score)
+    return hits.sortedWith(compareByDescending<Hit> { it.direct }.thenBy { it.external }.thenByDescending(::score))
 }
 
-/** This season's pack first, then loose episodes, whole-series dumps last. */
+/** Links first, then this season's pack, then loose episodes, whole-series dumps last. */
 fun rankEpisode(hits: List<Hit>, query: String = "", season: Int? = null): List<Hit> {
-    val ordered = rank(hits, query)
+    val (links, ordered) = rank(hits, query).partition { it.direct }
     fun thisPack(h: Hit): Boolean {
         if (h.seeders < 1 || h.scope != Scope.SEASON) return false
         val c = seasonsIn(h.name)
         return c.size <= 1 && (season == null || c.isEmpty() || season in c)
     }
     fun one(h: Hit) = h.scope == Scope.EPISODE && h.seeders >= 1
-    return ordered.filter(::thisPack) + ordered.filter(::one) + ordered.filter { !thisPack(it) && !one(it) }
-}
-
-/** "Dune: Part One" is filed as "Dune 2021" everywhere: the part before the subtitle. */
-fun aliasOf(title: String): String? {
-    val short = title.split(Regex(":| - "))[0].trim()
-    return short.takeIf { it.isNotEmpty() && !it.equals(title.trim(), ignoreCase = true) }
-}
-
-private fun tokens(s: String) = s.lowercase().replace(Regex("[^a-z0-9]+"), " ").trim().split(' ').filter { it.isNotEmpty() }
-
-/** Every word of the title appears, as a word — keeps "IMDb Top 250" packs out. */
-fun namesTitle(release: String, title: String): Boolean {
-    val want = tokens(title)
-    if (want.isEmpty()) return true
-    val got = tokens(release).toSet()
-    return want.all { it in got }
-}
-
-private val RELEASE_MARK = Regex(
-    "^(?:s\\d{1,2}(?:e\\d{1,3})?|e\\d{1,3}|\\d{1,2}x\\d{2}|(?:19|20)\\d{2}|season|seasons|complete|series|\\d{3,4}p|4k|uhd|hdr|bluray|blu|bdrip|brrip|web|webrip|webdl|hdtv|dvdrip|dvd|x264|x265|h264|h265|hevc|avc|xvid|aac|ac3|eac3|dts|ddp?5|truehd|atmos|remux|proper|repack|extended|imax|uncut|limited|internal|multi|dual|hindi|eng|english|subbed|dubbed)$",
-    RegexOption.IGNORE_CASE,
-)
-
-/** The part of a release name that is the title, in order. */
-fun releaseTitle(release: String): List<String> = tokens(release).takeWhile { !RELEASE_MARK.matches(it) }
-
-/** This release is *this* title — "House" must not match "House of the Dragon". Short tags allowed. */
-fun sameTitle(release: String, title: String): Boolean {
-    val want = tokens(title)
-    if (want.isEmpty()) return true
-    // Anime leads with the group — "[SubsPlease] One Piece - 1071" — and ends the title with the episode.
-    val got = releaseTitle(release.replace(Regex("""^\s*(?:\[[^\]]*]\s*)+"""), ""))
-    if (got.size < want.size) return false
-    for (i in want.indices) if (got[i] != want[i]) return false
-    return got.drop(want.size).all { it.length <= 2 || it.all(Char::isDigit) }
+    return links + ordered.filter(::thisPack) + ordered.filter(::one) + ordered.filter { !thisPack(it) && !one(it) }
 }
 
 typealias OnHits = (List<Hit>) -> Unit
 
 /* ---------------------------------------------------------------- search */
 
-private const val API = "https://apibay.org/q.php"
-private const val CSV = "https://torrents-csv.com/service/search"
-private const val TORRENTIO = "https://torrentio.strem.fun/stream"
-private const val YTS = "https://yts.mx/api/v2/list_movies.json"
-private const val EZTV = "https://eztv.tf/api/get-torrents"
-private const val KNABEN = "https://api.knaben.org/v1"
-private const val NYAA = "https://nyaa.si/"
-private const val SOURCE_MS = 8000L
-private const val KNABEN_MS = 15000L
+private const val SOURCE_MS = 12000L
 private const val PLAY_GRACE_MS = 2000L
 
 private suspend fun source(name: String, ms: Long, job: suspend () -> List<Hit>): List<Hit> {
@@ -448,138 +352,48 @@ private suspend fun source(name: String, ms: Long, job: suspend () -> List<Hit>)
     return out.orEmpty()
 }
 
-private suspend fun fromApibay(q: String) = toHits(JSONArray(Net.get("$API?q=${enc(q)}&cat=200", quiet = true)))
-private suspend fun fromCsv(q: String) = JSONObject(Net.get("$CSV?q=${enc(q)}&size=50", quiet = true)).optJSONArray("torrents")?.let(::toCsvHits).orEmpty()
-private suspend fun fromYts(q: String) = JSONObject(Net.get("$YTS?query_term=${enc(q)}&limit=50", quiet = true)).optJSONObject("data")?.optJSONArray("movies")?.let(::toYtsHits).orEmpty()
-private suspend fun fromEztv(imdb: String) = JSONObject(Net.get("$EZTV?imdb_id=${imdb.removePrefix("tt")}&limit=100", quiet = true)).optJSONArray("torrents")?.let(::toEztvHits).orEmpty()
-private suspend fun fromTorrentio(path: String, kind: String) = toTorrentioHits(JSONObject(Net.get("$TORRENTIO/$path.json", quiet = true)).optJSONArray("streams") ?: JSONArray(), kind)
-private suspend fun fromNyaa(q: String) = toNyaaHits(Net.get("$NYAA?page=rss&c=1_2&f=0&q=${enc(q)}", quiet = true))
-private suspend fun fromKnaben(q: String): List<Hit> {
-    val body = JSONObject().put("search_type", "100%").put("search_field", "title").put("query", q).put("order_by", "seeders")
-        .put("order_direction", "desc").put("size", 100).put("hide_unsafe", true).put("hide_xxx", true)
-    return JSONObject(Net.postJson(KNABEN, body.toString(), 16_000, quiet = true)).optJSONArray("hits")?.let(::toKnabenHits).orEmpty()
-}
-
-/** Everything so far as one ranked, on-topic list: strict title match, then words, then all. */
-private fun settle(bags: List<List<Hit>>, full: String, title: String, alias: String?, imdb: String?): List<Hit> {
-    val merged = merge(bags).let { all -> if (imdb != null) all.filter { it.imdb == null || it.imdb == imdb } else all }
-    val found = rank(merged, full)
-    val exact = found.filter { sameTitle(it.name, alias ?: title) }
-    val named = found.filter { namesTitle(it.name, alias ?: title) }
-    return exact.ifEmpty { named.ifEmpty { found } }
-}
-
 /**
- * Every index at once; [onHits] hears the merged, ranked list each time one answers,
- * so the page fills as results land. One source being unreachable is the normal case.
+ * Every enabled addon that streams [type] for [id], at once; [onHits] hears the merged, ranked list
+ * each time one answers, so the page fills as they land. One addon being unreachable is the normal case.
  */
-suspend fun searchTorrents(
-    title: String,
-    imdb: String? = null,
-    year: String? = null,
-    suffix: String? = null,
-    series: Boolean = false,
-    lang: Lang? = null,
-    onHits: OnHits? = null,
-): List<Hit> {
-    // A language is asked for by name ("Hindi"), and only releases that say it count.
-    val tail = listOfNotNull(suffix, lang?.name?.substringBefore(" ("), year).joinToString(" ")
-    val full = listOf(title, tail).filter { it.isNotEmpty() }.joinToString(" ")
-    val alias = aliasOf(title)
-    val aliasQuery = alias?.let { listOf(it, tail).filter { s -> s.isNotEmpty() }.joinToString(" ") }
+private suspend fun fromAddons(type: String, id: String, lang: Lang?, onHits: OnHits?, order: (List<Hit>) -> List<Hit>): List<Hit> {
+    val kind = kindOfType(type)
     val bags = mutableListOf<List<Hit>>()
-    fun now() = synchronized(bags) { settle(bags.toList(), full, title, alias, imdb) }
-        .let { all -> if (lang == null) all else all.filter { lang.match.containsMatchIn(it.name) } }
-    fun add(hits: List<Hit>) {
-        if (hits.isEmpty()) return
-        synchronized(bags) { bags.add(hits) }
-        onHits?.invoke(now())
-    }
-    // The alias is a looser question; its answers have to carry the year to count.
-    fun addAliased(hits: List<Hit>) = add(if (year != null) hits.filter { year in it.name } else hits)
-
-    // Off the main thread: ranking reruns on every source that lands, and on a TV that froze the remote.
+    // A language is picked by name ("Hindi"), and only streams that say it count.
+    fun now() = synchronized(bags) { order(merge(bags.toList())) }.let { all -> if (lang == null) all else all.filter { lang.match.containsMatchIn(it.name) } }
+    // Off the main thread: ranking reruns on every addon that lands, and on a TV that froze the remote.
     withContext(Dispatchers.Default) {
-        launch { add(source("apibay", SOURCE_MS) { fromApibay(full) }) }
-        launch { add(source("csv", SOURCE_MS) { fromCsv(full) }) }
-        launch { add(source("knaben", KNABEN_MS) { fromKnaben(full) }) }
-        launch { add(source("nyaa", SOURCE_MS) { fromNyaa(full) }) }
-        if (aliasQuery != null) {
-            launch { addAliased(source("apibay-alias", SOURCE_MS) { fromApibay(aliasQuery) }) }
-            launch { addAliased(source("knaben-alias", KNABEN_MS) { fromKnaben(aliasQuery) }) }
-        }
-        if (suffix == null && !series) {
-            launch { add(source("yts", SOURCE_MS) { fromYts(imdb ?: full) }) }
-            if (imdb != null) launch { add(source("torrentio", SOURCE_MS) { fromTorrentio("movie/$imdb", "movie") }) }
+        for (a in Addons.serving("stream", type, id)) launch {
+            val hits = source(a.name, SOURCE_MS) { toStreamHits(a.get("stream", type, id).optJSONArray("streams") ?: JSONArray(), kind, a.name) }
+            if (hits.isEmpty()) return@launch
+            synchronized(bags) { bags.add(hits) }
+            onHits?.invoke(now())
         }
     }
     return withContext(Dispatchers.Default) { now() }
 }
 
+/**
+ * A film's streams from the viewer's addons. Without an id, [title] is looked up by name first;
+ * a link pasted instead — a magnet, or a video on the viewer's own server — is the one stream.
+ */
+suspend fun searchStreams(title: String, imdb: String? = null, year: String? = null, lang: Lang? = null, type: String = "movie", onHits: OnHits? = null): List<Hit> {
+    linkHit(title)?.let { return listOf(it).also { one -> onHits?.invoke(one) } }
+    val id = imdb ?: Meta.resolve(listOfNotNull(title, year).joinToString(" "))?.takeIf { !it.isSeries }?.imdb ?: return emptyList()
+    return fromAddons(type, id, lang, onHits) { rank(it, title) }
+}
+
 private val episodeMemo = java.util.concurrent.ConcurrentHashMap<String, List<Hit>>()
 
 /**
- * Every release that can play one episode, packs included: a pack streams just as
- * well (only the one file is fetched) and usually has far more seeders.
+ * Every stream the addons have for one episode, by the episode's own id ("tt0944947:1:2", or an
+ * anime catalogue's): packs included, since a pack streams just as well — only the one file is fetched.
  */
-suspend fun searchEpisode(title: Title, season: Int, episode: Int, onHits: OnHits? = null, lang: Lang? = null) =
-    searchEpisode(title.title, season, episode, title.imdb, onHits, absoluteNumber(title.episodes, season, episode), title.isAnime, lang)
-
-/**
- * [absolute] is the episode counted through the show, the number anime is released under.
- * For [anime], nyaa.si's releases lead: they are the ones named that way, and best seeded.
- */
-suspend fun searchEpisode(
-    show: String, season: Int, episode: Int, imdb: String?, onHits: OnHits? = null,
-    absolute: Int? = null, anime: Boolean = false, lang: Lang? = null,
-): List<Hit> {
-    val key = "${imdb ?: show}:$season:$episode:${lang?.code}"
+suspend fun searchEpisode(title: Title, season: Int, episode: Int, onHits: OnHits? = null, lang: Lang? = null): List<Hit> {
+    val id = title.episodes.find { it.season == season && it.episode == episode }?.id ?: "${title.imdb}:$season:$episode"
+    val key = "$id:${lang?.code}"
     episodeMemo[key]?.let { return it }
-    fun plays(h: Hit): Boolean {
-        if (lang != null && !lang.match.containsMatchIn(h.name)) return false
-        // A batch first: its first episode alone would otherwise decide.
-        spanHolds(h.name, season, episode, absolute)?.let { return it }
-        namesEpisode(h.name, season, episode, absolute)?.let { return it }
-        val claims = seasonsIn(h.name)
-        return claims.isEmpty() || season in claims
-    }
-    var loose = emptyList<Hit>()
-    var packs = emptyList<Hit>()
-    var numbered = emptyList<Hit>()
-    var byId = emptyList<Hit>()
-    val lock = Any()
-    fun current() = synchronized(lock) {
-        val ranked = rankEpisode(merge(listOf(loose, numbered, packs, byId)).filter(::plays), show, season)
-        if (anime) ranked.filter { it.nyaa && it.seeders > 0 } + ranked.filterNot { it.nyaa && it.seeders > 0 } else ranked
-    }
-    val tag = episodeTag(season, episode)
-    withContext(Dispatchers.Default) {
-        // Anime is indexed by its running number, not S02E05.
-        launch {
-            val hits = searchTorrents(show, imdb, suffix = "%02d".format(absolute ?: episode), lang = lang) { synchronized(lock) { numbered = it }; onHits?.invoke(current()) }
-            synchronized(lock) { numbered = hits }
-        }
-        launch {
-            val hits = searchTorrents(show, imdb, suffix = tag, lang = lang) { synchronized(lock) { loose = it }; onHits?.invoke(current()) }
-            synchronized(lock) { loose = hits }
-        }
-        // "Prison Break Season 1 Complete" carries no episode tag: ask for the show by name too.
-        launch {
-            val hits = searchTorrents(show, imdb, series = true, lang = lang) { synchronized(lock) { packs = it }; onHits?.invoke(current()) }
-            synchronized(lock) { packs = hits }
-        }
-        if (imdb != null) {
-            launch {
-                val hits = source("torrentio", SOURCE_MS) { fromTorrentio("series/$imdb:$season:$episode", "tv") }
-                if (hits.isNotEmpty()) { synchronized(lock) { byId = merge(listOf(byId, hits)) }; onHits?.invoke(current()) }
-            }
-            launch {
-                val hits = source("eztv", SOURCE_MS) { fromEztv(imdb) }
-                if (hits.isNotEmpty()) { synchronized(lock) { byId = merge(listOf(byId, hits)) }; onHits?.invoke(current()) }
-            }
-        }
-    }
-    return withContext(Dispatchers.Default) { current() }.also { if (it.isNotEmpty()) episodeMemo[key] = it }
+    return fromAddons(title.type, id, lang, onHits) { rankEpisode(it, title.title, season) }.also { if (it.isNotEmpty()) episodeMemo[key] = it }
 }
 
 /**
@@ -737,35 +551,27 @@ object SubDl {
     }
 }
 
-/** OpenSubtitles through Stremio's add-on: no key, by IMDb id, and plain UTF-8 .srt files. */
-object OpenSubs {
-    private const val API = "https://opensubtitles-v3.strem.io/subtitles"
-
-    /** Its languages are three letters ("eng", "ger"); [LANGS] already knows them, so they come back as the app's codes. */
-    fun toSubs(body: JSONObject): List<Sub> = (body.optJSONArray("subtitles") ?: JSONArray()).objects().mapNotNull { r ->
-        val url = r.str("url") ?: return@mapNotNull null
-        val lang = r.optString("lang")
-        val file = r.str("subtitleFileName")
-        val release = r.str("movieReleaseName") ?: file?.substringBeforeLast('.').orEmpty()
-        Sub(
-            release = release,
-            name = file ?: release,
-            language = LANGS.find { it.match.containsMatchIn(lang) }?.code ?: lang.uppercase(),
-            url = url,
-            season = r.optInt("season").takeIf { it > 0 },
-            episode = r.optInt("episode").takeIf { it > 0 },
-        )
-    }
-
-    suspend fun search(imdb: String, season: Int?, episode: Int?): List<Sub> {
-        if (!imdb.startsWith("tt")) return emptyList()
-        val path = if (season != null && episode != null) "series/$imdb:$season:$episode" else "movie/$imdb"
-        return toSubs(JSONObject(Net.get("$API/$path.json")))
-    }
+/**
+ * A subtitles addon's answer. Languages are mostly three letters ("eng", "ger"); [LANGS] already
+ * knows them, so they come back as the app's codes. The release fields are OpenSubtitles' own extras.
+ */
+fun toAddonSubs(body: JSONObject): List<Sub> = (body.optJSONArray("subtitles") ?: JSONArray()).objects().mapNotNull { r ->
+    val url = r.str("url") ?: return@mapNotNull null
+    val lang = r.optString("lang")
+    val file = r.str("subtitleFileName")
+    val release = r.str("movieReleaseName") ?: file?.substringBeforeLast('.').orEmpty()
+    Sub(
+        release = release,
+        name = file ?: release,
+        language = LANGS.find { it.match.containsMatchIn(lang) }?.code ?: lang.uppercase(),
+        url = url,
+        season = r.optInt("season").takeIf { it > 0 },
+        episode = r.optInt("episode").takeIf { it > 0 },
+    )
 }
 
 /**
- * Subtitles for what is playing: OpenSubtitles always, SubDL's too when the build has [subdlKey].
+ * Subtitles for what is playing: from every subtitles addon the viewer added, and SubDL's too when there is a [subdlKey].
  * Without an IMDb id the file's name is looked up first. In [language] (English when unset) —
  * or every language when there are none in it — one per release, and those whose release
  * shares the most words with [fileName] first: a subtitle cut for the same release keeps its timing.
@@ -783,10 +589,12 @@ suspend fun findSubtitles(
 ): List<Sub> = coroutineScope {
     val lang = language.ifBlank { "EN" }
     val id = imdb ?: Meta.resolve(fileName.ifBlank { query })?.imdb
-    val sources = listOfNotNull(
-        id?.let { async { "OpenSubtitles" to runCatching { OpenSubs.search(it, season, episode) } } },
-        subdlKey.takeIf { it.isNotBlank() }?.let { key -> async { "SubDL" to runCatching { SubDl.search(query, key, id, season, episode, type, lang) } } },
-    ).map { it.await() }
+    val kind = if (season != null && episode != null) "series" else "movie"
+    val video = id?.let { if (kind == "series") "$it:$season:$episode" else it }
+    val sources = (
+        video?.let { v -> Addons.serving("subtitles", kind, v).map { a -> async { a.name to runCatching { toAddonSubs(a.get("subtitles", kind, v)) } } } }.orEmpty() +
+            listOfNotNull(subdlKey.takeIf { it.isNotBlank() }?.let { key -> async { "SubDL" to runCatching { SubDl.search(query, key, id, season, episode, type, lang) } } })
+        ).map { it.await() }
     sources.forEach { (name, r) ->
         r.onSuccess { Log.i("Subtitles", "$name: ${it.size} for $id S${season}E$episode") }
             .onFailure { Log.w("Subtitles", "$name failed for $id", it) }
