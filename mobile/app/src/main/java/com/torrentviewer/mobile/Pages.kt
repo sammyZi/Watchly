@@ -1051,41 +1051,74 @@ fun AddonsScreen(watch: Watch) {
                 )
             }
         }
-        Text(if (addons.isEmpty()) "No addons yet" else "Installed · ${addons.size}", Modifier.padding(start = 4.dp, top = 6.dp, bottom = 10.dp), style = Type.overline.copy(color = Ink.faint))
-        if (addons.isEmpty()) Note("Add one to find streams for every film and episode. Without any, only links you paste in Search will play.")
-        addons.forEachIndexed { i, a -> AddonCard(a, first = i == 0, last = i == addons.lastIndex, onRemoved = { watch.notes.tryEmit("Removed ${a.name}") }) }
+        if (addons.isEmpty()) {
+            Text("No addons yet", Modifier.padding(start = 4.dp, top = 6.dp, bottom = 10.dp), style = Type.overline.copy(color = Ink.faint))
+            Note("Add one to find streams for every film and episode. Without any, only links you paste in Search will play.")
+            return@Column
+        }
+        // Stremio's list: a search over what is installed, and a pill per type they serve.
+        var query by rememberSaveable { mutableStateOf("") }
+        var type by rememberSaveable { mutableStateOf<String?>(null) }
+        val types = addons.flatMap { a -> a.resources.flatMap { it.types } + a.catalogs.map { it.type } }.distinct()
+        Field(query, { query = it }, "Search installed addons", Modifier.fillMaxWidth(), leading = L.drawable.lucide_ic_search)
+        Row(Modifier.padding(top = 12.dp, bottom = 14.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip("All · ${addons.size}", type == null, onClick = { type = null })
+            types.forEach { t -> Chip(com.torrentviewer.core.typeLabel(t), type == t, onClick = { type = t }) }
+        }
+        val shown = addons.filter { a ->
+            (query.isBlank() || a.name.contains(query.trim(), ignoreCase = true)) &&
+                (type == null || a.resources.any { type in it.types } || a.catalogs.any { it.type == type })
+        }
+        if (shown.isEmpty()) Note("No installed addon matches.")
+        shown.forEach { a ->
+            val at = addons.indexOf(a)
+            AddonCard(a, first = at == 0, last = at == addons.lastIndex, onRemoved = { watch.notes.tryEmit("Uninstalled ${a.name}") })
+        }
     }
 }
 
-/** One addon: its logo, name, where it lives and what it offers, then its switch and order. */
+/**
+ * One addon, as Stremio lists it: logo, name with a tick while it is on, the types it serves and its
+ * version, what it says it does, then Uninstall — with its switch and place in the order beside it.
+ */
 @Composable
 private fun AddonCard(a: com.torrentviewer.core.Addon, first: Boolean, last: Boolean, onRemoved: () -> Unit) {
     val m = remember(a.manifest) { runCatching { org.json.JSONObject(a.manifest) }.getOrNull() }
-    Column(Modifier.padding(bottom = 10.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Ink.surface).padding(14.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).background(Ink.text.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
-                Text(a.name.take(1).uppercase(), style = Type.title.copy(fontWeight = FontWeight.Bold, color = Ink.muted))
+    val types = remember(a) { (a.resources.flatMap { it.types } + a.catalogs.map { it.type }).distinct().joinToString(", ") { com.torrentviewer.core.typeLabel(it) } }
+    Column(Modifier.padding(bottom = 12.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Ink.surface).padding(16.dp)) {
+        Row(verticalAlignment = Alignment.Top) {
+            Box(Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(Ink.text.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
+                Lc(L.drawable.lucide_ic_puzzle, tint = Ink.muted, size = 24.dp)
                 m?.optString("logo")?.takeIf { it.startsWith("http") }?.let { Artwork(it, a.name, Modifier.fillMaxSize(), fill = false) }
             }
-            Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                Text(a.name, style = Type.label.copy(fontWeight = FontWeight.SemiBold, color = if (a.on) Ink.text else Ink.faint), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                // The host only: the rest of the link can be the viewer's own key.
-                Text(
-                    listOfNotNull(m?.optString("version")?.takeIf { it.isNotBlank() }?.let { "v$it" }, a.host).joinToString("  ·  "),
-                    style = Type.meta.copy(color = Ink.faint, fontSize = 12.sp), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
+            Column(Modifier.weight(1f).padding(start = 14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(a.name, Modifier.weight(1f, fill = false), style = Type.title.copy(fontWeight = FontWeight.Bold, color = if (a.on) Ink.text else Ink.faint), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (a.on) Lc(L.drawable.lucide_ic_circle_check, Modifier.padding(start = 8.dp), tint = Ink.muted, size = 16.dp)
+                }
+                Text(types.ifEmpty { a.offers }, Modifier.padding(top = 2.dp), style = Type.meta.copy(color = Ink.muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Chip(if (a.on) "On" else "Off", a.on, onClick = { Addons.toggle(a.url) })
+            m?.optString("version")?.takeIf { it.isNotBlank() }?.let {
+                Text("v$it", Modifier.padding(start = 8.dp, top = 2.dp), style = Type.label.copy(fontWeight = FontWeight.SemiBold, color = Ink.muted))
+            }
         }
         m?.optString("description")?.takeIf { it.isNotBlank() }?.let {
-            Text(it, Modifier.padding(top = 10.dp), style = Type.meta.copy(color = Ink.muted, fontSize = 13.sp), maxLines = 3, overflow = TextOverflow.Ellipsis)
+            Text(it, Modifier.padding(top = 14.dp), style = Type.body.copy(color = Ink.muted), maxLines = 3, overflow = TextOverflow.Ellipsis)
         }
-        Text(a.offers.replaceFirstChar(Char::uppercase), Modifier.padding(top = 8.dp), style = Type.meta.copy(color = Ink.faint, fontSize = 12.sp))
-        Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Spacer(Modifier.weight(1f))
+        // The host only: the rest of the link can be the viewer's own key.
+        Text(a.host, Modifier.padding(top = 8.dp), style = Type.meta.copy(color = Ink.faint, fontSize = 12.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Tap({ Addons.remove(a.url); onRemoved() }, Modifier.weight(1f), RoundedCornerShape(24.dp)) { pressed ->
+                Box(
+                    Modifier.fillMaxWidth().height(46.dp).border(1.dp, Ink.text.copy(alpha = 0.3f), RoundedCornerShape(24.dp))
+                        .background(Ink.text.copy(alpha = if (pressed) 0.12f else 0f)),
+                    contentAlignment = Alignment.Center,
+                ) { Text("Uninstall", style = Type.label.copy(fontWeight = FontWeight.SemiBold, color = Ink.muted)) }
+            }
+            Spacer(Modifier.width(8.dp))
+            Chip(if (a.on) "On" else "Off", a.on, onClick = { Addons.toggle(a.url) })
             if (!first) Tap({ Addons.move(a.url, -1) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_chevron_up, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp) }
             if (!last) Tap({ Addons.move(a.url, 1) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_chevron_down, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp) }
-            Tap({ Addons.remove(a.url); onRemoved() }, shape = CircleShape) { Lc(L.drawable.lucide_ic_trash_2, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp) }
         }
     }
 }
