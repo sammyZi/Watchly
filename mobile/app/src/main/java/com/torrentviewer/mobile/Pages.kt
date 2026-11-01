@@ -838,7 +838,7 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
 
-        Section("Welcome tour", "The four pages a new install opens with: what Watchly does, over what's trending now.") {
+        Section("Welcome tour", "What a new install opens with: the welcome, then signing in to Stremio.") {
             Button("Show the welcome tour", { tourAgain = true }, icon = L.drawable.lucide_ic_sparkles)
         }
         }

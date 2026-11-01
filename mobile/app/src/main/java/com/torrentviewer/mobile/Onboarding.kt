@@ -37,6 +37,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
@@ -59,42 +61,47 @@ import com.composables.icons.lucide.R as L
 /** Settings asks for the tour again; the shell shows it until it is done. */
 var tourAgain by androidx.compose.runtime.mutableStateOf(false)
 
-/** One page of the tour: what it says, and what it is drawn over. */
-private data class Step(val title: String, val body: String, val art: Art, val tags: List<String> = emptyList())
-
-private enum class Art { WALL, FILM, SERIES, WALL_AGAIN }
-
-private val STEPS = listOf(
-    Step("Your media player", "Browse trending films, series and anime, and play them from the sources you choose.", Art.WALL),
-    Step("Bring your own sources", "Add an addon in the Addons tab, or paste a link from your own media server. Watchly comes with none.", Art.FILM, listOf("Addons", "Your server", "Links")),
-    Step("A profile for everyone", "Each with its own history and My List. A Kids profile shows family films only.", Art.SERIES),
-    Step("Pick up anywhere", "Sign in to Stremio in Settings and your library and Continue Watching come along, on your TV too.", Art.WALL_AGAIN),
-)
-
 /**
- * The first launch: four pages over what is trending right now — a drifting wall of posters, then
- * a film's and a series' backdrops — so the tour looks like the app it introduces. Skip ends it;
- * without a network the pages stand on their gradient alone.
+ * The first launch: one welcome over a drifting wall of what is trending, then signing in to Stremio —
+ * which brings the library, Continue Watching and addons — or skipping it. Sign in opens Stremio's own
+ * page; no password comes here. Without a network the pages stand on their gradient alone.
  */
 @Composable
 fun Onboarding(onDone: () -> Unit) {
     val films by produceState(emptyList<Title>()) { value = Meta.catalog("movie") }
     val series by produceState(emptyList<Title>()) { value = Meta.catalog("tv") }
     val posters = (films.take(14) + series.take(14)).filter { it.poster != null }
-    val pager = rememberPagerState { STEPS.size }
+    var signIn by remember { mutableStateOf(false) }
+    var code by remember { mutableStateOf<com.torrentviewer.core.DeviceCode?>(null) }
+    var note by remember { mutableStateOf<String?>(null) }
+    var job by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     val scope = rememberCoroutineScope()
-    val last = pager.currentPage == STEPS.lastIndex
-    BackHandler(pager.currentPage > 0) { scope.launch { pager.animateScrollToPage(pager.currentPage - 1) } }
+    val browser = androidx.compose.ui.platform.LocalUriHandler.current
+    BackHandler(signIn) {
+        job?.cancel()
+        signIn = false
+    }
 
-    Box(Modifier.fillMaxSize().background(Color(0xFF0A0A0A))) {
-        HorizontalPager(pager, Modifier.fillMaxSize()) { page ->
-            when (STEPS[page].art) {
-                Art.WALL -> PosterWall(posters)
-                Art.FILM -> Backdrop(films.firstOrNull { it.backdrop != null } ?: films.firstOrNull())
-                Art.SERIES -> Backdrop(series.firstOrNull { it.backdrop != null } ?: series.firstOrNull())
-                Art.WALL_AGAIN -> PosterWall(posters.reversed())
+    fun connect() {
+        note = null
+        job?.cancel()
+        job = scope.launch {
+            try {
+                val c = com.torrentviewer.core.Stremio.start()
+                code = c
+                runCatching { browser.openUri(c.uriComplete) }
+                // Signed in: the account's addons and library are on their way; the app opens.
+                if (com.torrentviewer.core.Stremio.await(c)) onDone() else note = "That code ran out — try again."
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) note = e.message ?: "Couldn't reach Stremio."
+            } finally {
+                code = null
             }
         }
+    }
+
+    Box(Modifier.fillMaxSize().background(Color(0xFF0A0A0A))) {
+        if (signIn) Backdrop(films.firstOrNull { it.backdrop != null } ?: films.firstOrNull()) else PosterWall(posters)
         // Dark at the foot for the words, and a little at the head for Skip.
         Box(
             Modifier.fillMaxSize().background(
@@ -104,46 +111,46 @@ fun Onboarding(onDone: () -> Unit) {
 
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = EDGE, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("WATCHLY", Modifier.weight(1f), style = Type.title.copy(color = Color(0xFFE50914), fontWeight = FontWeight.Black, letterSpacing = 2.sp))
-            if (!last) Tap(onDone, shape = RoundedCornerShape(8.dp)) {
+            if (signIn) Tap({ job?.cancel(); onDone() }, shape = RoundedCornerShape(8.dp)) {
                 Text("Skip", Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = Type.label.copy(color = Color.White.copy(alpha = 0.85f)))
             }
         }
 
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(horizontal = EDGE + 8.dp, vertical = 24.dp).widthIn(max = 520.dp)) {
-            // The words change with the page; the pictures move under them on their own.
             AnimatedContent(
-                STEPS[pager.currentPage],
+                signIn,
                 transitionSpec = { (fadeIn(tween(260)) + slideInVertically(tween(260)) { it / 6 }) togetherWith fadeOut(tween(160)) },
                 label = "step",
-            ) { step ->
+            ) { second ->
                 Column {
-                    if (step.tags.isNotEmpty()) Row(Modifier.padding(bottom = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        step.tags.forEachIndexed { i, tag ->
+                    if (!second) {
+                        Text("Your media player", style = Type.hero.copy(color = Color.White, fontSize = 34.sp, lineHeight = 38.sp))
+                        Text(
+                            "Browse trending films, series and anime, and play them from the addons and servers you choose. Watchly comes with none.",
+                            Modifier.padding(top = 10.dp), style = Type.body.copy(color = Color.White.copy(alpha = 0.78f), fontSize = 16.sp, lineHeight = 23.sp),
+                        )
+                        Button("Get started", { signIn = true }, Modifier.padding(top = 26.dp).fillMaxWidth(), icon = L.drawable.lucide_ic_arrow_right, primary = true)
+                    } else {
+                        Text("Sign in to Stremio", style = Type.hero.copy(color = Color.White, fontSize = 34.sp, lineHeight = 38.sp))
+                        Text(
+                            "Your library, Continue Watching and addons come with you, and stay in step both ways. You sign in on Stremio's own page — your password never comes to Watchly.",
+                            Modifier.padding(top = 10.dp), style = Type.body.copy(color = Color.White.copy(alpha = 0.78f), fontSize = 16.sp, lineHeight = 23.sp),
+                        )
+                        code?.let { c ->
                             Text(
-                                tag,
-                                Modifier.clip(RoundedCornerShape(6.dp)).background(if (i == 0) Color(0xFFE50914) else Color.White.copy(alpha = 0.16f)).padding(horizontal = 10.dp, vertical = 5.dp),
-                                style = Type.meta.copy(color = Color.White, fontWeight = FontWeight.Bold),
+                                "Sign in and approve on the page that opened — this notices by itself. Code ${c.userCode}",
+                                Modifier.padding(top = 14.dp), style = Type.meta.copy(color = Color.White.copy(alpha = 0.7f)),
                             )
                         }
-                    }
-                    Text(step.title, style = Type.hero.copy(color = Color.White, fontSize = 34.sp, lineHeight = 38.sp))
-                    Text(step.body, Modifier.padding(top = 10.dp), style = Type.body.copy(color = Color.White.copy(alpha = 0.78f), fontSize = 16.sp, lineHeight = 23.sp))
-                }
-            }
-            Row(Modifier.fillMaxWidth().padding(top = 26.dp), verticalAlignment = Alignment.CenterVertically) {
-                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    repeat(STEPS.size) { i ->
-                        val on = i == pager.currentPage
-                        Box(Modifier.size(if (on) 22.dp else 7.dp, 7.dp).clip(CircleShape).background(if (on) Color(0xFFE50914) else Color.White.copy(alpha = 0.35f)))
+                        note?.let { Text(it, Modifier.padding(top = 10.dp), style = Type.meta.copy(color = Color.White.copy(alpha = 0.7f))) }
+                        Button(
+                            if (code != null) "Open Stremio again" else "Sign in to Stremio",
+                            { code?.let { c -> runCatching { browser.openUri(c.uriComplete) } } ?: connect() },
+                            Modifier.padding(top = 22.dp).fillMaxWidth(), icon = L.drawable.lucide_ic_link, primary = true,
+                        )
+                        Button("Skip for now", { job?.cancel(); onDone() }, Modifier.padding(top = 10.dp).fillMaxWidth())
                     }
                 }
-                Button(
-                    if (last) "Get started" else "Next",
-                    { if (last) onDone() else scope.launch { pager.animateScrollToPage(pager.currentPage + 1) } },
-                    Modifier.widthIn(min = 140.dp),
-                    icon = if (last) L.drawable.lucide_ic_play else L.drawable.lucide_ic_arrow_right,
-                    primary = true,
-                )
             }
         }
     }
