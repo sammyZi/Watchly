@@ -119,6 +119,8 @@ fun Onboarding(onDone: () -> Unit) {
 
     Box(Modifier.fillMaxSize().background(Color(0xFF0A0A0A))) {
         if (step == SIGN_IN) Backdrop(films.firstOrNull { it.backdrop != null } ?: films.firstOrNull()) else PosterWall(posters)
+        // The genres fill half the screen: the wall goes well back behind them, or the words drown in posters.
+        if (step == GENRES_STEP) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.72f)))
         // Dark at the foot for the words, and a little at the head for Skip.
         Box(
             Modifier.fillMaxSize().background(
@@ -161,7 +163,8 @@ fun Onboarding(onDone: () -> Unit) {
                                 Tap({ picked = if (on) picked - g else picked + g }, shape = CircleShape) {
                                     Text(
                                         g,
-                                        Modifier.background(if (on) Color(0xFFE50914) else Color.White.copy(alpha = 0.14f)).padding(horizontal = 14.dp, vertical = 8.dp),
+                                        // Solid, not see-through: a poster behind a pill made its word unreadable.
+                                        Modifier.background(if (on) Color(0xFFE50914) else Color(0xFF2A2A2E)).padding(horizontal = 14.dp, vertical = 8.dp),
                                         style = Type.label.copy(color = Color.White, fontSize = 14.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium),
                                     )
                                 }
