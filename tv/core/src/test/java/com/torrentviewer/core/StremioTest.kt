@@ -43,6 +43,37 @@ class StremioTest {
         assertEquals(StremioLibrary(), parseLibrary("{}"))
     }
 
+    @Test fun earlierHistoryGoesUp() {
+        val t = isoMs("2026-01-10T00:00:00.000Z")!!
+        fun played(uri: String, imdb: String?, kind: String, file: String, at: Double, of: Double, opened: Long = t) = Item(
+            uri = uri, title = file, at = opened, lastFileIndex = 0,
+            files = listOf(StoredFile(0, file, 1, true, false, file)),
+            positions = mapOf(0 to at), durations = mapOf(0 to of), imdb = imdb, kind = kind, titleName = "Name",
+        )
+        val items = listOf(
+            played("a", "tt1", "movie", "Film.mkv", 6000.0, 6000.0), // finished
+            played("b", "tt2", "tv", "Show.S02E03.mkv", 600.0, 2400.0), // part-way
+            played("c", "tt3", "movie", "Old.mkv", 100.0, 6000.0, opened = t - 1000), // Stremio's is newer
+            played("d", null, "movie", "pasted.mkv", 100.0, 6000.0), // no id
+            played("e", "tt5", "movie", "Barely.mkv", 10.0, 6000.0), // not started
+            played("f", "tt6", "tv", "nonumber.mkv", 600.0, 2400.0), // which episode?
+        )
+        val remote = mapOf("tt3" to JSONObject("""{"_id":"tt3","state":{"lastWatched":"2026-01-10T00:00:00.000Z","timeOffset":5}}"""))
+        val up = backlog(items, remote).associateBy { it.getString("_id") }
+        assertEquals(setOf("tt1", "tt2"), up.keys)
+        val film = up.getValue("tt1").getJSONObject("state")
+        assertEquals(1, film.getInt("timesWatched"))
+        assertEquals(0, film.getInt("timeOffset"))
+        assertEquals("2026-01-10T00:00:00.000Z", film.getString("lastWatched"))
+        val show = up.getValue("tt2")
+        assertEquals("series", show.getString("type"))
+        assertEquals("tt2:2:3", show.getJSONObject("state").getString("video_id"))
+        assertEquals(600_000L, show.getJSONObject("state").getLong("timeOffset"))
+        // Sent once: the same play against what it wrote is not sent again.
+        assertTrue(backlog(items, up).none { it.getString("_id") in up.keys })
+        assertEquals(t, isoMs("2026-01-10T00:00:00Z"))
+    }
+
     @Test fun episodeIds() {
         assertEquals(Ep(1, 2), epOfVideo("tt0944947:1:2"))
         assertEquals(Ep(1, 5), epOfVideo("kitsu:123:1:5"))
