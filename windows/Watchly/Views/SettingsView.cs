@@ -38,6 +38,8 @@ public sealed class SettingsView : UserControl
 
         if (shell.Who is { } me) page.Children.Add(ProfileGroup(me));
         if (Simkl.Available) page.Children.Add(SimklGroup());
+        // A kids profile plays what it can browse to; where streams come from is the grown-ups' call.
+        if (!KidsMode.On) page.Children.Add(AddonsGroup());
 
         page.Children.Add(Group("Appearance",
             ChoiceRow("Theme", "Match Windows, or lock light or dark",
@@ -192,6 +194,78 @@ public sealed class SettingsView : UserControl
                 Ui.Button(Ui.Text("Connect Simkl", "Label", "Accent", 13, FontWeights.SemiBold), () => _ = shell.ConnectSimkl())));
         }
         return Group("Simkl", box);
+    }
+
+    bool addingAddon;
+
+    /// <summary>The viewer's addons, in the order they are asked, and a field to paste another's link into.</summary>
+    FrameworkElement AddonsGroup()
+    {
+        var panel = new StackPanel();
+        panel.Children.Add(Row("Where streams and subtitles come from",
+            "Paste an addon's link — a public one, your debrid service's, or your own media server's. Watchly comes with none. Links are stored encrypted for this Windows account."));
+        var addons = Addons.List;
+        for (var i = 0; i < addons.Count; i++)
+        {
+            var a = addons[i];
+            var name = Ui.Text(a.Name, "Label", a.On ? "Text" : "Faint", 15, FontWeights.SemiBold);
+            name.TextTrimming = TextTrimming.CharacterEllipsis;
+            // The host only: the rest of the link can be the viewer's own key.
+            var where = Ui.Text($"{a.Host}  ·  {a.Offers}", "Meta", "Faint", 12);
+            where.TextTrimming = TextTrimming.CharacterEllipsis;
+            var controls = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            var on = Toggle(a.On, _ => { Addons.Toggle(a.Url); Render(); });
+            on.ToolTip = a.On ? "On — asked for streams" : "Off";
+            on.Margin = new Thickness(0, 0, 8, 0);
+            controls.Children.Add(on);
+            Button Step(string icon, int step, string tip, bool enabled)
+            {
+                var b = Ui.Round(icon, () => { Addons.Move(a.Url, step); Render(); }, "Muted", "Transparent", 34, 18, tip);
+                b.Background = Brushes.Transparent;
+                b.IsEnabled = enabled;
+                b.Opacity = enabled ? 1 : 0.3;
+                return b;
+            }
+            controls.Children.Add(Step("chevron-up", -1, "Ask it sooner", i > 0));
+            controls.Children.Add(Step("chevron-down", 1, "Ask it later", i < addons.Count - 1));
+            var remove = Ui.Round("trash-2", () => { Addons.Remove(a.Url); shell.Toast($"Removed {a.Name}"); Render(); }, "Muted", "Transparent", 34, 18, $"Remove {a.Name}");
+            remove.Background = Brushes.Transparent;
+            controls.Children.Add(remove);
+            var dock = new DockPanel();
+            DockPanel.SetDock(controls, Dock.Right);
+            dock.Children.Add(controls);
+            dock.Children.Add(new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { name, where } });
+            var card = Ui.Card(dock, "Surface", 8, new Thickness(14, 8, 6, 8));
+            card.Margin = new Thickness(0, 0, 0, 8);
+            panel.Children.Add(card);
+        }
+
+        var link = new TextBox { Style = (Style)FindResource("Field"), Tag = "https://…/manifest.json", Width = 380, VerticalAlignment = VerticalAlignment.Center };
+        async void Add()
+        {
+            if (addingAddon) return;
+            if (link.Text.Trim().Length == 0) { shell.Toast("Paste an addon link first", true); return; }
+            addingAddon = true;
+            try
+            {
+                var added = await Addons.Add(link.Text);
+                shell.Toast($"Added {added.Name}");
+                Render();
+            }
+            catch (Exception e)
+            {
+                shell.Toast(e.Message, true);
+            }
+            finally
+            {
+                addingAddon = false;
+            }
+        }
+        link.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) Add(); };
+        var add = Ui.Button(Ui.Text("Add", "Label", "Accent", 13, FontWeights.SemiBold), Add);
+        add.Margin = new Thickness(14, 0, 0, 0);
+        panel.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0), Children = { Ui.Card(link, "SurfaceAlt", 6, new Thickness(10, 6, 10, 6)), add } });
+        return Group("Addons", panel);
     }
 
     /// <summary>A TorBox key: cached releases play from its servers, anything else from the swarm as before.</summary>
