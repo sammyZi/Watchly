@@ -156,7 +156,7 @@ class Watch(val engine: TorrentStream) {
         title = from
         val fresh = History.put(
             Item(
-                uri = hit.magnet,
+                uri = hit.uri,
                 title = hit.name,
                 at = System.currentTimeMillis(),
                 // Played straight from search: the index's own IMDb tag, so Simkl can still place it.
@@ -165,9 +165,10 @@ class Watch(val engine: TorrentStream) {
                 poster = from?.poster,
                 backdrop = from?.backdrop,
                 titleName = if (episode != null && from != null) "${from.title} · ${episodeTag(episode.season, episode.episode)}" else from?.title,
-                seeders = hit.seeders,
+                seeders = hit.seeders.takeIf { !hit.direct },
             ),
         )
+        if (hit.direct) return@launch playLink(fresh, hit.name, hit.size)
         val found = inspect(fresh) ?: return@launch
         if (found.files.none { it.isVideo }) return@launch fail("This torrent holds no video.")
         // A pack of anime names its files by the number through the show: let that pick too.
@@ -239,6 +240,27 @@ class Watch(val engine: TorrentStream) {
         phase = Phase.PLAYING
     }
 
+    /**
+     * A link that plays as it is — an addon's debrid stream, a file on the viewer's own server:
+     * one file, no torrent, so the engine only has to let go of whatever it was streaming.
+     */
+    private suspend fun playLink(target: Item, name: String, size: Long) {
+        val ticket = ++gen
+        withContext(Dispatchers.IO) { engine.stop() }
+        if (ticket != gen) return
+        source = null
+        History.patch(target.uri) { it.copy(torrentName = name, lastFileIndex = 0, files = listOf(StoredFile(0, name, size, true, false, name))) }
+        item = History.find(target.uri) ?: target
+        meta = TorrentMeta(name, listOf(TorrentFile(0, name, name, size, true, false)))
+        playingIndex = 0
+        via = null
+        torboxIndexed = false
+        engine.progress.value = null
+        engine.ready.value = Ready(target.uri, name, emptyList(), lanUrl = target.uri)
+        playId++
+        phase = Phase.PLAYING
+    }
+
     /** Continue watching: the stored file list goes straight to the engine. */
     fun resume(picked: Item) = AppScope.launch {
         if (isLocalVideo(picked.uri)) {
@@ -251,6 +273,7 @@ class Watch(val engine: TorrentStream) {
         title = null
         item = target
         target.imdb?.let { id -> launch { Meta.title(id, target.kind ?: "movie")?.let { if (item?.uri == target.uri) title = it } } }
+        if (isDirectLink(target.uri)) return@launch playLink(target, target.torrentName ?: target.label, target.files?.firstOrNull()?.size ?: 0)
         val known = target.lastFileIndex
         if (known != null && !target.files.isNullOrEmpty() && target.torrentName != null) {
             ++gen
@@ -372,7 +395,8 @@ class Watch(val engine: TorrentStream) {
 
     fun savePosition(seconds: Double) {
         val at = item ?: return
-        History.setPosition(at.uri, playingIndex, seconds, if (via != null) -1.0 else engine.readRatio())
+        // Nothing on disk to measure when it streams from a link.
+        History.setPosition(at.uri, playingIndex, seconds, if (via != null || source == null) -1.0 else engine.readRatio())
         markWatched(at, seconds)
     }
 

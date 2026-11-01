@@ -5,7 +5,7 @@
 <h1 align="center">Watchly</h1>
 
 <p align="center">
-  <b>Stream or download movies and series from torrents — on Android phones, Android TV and Windows.</b>
+  <b>A media player for Android phones, Android TV and Windows. Bring your own sources: Stremio-compatible addons, or your own media server.</b>
 </p>
 
 <p align="center">
@@ -34,7 +34,7 @@
   </tr>
   <tr>
     <td valign="top">⬇️ <b>Download &amp; go</b><br>An episode or a whole season, to watch offline.</td>
-    <td valign="top">🔎 <b>Find anything</b><br>Search titles — or torrents by name.</td>
+    <td valign="top">🧩 <b>Your sources</b><br>Add any Stremio-compatible addon by its link, or paste a video link from your own server. Watchly comes with none.</td>
     <td valign="top">👤 <b>Made yours</b><br>Profiles with PINs, light and dark themes, Media3 or VLC, subtitles in your language.</td>
   </tr>
 </table>
@@ -155,8 +155,8 @@ Three apps, each with its own README:
 | 📺 Television (Android TV) | [`tv/`](tv/README.md) | Kotlin + Compose; libtorrent4j + Media3 / libVLC |
 | 🪟 Windows desktop | [`windows/`](windows/README.md) | MonoTorrent + LibVLCSharp (.NET 8, WPF) |
 
-The phone and the TV share one Gradle module, `tv/core`: the torrent engine,
-the players, indexers, metadata, the store and the look.
+The phone and the TV share one Gradle module, `tv/core`: the addon client, the
+torrent engine, the players, metadata, the store and the look.
 
 ```bash
 cd mobile && ./gradlew compileDebugKotlin
@@ -179,14 +179,17 @@ apps share.
 | 🎨 Look | [Jetpack Compose](https://developer.android.com/jetpack/compose) · [Coil](https://github.com/coil-kt/coil) · [Lucide](https://lucide.dev) icons |
 | 🗂️ Titles &amp; art | [Cinemeta](https://v3-cinemeta.strem.io), Stremio's public catalogue · [TVmaze](https://www.tvmaze.com) episode stills |
 | ⏭️ Intros | [IntroDB](https://introdb.app) |
-| 💬 Subtitles | [OpenSubtitles](https://www.opensubtitles.org) (through Stremio's add-on, no key needed) · [SubDL](https://subdl.com) with your own free key |
+| 🧩 Sources | The [Stremio addon protocol](https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/protocol.md): streams and subtitles from addons you add yourself |
+| 💬 Subtitles | Subtitle addons you add · [SubDL](https://subdl.com) with your own free key |
 
 <a name="disclaimer"></a>
 <h2><img src="https://img.shields.io/badge/Disclaimer-5B6472?style=for-the-badge" alt="Disclaimer" height="34"></h2>
 
 > [!CAUTION]
-> Watchly is only a player. It does not host, upload, share or own any videos or torrent files,
-> and none come with it. It searches public, third-party indexes and plays what you choose, through
-> the BitTorrent protocol, the way any torrent client does. You are responsible for what you stream
-> or download, and for following the copyright laws where you live. Please only watch what you have
-> the right to.
+> Watchly is only a media player. It does not host, upload, share, index or own any content, and it
+> ships with no sources: what it plays comes from addons, links and servers you add yourself. Watchly
+> does not run, endorse or control any of them. You are responsible for what you add and play, and for
+> following the copyright laws where you live. Please only watch what you have the right to.
+>
+> Copyright holders: Watchly holds nothing to take down. Notices about content belong with the addon
+> or server that serves it; for anything about this repository itself, open an issue.

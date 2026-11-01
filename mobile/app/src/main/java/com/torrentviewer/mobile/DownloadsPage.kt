@@ -56,7 +56,7 @@ import com.composables.icons.lucide.R as L
 
 /** A release to keep, labelled the way History labels a stream of it. */
 fun downloadJob(hit: Hit, from: Title?, episode: Episode? = null) = DownloadJob(
-    uri = hit.magnet,
+    uri = hit.uri,
     title = hit.name,
     titleName = if (episode != null && from != null) "${from.title} · ${episodeTag(episode.season, episode.episode)}" else from?.title,
     poster = from?.poster,
