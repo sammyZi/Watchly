@@ -446,8 +446,10 @@ class Watch(val engine: TorrentStream) {
 
     /** The Cinemeta episode a file in this pack is, for its name and still. */
     fun episodeOf(file: TorrentFile?): Episode? {
-        val name = file?.name ?: return null
-        return episodeOfFile(title?.episodes ?: return null, name)
+        val f = file ?: return null
+        // A pack's folder or own name may be where the season is said: "Show Season 2/[Group] Show - 05.mkv".
+        val folder = listOfNotNull(f.path.substringBeforeLast('/', ""), meta?.name).joinToString(" ")
+        return episodeOfFile(title?.episodes ?: return null, f.name, folder)
     }
 
     val playingFile: TorrentFile? get() = meta?.files?.find { it.index == playingIndex }
@@ -463,7 +465,9 @@ class Watch(val engine: TorrentStream) {
     private fun playingEp(at: Item): Ep? {
         if (at.kind == "movie") return null
         val name = playingFile?.name ?: return null
+        // A link named only "1080p": the episode it was played as.
         return episodeOf(playingFile)?.let { Ep(it.season, it.episode) } ?: parseEpisode(name)
+            ?: at.titleName?.takeIf { meta?.files.orEmpty().size <= 1 }?.let(::parseEpisode)
     }
 
     /** Closed part-way: Stremio keeps the spot, for a reinstall or another device. Finished goes as watched instead. */

@@ -614,6 +614,27 @@ class LibTest {
         assertEquals("x:3:1", continueEpisode(show, listOf(played("Show.S02E04", 1000.0, 1000.0, 1)))?.id)
         assertNull(continueEpisode(show, listOf(played("Show.S03E04", 1000.0, 1000.0, 1))))
         assertNull(continueEpisode(show, emptyList()))
+        // Left at the end credits (85%): watched, so Play goes on to the next.
+        assertEquals("x:3:4", continueEpisode(show, listOf(played("Show.S03E03", 850.0, 1000.0, 5)))?.id)
+    }
+
+    @Test fun seasonalAnime() {
+        // Two seasons of 12.
+        val eps = (1..2).flatMap { s -> (1..12).map { e -> Episode("a:$s:$e", s, e, "", null, null, null) } }
+        // "S2 - 05", or "- 05" in a season 2 folder, is the fifth of season 2 — not the fifth of the show.
+        assertEquals("a:2:5", episodeOfFile(eps, "[SubsPlease] Show S2 - 05 (1080p) [ABCD1234].mkv")?.id)
+        assertEquals("a:2:5", episodeOfFile(eps, "[SubsPlease] Show - 05 (1080p).mkv", folder = "Show Season 2")?.id)
+        // Counted through the show: past season 2's end, or no season said.
+        assertEquals("a:2:5", episodeOfFile(eps, "Show S2 [17]")?.id)
+        assertEquals("a:1:5", episodeOfFile(eps, "[Group] Show - 05.mkv")?.id)
+
+        // An addon's link named by its quality is the episode it was played as.
+        val link = Item("https://d.example/x", "1080p", at = 1, imdb = "tt5", titleName = "Show · S02E03", files = listOf(StoredFile(0, "1080p", 1, true, false, "1080p")), lastFileIndex = 0, positions = mapOf(0 to 1250.0), durations = mapOf(0 to 1420.0))
+        assertEquals(Ep(2, 3), link.episodeAt(0, eps))
+        // Stopped at the ending song (88%): ticked, told to Stremio as watched, and Play goes on to the next.
+        assertTrue(episodeProgress(listOf(link), "tt5", episodes = eps)[Ep(2, 3)]!! >= WATCHED_AT)
+        assertEquals("a:2:4", continueEpisode(Title("tt5", "tv", "Show", episodes = eps), listOf(link))?.id)
+        assertEquals(setOf(Ep(2, 3)), localWatched(listOf(link)).episodes["tt5"])
     }
 
     @Test fun episodeLabels() {

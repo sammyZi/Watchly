@@ -180,6 +180,9 @@ fun seasonsIn(name: String): List<Int> {
     return out.toList()
 }
 
+/** The one season a name says by a token of its own: "Show S2 - 05" is season 2, not seasons 2 to 5. Null for none, or several. */
+fun seasonSaid(name: String): Int? = SEASON_ONES.flatMap { r -> r.findAll(name).map { it.groupValues[1].toInt() }.toList() }.distinct().singleOrNull()
+
 enum class Scope(val label: String) { EPISODE("Episode"), SEASON("Season pack"), COMPLETE("Complete series") }
 
 fun scopeOf(name: String): Scope {
