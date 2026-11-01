@@ -174,8 +174,9 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
                         if (!title.isSeries) {
                             // Never disabled: a disabled view cannot hold focus, and the remote would open elsewhere.
                             TvButton(
+                                // Left part-way here or on Stremio: Resume — the release picked starts at that spot.
                                 label = when {
-                                    shown.isNotEmpty() -> "Play"
+                                    shown.isNotEmpty() -> resumeLabel(title.imdb, history, stremio) ?: "Play"
                                     busy -> "Finding sources…"
                                     else -> "No sources"
                                 },
@@ -187,8 +188,11 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
                         } else if (upNext != null) {
                             TvButton(
                                 label = if (busy && episode?.id == upNext.id && shown.isEmpty()) "Finding sources…"
-                                    else if (through) "Play episode ${numbered[upNext.id] ?: upNext.episode}"
-                                    else "Play S${upNext.season}:E${upNext.episode}",
+                                    else {
+                                        val which = if (through) "episode ${numbered[upNext.id] ?: upNext.episode}" else "S${upNext.season}:E${upNext.episode}"
+                                        resumeLabel(title.imdb, history, stremio, Ep(upNext.season, upNext.episode))
+                                            ?.let { "Resume $which" + it.removePrefix("Resume") } ?: "Play $which"
+                                    },
                                 onClick = { playEpisode(upNext) },
                                 icon = L.drawable.lucide_ic_play,
                                 primary = true,

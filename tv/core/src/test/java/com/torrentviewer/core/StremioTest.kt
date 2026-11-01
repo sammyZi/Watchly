@@ -112,6 +112,26 @@ class StremioTest {
         assertEquals(3, withoutAddon(all, "https://other.example").size)
     }
 
+    @Test fun resumeOrPlay() {
+        fun played(file: String, at: Double, of: Double) = Item(
+            uri = file, title = file, at = 1, lastFileIndex = 0, files = listOf(StoredFile(0, file, 1, true, false, file)),
+            positions = mapOf(0 to at), durations = mapOf(0 to of), imdb = "tt1",
+        )
+        // Here, part-way: the time left.
+        assertEquals("Resume  ·  40m left", resumeLabel("tt1", listOf(played("Film.mkv", 1200.0, 3600.0)), StremioLibrary()))
+        // Here, watched through, or barely begun: Play.
+        assertNull(resumeLabel("tt1", listOf(played("Film.mkv", 3500.0, 3600.0)), StremioLibrary()))
+        assertNull(resumeLabel("tt1", emptyList(), StremioLibrary()))
+        // Only on Stremio: still Resume, its time left from the spot and percent.
+        val elsewhere = StremioLibrary(paused = listOf(Paused("tt1", "Film", null, null, 25.0, 900.0)))
+        assertEquals("Resume  ·  45m left", resumeLabel("tt1", emptyList(), elsewhere))
+        // An episode: only that episode's spot counts.
+        val show = StremioLibrary(paused = listOf(Paused("tt1", "Show", null, Ep(2, 3), 50.0, null)))
+        assertEquals("Resume", resumeLabel("tt1", emptyList(), show, Ep(2, 3)))
+        assertNull(resumeLabel("tt1", emptyList(), show, Ep(2, 4)))
+        assertEquals("Resume  ·  20m left", resumeLabel("tt1", listOf(played("Show.S02E03.mkv", 600.0, 1800.0)), StremioLibrary(), Ep(2, 3)))
+    }
+
     @Test fun episodeIds() {
         assertEquals(Ep(1, 2), epOfVideo("tt0944947:1:2"))
         assertEquals(Ep(1, 5), epOfVideo("kitsu:123:1:5"))
