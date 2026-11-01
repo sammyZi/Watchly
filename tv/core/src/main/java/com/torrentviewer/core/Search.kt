@@ -386,14 +386,48 @@ suspend fun searchStreams(title: String, imdb: String? = null, year: String? = n
 private val episodeMemo = java.util.concurrent.ConcurrentHashMap<String, List<Hit>>()
 
 /**
+ * Does release [name] say it is this episode? Null when it names none (a season pack): a batch
+ * holds it or not, a single release names it or another one.
+ */
+fun releaseIs(name: String, season: Int, episode: Int, absolute: Int?): Boolean? =
+    spanHolds(name, season, episode, absolute) ?: namesEpisode(name, season, episode, absolute)
+
+/**
+ * The addons number a long anime their own way, and can sit one off the episode list: asked for
+ * 1001, they answer with "- 1002". [own] (the answers for this episode's id) keeps all but the
+ * releases naming another episode; [near] (the neighbours' answers) gives those naming this one.
+ * If that leaves nothing, [own] as it was.
+ */
+fun sameEpisode(own: List<Hit>, near: List<Hit>, season: Int, episode: Int, absolute: Int): List<Hit> {
+    val kept = merge(listOf(own.filter { releaseIs(it.name, season, episode, absolute) != false }, near.filter { releaseIs(it.name, season, episode, absolute) == true }))
+    return kept.ifEmpty { own }
+}
+
+/**
  * Every stream the addons have for one episode, by the episode's own id ("tt0944947:1:2", or an
  * anime catalogue's): packs included, since a pack streams just as well — only the one file is fetched.
+ * Long anime also asks for the episodes either side, and keeps only releases numbered as this one ([sameEpisode]).
  */
 suspend fun searchEpisode(title: Title, season: Int, episode: Int, onHits: OnHits? = null, lang: Lang? = null): List<Hit> {
-    val id = title.episodes.find { it.season == season && it.episode == episode }?.id ?: "${title.imdb}:$season:$episode"
+    val own = title.episodes.find { it.season == season && it.episode == episode }
+    val id = own?.id ?: "${title.imdb}:$season:$episode"
     val key = "$id:${lang?.code}"
     episodeMemo[key]?.let { return it }
-    return fromAddons(title.type, id, lang, onHits) { rankEpisode(it, title.title, season) }.also { if (it.isNotEmpty()) episodeMemo[key] = it }
+    val order: (List<Hit>) -> List<Hit> = { rankEpisode(it, title.title, season) }
+    val numbers = if (own != null && title.numberedThrough) absoluteNumbers(title.episodes) else emptyMap()
+    val absolute = own?.let { numbers[it] }
+    val hits = if (absolute == null) fromAddons(title.type, id, lang, onHits, order) else {
+        val near = numbers.filterValues { it == absolute - 1 || it == absolute + 1 }.keys.map { it.id }.filter { it != id }.distinct()
+        val bags = java.util.concurrent.ConcurrentHashMap<String, List<Hit>>()
+        fun now() = order(sameEpisode(bags[id].orEmpty(), near.flatMap { bags[it].orEmpty() }, season, episode, absolute))
+        coroutineScope {
+            for (each in listOf(id) + near) launch {
+                bags[each] = fromAddons(title.type, each, lang, { bags[each] = it; onHits?.invoke(now()) }) { it }
+            }
+        }
+        withContext(Dispatchers.Default) { now() }
+    }
+    return hits.also { if (it.isNotEmpty()) episodeMemo[key] = it }
 }
 
 /**

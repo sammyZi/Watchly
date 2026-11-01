@@ -378,14 +378,23 @@ fun reviewLinks(title: Title): List<Pair<String, String>> {
 
 /**
  * The episode's number counted straight through the show, the way anime is released:
- * Jujutsu Kaisen S2E5 is "- 29". Specials don't count. A season whose numbers already
- * carry on from the last one (not starting at 1) is taken as is.
+ * Jujutsu Kaisen S2E5 is "- 29". Specials (and an "episode 0" inside a season) don't count.
+ * A season whose numbers already carry on past the last one's (S21 starting at 892) is taken as is.
+ *
+ * A season starting over at 1 carries on from the highest number reached before it, not from
+ * how many entries came before: the metadata of a thousand-episode show lists an episode twice
+ * here and skips one there, and counting entries put every later episode one off ("1001" fetched 1002).
  */
 fun absoluteNumber(episodes: List<Episode>, season: Int, number: Int): Int? {
-    if (season <= 0) return null
-    val inSeason = episodes.filter { it.season == season }
-    if (inSeason.isEmpty()) return null
-    return if (inSeason.minOf { it.episode } > 1) number else episodes.count { it.season in 1 until season } + number
+    if (season <= 0 || number <= 0) return null
+    if (episodes.none { it.season == season && it.episode > 0 }) return null
+    var last = 0
+    for ((s, inSeason) in episodes.filter { it.season in 1..season && it.episode > 0 }.groupBy { it.season }.toSortedMap()) {
+        val offset = if (inSeason.minOf { it.episode } > last) 0 else last
+        if (s == season) return offset + number
+        last = maxOf(last, offset + inSeason.maxOf { it.episode })
+    }
+    return null
 }
 
 /** An episode as the player names it: long anime by its number through the show ("Episode 1071"), else "S21:E5". */
@@ -399,10 +408,10 @@ fun fileEpisodeLabel(title: Title?, name: String): String? =
 
 /** [absoluteNumber] for every regular episode in one pass: per episode it is quadratic, a second a call on One Piece. */
 fun absoluteNumbers(episodes: List<Episode>): Map<Episode, Int> {
-    var before = 0
-    return episodes.filter { it.season > 0 }.groupBy { it.season }.toSortedMap().flatMap { (_, inSeason) ->
-        val offset = if (inSeason.minOf { it.episode } > 1) 0 else before
-        before += inSeason.size
+    var last = 0
+    return episodes.filter { it.season > 0 && it.episode > 0 }.groupBy { it.season }.toSortedMap().flatMap { (_, inSeason) ->
+        val offset = if (inSeason.minOf { it.episode } > last) 0 else last
+        last = maxOf(last, offset + inSeason.maxOf { it.episode })
         inSeason.map { it to offset + it.episode }
     }.toMap()
 }

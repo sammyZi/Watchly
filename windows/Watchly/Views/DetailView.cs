@@ -169,7 +169,7 @@ public sealed class DetailView : UserControl, IDisposable
         var key = PickKey;
         error = null;
         var job = picked is not null
-            ? Search.SearchEpisode(picked.Id, title.Name, picked.Season, cts.Token, lang, title.StremioType)
+            ? Search.SearchEpisode(picked.Id, title.Name, picked.Season, cts.Token, lang, title.StremioType, title)
             : Search.SearchStreams(title.Name, cts.Token, title.Imdb, lang: lang, type: title.StremioType);
         job.ContinueWith(t => Dispatcher.BeginInvoke(() =>
         {
