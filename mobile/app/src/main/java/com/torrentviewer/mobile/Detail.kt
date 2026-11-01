@@ -94,7 +94,8 @@ import com.torrentviewer.core.absoluteNumbers
 import com.torrentviewer.core.continueEpisode
 import com.torrentviewer.core.parseEpisode
 import com.torrentviewer.core.seasonsIn
-import com.torrentviewer.core.searchTorrents
+import com.torrentviewer.core.searchStreams
+import com.torrentviewer.core.Addons
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.launch
 import com.composables.icons.lucide.R as L
@@ -187,7 +188,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
         val run: suspend (OnHits) -> List<Hit> = { onHits ->
             try {
                 if (ep != null) searchEpisode(title, ep.season, ep.episode, onHits, searchLang())
-                else searchTorrents(title.title, title.imdb, title.year?.take(4), lang = searchLang(), onHits = onHits)
+                else searchStreams(title.title, title.imdb, title.year?.take(4), lang = searchLang(), onHits = onHits)
             } finally {
                 if (mine == ticket) busy = false
             }
@@ -209,7 +210,8 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
 
     fun downloadEpisode(ep: Episode) = scope.launch {
         val ready = if (episode?.id == ep.id && shown.isNotEmpty()) shown else findSources(ep).await()
-        ready.firstOrNull()?.let { keep(it, ep) } ?: watch.notes.tryEmit(noneFound(episodeTag(ep.season, ep.episode)))
+        // Downloads are torrents; a link is streamed only.
+        ready.firstOrNull { !it.direct }?.let { keep(it, ep) } ?: watch.notes.tryEmit(noneFound(episodeTag(ep.season, ep.episode)))
     }
 
     /**
@@ -218,7 +220,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
      */
     /** A season pack is this season alone, or a complete series that holds it; the download takes only this season's episodes. */
     fun packsOf(hits: List<Hit>, s: Int) = hits.filter {
-        (it.scope == Scope.SEASON && parseEpisode(it.name) == null && s in seasonsIn(it.name)) || it.scope == Scope.COMPLETE
+        !it.direct && ((it.scope == Scope.SEASON && parseEpisode(it.name) == null && s in seasonsIn(it.name)) || it.scope == Scope.COMPLETE)
     }
 
     /** The season's packs, listed to pick one from, as they arrive. */
@@ -462,7 +464,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
             when {
                 packs == null -> Row(Modifier.padding(horizontal = 20.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Spinner(size = 24.dp)
-                    Text("   Asking every index…", style = Type.body)
+                    Text("   Asking your addons…", style = Type.body)
                 }
                 packs.isEmpty() -> Note(
                     if (lang.isEmpty()) "No season $s pack found yet — download the episodes one by one."
@@ -537,12 +539,15 @@ private fun LazyListScope.sources(
             when {
                 busy && shown.isEmpty() -> Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Spinner(size = 24.dp)
-                    Text("   Asking every index…", style = Type.body)
+                    Text("   Asking your addons…", style = Type.body)
                 }
                 busy -> Note("${shown.size} so far · finding more…", Modifier.padding(bottom = 8.dp))
                 hits?.isEmpty() == true -> Note(
-                    if (language != null) "Nothing found in $language. Change the language and try again."
-                    else "Nothing found. Try another episode, or search for the release by name.",
+                    when {
+                        !Addons.hasStreams -> "No addons to ask yet. Add one under Settings → Addons to find streams."
+                        language != null -> "Nothing found in $language. Change the language and try again."
+                        else -> "Nothing found. Try another episode, or add another addon under Settings → Addons."
+                    },
                 )
                 hits == null && episode == null && title.isSeries -> Note("Choose an episode to see what is available.")
             }
@@ -660,8 +665,8 @@ fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0
     // Cached on TorBox: it plays from TorBox's servers, so the swarm's health says nothing.
     val torbox by TorBox.key.collectAsState()
     val cached by TorBox.cached.collectAsState()
-    LaunchedEffect(hit.id, torbox) { TorBox.check(hit.id) }
-    val instant = torbox.isNotEmpty() && hit.id.lowercase() in cached
+    LaunchedEffect(hit.id, torbox) { if (!hit.direct) TorBox.check(hit.id) }
+    val instant = !hit.direct && torbox.isNotEmpty() && hit.id.lowercase() in cached
     // A pack's size is many episodes; only a single file's size over the runtime is a bitrate.
     val mbps = if (runtimeSeconds > 0 && hit.size > 0 && (hit.scope == Scope.EPISODE || hit.perFileSize)) hit.size * 8 / runtimeSeconds / 1_000_000 else 0.0
     val tint = when (grade) {
@@ -692,18 +697,27 @@ fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0
                 )
                 Text(
                     // A film's scope is "Episode" only by default — it says nothing there.
-                    listOfNotNull(hit.scope.label.takeIf { hit.kind == "tv" || hit.scope != Scope.EPISODE }, bytes(hit.size), "${hit.seeders} seeds").joinToString("  ·  "),
+                    listOfNotNull(
+                        hit.scope.label.takeIf { hit.kind == "tv" || hit.scope != Scope.EPISODE },
+                        bytes(hit.size).takeIf { hit.size > 0 },
+                        "${hit.seeders} seeds".takeIf { !hit.direct },
+                        hit.addon.ifEmpty { null },
+                    ).joinToString("  ·  "),
                     Modifier.padding(top = 2.dp),
                     style = Type.meta.copy(color = Ink.faint, fontSize = 12.sp),
                 )
             }
             Spacer(Modifier.width(10.dp))
             Column(horizontalAlignment = Alignment.End) {
-                Text(if (instant) "Instant" else grade.label, style = Type.meta.copy(color = if (instant) Ink.good else tint, fontWeight = FontWeight.Bold))
+                Text(
+                    when { hit.direct -> "Direct"; instant -> "Instant"; else -> grade.label },
+                    style = Type.meta.copy(color = if (hit.direct || instant) Ink.good else tint, fontWeight = FontWeight.Bold),
+                )
                 if (instant) Text("TorBox", style = Type.meta.copy(fontSize = 11.sp, color = Ink.faint))
                 if (mbps >= HEAVY_MBPS) Text("Needs ${mbps.toInt()} Mb/s", style = Type.meta.copy(fontSize = 11.sp, color = if (mbps >= TOO_HEAVY_MBPS) Ink.danger else Ink.warn))
             }
-            if (onDownload != null) Tap(onDownload, Modifier.padding(start = 4.dp), CircleShape) { Lc(L.drawable.lucide_ic_download, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp) }
+            // The download engine is a torrent client; a link is streamed only.
+            if (onDownload != null && !hit.direct) Tap(onDownload, Modifier.padding(start = 4.dp), CircleShape) { Lc(L.drawable.lucide_ic_download, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp) }
         }
     }
 }

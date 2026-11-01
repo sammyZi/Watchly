@@ -89,6 +89,7 @@ import com.torrentviewer.core.Simkl
 import com.torrentviewer.core.TorBox
 import com.torrentviewer.core.Kv
 import com.torrentviewer.core.Kids
+import com.torrentviewer.core.Addons
 import com.torrentviewer.core.bytes
 import com.torrentviewer.core.playedSize
 import com.torrentviewer.core.DeviceCode
@@ -105,7 +106,7 @@ import com.torrentviewer.core.Avatars
 import androidx.compose.foundation.border
 import com.torrentviewer.core.colorOf
 import com.torrentviewer.core.parseEpisode
-import com.torrentviewer.core.searchTorrents
+import com.torrentviewer.core.searchStreams
 import com.torrentviewer.core.sortTitles
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -220,7 +221,7 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
         busy = true
         // A kids profile has no torrent search (a release name can't be vetted) and sees family titles only.
         if (torrents && !Kids.on) {
-            hits = searchTorrents(q) { hits = it }
+            hits = searchStreams(q) { hits = it }
         } else {
             results = coroutineScope {
                 val films = async { Meta.search(q, "movie") }
@@ -264,7 +265,7 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
                 Field(
                     query,
                     { query = it },
-                    if (torrents) "Release or torrent name" else "Movies, shows, anime",
+                    if (torrents) "A film, or a link to play" else "Movies, shows, anime",
                     Modifier.fillMaxWidth(),
                     leading = L.drawable.lucide_ic_search,
                     onSubmit = { recents = Searches.remember(query) },
@@ -278,7 +279,7 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
                 // A kids profile searches titles only.
                 if (!Kids.on) Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Chip("Titles", !torrents, onClick = { torrents = false; hits = null })
-                    Chip("Torrents", torrents, onClick = { torrents = true; results = null }, icon = L.drawable.lucide_ic_layers)
+                    Chip("Streams", torrents, onClick = { torrents = true; results = null }, icon = L.drawable.lucide_ic_layers)
                 }
                 // One chip per filter, red while it narrows anything.
                 Row(Modifier.padding(top = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -615,6 +616,12 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
 
         // With the profile: the connection is this profile's.
         if (Simkl.available) SimklSection(me)
+
+        // A kids profile plays what it can browse to; where streams come from is the grown-ups' call.
+        if (!Kids.on) Section(
+            "Addons",
+            "Where streams and subtitles come from. Paste an addon's link — a public one, your debrid service's, or your own media server's. Watchly comes with none.",
+        ) { AddonsList(watch) }
 
         Section("Welcome tour", "The four pages a new install opens with: what Watchly does, over what's trending now.") {
             Button("Show the welcome tour", { tourAgain = true }, icon = L.drawable.lucide_ic_sparkles)
@@ -986,6 +993,47 @@ fun SimklSection(me: Profile, onLater: (() -> Unit)? = null) {
     }
 }
 
+/** The viewer's addons, in the order they are asked, and a field to paste another's link into. */
+@Composable
+private fun AddonsList(watch: Watch) {
+    val addons by Addons.list.collectAsState()
+    var link by remember { mutableStateOf("") }
+    var adding by remember { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    addons.forEachIndexed { i, a ->
+        Row(Modifier.padding(bottom = 8.dp).fillMaxWidth().background(Ink.surface, RoundedCornerShape(8.dp)).padding(start = 14.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(a.name, style = Type.label.copy(fontWeight = FontWeight.SemiBold, color = if (a.on) Ink.text else Ink.faint), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // The host only: the rest of the link can be the viewer's own key.
+                Text("${a.host}  ·  ${a.offers}", style = Type.meta.copy(color = Ink.faint, fontSize = 12.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Tap({ Addons.toggle(a.url) }, shape = CircleShape) { Lc(if (a.on) L.drawable.lucide_ic_circle_check else L.drawable.lucide_ic_circle, Modifier.padding(8.dp), tint = if (a.on) Ink.good else Ink.faint, size = 20.dp) }
+            if (i > 0) Tap({ Addons.move(a.url, -1) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_chevron_up, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp) }
+            if (i < addons.lastIndex) Tap({ Addons.move(a.url, 1) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_chevron_down, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp) }
+            Tap({ Addons.remove(a.url); watch.notes.tryEmit("Removed ${a.name}") }, shape = CircleShape) { Lc(L.drawable.lucide_ic_trash_2, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp) }
+        }
+    }
+    fun add() {
+        if (adding) return
+        if (link.isEmpty()) {
+            watch.notes.tryEmit("Paste an addon link first")
+            return
+        }
+        adding = true
+        scope.launch {
+            runCatching { Addons.add(link) }
+                .onSuccess { link = ""; watch.notes.tryEmit("Added ${it.name}") }
+                .onFailure { watch.notes.tryEmit(it.message ?: "Couldn't add that addon") }
+            adding = false
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Field(link, { link = it.trim() }, "https://…/manifest.json", Modifier.weight(1f), onSubmit = ::add)
+        Spacer(Modifier.width(10.dp))
+        Button(if (adding) "Adding…" else "Add", ::add, icon = L.drawable.lucide_ic_plus)
+    }
+}
+
 @Composable
 private fun Section(title: String, hint: String, content: @Composable () -> Unit) {
     Column(Modifier.padding(bottom = 28.dp)) {
@@ -1140,8 +1188,8 @@ private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, Strin
                 Chip("Everything", !kids, onClick = { kids = false })
             }
             Text(
-                if (kids) "Family films and series only. No torrent search or links from other apps — give your own profile a PIN so it stays that way."
-                else "Every title, torrent search included.",
+                if (kids) "Family films and series only. No addons, stream search or links from other apps — give your own profile a PIN so it stays that way."
+                else "Every title, addons and stream search included.",
                 Modifier.fillMaxWidth().padding(top = 8.dp),
                 style = Type.meta.copy(color = Ink.faint),
             )

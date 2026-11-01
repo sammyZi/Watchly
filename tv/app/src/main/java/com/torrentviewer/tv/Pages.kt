@@ -182,7 +182,7 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
         busy = true
         // A kids profile has no torrent search (a release name can't be vetted) and sees family titles only.
         if (torrents && !Kids.on) {
-            hits = searchTorrents(q) { hits = it }
+            hits = searchStreams(q) { hits = it }
         } else {
             results = coroutineScope {
                 val films = async { Meta.search(q, "movie") }
@@ -211,7 +211,7 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
                     Field(
                         query,
                         { query = it },
-                        if (torrents) "Release or torrent name" else "Movies, shows, anime",
+                        if (torrents) "A film, or a link to play" else "Movies, shows, anime",
                         Modifier.weight(1f).widthIn(max = 640.dp),
                         requester = field,
                         leading = L.drawable.lucide_ic_search,
@@ -221,7 +221,7 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
                     )
                     if (!Kids.on) {
                         Spacer(Modifier.width(14.dp))
-                        Chip("Torrents", torrents, onClick = { torrents = !torrents; results = null; hits = null }, icon = L.drawable.lucide_ic_layers)
+                        Chip("Streams", torrents, onClick = { torrents = !torrents; results = null; hits = null }, icon = L.drawable.lucide_ic_layers)
                     }
                 }
                 if (recents.isNotEmpty() && results == null && hits == null) {
@@ -465,6 +465,12 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
 
+        // A kids profile plays what it can browse to; where streams come from is the grown-ups' call.
+        if (!Kids.on) Section(
+            "Addons",
+            "Where streams and subtitles come from. Add an addon by its link — a public one, your debrid service's, or your own media server's. Watchly comes with none.",
+        ) { AddonsList() }
+
         Section(
             "Storage for one film",
             "How much of a film may sit on this TV at once. When it fills, what you've watched is let go to make room. Auto uses the free space, keeping a few GB spare.",
@@ -517,7 +523,7 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
                     TvButton("Remove", { Secrets.setSubdl("") })
                 }
             }
-            PhoneKey("SubDL") { Secrets.setSubdl(it) }
+            PhoneKey("SubDL key") { Secrets.setSubdl(it); "Saved — your SubDL key is on the TV now. You can close this page." }
             }
         }
 
@@ -549,7 +555,7 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
                     TvButton("Remove", { TorBox.setKey("") })
                 }
             }
-            PhoneKey("TorBox") { TorBox.setKey(it) }
+            PhoneKey("TorBox key") { TorBox.setKey(it); "Saved — your TorBox key is on the TV now. You can close this page." }
             }
         }
 
@@ -576,26 +582,72 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
     first.claim()
 }
 
+/**
+ * The viewer's addons, each a row of buttons the D-pad can reach, then the ways to add one: pasted
+ * from a phone (links run long, and often carry a key), or typed for a short one.
+ */
+@Composable
+private fun AddonsList() {
+    val addons by Addons.list.collectAsState()
+    var link by remember { mutableStateOf("") }
+    var note by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    suspend fun add(raw: String): String = runCatching { Addons.add(raw) }.fold({ "Added ${it.name}." }, { it.message ?: "Couldn't add that addon." })
+    Column {
+        addons.forEachIndexed { i, a ->
+            Row(Modifier.padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.width(420.dp)) {
+                    Text(a.name, style = Type.label.copy(fontWeight = FontWeight.SemiBold, color = if (a.on) Ink.text else Ink.faint), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    // The host only: the rest of the link can be the viewer's own key.
+                    Text("${a.host}   ·   ${a.offers}", style = Type.meta.copy(color = Ink.faint), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Spacer(Modifier.width(14.dp))
+                TvButton(if (a.on) "On" else "Off", { Addons.toggle(a.url) }, icon = if (a.on) L.drawable.lucide_ic_circle_check else L.drawable.lucide_ic_circle)
+                Spacer(Modifier.width(10.dp))
+                // Kept at the ends, where they do nothing, rather than taken away: focus never lands on nothing.
+                TvButton("Up", { Addons.move(a.url, -1) }, icon = L.drawable.lucide_ic_chevron_up)
+                Spacer(Modifier.width(10.dp))
+                TvButton("Down", { Addons.move(a.url, 1) }, icon = L.drawable.lucide_ic_chevron_down)
+                Spacer(Modifier.width(10.dp))
+                TvButton("Remove", { Addons.remove(a.url) }, icon = L.drawable.lucide_ic_trash_2)
+            }
+        }
+        Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Field(link, { link = it.trim() }, "https://…/manifest.json", Modifier.width(420.dp), keyboardOnFocus = false)
+            Spacer(Modifier.width(14.dp))
+            TvButton(if (link.isNotEmpty()) "Add addon" else "Type a link", {
+                if (link.isNotEmpty()) scope.launch {
+                    note = "Checking…"
+                    note = add(link)
+                    if (note!!.startsWith("Added")) link = ""
+                }
+            }, icon = L.drawable.lucide_ic_plus)
+        }
+        note?.let { Text(it, Modifier.padding(top = 10.dp), style = Type.meta.copy(color = Ink.muted)) }
+        PhoneKey("addon link", several = true) { add(it).also { s -> note = s } }
+    }
+}
+
 /** The Library's Simkl card was put off with "Not now"; Settings still offers it. */
 private const val SIMKL_LATER = "simkl:later"
 
 /**
- * A key pasted on a phone rather than typed with the remote: a QR of a page the TV serves on the
- * home network ([KeyDrop]), open only while this shows. It closes itself once the key arrives.
+ * A key or link pasted on a phone rather than typed with the remote: a QR of a page the TV serves on
+ * the home network ([KeyDrop]), open only while this shows. [onKey]'s answer goes back to the phone;
+ * it closes once one arrives, unless [several] (addons: paste one after another).
  */
 @Composable
-private fun PhoneKey(what: String, onKey: (String) -> Unit) {
+private fun PhoneKey(what: String, several: Boolean = false, onKey: suspend (String) -> String) {
     var open by remember { mutableStateOf(false) }
     // One button that changes its label, not a button swapped for another: a focused button taken
     // away left focus nowhere, and the page sent it back to the top.
-    TvButton(if (open) "Cancel" else "Paste from phone", { open = !open }, Modifier.padding(top = 12.dp), icon = if (open) L.drawable.lucide_ic_x else L.drawable.lucide_ic_smartphone)
+    TvButton(if (open) (if (several) "Done" else "Cancel") else "Paste from phone", { open = !open }, Modifier.padding(top = 12.dp), icon = if (open) L.drawable.lucide_ic_x else L.drawable.lucide_ic_smartphone)
     if (!open) return
     var address by remember { mutableStateOf<String?>(null) }
     var tried by remember { mutableStateOf(false) }
     DisposableEffect(Unit) {
         val drop = KeyDrop(what) {
-            onKey(it)
-            open = false
+            onKey(it).also { if (!several) open = false }
         }
         address = drop.open()
         tried = true
@@ -607,7 +659,7 @@ private fun PhoneKey(what: String, onKey: (String) -> Unit) {
         Column(Modifier.widthIn(max = 520.dp)) {
             Text(
                 when {
-                    address != null -> "Scan with your phone's camera, paste your $what key on the page that opens, and tap Save. Your phone needs to be on the same Wi-Fi as the TV."
+                    address != null -> "Scan with your phone's camera, paste your $what on the page that opens, and tap Save. Your phone needs to be on the same Wi-Fi as the TV."
                     tried -> "The TV isn't on a network a phone can reach."
                     else -> "Opening…"
                 },
@@ -862,8 +914,8 @@ private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, Strin
                     Chip("Everything", !kids, onClick = { kids = false })
                 }
                 Text(
-                    if (kids) "Family films and series only. No torrent search or links from other apps — give your own profile a PIN so it stays that way."
-                    else "Every title, torrent search included.",
+                    if (kids) "Family films and series only. No addons, stream search or links from other apps — give your own profile a PIN so it stays that way."
+                    else "Every title, addons and stream search included.",
                     Modifier.padding(top = 8.dp),
                     style = Type.meta.copy(color = Ink.faint),
                 )

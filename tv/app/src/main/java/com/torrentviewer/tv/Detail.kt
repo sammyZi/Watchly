@@ -118,7 +118,7 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
         val run: suspend (OnHits) -> List<Hit> = { onHits ->
             try {
                 if (ep != null) searchEpisode(title, ep.season, ep.episode, onHits, searchLang())
-                else searchTorrents(title.title, title.imdb, title.year?.take(4), lang = searchLang(), onHits = onHits)
+                else searchStreams(title.title, title.imdb, title.year?.take(4), lang = searchLang(), onHits = onHits)
             } finally {
                 if (mine == ticket) busy = false
             }
@@ -274,12 +274,15 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
                     when {
                         busy && shown.isEmpty() -> Row(verticalAlignment = Alignment.CenterVertically) {
                             Spinner(size = 28.dp)
-                            Text("   Asking every index…", style = Type.body)
+                            Text("   Asking your addons…", style = Type.body)
                         }
                         busy -> Note("${shown.size} so far · finding more…", Modifier.padding(bottom = 10.dp))
                         hits?.isEmpty() == true -> Note(
-                            if (lang.isNotEmpty()) "Nothing found in ${langName(lang)}. Change the language and try again."
-                            else "Nothing found. Try another episode, or search for the release by name.",
+                            when {
+                                !Addons.hasStreams -> "No addons to ask yet. Add one under Settings → Addons to find streams."
+                                lang.isNotEmpty() -> "Nothing found in ${langName(lang)}. Change the language and try again."
+                                else -> "Nothing found. Try another episode, or add another addon under Settings → Addons."
+                            },
                         )
                         hits == null && title.isSeries -> Note("Choose an episode to see what is available.")
                     }
@@ -363,8 +366,8 @@ fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0
     // Cached on TorBox: it plays from TorBox's servers, so the swarm's health says nothing.
     val torbox by TorBox.key.collectAsState()
     val cached by TorBox.cached.collectAsState()
-    LaunchedEffect(hit.id, torbox) { TorBox.check(hit.id) }
-    val instant = torbox.isNotEmpty() && hit.id.lowercase() in cached
+    LaunchedEffect(hit.id, torbox) { if (!hit.direct) TorBox.check(hit.id) }
+    val instant = !hit.direct && torbox.isNotEmpty() && hit.id.lowercase() in cached
     // A pack's size is many episodes; only a single file's size over the runtime is a bitrate.
     val mbps = if (runtimeSeconds > 0 && hit.size > 0 && (hit.scope == Scope.EPISODE || hit.perFileSize)) hit.size * 8 / runtimeSeconds / 1_000_000 else 0.0
     val tint = when (grade) {
@@ -389,13 +392,21 @@ fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0
                 Text(hit.name, style = Type.label.copy(color = if (focused) Color.Black else Ink.text), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     // A film's scope is "Episode" only by default — it says nothing there.
-                    listOfNotNull(hit.scope.label.takeIf { hit.kind == "tv" || hit.scope != Scope.EPISODE }, bytes(hit.size), "${hit.seeders} seeds").joinToString("   ·   "),
+                    listOfNotNull(
+                        hit.scope.label.takeIf { hit.kind == "tv" || hit.scope != Scope.EPISODE },
+                        bytes(hit.size).takeIf { hit.size > 0 },
+                        "${hit.seeders} seeds".takeIf { !hit.direct },
+                        hit.addon.ifEmpty { null },
+                    ).joinToString("   ·   "),
                     style = Type.meta.copy(color = if (focused) Color.Black.copy(alpha = 0.6f) else Ink.faint),
                 )
             }
             Spacer(Modifier.width(14.dp))
             Column(horizontalAlignment = Alignment.End) {
-                Text(if (instant) "Instant" else grade.label, style = Type.meta.copy(color = if (focused) Color.Black else if (instant) Ink.good else tint, fontWeight = FontWeight.Bold))
+                Text(
+                    when { hit.direct -> "Direct"; instant -> "Instant"; else -> grade.label },
+                    style = Type.meta.copy(color = if (focused) Color.Black else if (hit.direct || instant) Ink.good else tint, fontWeight = FontWeight.Bold),
+                )
                 if (instant) Text("TorBox", style = Type.meta.copy(color = if (focused) Color.Black.copy(alpha = 0.6f) else Ink.faint))
                 if (mbps >= HEAVY_MBPS) {
                     Text(

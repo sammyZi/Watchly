@@ -161,6 +161,8 @@ object SettingsStore {
 
     fun load() {
         _value.value = fromJson(runCatching { JSONObject(Kv.global("settings") ?: "{}") }.getOrDefault(JSONObject()))
+        // In the same stored object, so it comes back with a restored backup too.
+        Addons.load()
     }
 
     /** Also what a backup restores, so nothing in it is trusted to be in range. */
