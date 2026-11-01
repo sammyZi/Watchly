@@ -504,6 +504,20 @@ fun pickFile(files: List<TorrentFile>, tag: String? = null): Int? {
     return videos.maxBy { it.size }.index
 }
 
+/**
+ * Which file of an addon's torrent plays [ep]. [fileIdx] is the file the addon itself searched out, and
+ * wins — but for a name that says this very S/E. Our count through the show (anime, "One Piece - 723")
+ * comes from Cinemeta's seasons and can be an episode off the addon's: by it, the next episode opened
+ * the one just watched, at the spot it was left.
+ */
+fun pickEpisodeFile(files: List<TorrentFile>, tag: String?, ep: Ep?, fileIdx: Int?): Int? {
+    val byAddon = fileIdx?.takeIf { i -> files.any { it.index == i && it.isVideo } }
+    val byName = pickFile(files, tag)
+    if (byAddon == null) return byName
+    if (byName != null && ep != null && files.find { it.index == byName }?.name?.let(::parseEpisode) == ep) return byName
+    return byAddon
+}
+
 /** Where a file sits in the show: SxxEyy, else its running number (in its folder's season, if labelled). */
 private fun episodeKey(f: TorrentFile): Ep? =
     parseEpisode(f.name) ?: parseAbsolute(f.name)?.let { Ep(seasonsIn(f.path).firstOrNull() ?: 0, it) }

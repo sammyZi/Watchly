@@ -180,8 +180,10 @@ class Watch(val engine: TorrentStream) {
         if (found.files.none { it.isVideo }) return@launch fail("This torrent holds no video.")
         // A pack of anime names its files by the number through the show: let that pick too.
         val pick = if (episode != null && from != null) pickTag(episode.season, episode.episode, absoluteNumber(from.episodes, episode.season, episode.episode)) else tag
-        // The addon's own file index settles it when the names can't.
-        val index = pickFile(found.files, pick) ?: hit.fileIdx?.takeIf { i -> found.files.any { it.index == i && it.isVideo } }
+        // The file the addon meant, by the torrent's own numbering; TorBox numbers its listing its own way,
+        // so there the names lead and the addon's index only settles what they can't.
+        val index = if (!torboxIndexed) pickEpisodeFile(found.files, pick, episode?.let { Ep(it.season, it.episode) }, hit.fileIdx)
+        else pickFile(found.files, pick) ?: hit.fileIdx?.takeIf { i -> found.files.any { it.index == i && it.isVideo } }
         if (index == null) {
             phase = Phase.IDLE
             choose = fresh to found

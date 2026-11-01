@@ -618,6 +618,21 @@ class LibTest {
         assertEquals("x:3:4", continueEpisode(show, listOf(played("Show.S03E03", 850.0, 1000.0, 5)))?.id)
     }
 
+    @Test fun addonPicksTheFile() {
+        fun f(i: Int, name: String, video: Boolean = true) = TorrentFile(i, "One Piece 700-750/$name", name, 1_000_000L + i, video, false)
+        val batch = listOf(f(0, "[Group] One Piece - 722 (1080p).mkv"), f(1, "[Group] One Piece - 723 (1080p).mkv"), f(2, "[Group] One Piece - 724 (1080p).mkv"))
+        // Our count through the show says 722; the addon searched out 723's file: the addon's wins.
+        assertEquals(1, pickEpisodeFile(batch, pickTag(21, 30, 722), Ep(21, 30), 1))
+        // No index from the addon, or one that isn't a video: by name, as before.
+        assertEquals(0, pickEpisodeFile(batch, pickTag(21, 30, 722), Ep(21, 30), null))
+        assertEquals(0, pickEpisodeFile(batch + f(3, "info.nfo", video = false), pickTag(21, 30, 722), Ep(21, 30), 3))
+        // A name that says this very S/E beats an index that points elsewhere.
+        val pack = listOf(TorrentFile(0, "Show.S01/Show.S01E01.mkv", "Show.S01E01.mkv", 5, true, false), TorrentFile(1, "Show.S01/Show.S01E02.mkv", "Show.S01E02.mkv", 5, true, false))
+        assertEquals(1, pickEpisodeFile(pack, pickTag(1, 2, null), Ep(1, 2), 0))
+        // A film: the file the addon meant.
+        assertEquals(1, pickEpisodeFile(pack, null, null, 1))
+    }
+
     @Test fun seasonalAnime() {
         // Two seasons of 12.
         val eps = (1..2).flatMap { s -> (1..12).map { e -> Episode("a:$s:$e", s, e, "", null, null, null) } }
