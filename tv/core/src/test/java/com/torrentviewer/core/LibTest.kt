@@ -243,6 +243,31 @@ class LibTest {
         val eps = (1..8).map { Episode("a$it", 1, it, "", null, null, null) } + (1..5).map { Episode("b$it", 2, it, "", null, null, null) }
         assertEquals(11, absoluteNumber(eps, 2, 3))
         assertEquals(eps.associateWith { absoluteNumber(eps, it.season, it.episode) }, absoluteNumbers(eps))
+        // An entry listed twice, or an "episode 0", doesn't push every later episode one on.
+        val doubled = eps + Episode("a8again", 1, 8, "", null, null, null) + Episode("b0", 2, 0, "", null, null, null)
+        assertEquals(11, absoluteNumber(doubled, 2, 3))
+        assertEquals(11, absoluteNumbers(doubled).entries.first { it.key.id == "b3" }.value)
+        assertNull(absoluteNumbers(doubled).entries.find { it.key.id == "b0" })
+        // One skipped in the list doesn't pull them one back either.
+        val skipped = eps.filterNot { it.id == "a4" }
+        assertEquals(11, absoluteNumber(skipped, 2, 3))
+        assertEquals(skipped.associateWith { absoluteNumber(skipped, it.season, it.episode) }, absoluteNumbers(skipped))
+        // A season already carrying on (One Piece's S21 from 892) stays as it is.
+        val running = eps + listOf(892, 893).map { Episode("c$it", 3, it, "", null, null, null) }
+        assertEquals(893, absoluteNumber(running, 3, 893))
+        assertEquals(893, absoluteNumbers(running).entries.first { it.key.id == "c893" }.value)
+
+        // The addons sit one off: asked for 1001, they answer "- 1002"; the neighbour's id has 1001.
+        fun hit(name: String) = Hit(name, name, "magnet:?xt=urn:btih:$name", 10, 0, 0, null, "tv", scopeOf(name), null)
+        val kept = sameEpisode(
+            own = listOf(hit("[SubsPlease] One Piece - 1002 (1080p)"), hit("One Piece Season 21 [1080p]"), hit("[ToonsHub] One Piece EP0995-EP1005 [BATCH]")),
+            near = listOf(hit("[SubsPlease] One Piece - 1001 (1080p)"), hit("[Erai-raws] One Piece - 1000 [1080p]")),
+            season = 21, episode = 110, absolute = 1001,
+        ).map { it.name }.toSet()
+        assertEquals(setOf("One Piece Season 21 [1080p]", "[ToonsHub] One Piece EP0995-EP1005 [BATCH]", "[SubsPlease] One Piece - 1001 (1080p)"), kept)
+        // Nothing said to be this one: what the addons gave, rather than nothing.
+        val only = listOf(hit("[SubsPlease] One Piece - 1002 (1080p)"))
+        assertEquals(only, sameEpisode(only, emptyList(), 21, 110, 1001))
         assertEquals("large", SubtitleStyle().resized(1).size)
         assertEquals("huge", SubtitleStyle(size = "huge").resized(1).size)
         assertEquals("small", SubtitleStyle(size = "small").resized(-1).size)

@@ -248,13 +248,13 @@ public static class Meta
     /// </summary>
     public static List<(Episode Episode, int Number)> AbsoluteNumbers(IEnumerable<Episode> episodes)
     {
-        var before = 0;
+        var last = 0;
         var @out = new List<(Episode, int)>();
-        foreach (var season in episodes.Where(e => e.Season > 0).GroupBy(e => e.Season).OrderBy(g => g.Key))
+        foreach (var season in episodes.Where(e => e.Season > 0 && e.Number > 0).GroupBy(e => e.Season).OrderBy(g => g.Key))
         {
             var list = season.ToList();
-            var offset = list.Min(e => e.Number) > 1 ? 0 : before;
-            before += list.Count;
+            var offset = list.Min(e => e.Number) > last ? 0 : last;
+            last = Math.Max(last, offset + list.Max(e => e.Number));
             @out.AddRange(list.Select(e => (e, offset + e.Number)));
         }
         return @out;
@@ -470,16 +470,27 @@ public static class Meta
 
     /// <summary>
     /// The episode's number counted straight through the show, the way anime is
-    /// released: Jujutsu Kaisen S2E5 is "- 29". Specials don't count. A season whose
-    /// numbers already carry on from the last one (not starting at 1) is taken as is.
+    /// released: Jujutsu Kaisen S2E5 is "- 29". Specials (and an "episode 0" inside a season)
+    /// don't count. A season whose numbers already carry on past the last one's (S21 starting
+    /// at 892) is taken as is.
+    /// A season starting over at 1 carries on from the highest number reached before it, not
+    /// from how many entries came before: the metadata of a thousand-episode show lists an
+    /// episode twice here and skips one there, and counting entries put every later episode
+    /// one off ("1001" fetched 1002).
     /// </summary>
     public static int? AbsoluteNumber(IEnumerable<Episode> episodes, int season, int number)
     {
-        if (season <= 0) return null;
-        var regular = episodes.Where(e => e.Season > 0).ToList();
-        var inSeason = regular.Where(e => e.Season == season).ToList();
-        if (inSeason.Count == 0) return null;
-        return inSeason.Min(e => e.Number) > 1 ? number : regular.Count(e => e.Season < season) + number;
+        if (season <= 0 || number <= 0) return null;
+        var regular = episodes.Where(e => e.Season > 0 && e.Season <= season && e.Number > 0).ToList();
+        if (!regular.Any(e => e.Season == season)) return null;
+        var last = 0;
+        foreach (var inSeason in regular.GroupBy(e => e.Season).OrderBy(g => g.Key))
+        {
+            var offset = inSeason.Min(e => e.Number) > last ? 0 : last;
+            if (inSeason.Key == season) return offset + number;
+            last = Math.Max(last, offset + inSeason.Max(e => e.Number));
+        }
+        return null;
     }
 
     /// <summary>

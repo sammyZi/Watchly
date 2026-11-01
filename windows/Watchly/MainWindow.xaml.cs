@@ -856,7 +856,7 @@ public partial class MainWindow : Window
         var absolute = Meta.AbsoluteNumber(list, next.Season, next.Number);
         return ($"{tag} · {next.Name}", async () =>
         {
-            var hits = await Search.SearchEpisode(next.Id, detail.Name, next.Season, type: detail.StremioType);
+            var hits = await Search.SearchEpisode(next.Id, detail.Name, next.Season, type: detail.StremioType, title: detail);
             if (hits.Count == 0)
             {
                 Toast($"No streams found for {tag}", true);
