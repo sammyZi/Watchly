@@ -22,8 +22,8 @@ android {
         applicationId = "com.torrentviewer.app"
         minSdk = 24
         targetSdk = 36
-        versionCode = 4
-        versionName = "2.2.0"
+        versionCode = 5
+        versionName = "2.3.0"
         buildConfigField("String", "SUBDL_KEY", "\"$subdlKey\"")
         buildConfigField("long", "BUILD_TIME", "${System.currentTimeMillis()}L")
         manifestPlaceholders["appLabel"] = "Watchly"
