@@ -24,8 +24,16 @@ public sealed record HistoryItem
     public string? Kind { get; init; }
     public string? Poster { get; init; }
     public string? TitleName { get; init; }
+    /// <summary>When each file's spot was last saved, ms: which of a title's releases was played last.</summary>
+    public Dictionary<int, long>? Played { get; init; }
 
     public double? PositionOf(int index) => Positions is not null && Positions.TryGetValue(index, out var v) ? v : null;
+    /// <summary>When this file was last played; an entry from before this was kept says when it was opened.</summary>
+    public long PlayedAt(int index) => Played is not null && Played.TryGetValue(index, out var t) ? t : At;
+
+    /// <summary>When anything in it was last played.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public long LastPlayed => LastFileIndex is int i ? PlayedAt(i) : At;
     public double? DurationOf(int index) => Durations is not null && Durations.TryGetValue(index, out var v) ? v : null;
 
     /// <summary>How far into a file the stored resume point is, 0-1.</summary>
@@ -123,6 +131,7 @@ public static class History
         {
             LastFileIndex = index,
             Positions = new Dictionary<int, double>(x.Positions ?? new()) { [index] = seconds },
+            Played = new Dictionary<int, long>(x.Played ?? new()) { [index] = Store.Now },
         });
 
     public static List<HistoryItem> SetDuration(string uri, int index, double seconds) =>
@@ -155,21 +164,22 @@ public static class History
     }
 
     /// <summary>
-    /// One entry per title, newest first: of a title's entries the newest that was started, so a
-    /// second release opened and closed at once does not hide where the first was left.
+    /// One entry per title, newest first: of a title's entries the one played last, so a second
+    /// release opened and closed at once does not hide where the first was left, nor an older one the newest.
     /// </summary>
     public static List<HistoryItem> LatestPerTitle(IEnumerable<HistoryItem> items) =>
-        items.OrderByDescending(x => x.At).GroupBy(x => x.TitleKey)
+        items.OrderByDescending(x => x.LastPlayed).GroupBy(x => x.TitleKey)
             .Select(g => g.FirstOrDefault(x => x.LastFileIndex is int i && x.PositionOf(i) is > 0) ?? g.First())
             .OrderByDescending(x => x.At).ToList();
 
     /// <summary>
-    /// Where to start <paramref name="fileName"/> of <paramref name="target"/> when this release was
-    /// never played: the spot another release of the title (for a series, the same episode) was
-    /// left, in seconds, with its duration. By time — releases differ in bytes. Null when there is
-    /// none, or it was watched through.
+    /// Where to start <paramref name="fileName"/> of <paramref name="target"/>: the spot another release
+    /// of the title (for a series, the same episode) was left, if one was played after <paramref name="since"/> —
+    /// this release's own last play, or -1 when it never was. One spot per title on a device, whichever
+    /// release opens it. In seconds, with its duration. By time — releases differ in bytes. Null when
+    /// there is none, or it was watched through.
     /// </summary>
-    public static (double At, double? Duration)? CarryOver(IEnumerable<HistoryItem> items, HistoryItem target, string fileName)
+    public static (double At, double? Duration)? CarryOver(IEnumerable<HistoryItem> items, HistoryItem target, string fileName, long since = -1)
     {
         // Anime goes by its bare number ("One Piece - 1125"): without it, every such file was
         // "no episode" alike, and 1125 opened where 1124 was left.
@@ -178,13 +188,25 @@ public static class History
         var ep = EpisodeOf(fileName);
         // A series file that says no episode can't be matched to anything.
         if (ep is null && target.Kind == "tv") return null;
-        var donor = items.Where(x => x.Uri != target.Uri && x.TitleKey == target.TitleKey).OrderByDescending(x => x.At)
-            .FirstOrDefault(d => d.LastFileIndex is int i && d.PositionOf(i) is > 0 &&
-                                 EpisodeOf(d.Files?.FirstOrDefault(f => f.Index == i)?.Name) == ep);
-        if (donor?.LastFileIndex is not int at || donor.PositionOf(at) is not double position) return null;
-        var duration = donor.DurationOf(at);
+        // Any file of another release that is this one — a pack's episode, not only the last it played.
+        var donors = items.Where(x => x.Uri != target.Uri && x.TitleKey == target.TitleKey).SelectMany(d =>
+            (d.Files ?? new()).Where(f => (ep is null ? f.Index == d.LastFileIndex : EpisodeOf(f.Name) == ep) && d.PositionOf(f.Index) is > 0)
+                .Select(f => (Item: d, Index: f.Index)));
+        var best = donors.OrderByDescending(x => x.Item.PlayedAt(x.Index)).FirstOrDefault();
+        if (best.Item is null || best.Item.PlayedAt(best.Index) <= since || best.Item.PositionOf(best.Index) is not double position) return null;
+        var duration = best.Item.DurationOf(best.Index);
         if (duration is > 0 && position >= duration.Value * 0.95) return null;
         return (position, duration);
+    }
+
+    /// <summary>
+    /// Where file <paramref name="index"/> of <paramref name="target"/> starts: its own spot, unless another
+    /// release of the title was played since — then that one's. Null when nothing here says.
+    /// </summary>
+    public static double? ResumeAt(IEnumerable<HistoryItem> items, HistoryItem target, int index, string fileName)
+    {
+        var own = target.ResumeRatio(index) > 0 ? target.PositionOf(index) : null;
+        return CarryOver(items, target, fileName, own is null ? -1 : target.PlayedAt(index))?.At ?? own;
     }
 
     /// <summary>Every entry of one title — each release it was played from.</summary>
@@ -474,7 +496,7 @@ public static class Profiles
     {
         Write(Load().Where(p => p.Id != id).ToList());
         Store.WipeProfile(id);
-        Simkl.Forget(id);
+        Stremio.Forget(id);
     }
 }
 
