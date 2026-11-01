@@ -153,7 +153,10 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         detail = null
         val raw = uri.toString()
         if (raw.startsWith("stremio://", ignoreCase = true)) {
-            watch.notes.tryEmit(runCatching { Addons.add(raw) }.fold({ "Added ${it.name} — see Settings → Addons" }, { it.message ?: "Couldn't add that addon" }))
+            // Not in this effect: clearing incoming above restarts it, which cancelled the fetch half-way.
+            AppScope.launch {
+                watch.notes.tryEmit(runCatching { Addons.add(raw) }.fold({ "Added ${it.name} — see Settings → Addons" }, { it.message ?: "Couldn't add that addon" }))
+            }
             return@LaunchedEffect
         }
         if (!isTorrentSource(raw)) return@LaunchedEffect

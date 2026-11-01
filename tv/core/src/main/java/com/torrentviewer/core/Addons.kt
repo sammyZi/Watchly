@@ -128,8 +128,18 @@ object Addons {
         // quiet, and our own messages: the link can carry a key, and a failure's own message names the link.
         val body = try {
             Net.get("$base/manifest.json", 15_000, quiet = true)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // The caller went away: that is no answer from the addon.
+            throw e
         } catch (e: Exception) {
-            throw IllegalArgumentException("Couldn't reach $host")
+            throw IllegalArgumentException(
+                when (e) {
+                    is HttpException -> if (e.code == 404) "No addon at that link — check it" else "$host answered ${e.code}"
+                    is java.net.UnknownHostException -> "Couldn't find $host — check the link and your connection"
+                    is java.net.SocketTimeoutException -> "$host took too long to answer"
+                    else -> "Couldn't reach $host"
+                },
+            )
         }
         val addon = runCatching { toAddon(base, JSONObject(body)) }.getOrNull() ?: throw IllegalArgumentException("Not an addon manifest")
         val now = _list.value
