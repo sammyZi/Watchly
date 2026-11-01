@@ -16,6 +16,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -61,25 +63,40 @@ import com.composables.icons.lucide.R as L
 /** Settings asks for the tour again; the shell shows it until it is done. */
 var tourAgain by androidx.compose.runtime.mutableStateOf(false)
 
+/** The onboarding's pages, in order. */
+private const val WELCOME = 0
+private const val GENRES_STEP = 1
+private const val SIGN_IN = 2
+
 /**
- * The first launch: one welcome over a drifting wall of what is trending, then signing in to Stremio —
- * which brings the library, Continue Watching and addons — or skipping it. Sign in opens Stremio's own
- * page; no password comes here. Without a network the pages stand on their gradient alone.
+ * The first launch: one welcome over a drifting wall of what is trending, then the genres the home
+ * screen leads with, then signing in to Stremio — which brings the library, Continue Watching and
+ * addons — or skipping it. Sign in opens Stremio's own page; no password comes here. Without a
+ * network the pages stand on their gradient alone.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun Onboarding(onDone: () -> Unit) {
     val films by produceState(emptyList<Title>()) { value = Meta.catalog("movie") }
     val series by produceState(emptyList<Title>()) { value = Meta.catalog("tv") }
     val posters = (films.take(14) + series.take(14)).filter { it.poster != null }
-    var signIn by remember { mutableStateOf(false) }
+    var step by remember { mutableStateOf(WELCOME) }
+    /** The same list as Settings → Genres on the home screen; taken again shows what was picked. */
+    var picked by remember { mutableStateOf(com.torrentviewer.core.SettingsStore.value.value.genres.toSet()) }
     var code by remember { mutableStateOf<com.torrentviewer.core.DeviceCode?>(null) }
     var note by remember { mutableStateOf<String?>(null) }
     var job by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     val scope = rememberCoroutineScope()
     val browser = androidx.compose.ui.platform.LocalUriHandler.current
-    BackHandler(signIn) {
+    BackHandler(step > WELCOME) {
         job?.cancel()
-        signIn = false
+        step--
+    }
+
+    fun keepGenres() {
+        val s = com.torrentviewer.core.SettingsStore.value.value
+        com.torrentviewer.core.SettingsStore.save(s.copy(genres = com.torrentviewer.core.GENRES.filter { it in picked }))
+        step = SIGN_IN
     }
 
     fun connect() {
@@ -101,7 +118,7 @@ fun Onboarding(onDone: () -> Unit) {
     }
 
     Box(Modifier.fillMaxSize().background(Color(0xFF0A0A0A))) {
-        if (signIn) Backdrop(films.firstOrNull { it.backdrop != null } ?: films.firstOrNull()) else PosterWall(posters)
+        if (step == SIGN_IN) Backdrop(films.firstOrNull { it.backdrop != null } ?: films.firstOrNull()) else PosterWall(posters)
         // Dark at the foot for the words, and a little at the head for Skip.
         Box(
             Modifier.fillMaxSize().background(
@@ -111,25 +128,49 @@ fun Onboarding(onDone: () -> Unit) {
 
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = EDGE, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("WATCHLY", Modifier.weight(1f), style = Type.title.copy(color = Color(0xFFE50914), fontWeight = FontWeight.Black, letterSpacing = 2.sp))
-            if (signIn) Tap({ job?.cancel(); onDone() }, shape = RoundedCornerShape(8.dp)) {
+            // Skip past the genres keeps the home screen as it was; past sign-in, into the app.
+            if (step > WELCOME) Tap({ if (step == GENRES_STEP) step = SIGN_IN else { job?.cancel(); onDone() } }, shape = RoundedCornerShape(8.dp)) {
                 Text("Skip", Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = Type.label.copy(color = Color.White.copy(alpha = 0.85f)))
             }
         }
 
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(horizontal = EDGE + 8.dp, vertical = 24.dp).widthIn(max = 520.dp)) {
             AnimatedContent(
-                signIn,
+                step,
                 transitionSpec = { (fadeIn(tween(260)) + slideInVertically(tween(260)) { it / 6 }) togetherWith fadeOut(tween(160)) },
                 label = "step",
-            ) { second ->
+            ) { page ->
                 Column {
-                    if (!second) {
+                    if (page == WELCOME) {
                         Text("Your media player", style = Type.hero.copy(color = Color.White, fontSize = 34.sp, lineHeight = 38.sp))
                         Text(
                             "Browse trending films, series and anime, and play them from the addons and servers you choose. Watchly comes with none.",
                             Modifier.padding(top = 10.dp), style = Type.body.copy(color = Color.White.copy(alpha = 0.78f), fontSize = 16.sp, lineHeight = 23.sp),
                         )
-                        Button("Get started", { signIn = true }, Modifier.padding(top = 26.dp).fillMaxWidth(), icon = L.drawable.lucide_ic_arrow_right, primary = true)
+                        Button("Get started", { step = GENRES_STEP }, Modifier.padding(top = 26.dp).fillMaxWidth(), icon = L.drawable.lucide_ic_arrow_right, primary = true)
+                    } else if (page == GENRES_STEP) {
+                        Text("What do you like?", style = Type.hero.copy(color = Color.White, fontSize = 34.sp, lineHeight = 38.sp))
+                        Text(
+                            "Pick a few — your home screen leads with them. Change them any time in Settings.",
+                            Modifier.padding(top = 10.dp, bottom = 16.dp), style = Type.body.copy(color = Color.White.copy(alpha = 0.78f), fontSize = 16.sp, lineHeight = 23.sp),
+                        )
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            com.torrentviewer.core.GENRES.forEach { g ->
+                                val on = g in picked
+                                // The tour's own pills: white on the dark page, whatever the phone's theme.
+                                Tap({ picked = if (on) picked - g else picked + g }, shape = CircleShape) {
+                                    Text(
+                                        g,
+                                        Modifier.background(if (on) Color(0xFFE50914) else Color.White.copy(alpha = 0.14f)).padding(horizontal = 14.dp, vertical = 8.dp),
+                                        style = Type.label.copy(color = Color.White, fontSize = 14.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium),
+                                    )
+                                }
+                            }
+                        }
+                        Button(
+                            if (picked.isEmpty()) "Continue" else "Continue with ${picked.size}",
+                            ::keepGenres, Modifier.padding(top = 22.dp).fillMaxWidth(), icon = L.drawable.lucide_ic_arrow_right, primary = true,
+                        )
                     } else {
                         Text("Sign in to Stremio", style = Type.hero.copy(color = Color.White, fontSize = 34.sp, lineHeight = 38.sp))
                         Text(

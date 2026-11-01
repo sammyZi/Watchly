@@ -838,7 +838,7 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
 
-        Section("Welcome tour", "What a new install opens with: the welcome, then signing in to Stremio.") {
+        Section("Welcome tour", "What a new install opens with: the welcome, your favourite genres, then signing in to Stremio.") {
             Button("Show the welcome tour", { tourAgain = true }, icon = L.drawable.lucide_ic_sparkles)
         }
         }

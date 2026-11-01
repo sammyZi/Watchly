@@ -176,6 +176,22 @@ fun libraryItem(old: JSONObject?, id: String, name: String, type: String, poster
 }
 
 /**
+ * [up] with My List added to the account's library: each title saved here that isn't in it — absent,
+ * removed, or only seen once (temp) — goes in, unless it was sent before ([sent]): one taken out
+ * there on purpose stays out. Nothing is ever removed this way. Merged into [up], by id.
+ */
+fun withMyList(up: Map<String, JSONObject>, remote: Map<String, JSONObject>, saved: List<Saved>, sent: Set<String>): Map<String, JSONObject> {
+    val out = up.toMutableMap()
+    for (s in saved) {
+        if (s.list != "later" || s.imdb in sent) continue
+        val now = out[s.imdb] ?: remote[s.imdb]
+        if (now != null && !now.optBoolean("removed") && !now.optBoolean("temp")) continue
+        out[s.imdb] = libraryItem(now, s.imdb, s.title, if (s.kind == "movie") "movie" else "series", s.poster, inLibrary = true)
+    }
+    return out
+}
+
+/**
  * The viewer's Stremio account: sign in by a code approved on link.stremio.com (no password here, and
  * the TV needs no keyboard), then the library, where films were left and what was finished come and go
  * both ways, and the account's addons come across. The key is per profile, encrypted like the SubDL key;
@@ -206,6 +222,11 @@ object Stremio {
     private var key: String? = null
 
     private fun slot(id: String) = "stremio:$id"
+
+    /** Per profile: My List titles already put in the account's library, so one removed there stays removed. */
+    private const val LIST_SENT = "stremio-list-sent"
+
+    private fun listSent(): Set<String> = runCatching { JSONArray(Kv.get(LIST_SENT) ?: "[]").let { a -> (0 until a.length()).map(a::getString).toSet() } }.getOrDefault(emptySet())
 
     /** On every profile switch, like History.load. */
     fun load(id: String, isGuest: Boolean) {
@@ -260,12 +281,17 @@ object Stremio {
             runCatching {
                 val got = call("datastoreGet", JSONObject().put("collection", "libraryItem").put("ids", JSONArray()).put("all", true), owner)
                 val theirs = got.optJSONArray("result")?.objects().orEmpty().associateBy { it.optString("_id") }
-                val up = backlog(History.items.value, theirs)
-                if (up.isNotEmpty() && owner == profile) {
-                    call("datastorePut", JSONObject().put("collection", "libraryItem").put("changes", JSONArray(up)), owner)
-                    Log.i("stremio", "sent ${up.size} from this device's history")
+                val played = backlog(History.items.value, theirs).associateBy { it.optString("_id") }
+                // My List from before signing in goes into the library once; after that, toggles go up as they happen.
+                val listed = SavedStore.items.value.filter { it.list == "later" }
+                val up = withMyList(played, theirs, listed, listSent())
+                if (owner != profile) return@runCatching
+                if (up.isNotEmpty()) {
+                    call("datastorePut", JSONObject().put("collection", "libraryItem").put("changes", JSONArray(up.values)), owner)
+                    Log.i("stremio", "sent ${up.size}: ${played.size} from this device's history, the rest from My List")
                 }
-                val merged = theirs + up.associateBy { it.optString("_id") }
+                if (owner == profile) Kv.set(LIST_SENT, JSONArray(listSent() + listed.map { it.imdb }).toString())
+                val merged = theirs + up
                 if (owner == profile) _library.value = parseLibrary(JSONObject().put("result", JSONArray(merged.values)).toString())
             }.onFailure { Log.w("stremio", "pull: ${it.message}") }
         }
