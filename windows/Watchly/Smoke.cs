@@ -120,6 +120,71 @@ static class Smoke
         Ok(!Search.IsDirectLink("https://x.example.org/thing.torrent") && Search.IsDirectLink("http://nas.local/a.mkv"), "isDirectLink");
         Eq(string.Join(",", Search.Rank(new[] { H("seed", seeders: 900), H("link", uri: "https://x.example.org/a.mkv") }).Select(h => h.Id)), "link,seed", "rank links first");
 
+        // Every stream shape: fileIdx, sources trackers, proxyHeaders, ytId / externalUrl.
+        var shapes = Search.ToStreamHits((JsonArray)JsonNode.Parse("""
+            [{"name":"T","title":"Show.S01.1080p","infoHash":"aa0fd381c944a72cabb3e962d5f727c8694d7dd6","fileIdx":3,"sources":["tracker:udp://tr.example.org:80/announce","dht:aa0f"]},
+             {"name":"L","url":"https://media.example.org/a.mkv","behaviorHints":{"filename":"A.mkv","proxyHeaders":{"request":{"User-Agent":"UA/1","Referer":"https://media.example.org/"}}}},
+             {"name":"Trailer","title":"Trailer","ytId":"abc123"},
+             {"name":"Page","title":"On the site","externalUrl":"https://site.example.org/watch"}]
+            """)!, "tv", "Mine");
+        Eq(shapes.Count, 4, "every stream shape kept");
+        Eq(shapes[0].FileIdx, (int?)3, "fileIdx on a torrent");
+        Ok(shapes[0].Uri.Contains("&tr=" + Uri.EscapeDataString("udp://tr.example.org:80/announce")), "sources trackers go into the magnet");
+        Eq(shapes[1].Headers.GetValueOrDefault("User-Agent"), "UA/1", "proxyHeaders kept for a link");
+        Ok(shapes[1].Direct && !shapes[1].External, "a link with headers still plays directly");
+        Ok(shapes[2].External && shapes[2].Uri == "https://www.youtube.com/watch?v=abc123" && !shapes[2].IsTorrent, "ytId opens in the browser");
+        Ok(shapes[3].External && !shapes[3].Direct, "externalUrl opens in the browser");
+        Eq(Search.Rank(shapes).Last().External, true, "other apps' streams last");
+
+        // Catalogues, meta types and kinds.
+        var catalogs = Addons.ToAddon("https://c.example.org", JsonNode.Parse("""
+            {"name":"Lists","resources":[{"name":"meta","types":["channel"],"idPrefixes":["yt:"]}],"types":["channel"],
+             "catalogs":[{"type":"channel","id":"top","name":"Top"},{"type":"movie","id":"g","name":"By genre","extra":[{"name":"genre","isRequired":true}]},
+                         {"type":"series","id":"s","name":"Search","extraSupported":["search"]}]}
+            """));
+        Ok(catalogs is not null && catalogs.Catalogs.Count == 3, "a catalogue-only addon is an addon");
+        Eq(catalogs?.MetaTypes("yt:1", "series").FirstOrDefault(), "channel", "meta types by id prefix");
+        Ok(catalogs is not null && catalogs.Catalogs[1].Required && catalogs.Catalogs[2].Search, "required and search extras");
+        Eq(Addons.KindOfType("tv"), "movie", "live tv plays its own id");
+        Eq(Addons.KindOfType("channel"), "tv", "a channel holds videos");
+        Eq(Addons.TypeLabel("channel"), "Channels", "type label");
+        Ok(catalogs is not null && catalogs.ShelfKey(catalogs.Catalogs[0]).StartsWith("addon:") && !catalogs.ShelfKey(catalogs.Catalogs[0]).Contains("example"), "shelf key keeps the link out");
+        var channel = Meta.ToEpisodes((JsonArray)JsonNode.Parse("""[{"id":"yt:v1","title":"First"},{"id":"yt:v2","title":"Second"}]""")!);
+        Eq(string.Join(",", channel.Select(e => $"{e.Season}:{e.Number}:{e.Id}")), "1:1:yt:v1,1:2:yt:v2", "a channel's videos numbered in order");
+        var own = Meta.ToTitles((JsonArray)JsonNode.Parse("""[{"id":"my:1","type":"other","name":"Mine"}]""")!, "tv", true, true);
+        Ok(own.Count == 1 && own[0].Episodes.Single().Id == "my:1" && own[0].StremioType == "other", "a custom type with no videos plays its own id");
+
+        // StremioTest.kt
+        Eq(Stremio.ParseLink("""{"result":{"success":true,"code":"34GW","link":"https://link.stremio.com/34GW"}}""").Code, "34GW", "link sign-in code");
+        Eq(Stremio.ParseLinkRead("""{"result":null,"error":{"code":101}}"""), null, "link sign-in waiting");
+        Eq(Stremio.ParseLinkRead("""{"result":{"authKey":"abc"}}"""), "abc", "link sign-in approved");
+        var lib = Stremio.ParseLibrary(((JsonArray)JsonNode.Parse("""
+            [{"_id":"tt1","name":"Film","type":"movie","removed":false,"temp":false,"_mtime":"2026-01-02T00:00:00.000Z","state":{"timeOffset":0,"duration":0,"timesWatched":1,"lastWatched":"2026-01-02T00:00:00.000Z"}},
+             {"_id":"tt2","name":"Show","type":"series","removed":false,"temp":true,"state":{"timeOffset":600000,"duration":2400000,"video_id":"tt2:3:4","lastWatched":"2026-01-03T00:00:00.000Z"}},
+             {"_id":"tt4","name":"Half","type":"movie","removed":false,"temp":false,"state":{"timeOffset":3000000,"duration":6000000,"lastWatched":"2026-01-01T00:00:00.000Z"}}]
+            """)!).OfType<JsonObject>());
+        Ok(lib.Films.SetEquals(new[] { "tt1" }), "stremio films watched");
+        Eq(string.Join(",", lib.Paused.Select(p => p.Imdb)), "tt2,tt4", "stremio paused newest first");
+        Eq(lib.PausedSeconds("tt2", (3, 4)), (double?)600, "stremio paused to the second");
+        Eq(string.Join(",", lib.Seen.Select(s => s.Imdb)), "tt1,tt4", "stremio library leaves temp out");
+        Eq(Stremio.EpOfVideo("kitsu:123:1:5"), ((int, int)?)(1, 5), "episode of an addon's id");
+        var fresh = Stremio.LibraryItem(null, "tt1", "Film", "movie", null, now: 0, change: s => s["timeOffset"] = 5000);
+        Ok(fresh["temp"]!.GetValue<bool>() && fresh["_mtime"]!.GetValue<string>() == "1970-01-01T00:00:00.000Z" && fresh["state"]!["video_id"] is null, "library item written whole");
+        var collection = new[]
+        {
+            (JsonObject)JsonNode.Parse("""{"transportUrl":"https://own.example.org/manifest.json","flags":{"protected":true},"manifest":{"id":"c"}}""")!,
+            (JsonObject)JsonNode.Parse("""{"transportUrl":"https://a.example.org/cfg/manifest.json","manifest":{"id":"a"}}""")!,
+        };
+        Eq(Stremio.WithoutAddon(collection, "https://a.example.org/cfg").Count, 1, "addon removed from the account");
+        Eq(Stremio.WithoutAddon(collection, "https://own.example.org").Count, 2, "a protected addon stays");
+
+        // One resume spot per title on this PC, whichever release opens it.
+        var older = new HistoryItem { Uri = "a", Title = "Film.720p", Imdb = "tt9", Files = new() { F(0, "Film.720p.mkv", 1) }, LastFileIndex = 0, Positions = new() { [0] = 600 }, Durations = new() { [0] = 6000 }, Played = new() { [0] = 100 } };
+        var newer = new HistoryItem { Uri = "b", Title = "Film.1080p", Imdb = "tt9", Files = new() { F(0, "Film.1080p.mkv", 1) }, LastFileIndex = 0, Positions = new() { [0] = 2400 }, Durations = new() { [0] = 6000 }, Played = new() { [0] = 200 } };
+        Eq(History.ResumeAt(new[] { older, newer }, older, 0, "Film.720p.mkv"), (double?)2400, "an older release resumes where the title was last left");
+        Eq(History.ResumeAt(new[] { older, newer }, newer, 0, "Film.1080p.mkv"), (double?)2400, "the newest release keeps its own spot");
+        Eq(History.LatestPerTitle(new[] { older with { At = 999 }, newer }).Single().Uri, "b", "Continue Watching shows the release played last");
+
         Eq(Search.Quality("Some.Film.2160p.WEB"), "4K", "quality 4K");
         Eq(Search.Quality("Some.Film.720p"), "720p", "quality 720p");
         Eq(Search.Quality("Some.Film.DVDRip"), null, "quality none");
@@ -357,7 +422,7 @@ static class Smoke
         active.Queue.Add(new Engine.QueueFile { Index = 2, Name = "Some.Show.S01E03.mkv", Size = 1_000_000, State = "Off" });
         Engine.Downloads.Instance.Live.Add(active);
 
-        foreach (var tab in new[] { "home", "search", "history", "downloads", "settings" })
+        foreach (var tab in new[] { "home", "search", "addons", "history", "downloads", "settings" })
         {
             try
             {

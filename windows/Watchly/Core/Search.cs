@@ -24,9 +24,17 @@ public sealed record Hit
     public bool PerFileSize { get; init; }
     /// <summary>The addon it came from, by name.</summary>
     public string Addon { get; init; } = "";
+    /// <summary>Not ours to play: a YouTube video or a page the addon sends to the browser.</summary>
+    public bool External { get; init; }
+    /// <summary>What the link's server wants with every request (an addon's <c>proxyHeaders</c>).</summary>
+    public Dictionary<string, string> Headers { get; init; } = new();
+    /// <summary>The file the addon meant, by the torrent's own numbering — for when names can't say.</summary>
+    public int? FileIdx { get; init; }
 
     /// <summary>Plays straight from its link: no swarm, no seeders to count, nothing to download.</summary>
-    public bool Direct => Search.IsDirectLink(Uri);
+    public bool Direct => !External && Search.IsDirectLink(Uri);
+    /// <summary>A torrent: the only kind the download engine can keep.</summary>
+    public bool IsTorrent => !Direct && !External;
 }
 
 /// <summary>A language to ask releases in: its name goes in the query, <see cref="Match"/> is how a release name says it (tv/core LANGS).</summary>
@@ -195,8 +203,10 @@ public static class Search
 
     static bool IsHash(string? s) => s is not null && Regex.IsMatch(s, "^[0-9a-f]{40}$", I);
 
-    static string MagnetOf(string hash, string name) =>
-        TitleText.WithTrackers($"magnet:?xt=urn:btih:{hash}&dn={Uri.EscapeDataString(name)}");
+    /// <summary>The addon's own trackers (its <c>sources</c>) first, then the well-known open ones.</summary>
+    static string MagnetOf(string hash, string name, IEnumerable<string>? trackers = null) =>
+        TitleText.WithTrackers($"magnet:?xt=urn:btih:{hash}&dn={Uri.EscapeDataString(name)}"
+            + string.Concat((trackers ?? Enumerable.Empty<string>()).Select(t => "&tr=" + Uri.EscapeDataString(t))));
 
     /// <summary>A video served over http(s), as opposed to a magnet, a .torrent or a path.</summary>
     public static bool IsDirectLink(string uri) => Regex.IsMatch(uri, "^https?://", I) && !TitleText.IsTorrentSource(uri);
@@ -220,7 +230,8 @@ public static class Search
             var full = words.Length > 0 && words.All(w => h.Name.ToLowerInvariant().Contains(w));
             return (h.Seeders + h.Leechers / 4.0) * (full ? 2 : 1);
         }
-        return hits.OrderByDescending(h => h.Direct).ThenByDescending(Score).ToList();
+        // Other apps' (YouTube, a page) last.
+        return hits.OrderByDescending(h => h.Direct).ThenBy(h => h.External).ThenByDescending(Score).ToList();
     }
 
     /// <summary>Links first, then this season's pack (fast enough to open). Whole-series dumps last.</summary>
@@ -255,10 +266,11 @@ public static class Search
     };
 
     /// <summary>
-    /// An addon's streams (the Stremio protocol): a torrent by <c>infoHash</c>, or a <c>url</c> that plays as it is.
-    /// The numbers most addons give sit inside the display text — "name\n👤 84 💾 51.3 GB ⚙️ 1337x" — and
-    /// <c>behaviorHints</c> carry the file's real name and size when the addon knows them.
-    /// ponytail: ytId, externalUrl and proxyHeaders streams are skipped; add them when an addon needs one.
+    /// An addon's streams, every shape the Stremio protocol has: a torrent by <c>infoHash</c> (with its
+    /// <c>fileIdx</c> and <c>sources</c> trackers), a <c>url</c> that plays as it is (with any <c>proxyHeaders</c>),
+    /// and a <c>ytId</c> or <c>externalUrl</c> handed to the browser. The numbers most addons give sit inside the
+    /// display text — "name\n👤 84 💾 51.3 GB ⚙️ 1337x" — and <c>behaviorHints</c> carry the file's real name and size.
+    /// ponytail: archive (rarUrls…) and nzbUrl streams are skipped; few addons send them yet.
     /// </summary>
     public static List<Hit> ToStreamHits(JsonArray streams, string kind, string addon = "")
     {
@@ -269,9 +281,13 @@ public static class Search
             if (!IsHash(hash)) hash = "";
             var url = Str(s["url"]);
             if (!IsDirectLink(url) && !TitleText.IsTorrentSource(url)) url = "";
-            if (hash.Length == 0 && url.Length == 0) continue;
+            var outside = Str(s["ytId"]) is { Length: > 0 } yt ? $"https://www.youtube.com/watch?v={Uri.EscapeDataString(yt)}"
+                : Str(s["externalUrl"]) is { } ext && Regex.IsMatch(ext, "^https?://", I) ? ext : "";
+            if (hash.Length == 0 && url.Length == 0 && outside.Length == 0) continue;
             var hints = s["behaviorHints"] as JsonObject;
-            if (url.Length > 0 && hints?["proxyHeaders"] is JsonObject) continue;
+            var headers = (hints?["proxyHeaders"]?["request"] as JsonObject)?.ToDictionary(h => h.Key, h => Str(h.Value)) ?? new();
+            var trackers = (s["sources"] as JsonArray ?? new JsonArray()).Select(Str).Where(t => t.StartsWith("tracker:")).Select(t => t["tracker:".Length..]);
+            var fileIdx = (int)Num(s["fileIdx"] ?? JsonValue.Create(-1));
             var text = Str(s["title"]) is { Length: > 0 } t ? t : Str(s["description"]);
             var label = Str(s["name"]).Replace('\n', ' ').Trim();
             var name = Str(hints?["filename"]) is { Length: > 0 } file ? file
@@ -283,9 +299,12 @@ public static class Search
             var seeds = SeedersRx.Match(text);
             @out.Add(new Hit
             {
-                Id = hash.Length > 0 ? hash : url,
+                Id = hash.Length > 0 ? hash : url.Length > 0 ? url : outside,
                 Name = name,
-                Uri = hash.Length > 0 ? MagnetOf(hash, name) : url,
+                Uri = hash.Length > 0 ? MagnetOf(hash, name, trackers) : url.Length > 0 ? url : outside,
+                External = hash.Length == 0 && url.Length == 0,
+                Headers = url.Length > 0 ? headers : new(),
+                FileIdx = hash.Length > 0 && fileIdx >= 0 ? fileIdx : null,
                 Seeders = seeds.Success ? int.Parse(seeds.Groups[1].Value) : 0,
                 Size = Math.Max(0, size),
                 Quality = Quality(name) ?? Quality($"{label} {text}"),
@@ -363,7 +382,7 @@ public static class Search
     /// </summary>
     static async Task<List<Hit>> FromAddons(string type, string id, CancellationToken ct, Lang? lang, Action<List<Hit>>? progress, Func<List<Hit>, List<Hit>> order)
     {
-        var kind = type == "movie" ? "movie" : "tv";
+        var kind = Addons.KindOfType(type);
         var sw = Stopwatch.StartNew();
         // A language is picked by name ("Hindi"), and only streams that say it count.
         List<Hit> Combine(IEnumerable<List<Hit>> bags)
@@ -396,14 +415,14 @@ public static class Search
     /// </summary>
     public static async Task<List<Hit>> SearchStreams(
         string title, CancellationToken ct = default, string? imdb = null, string? year = null,
-        Action<List<Hit>>? progress = null, Lang? lang = null)
+        Action<List<Hit>>? progress = null, Lang? lang = null, string type = "movie")
     {
         if (LinkHit(title) is { } link) return new() { link };
         var id = imdb;
         if (id is null && await Meta.ResolveTitle(string.Join(' ', new[] { title, year }.Where(x => !string.IsNullOrEmpty(x)))) is { Kind: "movie" } found)
             id = found.Imdb;
         if (string.IsNullOrEmpty(id)) return new();
-        return await FromAddons("movie", id, ct, lang, progress, hits => Rank(hits, title));
+        return await FromAddons(type, id, ct, lang, progress, hits => Rank(hits, title));
     }
 
     static readonly Dictionary<string, Task<List<Hit>>> EpisodeMemo = new();
@@ -415,13 +434,13 @@ public static class Search
     /// Every stream the addons have for one episode, by the episode's own id ("tt0944947:1:2"): packs
     /// included, since a pack streams just as well — only the one file is fetched.
     /// </summary>
-    public static Task<List<Hit>> SearchEpisode(string id, string show, int season, CancellationToken ct = default, Lang? lang = null)
+    public static Task<List<Hit>> SearchEpisode(string id, string show, int season, CancellationToken ct = default, Lang? lang = null, string type = "series")
     {
         var key = $"{id}:{lang?.Code}";
         lock (EpisodeMemo)
         {
             if (EpisodeMemo.TryGetValue(key, out var cached)) return cached;
-            var pending = FromAddons("series", id, ct, lang, null, hits => RankEpisode(hits, show, season)).ContinueWith(t =>
+            var pending = FromAddons(type, id, ct, lang, null, hits => RankEpisode(hits, show, season)).ContinueWith(t =>
             {
                 var hits = t.IsCompletedSuccessfully ? t.Result : new List<Hit>();
                 if (hits.Count == 0) lock (EpisodeMemo) EpisodeMemo.Remove(key);

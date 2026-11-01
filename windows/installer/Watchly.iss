@@ -49,6 +49,15 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+; An addon site's Install button opens stremio:// links. Offered only while no other app (Stremio
+; itself) has them, so installing Watchly never takes Stremio's links away.
+Name: "stremiolinks"; Description: "Open addon Install links (stremio://) in Watchly"; GroupDescription: "Links:"; Check: StremioLinksFree
+
+[Registry]
+Root: HKA; Subkey: "Software\Classes\stremio"; ValueType: string; ValueData: "URL:Stremio addon link"; Flags: uninsdeletekey; Tasks: stremiolinks
+Root: HKA; Subkey: "Software\Classes\stremio"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""; Tasks: stremiolinks
+Root: HKA; Subkey: "Software\Classes\stremio\DefaultIcon"; ValueType: string; ValueData: """{app}\Watchly.exe"",0"; Tasks: stremiolinks
+Root: HKA; Subkey: "Software\Classes\stremio\shell\open\command"; ValueType: string; ValueData: """{app}\Watchly.exe"" ""%1"""; Tasks: stremiolinks
 
 [Files]
 Source: "..\dist\Watchly.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -65,6 +74,16 @@ Filename: "{app}\Watchly.exe"; Description: "{cm:LaunchProgram,Watchly}"; Flags:
 Type: filesandordirs; Name: "{%TEMP}\.net\Watchly"
 
 [Code]
+// stremio:// is free, or already Watchly's (an update): anyone else's command is left alone.
+function StremioLinksFree(): Boolean;
+var
+  Command: String;
+begin
+  Result := True;
+  if RegQueryStringValue(HKEY_CLASSES_ROOT, 'stremio\shell\open\command', '', Command) then
+    Result := Pos('watchly.exe', Lowercase(Command)) > 0;
+end;
+
 // Profiles, history, My List, settings and the SubDL key live in %APPDATA%\Watchly; the stream
 // cache in %LOCALAPPDATA%\Watchly. Asked, not assumed: someone reinstalling wants to keep them.
 // Downloaded films in the downloads folder are never touched.

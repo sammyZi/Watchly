@@ -512,6 +512,12 @@ public sealed class PlayerView : UserControl, IDisposable
             ":live-caching=300",
             ":clock-jitter=0",
             $":start-time={startSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+        // ponytail: libVLC sends only these two of a link's headers (an addon's proxyHeaders).
+        foreach (var (k, v) in request.Headers ?? new())
+        {
+            if (k.Equals("user-agent", StringComparison.OrdinalIgnoreCase)) media.AddOption($":http-user-agent={v}");
+            else if (k.Equals("referer", StringComparison.OrdinalIgnoreCase)) media.AddOption($":http-referrer={v}");
+        }
         started = true;
         buffering = true;
         current = (long)(startSeconds * 1000);
