@@ -118,8 +118,41 @@ fun parseLibrary(json: String): StremioLibrary {
     return StremioLibrary(films, episodes, paused.sortedByDescending { it.first }.map { it.second }, seen.sortedByDescending { it.at })
 }
 
-private fun isoNow(now: Long = System.currentTimeMillis()): String =
-    java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }.format(java.util.Date(now))
+private fun utc(pattern: String) = java.text.SimpleDateFormat(pattern, java.util.Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+
+private fun isoNow(now: Long = System.currentTimeMillis()): String = utc("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").format(java.util.Date(now))
+
+/** Stremio's times, with or without the milliseconds; null for anything else. */
+fun isoMs(s: String?): Long? {
+    s ?: return null
+    for (p in listOf("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", "yyyy-MM-dd'T'HH:mm:ss'Z'")) runCatching { utc(p).parse(s)?.time }.getOrNull()?.let { return it }
+    return null
+}
+
+/**
+ * What this device played that Stremio hasn't heard of — from before signing in, or while offline: per
+ * title its latest play, past [WATCHED_AT] as watched, else its paused spot. Stremio's own item wins when
+ * it was watched since; the play's own time goes up as lastWatched, so the next open doesn't send it again.
+ * [remote] is the account's library by id. A play with no id (a pasted link) or episode can't be placed.
+ */
+fun backlog(items: List<Item>, remote: Map<String, JSONObject>): List<JSONObject> = latestPerTitle(items).mapNotNull { item ->
+    val id = item.imdb ?: return@mapNotNull null
+    val i = item.lastFileIndex ?: return@mapNotNull null
+    val at = item.positions[i] ?: return@mapNotNull null
+    val of = item.durations[i]?.takeIf { it > 0 } ?: return@mapNotNull null
+    val r = at / of
+    if (r < 0.02) return@mapNotNull null
+    val old = remote[id]
+    if ((isoMs(old?.optJSONObject("state")?.str("lastWatched")) ?: 0L) >= item.at) return@mapNotNull null
+    val film = item.kind == "movie"
+    val ep = if (film) null else item.files?.find { it.index == i }?.name?.let(::parseEpisode) ?: return@mapNotNull null
+    libraryItem(old, id, item.label.substringBefore(" · "), if (film) "movie" else "series", item.poster, now = item.at) { s ->
+        s.put("lastWatched", isoNow(item.at))
+        if (ep != null) s.put("video_id", "$id:${ep.season}:${ep.episode}")
+        if (r >= WATCHED_AT) s.put("timesWatched", s.optInt("timesWatched") + 1).put("flaggedWatched", 1).put("timeOffset", 0)
+        else s.put("timeOffset", (at * 1000).toLong()).put("duration", (of * 1000).toLong())
+    }
+}
 
 /**
  * A library item as Stremio's own apps read it: [old] as stored with [change] made to its state, or a new
@@ -215,14 +248,25 @@ object Stremio {
     /** Any profile's, not only the one watching — the profile editor connects whichever it has open. */
     fun isConnected(id: String) = if (id == profile) key != null else stored(id) != null
 
-    /** The viewer's library and paused playbacks. Off the network, it stays as it was. */
+    /**
+     * The viewer's library and paused playbacks — and, up the other way, whatever this device played that
+     * the account hasn't got ([backlog]), in one write. Every open and every sign-in, so plays from before
+     * signing in, or offline, need no remembering. Off the network, it all stays as it was.
+     */
     fun pull() {
         if (key == null) return
         val owner = profile
         AppScope.launch {
             runCatching {
                 val got = call("datastoreGet", JSONObject().put("collection", "libraryItem").put("ids", JSONArray()).put("all", true), owner)
-                if (owner == profile) _library.value = parseLibrary(got.toString())
+                val theirs = got.optJSONArray("result")?.objects().orEmpty().associateBy { it.optString("_id") }
+                val up = backlog(History.items.value, theirs)
+                if (up.isNotEmpty() && owner == profile) {
+                    call("datastorePut", JSONObject().put("collection", "libraryItem").put("changes", JSONArray(up)), owner)
+                    Log.i("stremio", "sent ${up.size} from this device's history")
+                }
+                val merged = theirs + up.associateBy { it.optString("_id") }
+                if (owner == profile) _library.value = parseLibrary(JSONObject().put("result", JSONArray(merged.values)).toString())
             }.onFailure { Log.w("stremio", "pull: ${it.message}") }
         }
     }
