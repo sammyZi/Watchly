@@ -166,8 +166,8 @@ public sealed class ProfilesView : UserControl
             kidsRow.Children.Add(on);
             kidsRow.Children.Add(Ui.Chip("Everything", !kids, () => { kids = false; RefreshKids(); }, style: "ChoiceChip"));
             kidsHint.Text = kids
-                ? "Family films and series only. No torrent search or links — give your own profile a PIN so it stays that way."
-                : "Every title, torrent search included.";
+                ? "Family films and series only. No addons, stream search or links — give your own profile a PIN so it stays that way."
+                : "Every title, addons and stream search included.";
         }
         RefreshKids();
         var preview = new ContentControl { VerticalAlignment = VerticalAlignment.Top };

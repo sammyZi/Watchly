@@ -32,6 +32,8 @@ public sealed record OpenOptions
     public string? Poster { get; init; }
     public string? TitleName { get; init; }
     public int? Season { get; init; }
+    /// <summary>The stream's own name, when it knows one better than its link does.</summary>
+    public string? Name { get; init; }
 }
 
 /// <summary>Everything the player needs for one file — a torrent file or one already on disk.</summary>
@@ -49,6 +51,8 @@ public sealed record PlaybackRequest
     public string? LocalPath { get; init; }
     /// <summary>TorBox's HTTPS link for this file; the torrent is the fallback when it fails.</summary>
     public string? Remote { get; init; }
+    /// <summary>A link that plays as it is — an addon's debrid stream, a file on the viewer's own server.</summary>
+    public string? Link { get; init; }
     public (string Name, Func<Task> Go)? Next { get; init; }
 }
 
@@ -521,7 +525,7 @@ public partial class MainWindow : Window
         var ok = await Open(new HistoryItem
         {
             Uri = uri,
-            Title = TitleText.TitleOf(uri),
+            Title = opts.Name ?? TitleText.TitleOf(uri),
             At = Store.Now,
             Imdb = opts.Imdb,
             Kind = opts.Kind,
@@ -544,6 +548,11 @@ public partial class MainWindow : Window
             TitleName = next.TitleName ?? detail?.Name,
         });
         var fresh = HistoryList.First(h => h.Uri == next.Uri);
+        if (Search.IsDirectLink(fresh.Uri))
+        {
+            PlayLink(fresh, opts.KeepProgress);
+            return true;
+        }
 
         var cts = new CancellationTokenSource();
         SetOpening(cts);
@@ -718,6 +727,36 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// A link that plays as it is — an addon's debrid stream, a file on the viewer's own server: one
+    /// file, no torrent, kept as a one-file entry so Continue Watching and resume points work as ever.
+    /// </summary>
+    void PlayLink(HistoryItem target, bool startOver)
+    {
+        var detail = CurrentDetail;
+        var name = target.TorrentName ?? target.Title;
+        var file = new TorrentFileInfo { Index = 0, Name = name, Path = name, IsVideo = true };
+        HistoryList = History.Patch(target.Uri, x => x with { TorrentName = name, LastFileIndex = 0, Files = new() { file } });
+        var stored = HistoryList.FirstOrDefault(h => h.Uri == target.Uri) ?? target;
+        var resumeAt = startOver ? 0
+            : stored.ResumeRatio(0) > 0 ? stored.PositionOf(0) ?? 0
+            : History.CarryOver(HistoryList, stored with { Imdb = detail?.Imdb ?? stored.Imdb, TitleName = stored.TitleName ?? detail?.Name }, name)?.At
+              ?? FromSimkl(detail?.Imdb ?? stored.Imdb, detail, name);
+        OpenPlayer(new PlaybackRequest
+        {
+            Title = name,
+            MetaTitle = detail?.Name ?? stored.TitleName,
+            Imdb = detail?.Imdb ?? stored.Imdb,
+            Kind = detail?.Kind ?? stored.Kind,
+            ResumeAt = resumeAt,
+            FileIndex = 0,
+            HistoryUri = target.Uri,
+            SavedSubs = stored.Subtitles?.GetValueOrDefault(0) ?? new(),
+            Next = UpNext(stored, null, new TorrentMeta(name, new() { file }), 0, detail),
+            Link = target.Uri,
+        });
+    }
+
+    /// <summary>
     /// Nothing here has played this title — a reinstall, another device — but Simkl kept where it was
     /// paused: its percent of the runtime Cinemeta gives. Close, not to the second.
     /// </summary>
@@ -733,11 +772,11 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// The episode after this one: inside this torrent first (instant), else the
-    /// next episode of the title page it came from, found by searching.
+    /// next episode of the title page it came from, found by asking the addons. A link (no torrent) is one file.
     /// </summary>
-    (string Name, Func<Task> Go)? UpNext(HistoryItem stored, Torrent torrent, TorrentMeta meta, int index, Title? detail)
+    (string Name, Func<Task> Go)? UpNext(HistoryItem stored, Torrent? torrent, TorrentMeta meta, int index, Title? detail)
     {
-        if (Pick.NextEpisode(meta.Files, index) is { } following)
+        if (torrent is not null && Pick.NextEpisode(meta.Files, index) is { } following)
             return (following.Name, () => { Play(stored.Uri, torrent, meta, following.Index, true); return Task.CompletedTask; });
 
         if (detail is not { Kind: "tv" }) return null;
@@ -749,14 +788,15 @@ public partial class MainWindow : Window
         var absolute = Meta.AbsoluteNumber(list, next.Season, next.Number);
         return ($"{tag} · {next.Name}", async () =>
         {
-            var hits = await Search.SearchEpisode(detail.Name, next.Season, next.Number, default, detail.Imdb, absolute);
+            var hits = await Search.SearchEpisode(next.Id, detail.Name, next.Season);
             if (hits.Count == 0)
             {
-                Toast($"No releases found for {tag}", true);
+                Toast($"No streams found for {tag}", true);
                 return;
             }
-            var local = await StreamUri(hits[0].Magnet, new OpenOptions
+            var local = await StreamUri(hits[0].Uri, new OpenOptions
             {
+                Name = hits[0].Name,
                 Auto = Search.PickTag(next.Season, next.Number, absolute),
                 KeepProgress = true,
                 Imdb = detail.Imdb,

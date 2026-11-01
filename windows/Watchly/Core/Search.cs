@@ -4,13 +4,14 @@ using System.Text.RegularExpressions;
 
 namespace Watchly.Core;
 
-/// <summary>A torrent release from one of the indexes. See src/lib/search.ts.</summary>
+/// <summary>One stream an addon offered: a torrent, or a link that plays as it is (tv/core Search.kt).</summary>
 public sealed record Hit
 {
-    /// <summary>The info hash — the one id every index agrees on.</summary>
+    /// <summary>The info hash for a torrent, so two addons' copies are one row; else the link.</summary>
     public required string Id { get; init; }
     public required string Name { get; init; }
-    public required string Magnet { get; init; }
+    /// <summary>A magnet, or the http(s) link itself — a debrid service's, or the viewer's own server's.</summary>
+    public required string Uri { get; init; }
     public int Seeders { get; init; }
     public int Leechers { get; init; }
     public long Size { get; init; }
@@ -19,9 +20,13 @@ public sealed record Hit
     public string Kind { get; init; } = "other";
     /// <summary>episode | season | complete</summary>
     public string Scope { get; init; } = "episode";
-    public string? Imdb { get; init; }
-    /// <summary>Torrentio's size is the one file it found, even for a season pack.</summary>
+    /// <summary>An addon's size is the one file it found, even for a season pack.</summary>
     public bool PerFileSize { get; init; }
+    /// <summary>The addon it came from, by name.</summary>
+    public string Addon { get; init; } = "";
+
+    /// <summary>Plays straight from its link: no swarm, no seeders to count, nothing to download.</summary>
+    public bool Direct => Search.IsDirectLink(Uri);
 }
 
 /// <summary>A language to ask releases in: its name goes in the query, <see cref="Match"/> is how a release name says it (tv/core LANGS).</summary>
@@ -73,21 +78,6 @@ public sealed record Lang(string Code, string Name, Regex Match)
 
 public static class Search
 {
-    const string Api = "https://apibay.org/q.php";
-    const string Csv = "https://torrents-csv.com/service/search";
-    const string Torrentio = "https://torrentio.strem.fun/stream";
-    /// <summary>Same stream format as Torrentio, a different (larger) index.</summary>
-    const string TorrentsDb = "https://torrentsdb.com/stream";
-    /// <summary>yts.mx no longer resolves on some networks; the mirrors serve the same API.</summary>
-    static readonly string[] YtsHosts = { "https://yts.mx", "https://yts.lt", "https://yts.am", "https://movies-api.accel.li" };
-    /// <summary>One search across many trackers (The Pirate Bay, 1337x, RuTracker, YTS, …) — reachable where apibay is blocked.</summary>
-    const string Knaben = "https://api.knaben.org/v1";
-    const string Bitsearch = "https://bitsearch.to/api/v1/search";
-    const string TheRarbg = "https://therarbg.com/get-posts/keywords:";
-    const string Nyaa = "https://nyaa.si/?page=rss&c=1_2&f=0&q=";
-    const string Eztv = "https://eztv.tf/api/get-torrents";
-    const int FastMs = 2000;
-
     static void Log(string message) => Debug.WriteLine($"[releases] {message}");
 
     const RegexOptions I = RegexOptions.IgnoreCase;
@@ -190,13 +180,6 @@ public static class Search
         return "episode";
     }
 
-    public static string KindOf(int category)
-    {
-        if (category is 201 or 202 or 204 or 207 or 209) return "movie";
-        if (category is 205 or 208) return "tv";
-        return "other";
-    }
-
     public static string? Quality(string name)
     {
         if (Regex.IsMatch(name, @"2160p|\buhd\b|\b4k\b", I)) return "4K";
@@ -215,6 +198,9 @@ public static class Search
     static string MagnetOf(string hash, string name) =>
         TitleText.WithTrackers($"magnet:?xt=urn:btih:{hash}&dn={Uri.EscapeDataString(name)}");
 
+    /// <summary>A video served over http(s), as opposed to a magnet, a .torrent or a path.</summary>
+    public static bool IsDirectLink(string uri) => Regex.IsMatch(uri, "^https?://", I) && !TitleText.IsTorrentSource(uri);
+
     static string Str(JsonNode? node) => node switch
     {
         null => "",
@@ -225,31 +211,7 @@ public static class Search
     static double Num(JsonNode? node) =>
         double.TryParse(Str(node), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : 0;
 
-    public static List<Hit> ToHits(JsonArray rows) => rows
-        .Where(r => Str(r?["id"]) != "0" && IsHash(Str(r?["info_hash"])))
-        .Where(r => Num(r!["category"]) is >= 200 and < 300)
-        .Select(r =>
-        {
-            var name = Str(r!["name"]);
-            var hash = Str(r["info_hash"]).ToLowerInvariant();
-            var imdb = Str(r["imdb"]);
-            return new Hit
-            {
-                Id = hash,
-                Name = name,
-                Magnet = MagnetOf(hash, name),
-                Seeders = (int)Num(r["seeders"]),
-                Leechers = (int)Num(r["leechers"]),
-                Size = (long)Num(r["size"]),
-                Quality = Quality(name),
-                Scope = ScopeOf(name),
-                Kind = KindOf((int)Num(r["category"])),
-                Imdb = Regex.IsMatch(imdb, @"^tt\d+$") ? imdb : null,
-            };
-        })
-        .ToList();
-
-    /// <summary>Order by how well the swarm will actually serve you.</summary>
+    /// <summary>Links first — they play at once — then by how well the swarm will actually serve you.</summary>
     public static List<Hit> Rank(IEnumerable<Hit> hits, string query = "")
     {
         var words = query.ToLowerInvariant().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
@@ -258,13 +220,14 @@ public static class Search
             var full = words.Length > 0 && words.All(w => h.Name.ToLowerInvariant().Contains(w));
             return (h.Seeders + h.Leechers / 4.0) * (full ? 2 : 1);
         }
-        return hits.OrderByDescending(Score).ToList();
+        return hits.OrderByDescending(h => h.Direct).ThenByDescending(Score).ToList();
     }
 
-    /// <summary>This season's pack first (fast enough to open). Whole-series dumps last.</summary>
+    /// <summary>Links first, then this season's pack (fast enough to open). Whole-series dumps last.</summary>
     public static List<Hit> RankEpisode(IEnumerable<Hit> hits, string query = "", int? season = null)
     {
-        var ordered = Rank(hits, query);
+        var all = Rank(hits, query);
+        var ordered = all.Where(h => !h.Direct).ToList();
         bool ThisPack(Hit h)
         {
             if (h.Seeders < 1 || h.Scope != "season") return false;
@@ -272,7 +235,8 @@ public static class Search
             return c.Count <= 1 && (season == null || c.Count == 0 || c.Contains(season.Value));
         }
         bool One(Hit h) => h.Scope == "episode" && h.Seeders >= 1;
-        return ordered.Where(ThisPack)
+        return all.Where(h => h.Direct)
+            .Concat(ordered.Where(ThisPack))
             .Concat(ordered.Where(One))
             .Concat(ordered.Where(h => !ThisPack(h) && !One(h)))
             .ToList();
@@ -290,115 +254,60 @@ public static class Search
         _ => 0,
     };
 
-    public static List<Hit> ToTorrentioHits(JsonArray streams, string kind) => streams
-        .Where(s => IsHash(Str(s?["infoHash"])))
-        .Select(s =>
+    /// <summary>
+    /// An addon's streams (the Stremio protocol): a torrent by <c>infoHash</c>, or a <c>url</c> that plays as it is.
+    /// The numbers most addons give sit inside the display text — "name\n👤 84 💾 51.3 GB ⚙️ 1337x" — and
+    /// <c>behaviorHints</c> carry the file's real name and size when the addon knows them.
+    /// ponytail: ytId, externalUrl and proxyHeaders streams are skipped; add them when an addon needs one.
+    /// </summary>
+    public static List<Hit> ToStreamHits(JsonArray streams, string kind, string addon = "")
+    {
+        var @out = new List<Hit>();
+        foreach (var s in streams.OfType<JsonObject>())
         {
-            var lines = Str(s!["title"]).Split('\n');
-            var name = lines.FirstOrDefault()?.Trim();
-            if (string.IsNullOrEmpty(name)) name = Str(s["name"]).Replace('\n', ' ');
-            var stats = string.Join(' ', lines.Skip(1));
-            var size = SizeRx.Match(stats);
-            var seeds = SeedersRx.Match(stats);
             var hash = Str(s["infoHash"]).ToLowerInvariant();
-            return new Hit
+            if (!IsHash(hash)) hash = "";
+            var url = Str(s["url"]);
+            if (!IsDirectLink(url) && !TitleText.IsTorrentSource(url)) url = "";
+            if (hash.Length == 0 && url.Length == 0) continue;
+            var hints = s["behaviorHints"] as JsonObject;
+            if (url.Length > 0 && hints?["proxyHeaders"] is JsonObject) continue;
+            var text = Str(s["title"]) is { Length: > 0 } t ? t : Str(s["description"]);
+            var label = Str(s["name"]).Replace('\n', ' ').Trim();
+            var name = Str(hints?["filename"]) is { Length: > 0 } file ? file
+                : text.Split('\n')[0].Trim() is { Length: > 0 } first ? first : label;
+            if (name.Length == 0) continue;
+            var size = (long)Num(hints?["videoSize"]);
+            if (size <= 0 && SizeRx.Match(text) is { Success: true } sm)
+                size = (long)Math.Round(double.Parse(sm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) * Unit(sm.Groups[2].Value));
+            var seeds = SeedersRx.Match(text);
+            @out.Add(new Hit
             {
-                Id = hash,
+                Id = hash.Length > 0 ? hash : url,
                 Name = name,
-                Magnet = MagnetOf(hash, name),
+                Uri = hash.Length > 0 ? MagnetOf(hash, name) : url,
                 Seeders = seeds.Success ? int.Parse(seeds.Groups[1].Value) : 0,
-                Leechers = 0,
-                Size = size.Success
-                    ? (long)Math.Round(double.Parse(size.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) * Unit(size.Groups[2].Value))
-                    : 0,
-                Quality = Quality(name),
+                Size = Math.Max(0, size),
+                Quality = Quality(name) ?? Quality($"{label} {text}"),
                 Scope = ScopeOf(name),
                 Kind = kind,
                 PerFileSize = true,
-            };
-        })
-        .Where(h => h.Name.Length > 0)
-        .ToList();
-
-    public static List<Hit> ToYtsHits(JsonArray movies)
-    {
-        var @out = new List<Hit>();
-        foreach (var movie in movies)
-        {
-            if (movie is null) continue;
-            var title = Str(movie["title_long"]);
-            if (title.Length == 0) title = Str(movie["title"]);
-            var imdbCode = Str(movie["imdb_code"]);
-            var imdb = Regex.IsMatch(imdbCode, @"^tt\d+$") ? imdbCode : null;
-            if (movie["torrents"] is not JsonArray torrents) continue;
-            foreach (var t in torrents)
-            {
-                var hash = Str(t?["hash"]).ToLowerInvariant();
-                if (!IsHash(hash)) continue;
-                var name = string.Join(' ', new[] { title, Str(t!["quality"]), Str(t["type"]) }.Where(x => x.Length > 0));
-                @out.Add(new Hit
-                {
-                    Id = hash,
-                    Name = name,
-                    Magnet = MagnetOf(hash, name),
-                    Seeders = (int)Num(t["seeds"]),
-                    Leechers = (int)Num(t["peers"]),
-                    Size = (long)Num(t["size_bytes"]),
-                    Quality = Quality(name),
-                    Scope = "episode",
-                    Kind = "movie",
-                    Imdb = imdb,
-                });
-            }
+                Addon = addon,
+            });
         }
         return @out;
     }
 
-    public static List<Hit> ToEztvHits(JsonArray torrents) => torrents
-        .Where(t => IsHash(Str(t?["hash"])))
-        .Select(t =>
-        {
-            var name = Str(t!["title"]);
-            var hash = Str(t["hash"]).ToLowerInvariant();
-            return new Hit
-            {
-                Id = hash,
-                Name = name,
-                Magnet = MagnetOf(hash, name),
-                Seeders = (int)Num(t["seeds"]),
-                Leechers = (int)Num(t["peers"]),
-                Size = (long)Num(t["size_bytes"]),
-                Quality = Quality(name),
-                Scope = ScopeOf(name),
-                Kind = "tv",
-            };
-        })
-        .Where(h => h.Name.Length > 0)
-        .ToList();
+    /// <summary>A pasted magnet or http(s) video link as a stream of its own: a file on the viewer's own server, say.</summary>
+    public static Hit? LinkHit(string text)
+    {
+        var s = text.Trim();
+        if (!s.StartsWith("magnet:?", StringComparison.OrdinalIgnoreCase) && !Regex.IsMatch(s, @"^https?://\S+$", I)) return null;
+        var name = TitleText.TitleOf(s);
+        return new Hit { Id = TitleText.HashOf(s) ?? s, Name = name, Uri = s, Quality = Quality(name), Kind = TitleText.IsSeries(name) ? "tv" : "movie", Scope = ScopeOf(name), Addon = "Link" };
+    }
 
-    public static List<Hit> ToCsvHits(JsonArray rows) => rows
-        .Where(r => IsHash(Str(r?["infohash"] ?? r?["info_hash"])))
-        .Select(r =>
-        {
-            var name = Str(r!["name"]);
-            var hash = Str(r["infohash"] ?? r["info_hash"]).ToLowerInvariant();
-            return new Hit
-            {
-                Id = hash,
-                Name = name,
-                Magnet = MagnetOf(hash, name),
-                Seeders = (int)Num(r["seeders"]),
-                Leechers = (int)Num(r["leechers"]),
-                Size = (long)Num(r["size_bytes"] ?? r["size"]),
-                Quality = Quality(name),
-                Scope = ScopeOf(name),
-                Kind = ParseEpisode(name) is null ? "movie" : "tv",
-            };
-        })
-        .Where(h => h.Name.Length > 0)
-        .ToList();
-
-    /// <summary>Same torrent from two indexes is one row — keep whichever knew more.</summary>
+    /// <summary>Same torrent from two addons is one row — keep whichever knew more.</summary>
     public static List<Hit> Merge(IEnumerable<IEnumerable<Hit>> lists)
     {
         var best = new Dictionary<string, Hit>();
@@ -422,33 +331,8 @@ public static class Search
         return order.Select(id => best[id]).ToList();
     }
 
-    static async Task<List<Hit>> FromTorrentio(string path, string kind, CancellationToken ct)
-    {
-        var body = await Net.Json($"{Torrentio}/{path}.json", ct, true);
-        return body?["streams"] is JsonArray streams ? ToTorrentioHits(streams, kind) : new();
-    }
-
-    static async Task<List<Hit>> FromTorrentsDb(string path, string kind, CancellationToken ct)
-    {
-        var body = await Net.Json($"{TorrentsDb}/{path}.json", ct, true);
-        return body?["streams"] is JsonArray streams ? ToTorrentioHits(streams, kind) : new();
-    }
-
-    static async Task<List<Hit>> FromCsv(string query, CancellationToken ct)
-    {
-        var body = await Net.Json($"{Csv}?q={Uri.EscapeDataString(query)}&size=50", ct, true);
-        var rows = body?["torrents"] as JsonArray ?? body as JsonArray;
-        return rows is null ? new() : ToCsvHits(rows);
-    }
-
-    static async Task<List<Hit>> FromBayOnly(string query, CancellationToken ct)
-    {
-        var body = await Net.Json($"{Api}?q={Uri.EscapeDataString(query)}&cat=200", ct, true);
-        return body is JsonArray rows ? ToHits(rows) : new List<Hit>();
-    }
-
-    /// <summary>How long one index gets in a search before it is left out of the answer.</summary>
-    const int SourceMs = 4000;
+    /// <summary>How long one addon gets in a search before it is left out of the answer.</summary>
+    const int SourceMs = 12000;
 
     /// <summary>The job's answer, or <paramref name="fallback"/> if it fails or takes longer than <paramref name="ms"/>.</summary>
     static async Task<T> Limited<T>(Task<T> job, int ms, T fallback)
@@ -467,294 +351,77 @@ public static class Search
     static async Task<List<Hit>> Timed(string name, Task<List<Hit>> job)
     {
         var sw = Stopwatch.StartNew();
-        try
-        {
-            var @out = await job;
-            Log($"{name} {sw.ElapsedMilliseconds}ms n={@out.Count}");
-            return @out;
-        }
-        catch (Exception e)
-        {
-            Log($"{name} {sw.ElapsedMilliseconds}ms FAIL {e.Message}");
-            throw;
-        }
-    }
-
-    static async Task<List<Hit>> FromYts(string query, CancellationToken ct)
-    {
-        foreach (var host in YtsHosts)
-        {
-            try
-            {
-                var body = await Net.Json($"{host}/api/v2/list_movies.json?query_term={Uri.EscapeDataString(query)}&limit=50", ct, true);
-                return body?["data"]?["movies"] is JsonArray movies ? ToYtsHits(movies) : new();
-            }
-            catch when (!ct.IsCancellationRequested)
-            {
-                // Blocked or down here: the next mirror.
-            }
-        }
-        return new();
-    }
-
-    static Hit Row(string hash, string name, int seeders, int leechers, long size, string? kind = null) => new()
-    {
-        Id = hash.ToLowerInvariant(),
-        Name = name,
-        Magnet = MagnetOf(hash.ToLowerInvariant(), name),
-        Seeders = seeders,
-        Leechers = leechers,
-        Size = size,
-        Quality = Quality(name),
-        Scope = ScopeOf(name),
-        Kind = kind ?? (ParseEpisode(name) is null ? "movie" : "tv"),
-    };
-
-    /// <summary>A category these indexes use for video.</summary>
-    static bool VideoCategory(string category) =>
-        Regex.IsMatch(category, @"^\s*(movies?|tv|anime)\b", I);
-
-    /// <summary>For an index with no usable category: the name reads like a video release.</summary>
-    static bool LooksLikeVideo(string name) =>
-        Quality(name) is not null || ParseEpisode(name) is not null ||
-        Regex.IsMatch(name, @"\b(x26[45]|h\.?26[45]|hevc|xvid|web-?dl|webrip|blu-?ray|bdrip|brrip|hdtv|dvdrip|hdrip|remux|mkv|mp4|avi)\b", I);
-
-    static async Task<List<Hit>> FromKnaben(string query, CancellationToken ct)
-    {
-        var request = new JsonObject
-        {
-            ["search_field"] = "title",
-            ["query"] = query,
-            ["order_by"] = "seeders",
-            ["order_direction"] = "desc",
-            ["size"] = 100,
-            ["hide_unsafe"] = true,
-            ["hide_xxx"] = true,
-        };
-        using var content = new System.Net.Http.StringContent(request.ToJsonString(), System.Text.Encoding.UTF8, "application/json");
-        using var res = await Net.Http.PostAsync(Knaben, content, ct);
-        res.EnsureSuccessStatusCode();
-        var body = JsonNode.Parse(await res.Content.ReadAsStringAsync(ct));
-        return body?["hits"] is JsonArray hits
-            ? hits.Where(h => h is not null && IsHash(Str(h["hash"])) && VideoCategory(Str(h["category"])))
-                .Select(h => Row(Str(h!["hash"]), Str(h["title"]), (int)Num(h["seeders"]), (int)Num(h["peers"]), (long)Num(h["bytes"]),
-                    Str(h["category"]).StartsWith("TV", StringComparison.OrdinalIgnoreCase) ? "tv" : null))
-                .ToList()
-            : new();
-    }
-
-    static async Task<List<Hit>> FromBitsearch(string query, CancellationToken ct)
-    {
-        var body = await Net.Json($"{Bitsearch}?q={Uri.EscapeDataString(query)}", ct, true);
-        return body?["results"] is JsonArray rows
-            ? rows.Where(r => r is not null && IsHash(Str(r["infohash"])) && LooksLikeVideo(Str(r["title"])))
-                .Select(r => Row(Str(r!["infohash"]), Str(r["title"]), (int)Num(r["seeders"]), (int)Num(r["leechers"]), (long)Num(r["size"])))
-                .ToList()
-            : new();
-    }
-
-    static async Task<List<Hit>> FromTheRarbg(string query, CancellationToken ct)
-    {
-        var body = await Net.Json($"{TheRarbg}{Uri.EscapeDataString(query)}/?format=json", ct, true);
-        return body?["results"] is JsonArray rows
-            ? rows.Where(r => r is not null && IsHash(Str(r["h"])) && VideoCategory(Str(r["c"])))
-                .Select(r => Row(Str(r!["h"]), Str(r["n"]), (int)Num(r["se"]), (int)Num(r["le"]), (long)Num(r["s"]),
-                    Str(r["c"]).Equals("TV", StringComparison.OrdinalIgnoreCase) ? "tv" : null))
-                .ToList()
-            : new();
-    }
-
-    /// <summary>nyaa.si, for anime: its RSS carries the info hash, seeders and a size like "1.2 GiB".</summary>
-    static async Task<List<Hit>> FromNyaa(string query, CancellationToken ct)
-    {
-        using var res = await Net.Send(Nyaa + Uri.EscapeDataString(query), ct, true);
-        res.EnsureSuccessStatusCode();
-        var xml = System.Xml.Linq.XDocument.Parse(await res.Content.ReadAsStringAsync(ct));
-        System.Xml.Linq.XNamespace nyaa = "https://nyaa.si/xmlns/nyaa";
-        long SizeOf(string text)
-        {
-            var m = Regex.Match(text, @"([\d.]+)\s*([KMGT])i?B", I);
-            return m.Success && double.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var n)
-                ? (long)(n * Unit(m.Groups[2].Value + "b"))
-                : 0;
-        }
-        return xml.Descendants("item")
-            .Select(item => (Name: (string?)item.Element("title") ?? "", Hash: (string?)item.Element(nyaa + "infoHash") ?? "",
-                Seeders: (int?)item.Element(nyaa + "seeders") ?? 0, Leechers: (int?)item.Element(nyaa + "leechers") ?? 0, Size: (string?)item.Element(nyaa + "size") ?? ""))
-            .Where(x => IsHash(x.Hash) && x.Name.Length > 0)
-            .Select(x => Row(x.Hash, x.Name, x.Seeders, x.Leechers, SizeOf(x.Size), "tv"))
-            .ToList();
-    }
-
-    static async Task<List<Hit>> FromEztv(string imdb, CancellationToken ct)
-    {
-        var body = await Net.Json($"{Eztv}?imdb_id={imdb.Replace("tt", "")}&limit=100", ct, true);
-        return body?["torrents"] is JsonArray torrents ? ToEztvHits(torrents) : new();
-    }
-
-    static readonly Dictionary<string, Task<List<Hit>>> EztvMemo = new();
-
-    static Task<List<Hit>> EztvFor(string imdb)
-    {
-        var id = imdb.Replace("tt", "");
-        lock (EztvMemo)
-        {
-            if (!EztvMemo.TryGetValue(id, out var pending))
-            {
-                pending = FromEztv(imdb, default).ContinueWith(t => t.IsCompletedSuccessfully ? t.Result : new List<Hit>());
-                EztvMemo[id] = pending;
-            }
-            return pending;
-        }
-    }
-
-    /// <summary>"Dune: Part One" is released as "Dune 2021" — the part before the subtitle.</summary>
-    public static string? AliasOf(string title)
-    {
-        var @short = Regex.Split(title, ":| - ")[0].Trim();
-        return @short.Length > 0 && !@short.Equals(title.Trim(), StringComparison.OrdinalIgnoreCase) ? @short : null;
-    }
-
-    static List<string> Tokens(string s) =>
-        Regex.Replace(s.ToLowerInvariant(), "[^a-z0-9]+", " ").Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
-
-    /// <summary>Does this release name every word of the title?</summary>
-    public static bool NamesTitle(string release, string title)
-    {
-        var want = Tokens(title);
-        if (want.Count == 0) return true;
-        var got = Tokens(release).ToHashSet();
-        return want.All(got.Contains);
-    }
-
-    static readonly Regex ReleaseMark = new(
-        @"^(?:s\d{1,2}(?:e\d{1,3})?|e\d{1,3}|\d{1,2}x\d{2}|(?:19|20)\d{2}|season|seasons|complete|series|\d{3,4}p|4k|uhd|hdr|bluray|blu|bdrip|brrip|web|webrip|webdl|hdtv|dvdrip|dvd|x264|x265|h264|h265|hevc|avc|xvid|aac|ac3|eac3|dts|ddp?5|truehd|atmos|remux|proper|repack|extended|imax|uncut|limited|internal|multi|dual|hindi|eng|english|subbed|dubbed)$",
-        I);
-
-    public static List<string> ReleaseTitle(string release)
-    {
-        var @out = new List<string>();
-        foreach (var word in Tokens(release))
-        {
-            if (ReleaseMark.IsMatch(word)) break;
-            @out.Add(word);
-        }
+        var @out = await job;
+        Log($"{name} {sw.ElapsedMilliseconds}ms n={@out.Count}");
         return @out;
     }
 
-    /// <summary>This release is *this* title, not one whose name merely contains it.</summary>
-    public static bool SameTitle(string release, string title)
-    {
-        var want = Tokens(title);
-        if (want.Count == 0) return true;
-        // Anime leads with the group — "[SubsPlease] Jujutsu Kaisen - 29" — and ends the title with the episode.
-        var got = ReleaseTitle(Regex.Replace(release, @"^\s*(?:\[[^\]]*\]\s*)+", ""));
-        if (got.Count < want.Count) return false;
-        for (var i = 0; i < want.Count; i++) if (got[i] != want[i]) return false;
-        return got.Skip(want.Count).All(w => w.Length <= 2 || w.All(char.IsDigit));
-    }
-
     /// <summary>
-    /// A release naming a year names the film's (give or take one, for festival vs. release
-    /// dates): "Mad Max 1979" is not Fury Road (2015). Years that are part of the title
-    /// ("Blade Runner 2049") don't count, and a release with no year is given the benefit.
+    /// Every enabled addon that streams <paramref name="type"/> for <paramref name="id"/>, at once;
+    /// <paramref name="progress"/>, if given, hears the merged, ranked list each time another answers.
+    /// One addon being unreachable is the normal case.
     /// </summary>
-    public static bool FitsYear(string release, string title, string year)
+    static async Task<List<Hit>> FromAddons(string type, string id, CancellationToken ct, Lang? lang, Action<List<Hit>>? progress, Func<List<Hit>, List<Hit>> order)
     {
-        if (!int.TryParse(year, out var want)) return true;
-        var inTitle = Tokens(title).ToHashSet();
-        var years = Tokens(release).Where(t => Regex.IsMatch(t, @"^(?:19|20)\d{2}$") && !inTitle.Contains(t)).Select(int.Parse).ToList();
-        return years.Count == 0 || years.Any(y => Math.Abs(y - want) <= 1);
-    }
-
-    /// <summary>
-    /// Search public indexes for video torrents. <paramref name="progress"/>, if given, gets the
-    /// merged list so far each time another index answers — so results can show as they arrive.
-    /// </summary>
-    public static async Task<List<Hit>> SearchTorrents(
-        string title, CancellationToken ct = default, string? imdb = null, string? year = null, string? suffix = null,
-        Action<List<Hit>>? progress = null, Lang? lang = null)
-    {
-        // A language is asked for by name ("Hindi"), and only releases that say it count.
-        var tail = string.Join(' ', new[] { suffix, lang?.Word, year }.Where(x => !string.IsNullOrEmpty(x)));
-        var full = string.Join(' ', new[] { title, tail }.Where(x => !string.IsNullOrEmpty(x)));
-        var alias = AliasOf(title);
+        var kind = type == "movie" ? "movie" : "tv";
         var sw = Stopwatch.StartNew();
-        Log($"torrents start \"{full}\" imdb={imdb ?? "-"}");
-
-        // Every index at once, each given a few seconds; the same torrent from several is one row
-        // (Merge, by info hash). Asking them in turn and stopping at the first answer left most
-        // releases unseen — apibay alone, unless it failed.
-        List<Hit> None() => new();
-        Task<List<Hit>> Ask(string source, Task<List<Hit>> job, int ms = SourceMs) => Timed(source, Limited(job, ms, None()));
-        var aliasQuery = alias is null ? null : string.Join(' ', new[] { alias, tail }.Where(x => !string.IsNullOrEmpty(x)));
-        // The alias ("Dune" for "Dune: Part One") catches differently named releases; with a year, only that year's.
-        var jobs = new List<(Task<List<Hit>> Job, bool Alias)>
-        {
-            (Ask("apibay", FromBayOnly(full, ct)), false),
-            (Ask("torrents-csv", FromCsv(full, ct)), false),
-            (Ask("knaben", FromKnaben(full, ct)), false),
-            (Ask("bitsearch", FromBitsearch(full, ct)), false),
-            (Ask("therarbg", FromTheRarbg(full, ct)), false),
-            (Ask("nyaa", FromNyaa(full, ct)), false),
-        };
-        if (aliasQuery is not null)
-        {
-            jobs.Add((Ask("apibay-alias", FromBayOnly(aliasQuery, ct)), true));
-            jobs.Add((Ask("knaben-alias", FromKnaben(aliasQuery, ct)), true));
-        }
-        if (string.IsNullOrEmpty(suffix))
-        {
-            jobs.Add((Ask("yts", FromYts(imdb ?? full, ct)), false)); // films only — no use for an episode tag
-            if (imdb is not null)
-            {
-                jobs.Add((Ask("torrentio", FromTorrentio($"movie/{imdb}", "movie", ct), SourceMs + 2000), false));
-                jobs.Add((Ask("torrentsdb", FromTorrentsDb($"movie/{imdb}", "movie", ct), SourceMs + 2000), false));
-            }
-        }
-
+        // A language is picked by name ("Hindi"), and only streams that say it count.
         List<Hit> Combine(IEnumerable<List<Hit>> bags)
         {
-            var merged = imdb is not null
-                ? Merge(bags).Where(h => h.Imdb is null || h.Imdb == imdb).ToList()
-                : Merge(bags);
-            var found = Rank(merged, full);
-            if (lang is not null) found = found.Where(lang.Says).ToList();
-            if (year is not null) found = found.Where(h => FitsYear(h.Name, title, year)).ToList();
-            var exact = found.Where(h => SameTitle(h.Name, title) || (alias is not null && SameTitle(h.Name, alias))).ToList();
-            var named = found.Where(h => NamesTitle(h.Name, title) || (alias is not null && NamesTitle(h.Name, alias))).ToList();
-            return exact.Count > 0 ? exact : named.Count > 0 ? named : found;
+            var all = order(Merge(bags));
+            return lang is null ? all : all.Where(lang.Says).ToList();
         }
+        async Task<List<Hit>> Ask(Addon a) =>
+            (await a.Get("stream", type, id, ct))?["streams"] is JsonArray streams ? ToStreamHits(streams, kind, a.Name) : new();
 
+        var pending = Addons.Serving("stream", type, id).Select(a => Timed(a.Name, Limited(Ask(a), SourceMs, new List<Hit>()))).ToList();
         var arrived = new List<List<Hit>>();
-        var pending = jobs.ToList();
         while (pending.Count > 0)
         {
-            var done = await Task.WhenAny(pending.Select(p => p.Job));
-            var which = pending.First(p => p.Job == done);
-            pending.Remove(which);
+            var done = await Task.WhenAny(pending);
+            pending.Remove(done);
             var hits = await done; // Limited: never throws
-            if (which.Alias && year is not null) hits = hits.Where(h => h.Name.Contains(year)).ToList();
             arrived.Add(hits);
             if (progress is not null && hits.Count > 0 && pending.Count > 0 && !ct.IsCancellationRequested)
                 progress(Combine(arrived));
         }
-
         var @out = Combine(arrived);
-        Log($"torrents done {sw.ElapsedMilliseconds}ms n={@out.Count}");
+        Log($"{type} {id} {sw.ElapsedMilliseconds}ms n={@out.Count}");
         return @out;
+    }
+
+    /// <summary>
+    /// A film's streams from the viewer's addons. Without an id, <paramref name="title"/> is looked up by name
+    /// first; a link pasted instead — a magnet, or a video on the viewer's own server — is the one stream.
+    /// </summary>
+    public static async Task<List<Hit>> SearchStreams(
+        string title, CancellationToken ct = default, string? imdb = null, string? year = null,
+        Action<List<Hit>>? progress = null, Lang? lang = null)
+    {
+        if (LinkHit(title) is { } link) return new() { link };
+        var id = imdb;
+        if (id is null && await Meta.ResolveTitle(string.Join(' ', new[] { title, year }.Where(x => !string.IsNullOrEmpty(x)))) is { Kind: "movie" } found)
+            id = found.Imdb;
+        if (string.IsNullOrEmpty(id)) return new();
+        return await FromAddons("movie", id, ct, lang, progress, hits => Rank(hits, title));
     }
 
     static readonly Dictionary<string, Task<List<Hit>>> EpisodeMemo = new();
 
-    /// <summary>Every release that can play one episode — including the packs.</summary>
-    public static Task<List<Hit>> SearchEpisode(string show, int season, int episode, CancellationToken ct = default, string? imdb = null, int? absolute = null, Lang? lang = null)
+    // An addon added, dropped or switched answers differently.
+    static Search() => Addons.Changed += () => { lock (EpisodeMemo) EpisodeMemo.Clear(); };
+
+    /// <summary>
+    /// Every stream the addons have for one episode, by the episode's own id ("tt0944947:1:2"): packs
+    /// included, since a pack streams just as well — only the one file is fetched.
+    /// </summary>
+    public static Task<List<Hit>> SearchEpisode(string id, string show, int season, CancellationToken ct = default, Lang? lang = null)
     {
-        var key = $"{imdb ?? show}:{season}:{episode}:{lang?.Code}";
+        var key = $"{id}:{lang?.Code}";
         lock (EpisodeMemo)
         {
             if (EpisodeMemo.TryGetValue(key, out var cached)) return cached;
-            var pending = FindEpisode(show, season, episode, ct, imdb, absolute, lang).ContinueWith(t =>
+            var pending = FromAddons("series", id, ct, lang, null, hits => RankEpisode(hits, show, season)).ContinueWith(t =>
             {
                 var hits = t.IsCompletedSuccessfully ? t.Result : new List<Hit>();
                 if (hits.Count == 0) lock (EpisodeMemo) EpisodeMemo.Remove(key);
@@ -763,60 +430,5 @@ public static class Search
             EpisodeMemo[key] = pending;
             return pending;
         }
-    }
-
-    static async Task<List<Hit>> FindEpisode(string show, int season, int episode, CancellationToken ct, string? imdb, int? absolute, Lang? lang)
-    {
-        bool Says(Hit h) => lang is null || lang.Says(h);
-        bool Plays(Hit h)
-        {
-            if (!Says(h)) return false;
-            if (NamesEpisode(h.Name, season, episode, absolute) is bool one) return one;
-            // Filed as a film and naming no episode: "Jujutsu Kaisen 0" is not a pack of the series.
-            // (Anime episodes are often filed as films too, so only the unlabelled ones go.)
-            if (h.Kind == "movie") return false;
-            var claims = SeasonsIn(h.Name);
-            // An unlabelled anime batch says which episodes it holds.
-            if (claims.Count == 0 && EpisodeSpan(h.Name) is { } span)
-            {
-                var n = absolute ?? episode;
-                return n >= span.From && n <= span.To;
-            }
-            return claims.Count == 0 || claims.Contains(season);
-        }
-
-        var sw = Stopwatch.StartNew();
-        var tag = EpisodeTag(season, episode);
-        Log($"episode start \"{show}\" {tag} abs={absolute?.ToString() ?? "-"} imdb={imdb ?? "-"}");
-
-        var looseJob = SearchTorrents(show, ct, imdb, suffix: tag, lang: lang);
-        var packsJob = SearchTorrents(show, ct, imdb, lang: lang);
-        // Anime is indexed by its running number, not S02E05.
-        var animeJob = SearchTorrents(show, ct, imdb, suffix: (absolute ?? episode).ToString("00"), lang: lang);
-        List<Hit> loose, packs, anime;
-        try { loose = await looseJob; } catch { loose = new(); }
-        try { packs = await packsJob; } catch { packs = new(); }
-        try { anime = await animeJob; } catch { anime = new(); }
-
-        var bayHits = RankEpisode(Merge(new[] { loose, anime, packs }).Where(Plays), show, season);
-        if (bayHits.Count > 0)
-        {
-            Log($"episode done {sw.ElapsedMilliseconds}ms n={bayHits.Count} bay");
-            return bayHits;
-        }
-        if (ct.IsCancellationRequested) return new();
-
-        if (imdb is not null)
-        {
-            var tioJob = Timed("torrentio", Limited(FromTorrentio($"series/{imdb}:{season}:{episode}", "tv", ct), FastMs * 3, new List<Hit>()));
-            var dbJob = Timed("torrentsdb", Limited(FromTorrentsDb($"series/{imdb}:{season}:{episode}", "tv", ct), FastMs * 3, new List<Hit>()));
-            var tio = Merge(new[] { await tioJob, await dbJob }).Where(Says).ToList();
-            if (tio.Count > 0) return RankEpisode(tio, show, season);
-            if (ct.IsCancellationRequested) return new();
-            var eztv = (await Timed("eztv", Limited(EztvFor(imdb), FastMs * 3, new List<Hit>()))).Where(Plays).ToList();
-            if (eztv.Count > 0) return RankEpisode(eztv, show, season);
-        }
-        Log($"episode done {sw.ElapsedMilliseconds}ms n=0");
-        return new();
     }
 }

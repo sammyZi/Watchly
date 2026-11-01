@@ -1,14 +1,16 @@
 # Watchly for Windows
 
 The phone app as a native Windows desktop app, in the look the phone and the TV share — same screens, same
-catalogue and release search, plus a BitTorrent-style download manager.
+catalogue, plus a BitTorrent-style download manager. Like the phone and the TV it ships with no sources:
+streams and subtitles come from the Stremio-protocol addons you add under Settings → Addons, or from a
+link you paste into Search → Streams. A torrent stream goes to the torrent engine; a link plays as it is.
 
 | Part | Library |
 |---|---|
 | App / UI | .NET 8 + WPF |
 | Player | [LibVLCSharp](https://code.videolan.org/videolan/LibVLCSharp) (VideoLAN's official libVLC binding) — every format VLC plays: HEVC, 10-bit, AV1, EAC3, AC-3, DTS, TrueHD, MKV, AVI; all audio tracks and subtitle formats, GPU decoding |
 | Torrents | [MonoTorrent](https://github.com/alanmcgovern/monotorrent) — streaming (serves the file over a loopback HTTP server with range support, fetching around wherever the player reads) and downloading, one engine for both |
-| Search, titles, subtitles | Plain HTTP: Cinemeta, apibay / torrents-csv / YTS / EZTV / Torrentio, OpenSubtitles, SubDL, IntroDB — ported from `src/lib` |
+| Titles, streams, subtitles | Plain HTTP: Cinemeta, your own addons ([Stremio addon protocol](https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/protocol.md)), SubDL, IntroDB |
 
 ## Build and run
 
@@ -71,9 +73,10 @@ $env:WATCHLY_SIGN_THUMBPRINT = 'AB12…'                                        
 
 `signtool.exe` comes from the Windows SDK.
 
-Online subtitles come from OpenSubtitles (no key needed); SubDL's join in once a SubDL key is
+Online subtitles come from the subtitle addons you add; SubDL's join in once a SubDL key is
 pasted into Settings → Subtitles, as on the phone and TV. It is kept encrypted with Windows'
-DPAPI in `%APPDATA%\Watchly\secrets.bin`. A key in `mobile/.env` (`SUBDL_KEY` or
+DPAPI in `%APPDATA%\Watchly\secrets.bin`, and the addons' links (which can carry a debrid key)
+likewise in `%APPDATA%\Watchly\addons.bin`. A key in `mobile/.env` (`SUBDL_KEY` or
 `EXPO_PUBLIC_SUBDL_KEY`) at build time still works as a fallback.
 
 ### Self-check

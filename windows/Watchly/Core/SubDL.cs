@@ -130,12 +130,10 @@ public static class SubDL
     }
 }
 
-/// <summary>OpenSubtitles through Stremio's add-on: no key, by IMDb id, and plain UTF-8 .srt files.</summary>
-public static class OpenSubs
+/// <summary>A subtitles addon's answer (the Stremio protocol). The release fields are OpenSubtitles' own extras.</summary>
+public static class AddonSubs
 {
-    const string Api = "https://opensubtitles-v3.strem.io/subtitles";
-
-    /// <summary>Its languages are three letters ("eng", "ger"); SubDL's and the app's are two.</summary>
+    /// <summary>Languages are mostly three letters ("eng", "ger"); SubDL's and the app's are two.</summary>
     static readonly Dictionary<string, string> Codes = new(StringComparer.OrdinalIgnoreCase)
     {
         ["eng"] = "EN", ["spa"] = "ES", ["fre"] = "FR", ["fra"] = "FR", ["ger"] = "DE", ["deu"] = "DE",
@@ -161,19 +159,14 @@ public static class OpenSubs
         })
         .ToList();
 
-    public static async Task<List<Sub>> Search(string imdb, int? season, int? episode)
-    {
-        if (!imdb.StartsWith("tt")) return new();
-        var path = season is not null && episode is not null ? $"series/{imdb}:{season}:{episode}" : $"movie/{imdb}";
-        return ToSubs(await Net.Json($"{Api}/{path}.json", quiet: true));
-    }
+    public static async Task<List<Sub>> Search(Addon addon, string type, string video) => ToSubs(await addon.Get("subtitles", type, video));
 }
 
 /// <summary>Both sources together, as the phone's findSubtitles.</summary>
 public static class Subtitles
 {
     /// <summary>
-    /// OpenSubtitles always, SubDL's too when the build has a key. Without an IMDb id what was
+    /// Every subtitles addon the viewer added, SubDL's too when there is a key. Without an IMDb id what was
     /// searched for (else the file's name) is looked up first. In <paramref name="language"/> — or every language when there are
     /// none in it — one per release, and those whose release shares the most words with
     /// <paramref name="fileName"/> first: a subtitle cut for the same release keeps its timing.
@@ -188,7 +181,12 @@ public static class Subtitles
             catch { }
         }
         var sources = new List<(string Name, Task<List<Sub>> Task)>();
-        if (id is not null) sources.Add(("OpenSubtitles", OpenSubs.Search(id, season, episode)));
+        if (id is not null)
+        {
+            var kind = season is not null && episode is not null ? "series" : "movie";
+            var video = kind == "series" ? $"{id}:{season}:{episode}" : id;
+            foreach (var addon in Addons.Serving("subtitles", kind, video)) sources.Add((addon.Name, AddonSubs.Search(addon, kind, video)));
+        }
         if (SubDL.Key is not null && (id is not null || query.Length > 0))
             sources.Add(("SubDL", SubDL.Search(id is null ? query : "", id, season, episode, type, language)));
         if (sources.Count == 0) return new();

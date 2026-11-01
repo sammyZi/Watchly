@@ -489,7 +489,7 @@ public static class Paths
     /// <summary>Pieces of whatever is being streamed. Cleared on stop unless the setting says keep.</summary>
     public static readonly string StreamCache = System.IO.Path.Combine(LocalRoot, "stream");
 
-    /// <summary>Subtitles fetched online (OpenSubtitles, SubDL).</summary>
+    /// <summary>Subtitles fetched online (subtitle addons, SubDL).</summary>
     public static readonly string Subtitles = System.IO.Path.Combine(LocalRoot, "subtitles");
 
     public static readonly string DefaultDownloads = System.IO.Path.Combine(
