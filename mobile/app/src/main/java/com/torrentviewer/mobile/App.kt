@@ -88,6 +88,7 @@ import com.torrentviewer.core.Profiles
 import com.torrentviewer.core.Simkl
 import com.torrentviewer.core.Kids
 import com.torrentviewer.core.Addons
+import com.torrentviewer.core.AppScope
 import com.torrentviewer.core.SavedStore
 import com.torrentviewer.core.Spinner
 import com.torrentviewer.core.Title
@@ -248,7 +249,10 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         if (Kids.on) return@LaunchedEffect watch.fail("A kids profile can't open torrents or addons from other apps.")
         val raw = uri.toString()
         if (raw.startsWith("stremio://", ignoreCase = true)) {
-            watch.notes.tryEmit(runCatching { Addons.add(raw) }.fold({ "Added ${it.name} — see the Addons tab" }, { it.message ?: "Couldn't add that addon" }))
+            // Not in this effect: clearing incoming above restarts it, which cancelled the fetch half-way.
+            AppScope.launch {
+                watch.notes.tryEmit(runCatching { Addons.add(raw) }.fold({ "Added ${it.name} — see the Addons tab" }, { it.message ?: "Couldn't add that addon" }))
+            }
             return@LaunchedEffect
         }
         if (!isTorrentSource(raw)) return@LaunchedEffect
