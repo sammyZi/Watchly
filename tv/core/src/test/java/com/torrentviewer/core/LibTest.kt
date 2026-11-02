@@ -650,6 +650,13 @@ class LibTest {
         assertTrue(episodeProgress(listOf(link), "tt5", episodes = eps)[Ep(2, 3)]!! >= WATCHED_AT)
         assertEquals("a:2:4", continueEpisode(Title("tt5", "tv", "Show", episodes = eps), listOf(link))?.id)
         assertEquals(setOf(Ep(2, 3)), localWatched(listOf(link)).episodes["tt5"])
+
+        // A season pack whose files go by number, the season only in the pack's name: "S01" over "- 02".
+        val folder = "[GetItTwisted] Cyberpunk Edgerunners S01 v2 [BD 1080p HEVC x265 10bit Opus 5.1]"
+        val packFiles = (1..10).map { n -> "[GetItTwisted] Cyberpunk Edgerunners - %02d [BD 1080p HEVC x265 10bit Opus 5.1].mkv".format(n) }
+            .mapIndexed { i, name -> StoredFile(i, name, 1, true, false, "$folder/$name") }
+        val pack = Item("magnet:?xt=urn:btih:ab&dn=E02", folder, at = 7, imdb = "tt5", torrentName = folder, titleName = "Cyberpunk: Edgerunners · S01E02", files = packFiles, lastFileIndex = 1, positions = mapOf(1 to 1430.0), durations = mapOf(1 to 1490.0))
+        assertEquals(mapOf(Ep(1, 2) to 1430.0 / 1490.0), episodeProgress(listOf(pack), "tt5", episodes = eps))
     }
 
     @Test fun episodeLabels() {
