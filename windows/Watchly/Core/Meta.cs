@@ -502,7 +502,9 @@ public static class Meta
         int i;
         if (Search.ParseEpisode(fileName) is { } at && (i = list.FindIndex(e => e.Season == at.Season && e.Number == at.Episode)) >= 0) return i;
         if ((Search.ParseAbsolute(fileName) ?? Search.ParseEpisode(fileName)?.Episode) is not int n) return -1;
-        if (Search.SeasonsIn(path) is [var season] && (i = list.FindIndex(e => e.Season == season && e.Number == n)) >= 0) return i;
+        // "Show S2 - 05" — or "- 05" in a "Show Season 2" folder — is the fifth of season 2 ("S2 - 05" alone reads as seasons 2 to 5).
+        var folder = path.Length > fileName.Length && path.EndsWith(fileName) ? path[..^fileName.Length] : path;
+        if ((Search.SeasonSaid(fileName) ?? Search.SeasonSaid(folder)) is int season && (i = list.FindIndex(e => e.Season == season && e.Number == n)) >= 0) return i;
         return list.FindIndex(e => AbsoluteNumber(list, e.Season, e.Number) == n);
     }
 

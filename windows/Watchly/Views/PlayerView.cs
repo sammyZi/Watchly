@@ -292,7 +292,7 @@ public sealed class PlayerView : UserControl, IDisposable
     /// <summary>This episode's intro, from IntroDB. A film has no recurring titles.</summary>
     async Task LoadIntro()
     {
-        if (request.Imdb is not { Length: > 0 } imdb || Search.ParseEpisode(request.Title) is not { } at) return;
+        if (request.Imdb is not { Length: > 0 } imdb || PlayingEp is not { } at) return;
         intro = await IntroDb.Find(imdb, at.Season, at.Episode);
         if (!disposed && intro is not null) Render();
     }
@@ -1212,7 +1212,7 @@ public sealed class PlayerView : UserControl, IDisposable
 
     static readonly (string Section, string[] Rows)[] InfoLayout =
     {
-        ("TORRENT", new[] { "Seeders", "Leechers", "Connections", "Download", "Upload", "File", "Pieces", "Fetching" }),
+        ("TORRENT", new[] { "Seeders", "Leechers", "Connections", "Download", "Upload", "File", "Ahead", "Pieces", "Fetching" }),
         ("VIDEO", new[] { "Codec", "Resolution", "Frame rate", "Displayed", "Lost frames" }),
         ("AUDIO", new[] { "Track", "Played buffers", "Lost buffers" }),
         ("STREAM", new[] { "Input bitrate", "Content bitrate", "Average bitrate", "Read", "Corrupted", "Discontinuities" }),
@@ -1328,6 +1328,11 @@ public sealed class PlayerView : UserControl, IDisposable
             SetInfo("Download", Format.Speed(p.Speed));
             SetInfo("Upload", Format.Speed(p.UploadSpeed));
             SetInfo("File", $"{p.Percent:0.0}% of {Format.Bytes(file.Length)}");
+            // On disk straight on from the playhead, in running time: what would play with nothing more from
+            // peers. The file's spans are by bytes, the playhead by time — near enough for a file's average.
+            var pos = duration > 0 ? (double)current / duration : 0;
+            var run = s.Downloaded().FirstOrDefault(d => d.From <= pos && pos < d.To);
+            SetInfo("Ahead", duration > 0 ? $"{Span((run.To - pos) * duration / 1000.0)} downloaded" : "—");
             SetInfo("Pieces", $"{have} / {total} · {Format.Bytes(m.Torrent?.PieceLength ?? 0)}");
             SetInfo("Fetching", s.Borrowed ? "Whole file (download)" : s.WholeFile ? "Whole file" : "Next 5 minutes");
         }
@@ -1589,7 +1594,7 @@ public sealed class PlayerView : UserControl, IDisposable
         Render();
         try
         {
-            var at = Search.ParseEpisode(request.Title);
+            var at = PlayingEp;
             var useImdb = request.Imdb is not null && (typed is null || typed.Trim().Length == 0 || typed.Trim() == request.MetaTitle);
             // The viewer's subtitles addons; SubDL joins in once the viewer has given their key in Settings.
             var results = await Subtitles.Find(q, useImdb ? request.Imdb : null, at?.Season, at?.Episode,
@@ -1673,10 +1678,47 @@ public sealed class PlayerView : UserControl, IDisposable
     {
         get
         {
-            if (Search.ParseEpisode(request.Title) is { } at)
+            if (PlayingEp is { } at)
                 return titleMeta is { NumberedThrough: true } t && Meta.AbsoluteNumber(t.Episodes, at.Season, at.Episode) is int n ? $"Episode {n}" : $"S{at.Season}:E{at.Episode}";
             return request.Kind != "movie" && Search.ParseAbsolute(request.Title) is int bare ? $"Episode {bare}" : null;
         }
+    }
+
+    (object? Key, (int Season, int Episode)? Ep) playingEpCache;
+
+    /// <summary>
+    /// The episode playing: by its own S/E; else by the series' episode list — "Show S2 - 05", "- 05" in a
+    /// season's folder, a number through the show; else — an addon's link named "1080p" — the episode it was
+    /// played as from the episode page. Kept until the list or the file changes: on One Piece the count is slow.
+    /// </summary>
+    (int Season, int Episode)? PlayingEp
+    {
+        get
+        {
+            var path = session is { } s && s.FileIndex >= 0 && s.FileIndex < s.Manager.Files.Count ? s.Manager.Files[s.FileIndex].Path : request.Title;
+            var key = (titleMeta, path);
+            if (Equals(playingEpCache.Key, key)) return playingEpCache.Ep;
+            (int Season, int Episode)? ep = Search.ParseEpisode(request.Title);
+            if (ep is null && request.Kind != "movie")
+            {
+                if (titleMeta is { Episodes.Count: > 0 } t)
+                {
+                    var i = Meta.IndexOfEpisode(t.Episodes, request.Title, path);
+                    if (i >= 0) ep = (t.Episodes[i].Season, t.Episodes[i].Number);
+                }
+                if (ep is null && request.HistoryUri is { } uri && shell.HistoryList.FirstOrDefault(h => h.Uri == uri) is { } item)
+                    ep = shell.PlayedAs(item, Math.Max(0, request.FileIndex));
+            }
+            playingEpCache = (key, ep);
+            return ep;
+        }
+    }
+
+    /// <summary>"4m 12s", "1h 5m": how long a stretch of the film runs.</summary>
+    static string Span(double seconds)
+    {
+        var t = (long)Math.Max(0, seconds);
+        return t >= 3600 ? $"{t / 3600}h {t % 3600 / 60}m" : t >= 60 ? $"{t / 60}m {t % 60}s" : $"{t} s";
     }
 
     static Icon WIcon(string kind, double size, Brush? brush = null) => new() { Kind = kind, Size = size, Foreground = brush ?? Brushes.White };
@@ -1849,7 +1891,12 @@ public sealed class PlayerView : UserControl, IDisposable
             top.Children.Add(right);
             var heading = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 12, 0) };
             heading.Children.Add(WText(ShownTitle, 18, null, FontWeights.Bold));
-            if (EpisodeLine is { } episode) heading.Children.Add(WText(episode, 12, White(0xb0)));
+            if (EpisodeLine is { } episode)
+            {
+                // "S1:E2 · Like a Boy", as on the phone and the TV.
+                var named = PlayingEp is { } pe ? titleMeta?.Episodes.FirstOrDefault(e => e.Season == pe.Season && e.Number == pe.Episode)?.Name : null;
+                heading.Children.Add(WText(named is { Length: > 0 } ? $"{episode} · {named}" : episode, 12, White(0xb0)));
+            }
             top.Children.Add(heading);
             chrome.Children.Add(top);
 
@@ -2172,7 +2219,7 @@ public sealed class PlayerView : UserControl, IDisposable
             name.Margin = new Thickness(0, 6, 0, 0);
             body.Children.Add(name);
         }
-        var at = Search.ParseEpisode(request.Title);
+        var at = PlayingEp;
         var ep = at is { } a ? titleMeta?.Episodes.FirstOrDefault(e => e.Season == a.Season && e.Number == a.Episode) : null;
         if (EpisodeLine is { } episode)
         {

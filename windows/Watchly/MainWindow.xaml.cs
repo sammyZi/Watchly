@@ -685,9 +685,8 @@ public partial class MainWindow : Window
         {
             var indices = opts.Season is not null ? Pick.SeasonFiles(meta.Files, opts.Season) : null;
             var named = opts.FileName is { } wanted ? meta.Files.FirstOrDefault(x => x.IsVideo && x.Name == wanted) : null;
-            var chosen = indices is { Count: > 0 } ? indices[0] : named is not null ? named.Index : Pick.PickFile(meta.Files, opts.Auto == "best" ? null : opts.Auto)
-                // The addon's own file index settles it when the names can't.
-                ?? (opts.FileIdx is int f && meta.Files.Any(x => x.Index == f && x.IsVideo) ? f : (int?)null);
+            // The file the addon meant, by the torrent's own numbering, unless a name says the very episode asked for.
+            var chosen = indices is { Count: > 0 } ? indices[0] : named is not null ? named.Index : Pick.PickEpisodeFile(meta.Files, opts.Auto == "best" ? null : opts.Auto, opts.FileIdx);
             if (chosen is int pick)
             {
                 Play(fresh.Uri, torrent, meta, pick, opts.KeepProgress);
@@ -860,7 +859,13 @@ public partial class MainWindow : Window
     static double FromStremio(string? imdb, Title? detail, string fileName)
     {
         if (imdb is null || detail is null) return 0;
-        (int, int)? ep = detail.Kind == "movie" ? null : Search.ParseEpisode(fileName);
+        (int, int)? ep = null;
+        if (detail.Kind != "movie")
+        {
+            // By the series' episode list first: "Show S2 - 05" or "One Piece - 723" names no S/E of its own.
+            var i = Meta.IndexOfEpisode(detail.Episodes, fileName, fileName);
+            ep = i >= 0 ? (detail.Episodes[i].Season, detail.Episodes[i].Number) : Search.ParseEpisode(fileName);
+        }
         if (detail.Kind != "movie" && ep is null) return 0;
         if (Stremio.Library.PausedSeconds(imdb, ep) is double seconds) return seconds;
         var minutes = System.Text.RegularExpressions.Regex.Match(detail.Runtime ?? "", @"(\d+)\s*min", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
@@ -945,12 +950,26 @@ public partial class MainWindow : Window
     /// <summary>Files already sent to Stremio as watched this session, so a film goes up once however often its spot is saved.</summary>
     readonly HashSet<string> stremioMarked = new();
 
-    /// <summary>The episode a file is, by its S/E; (true, null) for a film; (false, _) for one that can't say.</summary>
-    static (bool Ok, (int, int)? Ep) EpisodeOf(HistoryItem item, int index)
+    /// <summary>
+    /// The episode a file is: by its S/E, else — a release of one file, such as an addon's link named "1080p",
+    /// or the file last played from it — the episode it was played as (<see cref="Links"/>).
+    /// (true, null) for a film; (false, _) for one that can't say.
+    /// </summary>
+    (bool Ok, (int, int)? Ep) EpisodeOf(HistoryItem item, int index)
     {
         if (item.Kind == "movie") return (true, null);
         var name = item.Files?.FirstOrDefault(f => f.Index == index)?.Name;
-        return Search.ParseEpisode(name) is { } ep ? (true, ep) : (false, null);
+        if (Search.ParseEpisode(name) is { } ep) return (true, ep);
+        return PlayedAs(item, index) is { } played ? (true, played) : (false, null);
+    }
+
+    /// <summary>The episode <paramref name="index"/> of this release was played as, from the episode page: one file, or the last one played.</summary>
+    public (int, int)? PlayedAs(HistoryItem item, int index)
+    {
+        if ((item.Files?.Count ?? 0) > 1 && item.LastFileIndex != index) return null;
+        var id = Links.FirstOrDefault(l => l.Value == item.Uri).Key;
+        var parts = id?.Split(':');
+        return parts is { Length: >= 3 } && int.TryParse(parts[^2], out var s) && int.TryParse(parts[^1], out var e) ? (s, e) : null;
     }
 
     /// <summary>Closed part-way: Stremio keeps the spot, for a reinstall or another device. Finished went as watched instead.</summary>

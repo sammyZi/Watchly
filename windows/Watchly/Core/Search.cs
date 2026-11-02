@@ -199,6 +199,16 @@ public static class Search
         return claims.Count == 0 ? n == (absolute ?? episode) : claims.Contains(season) && (n == episode || n == absolute);
     }
 
+    static readonly string[] SeasonOnes = { @"\bs(\d{1,2})(?=e\d{1,4}(?:v\d)?\b|\b)", @"\bseasons?[ ._-]*(\d{1,2})\b" };
+
+    /// <summary>The one season a name says by a token of its own: "Show S2 - 05" is season 2, not seasons 2 to 5. Null for none, or several.</summary>
+    public static int? SeasonSaid(string? name)
+    {
+        if (string.IsNullOrEmpty(name)) return null;
+        var found = SeasonOnes.SelectMany(p => Regex.Matches(name, p, I).Select(m => int.Parse(m.Groups[1].Value))).Distinct().ToList();
+        return found.Count == 1 ? found[0] : null;
+    }
+
     /// <summary>Which seasons a release name claims to hold. Empty when it names none.</summary>
     public static List<int> SeasonsIn(string name)
     {
@@ -215,8 +225,7 @@ public static class Search
         }
         if (@out.Count > 0) return @out.ToList();
 
-        string[] ones = { @"\bs(\d{1,2})(?=e\d{1,4}(?:v\d)?\b|\b)", @"\bseasons?[ ._-]*(\d{1,2})\b" };
-        foreach (var pattern in ones)
+        foreach (var pattern in SeasonOnes)
             foreach (Match found in Regex.Matches(name, pattern, I))
                 @out.Add(int.Parse(found.Groups[1].Value));
         return @out.ToList();
