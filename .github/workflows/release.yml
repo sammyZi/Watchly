@@ -1,14 +1,11 @@
-# Builds every app and publishes them as one GitHub release:
-#   phone and TV release APKs, per ABI and universal; the Windows exe.
-# Releases are built locally (the .env keys stay off GitHub); this runs only by hand from the Actions tab,
-# with a tag to create, and its builds carry no .env keys.
+
 name: Release
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Tag to release (created on this commit if it doesn't exist)
+        description: Tag to release
         required: true
         default: v2.3.0
 
@@ -16,10 +13,10 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  group: release-${{ github.event.inputs.tag }}
 
 env:
-  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  TAG: ${{ github.event.inputs.tag }}
 
 jobs:
   android:
@@ -33,6 +30,7 @@ jobs:
             dir: mobile
           - app: tv
             dir: tv
+
     steps:
       - uses: actions/checkout@v4
 
@@ -43,7 +41,6 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      # AGP fetches the compileSdk platform and build tools itself once the licences are accepted.
       - name: Accept Android SDK licences
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
 
@@ -51,24 +48,10 @@ jobs:
         working-directory: ${{ matrix.dir }}
         run: ./gradlew --no-daemon -PuniversalApk assembleRelease
 
-      - name: Name the APKs
-        run: |
-          mkdir out
-          for apk in ${{ matrix.dir }}/app/build/outputs/apk/release/app-*-release.apk; do
-            abi=$(basename "$apk" -release.apk); abi=${abi#app-}
-            cp "$apk" "out/Watchly-${{ matrix.app }}-$TAG-$abi.apk"
-          done
-          ls -l out
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: android-${{ matrix.app }}
-          path: out/*.apk
-          if-no-files-found: error
-
   windows:
     name: Windows
     runs-on: windows-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -76,67 +59,53 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      - name: Publish the single-file exe
+      - name: Publish Windows application
         run: dotnet publish windows/Watchly -c Release -r win-x64 --self-contained -o windows/dist
 
-      # The release offers the installer, not the bare exe it packs.
-      - name: Build the installer
+      - name: Build installer
         shell: bash
         run: |
           choco install innosetup --no-progress -y > /dev/null
+
           MSYS_NO_PATHCONV=1 "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" /DAppVersion=${TAG#v} windows/installer/Watchly.iss
+
           mkdir out
-          cp windows/installer/Output/Watchly-Setup-${TAG#v}-x64.exe "out/Watchly-windows-$TAG-x64-setup.exe"
-          ls -l out
+
+          cp windows/installer/Output/Watchly-Setup-${TAG#v}-x64.exe \
+            "out/Watchly-windows-$TAG-x64-setup.exe"
+
+          ls -lh out
 
       - uses: actions/upload-artifact@v4
         with:
-          name: windows
+          name: windows-installer
           path: out/*.exe
           if-no-files-found: error
 
   release:
-    name: Publish release
+    name: Publish Windows Release
     needs: [android, windows]
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/download-artifact@v4
         with:
+          name: windows-installer
           path: out
-          merge-multiple: true
 
-      - name: Create the release
+      - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          cat > notes.md <<EOF
-          ## Which file?
-
-          | Device | File |
-          |---|---|
-          | Most Android phones (64-bit) | \`Watchly-phone-$TAG-arm64-v8a.apk\` |
-          | Older 32-bit phones | \`Watchly-phone-$TAG-armeabi-v7a.apk\` |
-          | Most Android TVs and TV boxes (32-bit ARM) | \`Watchly-tv-$TAG-armeabi-v7a.apk\` |
-          | 64-bit Android TVs (Shield, Chromecast with Google TV, newer boxes) | \`Watchly-tv-$TAG-arm64-v8a.apk\` |
-          | Emulators / x86 devices | \`…-x86.apk\` |
-          | Not sure | \`…-universal.apk\` (every ABI, larger) |
-          | Windows 10/11 (x64) | \`Watchly-windows-$TAG-x64-setup.exe\` |
-
-          The phone app is \`com.torrentviewer.app\` and the TV app \`com.torrentviewer.tv\`; both install over
-          earlier builds in place.
-
-          On Windows, run the setup: it installs Watchly (no .NET needed) over any earlier version, with a Start menu
-          entry and an uninstaller. It isn't code-signed yet, so Windows may say "Windows protected your PC" — click
-          More info → Run anyway. Allow the Windows Firewall prompt on first launch so peers can connect.
-          EOF
-          # Re-releasing a tag replaces its files and notes, and drops files this run didn't build.
           if gh release view "$TAG" > /dev/null 2>&1; then
-            for name in $(gh release view "$TAG" --json assets -q '.assets[].name'); do
-              [ -e "out/$name" ] || gh release delete-asset "$TAG" "$name" --yes
-            done
-            gh release upload "$TAG" out/* --clobber
-            gh release edit "$TAG" --notes-file notes.md
+            gh release upload "$TAG" out/*.exe --clobber
+            gh release edit "$TAG" \
+              --title "Watchly ${TAG#v}" \
+              --notes "Windows 10/11 (x64) installer. Self-contained application; .NET installation is not required."
           else
-            gh release create "$TAG" out/* --title "Watchly ${TAG#v}" --notes-file notes.md --target "$GITHUB_SHA"
+            gh release create "$TAG" out/*.exe \
+              --title "Watchly ${TAG#v}" \
+              --notes "Windows 10/11 (x64) installer. Self-contained application; .NET installation is not required." \
+              --target "$GITHUB_SHA"
           fi
