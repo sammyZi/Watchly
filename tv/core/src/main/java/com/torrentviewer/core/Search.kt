@@ -102,7 +102,8 @@ fun parseEpisode(name: String): Ep? {
 
 // Compiled once: these run per release, hundreds of times a search, and a compile each
 // time held the TV's main thread past the five-second ANR.
-private val SXE = Regex("""\bs(\d{1,2})[ ._-]*e(\d{1,4})\b""", RegexOption.IGNORE_CASE)
+// "S01E02v2" is a fixed re-release of the same episode: its version mark doesn't hide the S/E.
+private val SXE = Regex("""\bs(\d{1,2})[ ._-]*e(\d{1,4})(?:v\d)?\b""", RegexOption.IGNORE_CASE)
 private val NXN = Regex("""\b(\d{1,2})x(\d{1,2})\b""", RegexOption.IGNORE_CASE)
 private val ABSOLUTE = listOf(
     Regex("""(?:^|[\s_\])])-[\s_]*(\d{1,4})(?:v\d)?(?=[\s_.\[(]|$)""", RegexOption.IGNORE_CASE),
@@ -118,7 +119,7 @@ private val SEASON_RANGES = listOf(
     Regex("""\bseasons?[ ._-]*(\d{1,2})\s*[-–]\s*s?(\d{1,2})\b""", RegexOption.IGNORE_CASE),
 )
 private val SEASON_ONES = listOf(
-    Regex("""\bs(\d{1,2})(?=e\d{1,4}\b|\b)""", RegexOption.IGNORE_CASE),
+    Regex("""\bs(\d{1,2})(?=e\d{1,4}(?:v\d)?\b|\b)""", RegexOption.IGNORE_CASE),
     Regex("""\bseasons?[ ._-]*(\d{1,2})\b""", RegexOption.IGNORE_CASE),
 )
 
@@ -188,7 +189,7 @@ enum class Scope(val label: String) { EPISODE("Episode"), SEASON("Season pack"),
 fun scopeOf(name: String): Scope {
     val i = RegexOption.IGNORE_CASE
     if (Regex("""\bs\d{1,2}\s?e\d{1,2}\s*[-–]\s*e?\d{1,2}\b""", i).containsMatchIn(name)) return Scope.SEASON
-    if (Regex("""\bs\d{1,2}\s?e\d{1,4}\b|\b\d{1,2}x\d{2}\b""", i).containsMatchIn(name)) return Scope.EPISODE
+    if (Regex("""\bs\d{1,2}\s?e\d{1,4}(?:v\d)?\b|\b\d{1,2}x\d{2}\b""", i).containsMatchIn(name)) return Scope.EPISODE
     // "Show S2 [29]", "Show Season 2 - 05": one anime episode, not the season pack its label suggests.
     if (parseAbsolute(name) != null) return Scope.EPISODE
     if (Regex("""\bseasons?\s*\d{1,2}\s*[-–]\s*\d{1,2}\b|\ball seasons\b|\bcomplete series\b""", i).containsMatchIn(name)) return Scope.COMPLETE

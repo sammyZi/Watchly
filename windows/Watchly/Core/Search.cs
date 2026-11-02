@@ -110,7 +110,8 @@ public static class Search
     {
         if (string.IsNullOrEmpty(name)) return null;
         // Up to four digits: long-running anime is released as S01E1071.
-        var m = Regex.Match(name, @"\bs(\d{1,2})[ ._-]*e(\d{1,4})\b", I);
+        // "S01E02v2" is a fixed re-release of the same episode: its version mark doesn't hide the S/E.
+        var m = Regex.Match(name, @"\bs(\d{1,2})[ ._-]*e(\d{1,4})(?:v\d)?\b", I);
         if (!m.Success) m = Regex.Match(name, @"\b(\d{1,2})x(\d{1,2})\b", I);
         return m.Success ? (int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value)) : null;
     }
@@ -214,7 +215,7 @@ public static class Search
         }
         if (@out.Count > 0) return @out.ToList();
 
-        string[] ones = { @"\bs(\d{1,2})(?=e\d{1,2}\b|\b)", @"\bseasons?[ ._-]*(\d{1,2})\b" };
+        string[] ones = { @"\bs(\d{1,2})(?=e\d{1,4}(?:v\d)?\b|\b)", @"\bseasons?[ ._-]*(\d{1,2})\b" };
         foreach (var pattern in ones)
             foreach (Match found in Regex.Matches(name, pattern, I))
                 @out.Add(int.Parse(found.Groups[1].Value));
@@ -224,7 +225,7 @@ public static class Search
     public static string ScopeOf(string name)
     {
         if (Regex.IsMatch(name, @"\bs\d{1,2}\s?e\d{1,2}\s*[-–]\s*e?\d{1,2}\b", I)) return "season";
-        if (Regex.IsMatch(name, @"\bs\d{1,2}\s?e\d{1,2}\b|\b\d{1,2}x\d{2}\b", I)) return "episode";
+        if (Regex.IsMatch(name, @"\bs\d{1,2}\s?e\d{1,4}(?:v\d)?\b|\b\d{1,2}x\d{2}\b", I)) return "episode";
         // "Show S2 [29]", "Show Season 2 - 05": one anime episode, not the season pack its label suggests.
         if (ParseAbsolute(name) is not null) return "episode";
         if (Regex.IsMatch(name, @"\bseasons?\s*\d{1,2}\s*[-–]\s*\d{1,2}\b|\ball seasons\b|\bcomplete series\b", I)) return "complete";

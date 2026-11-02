@@ -657,6 +657,13 @@ class LibTest {
             .mapIndexed { i, name -> StoredFile(i, name, 1, true, false, "$folder/$name") }
         val pack = Item("magnet:?xt=urn:btih:ab&dn=E02", folder, at = 7, imdb = "tt5", torrentName = folder, titleName = "Cyberpunk: Edgerunners · S01E02", files = packFiles, lastFileIndex = 1, positions = mapOf(1 to 1430.0), durations = mapOf(1 to 1490.0))
         assertEquals(mapOf(Ep(1, 2) to 1430.0 / 1490.0), episodeProgress(listOf(pack), "tt5", episodes = eps))
+        // The same pack as it really names them: a fixed re-release's "v2" right on the S/E.
+        val v2 = pack.copy(files = packFiles.map { it.copy(name = it.name.replace(Regex("- (\\d+)"), "- S01E$1v2")) })
+        assertEquals("[GetItTwisted] Cyberpunk Edgerunners - S01E02v2 [BD 1080p HEVC x265 10bit Opus 5.1].mkv", v2.files!![1].name)
+        assertEquals(Ep(1, 2), parseEpisode(v2.files!![1].name))
+        assertEquals(mapOf(Ep(1, 2) to 1430.0 / 1490.0), episodeProgress(listOf(v2), "tt5", episodes = eps))
+        assertEquals(Scope.EPISODE, scopeOf("Show - S01E02v2 [1080p]"))
+        assertEquals(1, seasonSaid("Show - S01E02v2 [1080p]"))
     }
 
     @Test fun episodeLabels() {
