@@ -1,3 +1,76 @@
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to release (created on this commit if it doesn't exist)
+        required: true
+        default: v2.3.0
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.inputs.tag }}
+
+env:
+  TAG: ${{ github.event.inputs.tag }}
+
+jobs:
+  android:
+    name: Android (${{ matrix.app }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: phone
+            dir: mobile
+          - app: tv
+            dir: tv
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Accept Android SDK licences
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+
+      - name: Build release APKs
+        working-directory: ${{ matrix.dir }}
+        run: ./gradlew --no-daemon -PuniversalApk assembleRelease
+
+      - name: Name the APKs
+        shell: bash
+        run: |
+          mkdir -p out
+
+          for apk in ${{ matrix.dir }}/app/build/outputs/apk/release/app-*-release.apk; do
+            [ -f "$apk" ] || continue
+
+            abi=$(basename "$apk" -release.apk)
+            abi=${abi#app-}
+
+            cp "$apk" "out/Watchly-${{ matrix.app }}-$TAG-$abi.apk"
+          done
+
+          ls -lh out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-${{ matrix.app }}
+          path: out/*.apk
+          if-no-files-found: error
+
   windows:
     name: Windows Installer
     runs-on: windows-latest
@@ -31,3 +104,67 @@
           name: windows-installer
           path: out/*.exe
           if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [android, windows]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Show release files
+        run: ls -lh out
+
+      - name: Prepare release notes
+        shell: bash
+        run: |
+          cat > notes.md <<EOF
+          ## Watchly ${TAG}
+
+          ### Android Phone
+
+          - ARM64: \`Watchly-phone-${TAG}-arm64-v8a.apk\`
+          - ARMv7: \`Watchly-phone-${TAG}-armeabi-v7a.apk\`
+          - x86: \`Watchly-phone-${TAG}-x86.apk\`
+          - x86_64: \`Watchly-phone-${TAG}-x86_64.apk\`
+          - Universal: \`Watchly-phone-${TAG}-universal.apk\`
+
+          ### Android TV
+
+          - ARM64: \`Watchly-tv-${TAG}-arm64-v8a.apk\`
+          - ARMv7: \`Watchly-tv-${TAG}-armeabi-v7a.apk\`
+          - x86: \`Watchly-tv-${TAG}-x86.apk\`
+          - x86_64: \`Watchly-tv-${TAG}-x86_64.apk\`
+          - Universal: \`Watchly-tv-${TAG}-universal.apk\`
+
+          ### Windows
+
+          - Windows 10/11 (x64): \`Watchly-windows-${TAG}-x64-setup.exe\`
+
+          Run the Windows installer to install Watchly. .NET installation is not required.
+          EOF
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            for name in $(gh release view "$TAG" --json assets -q '.assets[].name'); do
+              [ -e "out/$name" ] || gh release delete-asset "$TAG" "$name" --yes
+            done
+
+            gh release upload "$TAG" out/* --clobber
+            gh release edit "$TAG" \
+              --title "Watchly ${TAG#v}" \
+              --notes-file notes.md
+          else
+            gh release create "$TAG" out/* \
+              --title "Watchly ${TAG#v}" \
+              --notes-file notes.md \
+              --target "$GITHUB_SHA"
+          fi
