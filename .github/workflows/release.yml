@@ -1,55 +1,5 @@
-
-name: Release
-
-on:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Tag to release
-        required: true
-        default: v2.3.0
-
-permissions:
-  contents: write
-
-concurrency:
-  group: release-${{ github.event.inputs.tag }}
-
-env:
-  TAG: ${{ github.event.inputs.tag }}
-
-jobs:
-  android:
-    name: Android (${{ matrix.app }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - app: phone
-            dir: mobile
-          - app: tv
-            dir: tv
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 21
-
-      - uses: gradle/actions/setup-gradle@v4
-
-      - name: Accept Android SDK licences
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
-
-      - name: Build release APKs
-        working-directory: ${{ matrix.dir }}
-        run: ./gradlew --no-daemon -PuniversalApk assembleRelease
-
   windows:
-    name: Windows
+    name: Windows Installer
     runs-on: windows-latest
 
     steps:
@@ -69,7 +19,7 @@ jobs:
 
           MSYS_NO_PATHCONV=1 "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" /DAppVersion=${TAG#v} windows/installer/Watchly.iss
 
-          mkdir out
+          mkdir -p out
 
           cp windows/installer/Output/Watchly-Setup-${TAG#v}-x64.exe \
             "out/Watchly-windows-$TAG-x64-setup.exe"
@@ -81,31 +31,3 @@ jobs:
           name: windows-installer
           path: out/*.exe
           if-no-files-found: error
-
-  release:
-    name: Publish Windows Release
-    needs: [android, windows]
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: windows-installer
-          path: out
-
-      - name: Create or update GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release upload "$TAG" out/*.exe --clobber
-            gh release edit "$TAG" \
-              --title "Watchly ${TAG#v}" \
-              --notes "Windows 10/11 (x64) installer. Self-contained application; .NET installation is not required."
-          else
-            gh release create "$TAG" out/*.exe \
-              --title "Watchly ${TAG#v}" \
-              --notes "Windows 10/11 (x64) installer. Self-contained application; .NET installation is not required." \
-              --target "$GITHUB_SHA"
-          fi
