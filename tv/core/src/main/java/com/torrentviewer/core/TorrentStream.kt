@@ -1398,6 +1398,21 @@ class TorrentStream(
         if (size == null || at == null) -1.0 else at.toDouble() / size
     }.getOrDefault(-1.0)
 
+    /**
+     * Bytes of the file on disk straight on from where the player reads: what would play with nothing
+     * more from peers — the real buffer, where the player's own holds only its few seconds of read-ahead.
+     * -1 with no torrent or no open reader (a link, a finished download).
+     */
+    fun bytesAhead(): Long = runCatching {
+        val h = handle ?: return@runCatching -1L
+        val ti = info ?: return@runCatching -1L
+        val size = ti.files().fileSize(fileIndex).takeIf { it > 0 } ?: return@runCatching -1L
+        val at = readers.values.filter { pieceAt(it) < tailPiece }.minOrNull() ?: return@runCatching -1L
+        val start = ti.mapFile(fileIndex, at.coerceAtLeast(0), 1)
+        // The reader's own piece counts from where it reads in it, then every whole piece after it.
+        (contiguousFrom(h, ti, start.piece()) - start.start()).coerceIn(0L, size - at)
+    }.getOrDefault(-1L)
+
     /** Piece holding the given byte offset within the selected file. */
     private fun pieceAt(offset: Long): Int {
         val ti = info ?: return firstPiece

@@ -476,11 +476,32 @@ fun carryOver(items: List<Item>, target: Item, fileName: String, since: Long = -
     return donor.positions[i]!! to duration
 }
 
-/** The episode a file in [list] is: by its S/E, else by the number counted through the show ("One Piece - 1071"). */
-fun episodeOfFile(list: List<Episode>, name: String): Episode? {
+/**
+ * The episode a file in [list] is: by its S/E, else by its number. "Show S2 - 05" — or "- 05" in a
+ * "Show Season 2" [folder] — is the fifth of season 2; a number past that season's end, or with no
+ * season said ("One Piece - 1071", "Show S2 [29]"), counts through the show.
+ */
+fun episodeOfFile(list: List<Episode>, name: String, folder: String = ""): Episode? {
     parseEpisode(name)?.let { at -> return list.find { it.season == at.season && it.episode == at.episode } }
     val n = parseAbsolute(name) ?: return null
+    (seasonSaid(name) ?: seasonSaid(folder))?.let { s ->
+        list.find { it.season == s && it.episode == n }?.let { return it }
+    }
     return absoluteNumbers(list).entries.find { it.value == n }?.key
+}
+
+/**
+ * Which episode file [index] of this release is. A release of one file is the episode it was played as
+ * ([Item.titleName] says, "Show · S02E05"), whatever its name — an addon's link is often only "1080p".
+ * Otherwise its name, its folder or the release's name, and its number through [episodes].
+ */
+fun Item.episodeAt(index: Int, episodes: List<Episode>): Ep? {
+    if (files.orEmpty().size <= 1) titleName?.let(::parseEpisode)?.let { return it }
+    val file = files?.find { it.index == index }
+    val name = file?.name ?: title
+    parseEpisode(name)?.let { return it }
+    val folder = listOfNotNull(file?.path?.substringBeforeLast('/', ""), torrentName).joinToString(" ")
+    return episodes.takeIf { it.isNotEmpty() }?.let { episodeOfFile(it, name, folder) }?.let { Ep(it.season, it.episode) }
 }
 
 /**
@@ -508,12 +529,12 @@ fun resumeLabel(imdb: String, items: List<Item>, stremio: StremioLibrary, ep: Ep
 fun continueEpisode(title: Title, items: List<Item>, stremio: StremioLibrary = StremioLibrary()): Episode? {
     val last = items.filter { it.imdb == title.imdb }.sortedByDescending { it.at }.firstNotNullOfOrNull { item ->
         val i = item.lastFileIndex ?: return@firstNotNullOfOrNull null
-        val name = item.files?.find { it.index == i }?.name ?: item.title
-        episodeOfFile(title.episodes, name)?.let { it to item }
+        item.episodeAt(i, title.episodes)?.let { at -> title.episodes.find { it.season == at.season && it.episode == at.episode } }?.let { it to item }
     } ?: return stremioContinue(title, stremio)
     val (ep, item) = last
     val i = item.lastFileIndex!!
-    val done = item.durations[i]?.let { d -> d > 0 && (item.positions[i] ?: 0.0) >= d * 0.95 } ?: false
+    // Watched as Stremio is told: an episode left at its end credits is done, and Play goes on to the next.
+    val done = item.durations[i]?.let { d -> d > 0 && (item.positions[i] ?: 0.0) >= d * WATCHED_AT } ?: false
     if (!done) return ep
     val inOrder = title.episodes.filter { it.season > 0 }.sortedWith(compareBy({ it.season }, { it.episode }))
     return inOrder.getOrNull(inOrder.indexOf(ep) + 1)
@@ -533,16 +554,15 @@ private fun stremioContinue(title: Title, stremio: StremioLibrary): Episode? {
 /**
  * How far through each episode of [imdb] anyone got, 0–1 — the furthest of every release it was
  * played from, and of what Stremio has: watched is 1, paused its percent. A file is placed by its
- * name, or by its number through the show among [episodes] (anime); a release of one file whose
- * name says neither — an addon's link named "1080p" — by the episode it was played as.
+ * name, its season and its number among [episodes] (anime), or — a release of one file, such as an
+ * addon's link named "1080p" — by the episode it was played as: see [Item.episodeAt].
  */
 fun episodeProgress(items: List<Item>, imdb: String, stremio: StremioLibrary = StremioLibrary(), episodes: List<Episode> = emptyList()): Map<Ep, Double> {
     val out = mutableMapOf<Ep, Double>()
     stremio.episodes[imdb]?.forEach { out[it] = 1.0 }
     for (p in stremio.paused) if (p.imdb == imdb && p.ep != null) out[p.ep] = maxOf(out[p.ep] ?: 0.0, p.progress / 100)
-    fun placed(name: String): Ep? = parseEpisode(name) ?: episodes.takeIf { it.isNotEmpty() }?.let { episodeOfFile(it, name) }?.let { Ep(it.season, it.episode) }
     for (item in items) if (item.imdb == imdb) for (file in item.files.orEmpty()) {
-        val ep = placed(file.name) ?: item.titleName?.takeIf { item.files.orEmpty().size == 1 }?.let(::parseEpisode) ?: continue
+        val ep = item.episodeAt(file.index, episodes) ?: continue
         val at = item.positions[file.index] ?: continue
         val of = item.durations[file.index]?.takeIf { it > 0 } ?: continue
         out[ep] = maxOf(out[ep] ?: 0.0, (at / of).coerceIn(0.0, 1.0))

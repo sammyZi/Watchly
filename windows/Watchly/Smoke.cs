@@ -286,6 +286,10 @@ static class Smoke
         Eq(new AppSettings { SubSize = "small" }.Resized(-1).SubRel, 20, "subtitle size stops at small");
         Eq(jjk[Meta.IndexOfEpisode(jjk, "[SubsPlease] Jujutsu Kaisen - 29 (1080p).mkv", "JJK/[SubsPlease] Jujutsu Kaisen - 29 (1080p).mkv")].Id, "tt:2:5", "indexOfEpisode running number");
         Eq(jjk[Meta.IndexOfEpisode(jjk, "Show - 05.mkv", "Show Season 2/Show - 05.mkv")].Id, "tt:2:5", "indexOfEpisode season folder");
+        // "S2 - 05" reads as seasons 2 to 5 to SeasonsIn; it's the fifth of season 2.
+        Eq(Search.SeasonSaid("[SubsPlease] Jujutsu Kaisen S2 - 05 (1080p)"), (int?)2, "seasonSaid S2 - 05");
+        Eq(jjk[Meta.IndexOfEpisode(jjk, "[SubsPlease] Jujutsu Kaisen S2 - 05 (1080p).mkv", "[SubsPlease] Jujutsu Kaisen S2 - 05 (1080p).mkv")].Id, "tt:2:5", "indexOfEpisode S2 - 05");
+        Eq(Search.ParseEpisode("[GetItTwisted] Cyberpunk Edgerunners - S01E02v2 [BD 1080p].mkv"), (1, 2), "parseEpisode S01E02v2");
 
         Eq(string.Join(",", Search.SeasonsIn("Stranger.Things.S04.COMPLETE.1080p")), "4", "seasonsIn S04");
         Eq(string.Join(",", Search.SeasonsIn("Stranger.Things.Season.5.Complete.2025.720p")), "5", "seasonsIn Season.5");
@@ -315,6 +319,11 @@ static class Smoke
         var pack = new[] { F(0, "Show.S01E01.1080p.mkv", 2_000_000_000), F(1, "Show.S01E02.1080p.mkv", 1_000_000_000), F(2, "Show.S01E03.1080p.mkv", 3_000_000_000) };
         Eq(Pick.PickFile(pack, "S01E02"), 1, "pickFile tag");
         Eq(Pick.PickFile(new[] { F(0, "Show.1x02.mkv", 5), F(1, "Show.S1E2.mkv", 9) }, "S01E02"), 1, "pickFile no zeros");
+        // The addon's file wins over our count through the show, which can be an episode off; a name with the very S/E wins over it.
+        var opBatch = new[] { F(0, "[Group] One Piece - 722 (1080p).mkv", 5), F(1, "[Group] One Piece - 723 (1080p).mkv", 5) };
+        Eq(Pick.PickEpisodeFile(opBatch, "S21E30#722", 1), (int?)1, "pickEpisodeFile addon's file");
+        Eq(Pick.PickEpisodeFile(opBatch, "S21E30#722", null), (int?)0, "pickEpisodeFile no index");
+        Eq(Pick.PickEpisodeFile(pack, "S01E02", 0), (int?)1, "pickEpisodeFile exact S/E");
         Eq(Pick.PickFile(pack, "S09E09"), null, "pickFile refuses wrong episode");
         Eq(Pick.PickFile(new[] { F(0, "episode.mkv", 500) }, "S09E09"), 0, "pickFile single video");
         Eq(Pick.PickFile(new[] { F(0, "readme.txt", 10, false) }), null, "pickFile nothing");

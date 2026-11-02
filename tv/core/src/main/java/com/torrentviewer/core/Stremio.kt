@@ -33,7 +33,7 @@ fun epOfVideo(videoId: String?): Ep? {
     return Ep(s, e)
 }
 
-/** How far in counts as watched. */
+/** How far in counts as watched: an episode's end credits — an anime's ending song — aren't worth waiting for. */
 const val WATCHED_AT = 0.8
 
 /**
@@ -49,7 +49,7 @@ fun localWatched(items: List<Item>): StremioLibrary {
             val of = item.durations[index]?.takeIf { it > 0 } ?: continue
             if (at / of < WATCHED_AT) continue
             if (item.kind == "movie") films += imdb
-            else item.files?.find { it.index == index }?.name?.let(::parseEpisode)?.let { episodes.getOrPut(imdb) { mutableSetOf() } += it }
+            else item.episodeAt(index, emptyList())?.let { episodes.getOrPut(imdb) { mutableSetOf() } += it }
         }
     }
     return StremioLibrary(films, episodes)

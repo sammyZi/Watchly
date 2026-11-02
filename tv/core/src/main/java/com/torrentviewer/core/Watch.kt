@@ -180,8 +180,10 @@ class Watch(val engine: TorrentStream) {
         if (found.files.none { it.isVideo }) return@launch fail("This torrent holds no video.")
         // A pack of anime names its files by the number through the show: let that pick too.
         val pick = if (episode != null && from != null) pickTag(episode.season, episode.episode, absoluteNumber(from.episodes, episode.season, episode.episode)) else tag
-        // The addon's own file index settles it when the names can't.
-        val index = pickFile(found.files, pick) ?: hit.fileIdx?.takeIf { i -> found.files.any { it.index == i && it.isVideo } }
+        // The file the addon meant, by the torrent's own numbering; TorBox numbers its listing its own way,
+        // so there the names lead and the addon's index only settles what they can't.
+        val index = if (!torboxIndexed) pickEpisodeFile(found.files, pick, episode?.let { Ep(it.season, it.episode) }, hit.fileIdx)
+        else pickFile(found.files, pick) ?: hit.fileIdx?.takeIf { i -> found.files.any { it.index == i && it.isVideo } }
         if (index == null) {
             phase = Phase.IDLE
             choose = fresh to found
@@ -446,8 +448,21 @@ class Watch(val engine: TorrentStream) {
 
     /** The Cinemeta episode a file in this pack is, for its name and still. */
     fun episodeOf(file: TorrentFile?): Episode? {
-        val name = file?.name ?: return null
-        return episodeOfFile(title?.episodes ?: return null, name)
+        val f = file ?: return null
+        // A pack's folder or own name may be where the season is said: "Show Season 2/[Group] Show - 05.mkv".
+        val folder = listOfNotNull(f.path.substringBeforeLast('/', ""), meta?.name).joinToString(" ")
+        return episodeOfFile(title?.episodes ?: return null, f.name, folder)
+    }
+
+    /**
+     * The episode [file] is, for the player's heading and Up Next: by its name, else — one file, such as an
+     * addon's link named "1080p" — the episode it was played as.
+     */
+    fun playingEpisode(file: TorrentFile?): Episode? {
+        episodeOf(file)?.let { return it }
+        if (file == null || meta?.files.orEmpty().size > 1) return null
+        val at = item?.titleName?.let(::parseEpisode) ?: return null
+        return title?.episodes?.find { it.season == at.season && it.episode == at.episode }
     }
 
     val playingFile: TorrentFile? get() = meta?.files?.find { it.index == playingIndex }
@@ -463,7 +478,9 @@ class Watch(val engine: TorrentStream) {
     private fun playingEp(at: Item): Ep? {
         if (at.kind == "movie") return null
         val name = playingFile?.name ?: return null
+        // A link named only "1080p": the episode it was played as.
         return episodeOf(playingFile)?.let { Ep(it.season, it.episode) } ?: parseEpisode(name)
+            ?: at.titleName?.takeIf { meta?.files.orEmpty().size <= 1 }?.let(::parseEpisode)
     }
 
     /** Closed part-way: Stremio keeps the spot, for a reinstall or another device. Finished goes as watched instead. */

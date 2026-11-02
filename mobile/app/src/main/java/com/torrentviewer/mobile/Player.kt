@@ -26,6 +26,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -300,14 +301,15 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     val progressState = engine.progress.collectAsState()
     val title = watch.title
     val file = watch.playingFile
-    val episode = remember(file) { watch.episodeOf(file) }
+    // Again once the show's episode list is in: opened before it, the file looked like no episode at all.
+    val episode = remember(file, title) { watch.playingEpisode(file) }
     val next = watch.next
     /** No next file in this torrent: the show's next episode, found online when asked for. */
     val onlineNext = remember(title, episode, next) {
         if (next != null || title == null || episode == null) null
         else title.episodes.indexOfFirst { it.id == episode.id }.takeIf { it >= 0 }?.let { title.episodes.getOrNull(it + 1) }
     }
-    val nextEpisode = remember(next) { watch.episodeOf(next) } ?: onlineNext
+    val nextEpisode = remember(next, title) { watch.episodeOf(next) } ?: onlineNext
     val startAt = remember { watch.startAt() }
     val bitrate = remember { file?.size?.let { size -> watch.item?.durations?.get(watch.playingIndex)?.takeIf { it > 0 }?.let { size / it } } ?: 0.0 }
     /** Intros are per show; a film has no recurring titles. */
@@ -328,6 +330,8 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     var panel by remember { mutableStateOf<Panel?>(null) }
     var info by remember { mutableStateOf(false) }
     var stats by remember { mutableStateOf<Stats?>(null) }
+    /** Bytes downloaded straight on from the playhead; -1 when it isn't a torrent. */
+    var ahead by remember { mutableStateOf(-1L) }
     var tracks by remember { mutableStateOf<Tracks?>(null) }
     var subtitle by remember { mutableStateOf<Int?>(null) }
     var audio by remember { mutableStateOf<Int?>(null) }
@@ -676,6 +680,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     LaunchedEffect(info) {
         while (info) {
             stats = view.value?.stats()
+            ahead = withContext(Dispatchers.IO) { watch.engine.bytesAhead() }
             delay(1000)
         }
     }
@@ -1039,7 +1044,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         }
 
         AnimatedVisibility(info && !waiting, Modifier.align(Alignment.TopStart).windowInsetsPadding(WindowInsets.safeDrawing).padding(start = if (controls) 64.dp else 16.dp, top = if (controls) 64.dp else 16.dp), enter = fadeIn(), exit = fadeOut()) {
-            StatsPanel(stats, progressState.value, file, duration)
+            StatsPanel(stats, progressState.value, file, duration, ahead)
         }
 
         if (offerNext && !locked) {
@@ -1678,8 +1683,16 @@ private fun TrackRow(label: String, on: Boolean, @DrawableRes icon: Int? = null,
 
 /** What is playing and how it is going — dropped frames climbing means the player is discarding them. */
 @Composable
-private fun StatsPanel(s: Stats?, progress: Progress?, file: TorrentFile?, duration: Double) {
+private fun StatsPanel(s: Stats?, progress: Progress?, file: TorrentFile?, duration: Double, ahead: Long) {
     fun mbps(kbps: Double) = "%.1f Mb/s".format(kbps / 1000)
+    fun span(seconds: Double): String {
+        val t = seconds.toLong()
+        return when {
+            t >= 3600 -> "${t / 3600}h ${t % 3600 / 60}m"
+            t >= 60 -> "${t / 60}m ${t % 60}s"
+            else -> "$t s"
+        }
+    }
     val rows = buildList {
         if (s == null) add("Player" to "Reading…")
         else {
@@ -1694,7 +1707,10 @@ private fun StatsPanel(s: Stats?, progress: Progress?, file: TorrentFile?, durat
                 ?: "—"
             add("Bitrate" to video + (progress?.let { "  ·  ${mbps(it.speed * 8 / 1000.0)} arriving" } ?: ""))
             add("Frames" to "${s.displayed} shown  ·  ${s.lostFrames} dropped")
-            add("Buffer" to "${s.cacheMs / 1000} s" + if (s.lostBuffers > 0) "  ·  ${s.lostBuffers} audio gaps" else "")
+            // What's downloaded on from the playhead, in running time at the file's average rate: the
+            // player's own buffer is only its read-ahead, a few seconds to half a minute, however much is on disk.
+            val downloaded = file?.size?.takeIf { ahead >= 0 && it > 0 && duration > 0 }?.let { "${span(ahead * duration / it)} downloaded" }
+            add("Buffer" to listOfNotNull(downloaded, "${s.cacheMs / 1000} s in the player", if (s.lostBuffers > 0) "${s.lostBuffers} audio gaps" else null).joinToString("  ·  "))
         }
         progress?.let { add("Swarm" to "${speed(it.speed)}  ·  ${it.peers} peers  ·  ${it.seeds} seeds") }
         file?.let { add("File" to "${bytes(it.size)}  ·  ${it.name}") }
@@ -1703,7 +1719,9 @@ private fun StatsPanel(s: Stats?, progress: Progress?, file: TorrentFile?, durat
         rows.forEach { (label, value) ->
             Row(Modifier.padding(vertical = 2.dp)) {
                 Text(label, Modifier.width(70.dp), style = Type.meta.copy(color = Ink.faint, fontSize = 12.sp))
-                Text(value, style = Type.meta.copy(color = Color.White, fontSize = 12.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // The file's name is long and is the one worth reading whole: it scrolls rather than being cut.
+                val scroll = if (label == "File") Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1500, repeatDelayMillis = 2000, velocity = 40.dp) else Modifier
+                Text(value, scroll, style = Type.meta.copy(color = Color.White, fontSize = 12.sp), maxLines = 1, overflow = if (label == "File") TextOverflow.Clip else TextOverflow.Ellipsis)
             }
         }
     }

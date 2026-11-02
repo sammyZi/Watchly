@@ -33,6 +33,11 @@ public sealed record Hit
     /// <summary>The manifest link of the addon it came from: a debrid link only plays while that addon (and its key) is still added.</summary>
     public string AddonUrl { get; init; } = "";
 
+    /// <summary>The release's own name, when it isn't <see cref="Name"/>: a season pack's, where Name is the one file in it the addon meant.</summary>
+    public string Release { get; init; } = "";
+    /// <summary>What says whether this is a pack and of which seasons: the release's name, else the file's.</summary>
+    public string PackName => Release.Length > 0 ? Release : Name;
+
     /// <summary>Plays straight from its link: no swarm, no seeders to count, nothing to download.</summary>
     public bool Direct => !External && Search.IsDirectLink(Uri);
     /// <summary>A torrent: the only kind the download engine can keep.</summary>
@@ -105,7 +110,8 @@ public static class Search
     {
         if (string.IsNullOrEmpty(name)) return null;
         // Up to four digits: long-running anime is released as S01E1071.
-        var m = Regex.Match(name, @"\bs(\d{1,2})[ ._-]*e(\d{1,4})\b", I);
+        // "S01E02v2" is a fixed re-release of the same episode: its version mark doesn't hide the S/E.
+        var m = Regex.Match(name, @"\bs(\d{1,2})[ ._-]*e(\d{1,4})(?:v\d)?\b", I);
         if (!m.Success) m = Regex.Match(name, @"\b(\d{1,2})x(\d{1,2})\b", I);
         return m.Success ? (int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value)) : null;
     }
@@ -193,6 +199,16 @@ public static class Search
         return claims.Count == 0 ? n == (absolute ?? episode) : claims.Contains(season) && (n == episode || n == absolute);
     }
 
+    static readonly string[] SeasonOnes = { @"\bs(\d{1,2})(?=e\d{1,4}(?:v\d)?\b|\b)", @"\bseasons?[ ._-]*(\d{1,2})\b" };
+
+    /// <summary>The one season a name says by a token of its own: "Show S2 - 05" is season 2, not seasons 2 to 5. Null for none, or several.</summary>
+    public static int? SeasonSaid(string? name)
+    {
+        if (string.IsNullOrEmpty(name)) return null;
+        var found = SeasonOnes.SelectMany(p => Regex.Matches(name, p, I).Select(m => int.Parse(m.Groups[1].Value))).Distinct().ToList();
+        return found.Count == 1 ? found[0] : null;
+    }
+
     /// <summary>Which seasons a release name claims to hold. Empty when it names none.</summary>
     public static List<int> SeasonsIn(string name)
     {
@@ -209,8 +225,7 @@ public static class Search
         }
         if (@out.Count > 0) return @out.ToList();
 
-        string[] ones = { @"\bs(\d{1,2})(?=e\d{1,2}\b|\b)", @"\bseasons?[ ._-]*(\d{1,2})\b" };
-        foreach (var pattern in ones)
+        foreach (var pattern in SeasonOnes)
             foreach (Match found in Regex.Matches(name, pattern, I))
                 @out.Add(int.Parse(found.Groups[1].Value));
         return @out.ToList();
@@ -219,7 +234,7 @@ public static class Search
     public static string ScopeOf(string name)
     {
         if (Regex.IsMatch(name, @"\bs\d{1,2}\s?e\d{1,2}\s*[-–]\s*e?\d{1,2}\b", I)) return "season";
-        if (Regex.IsMatch(name, @"\bs\d{1,2}\s?e\d{1,2}\b|\b\d{1,2}x\d{2}\b", I)) return "episode";
+        if (Regex.IsMatch(name, @"\bs\d{1,2}\s?e\d{1,4}(?:v\d)?\b|\b\d{1,2}x\d{2}\b", I)) return "episode";
         // "Show S2 [29]", "Show Season 2 - 05": one anime episode, not the season pack its label suggests.
         if (ParseAbsolute(name) is not null) return "episode";
         if (Regex.IsMatch(name, @"\bseasons?\s*\d{1,2}\s*[-–]\s*\d{1,2}\b|\ball seasons\b|\bcomplete series\b", I)) return "complete";
@@ -287,7 +302,7 @@ public static class Search
         bool ThisPack(Hit h)
         {
             if (h.Seeders < 1 || h.Scope != "season") return false;
-            var c = SeasonsIn(h.Name);
+            var c = SeasonsIn(h.PackName);
             return c.Count <= 1 && (season == null || c.Count == 0 || c.Contains(season.Value));
         }
         bool One(Hit h) => h.Scope == "episode" && h.Seeders >= 1;
@@ -335,9 +350,12 @@ public static class Search
             var fileIdx = (int)Num(s["fileIdx"] ?? JsonValue.Create(-1));
             var text = Str(s["title"]) is { Length: > 0 } t ? t : Str(s["description"]);
             var label = Str(s["name"]).Replace('\n', ' ').Trim();
-            var name = Str(hints?["filename"]) is { Length: > 0 } file ? file
-                : text.Split('\n')[0].Trim() is { Length: > 0 } first ? first : label;
+            var first = text.Split('\n')[0].Trim();
+            var name = Str(hints?["filename"]) is { Length: > 0 } file ? file : first.Length > 0 ? first : label;
             if (name.Length == 0) continue;
+            // Torrentio and the like name the one file they found and put the release on the first line:
+            // "Show.S01.1080p" over "Show.S01E01.mkv" is a season pack, whatever the file says.
+            var release = first.Length > 0 && first != name && ScopeOf(first) != "episode" ? first : "";
             var size = (long)Num(hints?["videoSize"]);
             if (size <= 0 && SizeRx.Match(text) is { Success: true } sm)
                 size = (long)Math.Round(double.Parse(sm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) * Unit(sm.Groups[2].Value));
@@ -353,7 +371,8 @@ public static class Search
                 Seeders = seeds.Success ? int.Parse(seeds.Groups[1].Value) : 0,
                 Size = Math.Max(0, size),
                 Quality = Quality(name) ?? Quality($"{label} {text}"),
-                Scope = ScopeOf(name),
+                Scope = ScopeOf(release.Length > 0 ? release : name),
+                Release = release,
                 Kind = kind,
                 PerFileSize = true,
                 Addon = addon,

@@ -102,7 +102,8 @@ fun parseEpisode(name: String): Ep? {
 
 // Compiled once: these run per release, hundreds of times a search, and a compile each
 // time held the TV's main thread past the five-second ANR.
-private val SXE = Regex("""\bs(\d{1,2})[ ._-]*e(\d{1,4})\b""", RegexOption.IGNORE_CASE)
+// "S01E02v2" is a fixed re-release of the same episode: its version mark doesn't hide the S/E.
+private val SXE = Regex("""\bs(\d{1,2})[ ._-]*e(\d{1,4})(?:v\d)?\b""", RegexOption.IGNORE_CASE)
 private val NXN = Regex("""\b(\d{1,2})x(\d{1,2})\b""", RegexOption.IGNORE_CASE)
 private val ABSOLUTE = listOf(
     Regex("""(?:^|[\s_\])])-[\s_]*(\d{1,4})(?:v\d)?(?=[\s_.\[(]|$)""", RegexOption.IGNORE_CASE),
@@ -118,7 +119,7 @@ private val SEASON_RANGES = listOf(
     Regex("""\bseasons?[ ._-]*(\d{1,2})\s*[-–]\s*s?(\d{1,2})\b""", RegexOption.IGNORE_CASE),
 )
 private val SEASON_ONES = listOf(
-    Regex("""\bs(\d{1,2})(?=e\d{1,4}\b|\b)""", RegexOption.IGNORE_CASE),
+    Regex("""\bs(\d{1,2})(?=e\d{1,4}(?:v\d)?\b|\b)""", RegexOption.IGNORE_CASE),
     Regex("""\bseasons?[ ._-]*(\d{1,2})\b""", RegexOption.IGNORE_CASE),
 )
 
@@ -180,12 +181,15 @@ fun seasonsIn(name: String): List<Int> {
     return out.toList()
 }
 
+/** The one season a name says by a token of its own: "Show S2 - 05" is season 2, not seasons 2 to 5. Null for none, or several. */
+fun seasonSaid(name: String): Int? = SEASON_ONES.flatMap { r -> r.findAll(name).map { it.groupValues[1].toInt() }.toList() }.distinct().singleOrNull()
+
 enum class Scope(val label: String) { EPISODE("Episode"), SEASON("Season pack"), COMPLETE("Complete series") }
 
 fun scopeOf(name: String): Scope {
     val i = RegexOption.IGNORE_CASE
     if (Regex("""\bs\d{1,2}\s?e\d{1,2}\s*[-–]\s*e?\d{1,2}\b""", i).containsMatchIn(name)) return Scope.SEASON
-    if (Regex("""\bs\d{1,2}\s?e\d{1,4}\b|\b\d{1,2}x\d{2}\b""", i).containsMatchIn(name)) return Scope.EPISODE
+    if (Regex("""\bs\d{1,2}\s?e\d{1,4}(?:v\d)?\b|\b\d{1,2}x\d{2}\b""", i).containsMatchIn(name)) return Scope.EPISODE
     // "Show S2 [29]", "Show Season 2 - 05": one anime episode, not the season pack its label suggests.
     if (parseAbsolute(name) != null) return Scope.EPISODE
     if (Regex("""\bseasons?\s*\d{1,2}\s*[-–]\s*\d{1,2}\b|\ball seasons\b|\bcomplete series\b""", i).containsMatchIn(name)) return Scope.COMPLETE
@@ -224,6 +228,8 @@ data class Hit(
     val fileIdx: Int? = null,
     /** The manifest link of the addon it came from: a debrid link only plays while that addon (and its key) is still added. */
     val addonUrl: String = "",
+    /** The release's own name: a season pack's, where [name] is the one file in it the addon meant. */
+    val release: String = name,
 ) {
     /** Plays straight from its link: no swarm, no seeders to count. */
     val direct get() = !external && isDirectLink(uri)
@@ -274,8 +280,12 @@ fun toStreamHits(streams: JSONArray, kind: String, addon: String = "", addonUrl:
     val hints = s.optJSONObject("behaviorHints")
     val text = (s.str("title") ?: s.str("description")).orEmpty()
     val label = s.optString("name").replace('\n', ' ').trim()
-    val name = hints?.str("filename") ?: text.lineSequence().firstOrNull()?.trim().orEmpty().ifEmpty { label }
+    val first = text.lineSequence().firstOrNull()?.trim().orEmpty()
+    val name = hints?.str("filename") ?: first.ifEmpty { label }
     if (name.isEmpty()) return@mapNotNull null
+    // Torrentio and the like name the one file they found and put the release on the first line:
+    // "Show.S01.1080p" over "Show.S01E01.mkv" is a season pack, whatever the file says.
+    val release = first.takeIf { it.isNotEmpty() && it != name && scopeOf(it) != Scope.EPISODE } ?: name
     val size = hints?.optLong("videoSize")?.takeIf { it > 0 }
         ?: SIZE.find(text)?.let { (it.groupValues[1].toDouble() * (UNIT[it.groupValues[2].lowercase()] ?: 0.0)).roundToLong() } ?: 0L
     val trackers = s.strings("sources").filter { it.startsWith("tracker:") }.map { it.removePrefix("tracker:") }
@@ -289,10 +299,10 @@ fun toStreamHits(streams: JSONArray, kind: String, addon: String = "", addonUrl:
             else -> outside!!
         },
         seeders = SEEDERS.find(text)?.groupValues?.get(1)?.toIntOrNull() ?: 0, leechers = 0, size = size,
-        quality = quality(name) ?: quality("$label $text"), kind = kind, scope = scopeOf(name), imdb = null, perFileSize = true, addon = addon,
+        quality = quality(name) ?: quality("$label $text"), kind = kind, scope = scopeOf(release), imdb = null, perFileSize = true, addon = addon,
         external = hash == null && url == null, headers = if (url != null) headers else emptyMap(),
         fileIdx = s.optInt("fileIdx", -1).takeIf { hash != null && it >= 0 },
-        addonUrl = addonUrl,
+        addonUrl = addonUrl, release = release,
     )
 }
 
@@ -338,7 +348,7 @@ fun rankEpisode(hits: List<Hit>, query: String = "", season: Int? = null): List<
     val (links, ordered) = rank(hits, query).partition { it.direct }
     fun thisPack(h: Hit): Boolean {
         if (h.seeders < 1 || h.scope != Scope.SEASON) return false
-        val c = seasonsIn(h.name)
+        val c = seasonsIn(h.release)
         return c.size <= 1 && (season == null || c.isEmpty() || season in c)
     }
     fun one(h: Hit) = h.scope == Scope.EPISODE && h.seeders >= 1
@@ -493,6 +503,20 @@ fun pickFile(files: List<TorrentFile>, tag: String? = null): Int? {
         if (videos.size > 1) return null
     }
     return videos.maxBy { it.size }.index
+}
+
+/**
+ * Which file of an addon's torrent plays [ep]. [fileIdx] is the file the addon itself searched out, and
+ * wins — but for a name that says this very S/E. Our count through the show (anime, "One Piece - 723")
+ * comes from Cinemeta's seasons and can be an episode off the addon's: by it, the next episode opened
+ * the one just watched, at the spot it was left.
+ */
+fun pickEpisodeFile(files: List<TorrentFile>, tag: String?, ep: Ep?, fileIdx: Int?): Int? {
+    val byAddon = fileIdx?.takeIf { i -> files.any { it.index == i && it.isVideo } }
+    val byName = pickFile(files, tag)
+    if (byAddon == null) return byName
+    if (byName != null && ep != null && files.find { it.index == byName }?.name?.let(::parseEpisode) == ep) return byName
+    return byAddon
 }
 
 /** Where a file sits in the show: SxxEyy, else its running number (in its folder's season, if labelled). */

@@ -220,7 +220,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
      */
     /** A season pack is this season alone, or a complete series that holds it; the download takes only this season's episodes. */
     fun packsOf(hits: List<Hit>, s: Int) = hits.filter {
-        !it.direct && ((it.scope == Scope.SEASON && parseEpisode(it.name) == null && s in seasonsIn(it.name)) || it.scope == Scope.COMPLETE)
+        !it.direct && ((it.scope == Scope.SEASON && parseEpisode(it.release) == null && s in seasonsIn(it.release)) || it.scope == Scope.COMPLETE)
     }
 
     /** The season's packs, listed to pick one from, as they arrive. */
@@ -279,7 +279,8 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                     // Part-way through — whichever release or episode was last played — Resume leads, Start over under it.
                     val last = remember(history, title.imdb) { latestPerTitle(history.filter { it.imdb == title.imdb }).firstOrNull() }
                     when {
-                        last != null && last.ratio > 0.02 && last.ratio < 0.95 -> {
+                        // An episode left at its end credits is watched: Play goes on to the next instead.
+                        last != null && last.ratio > 0.02 && last.ratio < (if (title.isSeries) com.torrentviewer.core.WATCHED_AT else 0.95) -> {
                             Button(
                                 "Resume" + (whereLeft(last)?.let { "  ·  $it" } ?: ""),
                                 { watch.resume(last) },
@@ -476,7 +477,8 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
 Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
                 else -> LazyColumn {
                     items(packs.take(MAX_SOURCES), key = { "pack-" + it.id }) { hit ->
-                        Source(hit, Modifier.padding(start = EDGE, end = EDGE, bottom = 8.dp), onDownload = { keepSeason(hit, s) }) { keepSeason(hit, s) }
+                        // Under the pack's own name, not the one episode file the addon pointed into it.
+                        Source(hit.copy(name = hit.release), Modifier.padding(start = EDGE, end = EDGE, bottom = 8.dp), onDownload = { keepSeason(hit, s) }) { keepSeason(hit, s) }
                     }
                 }
             }
@@ -632,7 +634,7 @@ private fun EpisodeRow(ep: Episode, number: Int = ep.episode, fallback: String?,
                     }
                     if (selected && !busy) Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp).background(Ink.accent))
                     // How far it got, as on Continue watching; watched through says so beside the name instead.
-                    else if (seen > 0.02 && seen < 0.95) Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp).background(Color.White.copy(alpha = 0.3f))) {
+                    else if (seen > 0.02 && seen < com.torrentviewer.core.WATCHED_AT) Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp).background(Color.White.copy(alpha = 0.3f))) {
                         Box(Modifier.fillMaxWidth(seen.toFloat()).fillMaxHeight().background(Ink.accent))
                     }
                 }
@@ -640,7 +642,8 @@ private fun EpisodeRow(ep: Episode, number: Int = ep.episode, fallback: String?,
             Column(Modifier.weight(1f).padding(start = 12.dp)) {
                 Text("$number. ${ep.name}", style = Type.label.copy(fontWeight = FontWeight.SemiBold), maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (seen >= 0.95) {
+                    // Watched as Stremio is told: an anime's ending song isn't worth waiting through for the tick.
+                    if (seen >= com.torrentviewer.core.WATCHED_AT) {
                         Lc(L.drawable.lucide_ic_check, tint = Ink.good, size = 13.dp)
                         Text(" Watched" + if (ep.released != null) "  ·  " else "", style = Type.meta.copy(color = Ink.good, fontSize = 12.sp, fontWeight = FontWeight.SemiBold))
                     }

@@ -334,8 +334,11 @@ public sealed record AppSettings
 public static class EpisodeLinks
 {
     const string Key = "episodes";
-    /// <summary>Anything past this counts as watched.</summary>
-    public const double Watched = 92;
+    /// <summary>
+    /// Anything past this counts as watched, in percent: the same as Stremio is told, so an episode left
+    /// at its end credits — an anime's ending song — gets its tick and Play goes on to the next.
+    /// </summary>
+    public const double Watched = Stremio.WatchedAt * 100;
 
     public static Dictionary<string, string> Load() => Store.LoadOwn(Key, new Dictionary<string, string>());
 

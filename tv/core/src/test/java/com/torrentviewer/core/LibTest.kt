@@ -186,6 +186,30 @@ class LibTest {
         assertEquals(3, tracked.fileIdx)
         assertTrue(tracked.uri.contains("t.example"))
 
+        // Torrentio's shape: the pack on the first line, the episode file it found in behaviorHints.
+        // It's a season pack, by the pack's name; the file's name stays for playing.
+        val packed = toStreamHits(
+            JSONArray().put(
+                JSONObject(stream.toString()).put("title", "Show.S01.1080p.WEB-DL\nShow.S01E01.1080p.WEB-DL.mkv\n👤 40 💾 1.2 GB ⚙️ somewhere")
+                    .put("behaviorHints", JSONObject().put("filename", "Show.S01E01.1080p.WEB-DL.mkv")),
+            ),
+            "tv",
+        ).single()
+        assertEquals("Show.S01E01.1080p.WEB-DL.mkv", packed.name)
+        assertEquals("Show.S01.1080p.WEB-DL", packed.release)
+        assertEquals(Scope.SEASON, packed.scope)
+        assertEquals("Show.S01.1080p.WEB-DL", rankEpisode(listOf(packed), "", 1).single().release)
+        // A single episode's release on the first line stays an episode.
+        val single = toStreamHits(
+            JSONArray().put(
+                JSONObject(stream.toString()).put("title", "Show.S01E02.1080p.WEB-DL\n👤 40")
+                    .put("behaviorHints", JSONObject().put("filename", "Show.S01E02.1080p.WEB-DL.mkv")),
+            ),
+            "tv",
+        ).single()
+        assertEquals(Scope.EPISODE, single.scope)
+        assertEquals("Show.S01E02.1080p.WEB-DL.mkv", single.release)
+
         // Pasted links: a magnet goes to the swarm, a video URL plays as it is, words are a search.
         assertTrue(linkHit("http://192.168.1.5:8096/Videos/1/stream.mkv")!!.direct)
         assertFalse(linkHit("magnet:?xt=urn:btih:aa0fd381c944a72cabb3e962d5f727c8694d7dd6&dn=X")!!.direct)
@@ -590,6 +614,56 @@ class LibTest {
         assertEquals("x:3:1", continueEpisode(show, listOf(played("Show.S02E04", 1000.0, 1000.0, 1)))?.id)
         assertNull(continueEpisode(show, listOf(played("Show.S03E04", 1000.0, 1000.0, 1))))
         assertNull(continueEpisode(show, emptyList()))
+        // Left at the end credits (85%): watched, so Play goes on to the next.
+        assertEquals("x:3:4", continueEpisode(show, listOf(played("Show.S03E03", 850.0, 1000.0, 5)))?.id)
+    }
+
+    @Test fun addonPicksTheFile() {
+        fun f(i: Int, name: String, video: Boolean = true) = TorrentFile(i, "One Piece 700-750/$name", name, 1_000_000L + i, video, false)
+        val batch = listOf(f(0, "[Group] One Piece - 722 (1080p).mkv"), f(1, "[Group] One Piece - 723 (1080p).mkv"), f(2, "[Group] One Piece - 724 (1080p).mkv"))
+        // Our count through the show says 722; the addon searched out 723's file: the addon's wins.
+        assertEquals(1, pickEpisodeFile(batch, pickTag(21, 30, 722), Ep(21, 30), 1))
+        // No index from the addon, or one that isn't a video: by name, as before.
+        assertEquals(0, pickEpisodeFile(batch, pickTag(21, 30, 722), Ep(21, 30), null))
+        assertEquals(0, pickEpisodeFile(batch + f(3, "info.nfo", video = false), pickTag(21, 30, 722), Ep(21, 30), 3))
+        // A name that says this very S/E beats an index that points elsewhere.
+        val pack = listOf(TorrentFile(0, "Show.S01/Show.S01E01.mkv", "Show.S01E01.mkv", 5, true, false), TorrentFile(1, "Show.S01/Show.S01E02.mkv", "Show.S01E02.mkv", 5, true, false))
+        assertEquals(1, pickEpisodeFile(pack, pickTag(1, 2, null), Ep(1, 2), 0))
+        // A film: the file the addon meant.
+        assertEquals(1, pickEpisodeFile(pack, null, null, 1))
+    }
+
+    @Test fun seasonalAnime() {
+        // Two seasons of 12.
+        val eps = (1..2).flatMap { s -> (1..12).map { e -> Episode("a:$s:$e", s, e, "", null, null, null) } }
+        // "S2 - 05", or "- 05" in a season 2 folder, is the fifth of season 2 — not the fifth of the show.
+        assertEquals("a:2:5", episodeOfFile(eps, "[SubsPlease] Show S2 - 05 (1080p) [ABCD1234].mkv")?.id)
+        assertEquals("a:2:5", episodeOfFile(eps, "[SubsPlease] Show - 05 (1080p).mkv", folder = "Show Season 2")?.id)
+        // Counted through the show: past season 2's end, or no season said.
+        assertEquals("a:2:5", episodeOfFile(eps, "Show S2 [17]")?.id)
+        assertEquals("a:1:5", episodeOfFile(eps, "[Group] Show - 05.mkv")?.id)
+
+        // An addon's link named by its quality is the episode it was played as.
+        val link = Item("https://d.example/x", "1080p", at = 1, imdb = "tt5", titleName = "Show · S02E03", files = listOf(StoredFile(0, "1080p", 1, true, false, "1080p")), lastFileIndex = 0, positions = mapOf(0 to 1250.0), durations = mapOf(0 to 1420.0))
+        assertEquals(Ep(2, 3), link.episodeAt(0, eps))
+        // Stopped at the ending song (88%): ticked, told to Stremio as watched, and Play goes on to the next.
+        assertTrue(episodeProgress(listOf(link), "tt5", episodes = eps)[Ep(2, 3)]!! >= WATCHED_AT)
+        assertEquals("a:2:4", continueEpisode(Title("tt5", "tv", "Show", episodes = eps), listOf(link))?.id)
+        assertEquals(setOf(Ep(2, 3)), localWatched(listOf(link)).episodes["tt5"])
+
+        // A season pack whose files go by number, the season only in the pack's name: "S01" over "- 02".
+        val folder = "[GetItTwisted] Cyberpunk Edgerunners S01 v2 [BD 1080p HEVC x265 10bit Opus 5.1]"
+        val packFiles = (1..10).map { n -> "[GetItTwisted] Cyberpunk Edgerunners - %02d [BD 1080p HEVC x265 10bit Opus 5.1].mkv".format(n) }
+            .mapIndexed { i, name -> StoredFile(i, name, 1, true, false, "$folder/$name") }
+        val pack = Item("magnet:?xt=urn:btih:ab&dn=E02", folder, at = 7, imdb = "tt5", torrentName = folder, titleName = "Cyberpunk: Edgerunners · S01E02", files = packFiles, lastFileIndex = 1, positions = mapOf(1 to 1430.0), durations = mapOf(1 to 1490.0))
+        assertEquals(mapOf(Ep(1, 2) to 1430.0 / 1490.0), episodeProgress(listOf(pack), "tt5", episodes = eps))
+        // The same pack as it really names them: a fixed re-release's "v2" right on the S/E.
+        val v2 = pack.copy(files = packFiles.map { it.copy(name = it.name.replace(Regex("- (\\d+)"), "- S01E$1v2")) })
+        assertEquals("[GetItTwisted] Cyberpunk Edgerunners - S01E02v2 [BD 1080p HEVC x265 10bit Opus 5.1].mkv", v2.files!![1].name)
+        assertEquals(Ep(1, 2), parseEpisode(v2.files!![1].name))
+        assertEquals(mapOf(Ep(1, 2) to 1430.0 / 1490.0), episodeProgress(listOf(v2), "tt5", episodes = eps))
+        assertEquals(Scope.EPISODE, scopeOf("Show - S01E02v2 [1080p]"))
+        assertEquals(1, seasonSaid("Show - S01E02v2 [1080p]"))
     }
 
     @Test fun episodeLabels() {

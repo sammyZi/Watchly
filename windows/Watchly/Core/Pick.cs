@@ -92,6 +92,22 @@ public static class Pick
         return Biggest(videos).Index;
     }
 
+    /// <summary>
+    /// Which file of an addon's torrent to play. <paramref name="fileIdx"/> is the file the addon itself searched
+    /// out, and wins — but for a name that says the very S/E of <paramref name="tag"/>. Our count through the show
+    /// (anime, "One Piece - 723") comes from Cinemeta's seasons and can be an episode off the addon's: by it, the
+    /// next episode opened the one just watched, at the spot it was left.
+    /// </summary>
+    public static int? PickEpisodeFile(IReadOnlyList<TorrentFileInfo> files, string? tag, int? fileIdx)
+    {
+        var byName = PickFile(files, tag);
+        if (fileIdx is not int f || !files.Any(x => x.Index == f && x.IsVideo)) return byName;
+        if (byName is int n && tag is not null && Regex.Match(tag, @"^s(\d+)e(\d+)", RegexOptions.IgnoreCase) is { Success: true } m
+            && files.FirstOrDefault(x => x.Index == n) is { } file && Search.ParseEpisode(file.Name) is { } at
+            && at.Season == int.Parse(m.Groups[1].Value) && at.Episode == int.Parse(m.Groups[2].Value)) return n;
+        return f;
+    }
+
     /// <summary>Where a file sits in the show: SxxEyy, else its running number (in its folder's season, if labelled).</summary>
     static (int Season, int Episode)? EpisodeKey(TorrentFileInfo f)
     {
