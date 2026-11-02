@@ -550,7 +550,7 @@ private fun LazyListScope.sources(
                 busy -> Note("${shown.size} so far · finding more…", Modifier.padding(bottom = 8.dp))
                 hits?.isEmpty() == true -> Note(
                     when {
-                        !Addons.hasStreams -> "No addons to ask yet. Add one in the Addons tab to find streams."
+                        !Addons.hasStreams -> "No add-ons found yet. Search Google for popular Stremio add-ons to discover available streaming sources."
                         language != null -> "Nothing found in $language. Change the language and try again."
                         else -> "Nothing found. Try another episode, or add another addon in the Addons tab."
                     },

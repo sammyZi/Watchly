@@ -641,7 +641,7 @@ public sealed class DetailView : UserControl, IDisposable
         if (sources is null || !fresh) block.Children.Add(Busy("Asking your addons…"));
         else if (error is not null) block.Children.Add(Note(error, "Danger"));
         else if (sources.Count == 0) block.Children.Add(Note(
-            !Addons.HasStreams ? "No addons to ask yet. Add one under Settings → Addons to find streams."
+            !Addons.HasStreams ? "No streaming sources available yet. Add a Stremio add-on under Settings → Add-ons, or search Google for popular Stremio streaming add-ons."
             : lang is not null ? $"Nothing found in {lang.Name}. Change the language and try again."
             : "Nothing found. Try another episode, or add another addon under Settings → Addons."));
 

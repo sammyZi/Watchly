@@ -283,7 +283,7 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
                         busy -> Note("${shown.size} so far · finding more…", Modifier.padding(bottom = 10.dp))
                         hits?.isEmpty() == true -> Note(
                             when {
-                                !Addons.hasStreams -> "No addons to ask yet. Add one under Settings → Addons to find streams."
+                                !Addons.hasStreams -> "No streaming sources available yet. Add a Stremio add-on under Settings → Add-ons, or search Google for popular Stremio streaming add-ons."
                                 lang.isNotEmpty() -> "Nothing found in ${langName(lang)}. Change the language and try again."
                                 else -> "Nothing found. Try another episode, or add another addon under Settings → Addons."
                             },
