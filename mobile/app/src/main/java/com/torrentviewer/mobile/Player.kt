@@ -300,14 +300,15 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     val progressState = engine.progress.collectAsState()
     val title = watch.title
     val file = watch.playingFile
-    val episode = remember(file) { watch.episodeOf(file) }
+    // Again once the show's episode list is in: opened before it, the file looked like no episode at all.
+    val episode = remember(file, title) { watch.playingEpisode(file) }
     val next = watch.next
     /** No next file in this torrent: the show's next episode, found online when asked for. */
     val onlineNext = remember(title, episode, next) {
         if (next != null || title == null || episode == null) null
         else title.episodes.indexOfFirst { it.id == episode.id }.takeIf { it >= 0 }?.let { title.episodes.getOrNull(it + 1) }
     }
-    val nextEpisode = remember(next) { watch.episodeOf(next) } ?: onlineNext
+    val nextEpisode = remember(next, title) { watch.episodeOf(next) } ?: onlineNext
     val startAt = remember { watch.startAt() }
     val bitrate = remember { file?.size?.let { size -> watch.item?.durations?.get(watch.playingIndex)?.takeIf { it > 0 }?.let { size / it } } ?: 0.0 }
     /** Intros are per show; a film has no recurring titles. */

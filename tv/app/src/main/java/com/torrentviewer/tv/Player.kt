@@ -193,9 +193,10 @@ private fun Player(watch: Watch) {
     val progressState = engine.progress.collectAsState()
     val title = watch.title
     val file = watch.playingFile
-    val episode = remember(file) { watch.episodeOf(file) }
+    // Again once the show's episode list is in: opened before it, the file looked like no episode at all.
+    val episode = remember(file, title) { watch.playingEpisode(file) }
     val next = watch.next
-    val nextEpisode = remember(next) { watch.episodeOf(next) }
+    val nextEpisode = remember(next, title) { watch.episodeOf(next) }
     val startAt = remember { watch.startAt() }
     val bitrate = remember { file?.size?.let { size -> watch.item?.durations?.get(watch.playingIndex)?.takeIf { it > 0 }?.let { size / it } } ?: 0.0 }
 

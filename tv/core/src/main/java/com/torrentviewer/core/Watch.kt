@@ -454,6 +454,17 @@ class Watch(val engine: TorrentStream) {
         return episodeOfFile(title?.episodes ?: return null, f.name, folder)
     }
 
+    /**
+     * The episode [file] is, for the player's heading and Up Next: by its name, else — one file, such as an
+     * addon's link named "1080p" — the episode it was played as.
+     */
+    fun playingEpisode(file: TorrentFile?): Episode? {
+        episodeOf(file)?.let { return it }
+        if (file == null || meta?.files.orEmpty().size > 1) return null
+        val at = item?.titleName?.let(::parseEpisode) ?: return null
+        return title?.episodes?.find { it.season == at.season && it.episode == at.episode }
+    }
+
     val playingFile: TorrentFile? get() = meta?.files?.find { it.index == playingIndex }
 
     fun savePosition(seconds: Double) {
