@@ -320,9 +320,9 @@ static class Smoke
         Eq(Pick.PickFile(pack, "S01E02"), 1, "pickFile tag");
         Eq(Pick.PickFile(new[] { F(0, "Show.1x02.mkv", 5), F(1, "Show.S1E2.mkv", 9) }, "S01E02"), 1, "pickFile no zeros");
         // The addon's file wins over our count through the show, which can be an episode off; a name with the very S/E wins over it.
-        var batch = new[] { F(0, "[Group] One Piece - 722 (1080p).mkv", 5), F(1, "[Group] One Piece - 723 (1080p).mkv", 5) };
-        Eq(Pick.PickEpisodeFile(batch, "S21E30#722", 1), (int?)1, "pickEpisodeFile addon's file");
-        Eq(Pick.PickEpisodeFile(batch, "S21E30#722", null), (int?)0, "pickEpisodeFile no index");
+        var opBatch = new[] { F(0, "[Group] One Piece - 722 (1080p).mkv", 5), F(1, "[Group] One Piece - 723 (1080p).mkv", 5) };
+        Eq(Pick.PickEpisodeFile(opBatch, "S21E30#722", 1), (int?)1, "pickEpisodeFile addon's file");
+        Eq(Pick.PickEpisodeFile(opBatch, "S21E30#722", null), (int?)0, "pickEpisodeFile no index");
         Eq(Pick.PickEpisodeFile(pack, "S01E02", 0), (int?)1, "pickEpisodeFile exact S/E");
         Eq(Pick.PickFile(pack, "S09E09"), null, "pickFile refuses wrong episode");
         Eq(Pick.PickFile(new[] { F(0, "episode.mkv", 500) }, "S09E09"), 0, "pickFile single video");
