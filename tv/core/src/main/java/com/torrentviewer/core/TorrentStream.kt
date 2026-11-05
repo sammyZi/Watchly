@@ -1463,9 +1463,10 @@ class TorrentStream(
             val p = found.get(i)
             PeerLoad(PeerInfo(p).ip().removePrefix("tcp://").substringBeforeLast(':').trim('[', ']'), p.getDownload_queue_length(), p.getPayload_down_speed())
         }
-        val stalled = stalledPeers(peers)
+        val connected = h.status().numPeers()
+        val stalled = stalledPeers(peers, connected)
         if (stalled.isEmpty()) return
-        log("stalled: dropping ${stalled.size} of ${peers.size} peers holding up piece $piece ($left blocks left)")
+        log("stalled: dropping ${stalled.size} of $connected peers holding up piece $piece ($left blocks left)")
         dropped.values.removeIf { clock - it > DROP_MS }
         stalled.forEach { dropped[it] = clock }
         applyDropped()

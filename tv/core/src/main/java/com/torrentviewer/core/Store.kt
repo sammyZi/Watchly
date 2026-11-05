@@ -611,18 +611,19 @@ internal data class PeerLoad(val ip: String, val queued: Int, val bytesPerSecond
 /** Below this a peer holding requests is sitting on them. Calibration knob: higher drops peers that were only slow. */
 private const val STALLED_BYTES_PER_SECOND = 32 * 1024
 private const val MAX_DROPPED_AT_ONCE = 8
-/** Never thin a small swarm: the holder of a rare piece may be all there is. */
-private const val MIN_PEERS_KEPT = 10
+/** Never thin a small swarm: the holder of a rare piece may be all there is. A torrent with 17 peers went down to 9. */
+private const val MIN_PEERS_KEPT = 40
 
 /**
  * Whom to drop when a piece hangs on its last blocks, slowest first. Asking again can't take a block
  * from a peer that holds it: a 2MB piece of a 2GB film sat 14s on its last two blocks at 2MB/s with
- * 94 peers connected. Dropped, a peer's requests go back to the swarm at once.
+ * 94 peers connected. Dropped, a peer's requests go back to the swarm at once. [connected] is how
+ * many are really there: [peers] also holds those still being dialled, 176 for 32 connected.
  */
-internal fun stalledPeers(peers: List<PeerLoad>): List<String> =
+internal fun stalledPeers(peers: List<PeerLoad>, connected: Int): List<String> =
     peers.filter { it.queued > 0 && it.bytesPerSecond < STALLED_BYTES_PER_SECOND }
         .sortedBy { it.bytesPerSecond }
-        .take(minOf(MAX_DROPPED_AT_ONCE, peers.size - MIN_PEERS_KEPT).coerceAtLeast(0))
+        .take(minOf(MAX_DROPPED_AT_ONCE, connected - MIN_PEERS_KEPT).coerceAtLeast(0))
         .map { it.ip }
         .distinct()
 

@@ -36,6 +36,9 @@ import androidx.media3.common.Tracks as MediaTracks
 
 private const val TAG = "ExoView"
 
+/** Subtitles' gap under them with the picture filling the screen, as a fraction of its height; Media3's own is 0.08. */
+private const val FILLED_SUBTITLE_PADDING = 0.03f
+
 /** Sidecar subtitle types by extension; anything else waits for VLC. */
 internal fun subtitleMime(path: String): String? = when (path.substringAfterLast('.', "").lowercase()) {
     "srt" -> MimeTypes.APPLICATION_SUBRIP
@@ -381,6 +384,10 @@ class ExoView(context: Context) : Video(context) {
             ScaleType.SURFACE_FILL -> AspectRatioFrameLayout.RESIZE_MODE_FILL
             else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
         }
+        // The layer is the whole screen, whatever the picture does: with the picture filling it,
+        // the words go down by the edge, off as much of the film as they can.
+        val fills = scale == ScaleType.SURFACE_FIT_SCREEN || scale == ScaleType.SURFACE_FILL
+        subtitleView.setBottomPaddingFraction(if (fills) FILLED_SUBTITLE_PADDING else SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION)
         frame.setAspectRatio(
             when (scale) {
                 ScaleType.SURFACE_16_9 -> 16f / 9f

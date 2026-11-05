@@ -48,17 +48,25 @@ class ResumeTest {
     private fun swarm(n: Int, stalled: Int) = List(n) { i -> PeerLoad("10.0.0.$i", 4, if (i < stalled) i * 1000 else 500_000) }
 
     @Test fun peersSittingOnRequestsAreDroppedSlowestFirst() {
-        assertEquals(listOf("10.0.0.0", "10.0.0.1"), stalledPeers(swarm(30, 2)))
+        assertEquals(listOf("10.0.0.0", "10.0.0.1"), stalledPeers(swarm(60, 2), 60))
     }
 
     @Test fun aSlowPeerWithNothingAskedOfItStays() {
-        assertEquals(emptyList<String>(), stalledPeers(List(30) { PeerLoad("10.0.0.$it", 0, 0) }))
+        assertEquals(emptyList<String>(), stalledPeers(List(60) { PeerLoad("10.0.0.$it", 0, 0) }, 60))
     }
 
-    @Test fun droppingStopsAtEightAndLeavesTenPeers() {
-        assertEquals(8, stalledPeers(swarm(30, 20)).size)
-        assertEquals(2, stalledPeers(swarm(12, 12)).size)
-        assertEquals(emptyList<String>(), stalledPeers(swarm(10, 10)))
+    @Test fun droppingStopsAtEightAndLeavesFortyPeers() {
+        assertEquals(8, stalledPeers(swarm(60, 30), 60).size)
+        assertEquals(2, stalledPeers(swarm(42, 42), 42).size)
+        assertEquals(emptyList<String>(), stalledPeers(swarm(40, 40), 40))
+    }
+
+    @Test fun aSmallSwarmKeepsItsSlowPeers() {
+        assertEquals(emptyList<String>(), stalledPeers(swarm(16, 16), 16))
+    }
+
+    @Test fun peersStillDiallingDontCount() {
+        assertEquals(emptyList<String>(), stalledPeers(swarm(176, 20), 32))
     }
 
     @Test fun nothingOpensWithoutTheHeader() {
