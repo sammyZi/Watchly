@@ -117,6 +117,8 @@ fun Onboarding(onDone: () -> Unit) {
         }
     }
 
+    // The tour is dark whatever the phone's theme, top to bottom.
+    StatusIconsOverArt(true, navigationToo = true)
     Box(Modifier.fillMaxSize().background(Color(0xFF0A0A0A))) {
         if (step == SIGN_IN) Backdrop(films.firstOrNull { it.backdrop != null } ?: films.firstOrNull()) else PosterWall(posters)
         // The genres fill half the screen: the wall goes well back behind them, or the words drown in posters.
@@ -192,7 +194,7 @@ fun Onboarding(onDone: () -> Unit) {
                             { code?.let { c -> runCatching { browser.openUri(c.uriComplete) } } ?: connect() },
                             Modifier.padding(top = 22.dp).fillMaxWidth(), icon = L.drawable.lucide_ic_link, primary = true,
                         )
-                        Button("Skip for now", { job?.cancel(); onDone() }, Modifier.padding(top = 10.dp).fillMaxWidth())
+                        Button("Skip for now", { job?.cancel(); onDone() }, Modifier.padding(top = 10.dp).fillMaxWidth(), tint = Color.White)
                     }
                 }
             }

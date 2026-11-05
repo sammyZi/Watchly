@@ -60,6 +60,8 @@ abstract class Video(context: Context) : FrameLayout(context) {
     abstract fun open(url: String, startAt: Long, cacheMs: Int, subtitles: List<String>)
     abstract fun reload(ms: Long)
     abstract val time: Long
+    /** How far past the picture this has read. */
+    open val aheadSeconds: Double get() = 0.0
     abstract fun seekTo(ms: Long)
     abstract fun setPaused(value: Boolean)
     abstract val isPaused: Boolean

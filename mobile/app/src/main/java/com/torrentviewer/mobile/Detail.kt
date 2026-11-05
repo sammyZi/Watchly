@@ -109,6 +109,23 @@ private const val FIRST_EPISODES = 10
 /** Past this the list is noise; the best are at the top. */
 private const val MAX_SOURCES = 60
 
+/** A film seen through, and when if it was on this phone: a connected account only says that it was. */
+@Composable
+private fun WatchedBadge(at: Long?, modifier: Modifier = Modifier) {
+    val date = at?.let { java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(it)) }
+    Row(
+        modifier.clip(CircleShape).background(Ink.good.copy(alpha = 0.14f)).padding(start = 5.dp, end = 12.dp, top = 5.dp, bottom = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // The page's colour on the green: white was lost on the bright green of the dark theme.
+        Box(Modifier.size(20.dp).clip(CircleShape).background(Ink.good), contentAlignment = Alignment.Center) {
+            Lc(L.drawable.lucide_ic_check, tint = Ink.bg, size = 13.dp)
+        }
+        Text("Watched", Modifier.padding(start = 7.dp), style = Type.meta.copy(color = Ink.good, fontWeight = FontWeight.SemiBold))
+        date?.let { Text("  ·  $it", style = Type.meta.copy(color = Ink.text.copy(alpha = 0.7f))) }
+    }
+}
+
 fun openUrl(context: Context, url: String) {
     try {
         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -134,7 +151,8 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
     val seasons = remember(title.episodes) { title.episodes.map { it.season }.filter { it > 0 }.distinct().sorted() }
     /** Where this series was left: the episode after the last one finished, or the one stopped part-way. */
     // What Stremio has seen counts too: after a reinstall, this phone's own history is empty.
-    val stremio by com.torrentviewer.core.Stremio.library.collectAsState()
+    // And what Simkl and MDBList have seen, from any app that tells them.
+    val stremio by com.torrentviewer.core.WatchedEverywhere.collectAsState(com.torrentviewer.core.Stremio.library.value)
     val continueAt = remember(history, title.episodes, stremio) { continueEpisode(title, history, stremio) }
     var season by rememberSaveable(title.imdb) { mutableStateOf<Int?>(null) }
     // Not while the episode list is still loading: that would throw away the season being come back to.
@@ -263,7 +281,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
         LazyColumn(state = list, contentPadding = PaddingValues(bottom = 32.dp), modifier = Modifier.fillMaxSize()) {
             item(key = "head") {
                 if (!wide) {
-                    Box(Modifier.fillMaxWidth().aspectRatio(16f / 11f)) {
+                    Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
                         Artwork(title.wide, title.title, Modifier.fillMaxSize().bottomScrim(0.6f), fill = false)
                         TitleMark(title, Modifier.align(Alignment.BottomStart).padding(horizontal = EDGE).widthIn(max = 260.dp), maxHeight = 72.dp, style = Type.display)
                     }
@@ -275,6 +293,9 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                 ) {
                     if (wide) TitleMark(title, Modifier.widthIn(max = 320.dp).padding(bottom = 12.dp), maxHeight = 80.dp, style = Type.display)
                     Facts(title.copy(genres = title.genres.take(2)))
+                    // On any release here, or on a connected account from another device; a series shows it per episode.
+                    val finished = history.filter { it.imdb == title.imdb && it.ratio >= com.torrentviewer.core.WATCHED_AT }.maxOfOrNull { it.at }
+                    if (!title.isSeries && (finished != null || title.imdb in stremio.films)) WatchedBadge(finished, Modifier.padding(top = 12.dp))
                     Spacer(Modifier.height(16.dp))
                     // Part-way through — whichever release or episode was last played — Resume leads, Start over under it.
                     val last = remember(history, title.imdb) { latestPerTitle(history.filter { it.imdb == title.imdb }).firstOrNull() }

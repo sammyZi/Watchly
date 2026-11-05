@@ -153,6 +153,8 @@ class ExoView(context: Context) : Video(context) {
 
     override val time: Long get() = player?.currentPosition ?: 0L
 
+    override val aheadSeconds: Double get() = (player?.totalBufferedDuration ?: 0L) / 1000.0
+
     override fun seekTo(ms: Long) {
         player?.seekTo(ms)
     }

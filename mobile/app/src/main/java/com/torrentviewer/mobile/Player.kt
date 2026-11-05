@@ -862,11 +862,14 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                             if (!loaded) {
                                 loaded = true
                                 watch.saveDuration(duration)
-                                // Aim the engine at the resume point now the real runtime is known.
-                                if (startAt > 0 && duration > 0) scope.launch(Dispatchers.IO) { engine.setPosition(minOf(0.99, startAt / duration)) }
+                                engine.noteStarted()
+                                // Aim the engine at the resume point now the real runtime is known. Not over a
+                                // measured start: running time is a poorer guess, and pulled pieces from behind the picture.
+                                if (startAt > 0 && duration > 0 && !watch.startIsMeasured()) scope.launch(Dispatchers.IO) { engine.setPosition(minOf(0.99, startAt / duration)) }
                             }
                         }
                         v.onTime = { ms ->
+                            watch.aheadSeconds = v.aheadSeconds
                             val t = ms / 1000.0
                             val s = seeking.value
                             // Landed once a report is nearer the target than the spot it left.

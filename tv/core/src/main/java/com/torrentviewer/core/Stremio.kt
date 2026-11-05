@@ -121,7 +121,7 @@ fun parseLibrary(json: String): StremioLibrary {
 
 private fun utc(pattern: String) = java.text.SimpleDateFormat(pattern, java.util.Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
 
-private fun isoNow(now: Long = System.currentTimeMillis()): String = utc("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").format(java.util.Date(now))
+internal fun isoNow(now: Long = System.currentTimeMillis()): String = utc("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").format(java.util.Date(now))
 
 /** Stremio's times, with or without the milliseconds; null for anything else. */
 fun isoMs(s: String?): Long? {

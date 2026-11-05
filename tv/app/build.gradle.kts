@@ -20,8 +20,8 @@ android {
         applicationId = "com.torrentviewer.tv"
         minSdk = 24
         targetSdk = 36
-        versionCode = 5
-        versionName = "2.3.0"
+        versionCode = 6
+        versionName = "2.4.0"
         buildConfigField("String", "SUBDL_KEY", "\"$subdlKey\"")
         buildConfigField("long", "BUILD_TIME", "${System.currentTimeMillis()}L")
     }

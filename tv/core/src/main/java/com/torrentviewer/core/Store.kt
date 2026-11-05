@@ -322,6 +322,7 @@ object Profiles {
         write(_list.value.filter { it.id != id })
         Kv.wipeProfile(id)
         Stremio.forget(id)
+        WATCH_TRACKERS.forEach { it.forget(id) }
     }
 }
 
@@ -569,6 +570,27 @@ fun episodeProgress(items: List<Item>, imdb: String, stremio: StremioLibrary = S
     }
     return out
 }
+
+/**
+ * What is fetched before the player gets the URL, in the order it will ask: the header, then for a
+ * resume the file's last piece, then the resume point. A seek can't happen until the player has
+ * read the index at the very end: left until after the start, that piece alone cost 10–12s, one
+ * wait after another, where fetched here it comes in alongside the others.
+ */
+internal fun prerollTargets(first: Int, start: Int, count: Int, last: Int): List<Int> =
+    (listOf(first) + (if (start != first) listOf(last) else emptyList()) + (start until start + count))
+        .filter { it <= last }.distinct()
+
+/** A seek lands on the keyframe before the spot, and those can be seconds apart. */
+private const val KEYFRAME_SECONDS = 5.0
+
+/**
+ * The byte the picture is at, from the one the player is reading: it reads up to 30s or 64MB ahead
+ * of what is on screen. Saved as read, a resume fetched pieces 4 past where the seek landed.
+ * [read] below 0 is nothing measured.
+ */
+fun playheadRatio(read: Double, aheadSeconds: Double, duration: Double): Double =
+    if (read < 0 || duration <= 0) read else (read - (aheadSeconds + KEYFRAME_SECONDS) / duration).coerceAtLeast(0.0)
 
 /** Prefer a real http(s) URL over a missing or local one. */
 /** The size of the file last played from this release — what it took, not the whole pack. */

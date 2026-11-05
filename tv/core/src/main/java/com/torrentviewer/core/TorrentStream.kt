@@ -1012,8 +1012,7 @@ class TorrentStream(
         // the prepare window from the resume point — each its own one-piece zone. Zones of
         // `reach + 1` pieces per target plus spare fetched 9 pieces (72MB) for 3 needed on
         // the phone; with 8MB pieces and ~50 peers that spread kept piece 0 unfinished for 70s.
-        val preroll = (listOf(firstPiece) + (startPiece until startPiece + prerollPieces))
-            .filter { it <= lastPiece }.distinct()
+        val preroll = prerollTargets(firstPiece, startPiece, prerollPieces, lastPiece)
 
         // A reader parked in the tail is the player reading the container index, not
         // playback. Lingering closed readers only add zones, never lead. The newest
@@ -1528,6 +1527,11 @@ class TorrentStream(
 
     /** For the rest of the app — TorBox, the player — into the same log: the one a vivo phone keeps. */
     fun note(message: String) = log(message)
+
+    /** The picture is up: the whole wait, which "ready in" stops short of when a resume has further to go. */
+    fun noteStarted() {
+        if (handle != null) log("first picture ${(System.currentTimeMillis() - readyAt) / 1000}s after play")
+    }
 
     private fun log(message: String) {
         Log.i(TAG, message)

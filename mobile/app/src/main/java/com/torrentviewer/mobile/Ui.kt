@@ -161,6 +161,8 @@ fun Button(
     /** A toggle (My List): switched on, the icon gets [Action]'s disc and pop. */
     on: Boolean? = null,
     onColor: Color = Ink.good,
+    /** The word's colour, and the flat fill's tint: for a button on something other than the page. */
+    tint: Color = Ink.text,
 ) {
     val filled = on == true
     val disc by animateFloatAsState(if (filled) 1f else 0f, if (filled) spring(dampingRatio = 0.55f, stiffness = 420f) else tween(180), label = "disc")
@@ -176,11 +178,11 @@ fun Button(
             when {
                 primary -> if (pressed) Ink.accent.copy(alpha = 0.8f) else Ink.accent
                 // A tint of the text colour: grey on either page.
-                else -> Ink.text.copy(alpha = if (pressed) 0.22f else 0.12f)
+                else -> tint.copy(alpha = if (pressed) 0.22f else 0.12f)
             },
             Motion.effects(), label = "bg",
         )
-        val fg = if (primary) Color.White else Ink.text
+        val fg = if (primary) Color.White else tint
         Row(
             // The primary one — Play, Watch — a grainy red glow, a shade deeper while pressed; the rest a flat tint.
             (if (primary) Modifier.glow(accentGlow(), 0.85f, 1.1f).background(Color.Black.copy(alpha = if (pressed) 0.18f else 0f)) else Modifier.background(bg))
@@ -481,18 +483,22 @@ fun Modifier.bottomScrim(from: Float = 0.45f): Modifier = graphicsLayer { compos
  * page's own again once the art has scrolled away or the screen goes.
  */
 @Composable
-fun StatusIconsOverArt(overArt: Boolean) {
+fun StatusIconsOverArt(overArt: Boolean, navigationToo: Boolean = false) {
     val view = LocalView.current
     val dark = Ink.isDark
     LaunchedEffect(overArt, dark) {
         val window = (view.context as? Activity)?.window ?: return@LaunchedEffect
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) window.isStatusBarContrastEnforced = false
-        WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !dark && !overArt
+        val bars = WindowCompat.getInsetsController(window, view)
+        bars.isAppearanceLightStatusBars = !dark && !overArt
+        if (navigationToo) bars.isAppearanceLightNavigationBars = !dark && !overArt
     }
     DisposableEffect(view) {
         onDispose {
             val window = (view.context as? Activity)?.window ?: return@onDispose
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !Ink.isDark
+            val bars = WindowCompat.getInsetsController(window, view)
+            bars.isAppearanceLightStatusBars = !Ink.isDark
+            if (navigationToo) bars.isAppearanceLightNavigationBars = !Ink.isDark
         }
     }
 }

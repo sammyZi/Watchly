@@ -469,10 +469,17 @@ class Watch(val engine: TorrentStream) {
 
     fun savePosition(seconds: Double) {
         val at = item ?: return
+        val duration = History.find(at.uri)?.durations?.get(playingIndex) ?: 0.0
         // Nothing on disk to measure when it streams from a link.
-        History.setPosition(at.uri, playingIndex, seconds, if (via != null || source == null) -1.0 else engine.readRatio())
+        History.setPosition(at.uri, playingIndex, seconds, if (via != null || source == null) -1.0 else playheadRatio(engine.readRatio(), aheadSeconds, duration))
         markWatched(at, seconds)
     }
+
+    /** How far past the picture the player has read, as it last said. */
+    var aheadSeconds = 0.0
+
+    /** The resume point was measured in bytes, so the engine is already aimed better than the running time could. */
+    fun startIsMeasured() = item?.let { History.find(it.uri)?.byteAts?.containsKey(playingIndex) } == true
 
     /** The episode the playing file is, by Cinemeta's list or its name; null for a film or a file that can't say. */
     private fun playingEp(at: Item): Ep? {
@@ -506,9 +513,9 @@ class Watch(val engine: TorrentStream) {
         val of = History.find(at.uri)?.durations?.get(playingIndex) ?: return
         if (of <= 0 || seconds / of < WATCHED_AT) return
         marked = playId
-        if (at.kind == "movie") return Stremio.watched(at, null, null)
-        val ep = playingEp(at) ?: return
-        Stremio.watched(at, ep.season, ep.episode)
+        val ep = if (at.kind == "movie") null else playingEp(at) ?: return
+        Stremio.watched(at, ep?.season, ep?.episode)
+        WATCH_TRACKERS.forEach { it.watched(at, ep?.season, ep?.episode) }
     }
 
     fun saveDuration(seconds: Double) = item?.let { History.setDuration(it.uri, playingIndex, seconds) }

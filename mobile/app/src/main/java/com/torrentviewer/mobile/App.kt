@@ -145,6 +145,7 @@ private fun open(profile: Profile) {
     History.load()
     SavedStore.load()
     Stremio.load(profile.id, profile.isGuest)
+    com.torrentviewer.core.WATCH_TRACKERS.forEach { it.load(profile.id, profile.isGuest) }
     Kids.use(profile)
     if (!profile.isGuest) Kv.setGlobal(LAST_PROFILE, profile.id)
 }
@@ -168,6 +169,9 @@ fun ComponentActivity.applyTheme(dark: Boolean) {
     val bars = if (dark) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT) else SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
     enableEdgeToEdge(bars, bars)
 }
+
+/** What the download notification opens. */
+const val DOWNLOADS_LINK = "watchly://downloads"
 
 @Composable
 fun App(watch: Watch, incoming: MutableState<Uri?>) {
@@ -251,6 +255,12 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         val uri = incoming.value ?: return@LaunchedEffect
         if (who == null) return@LaunchedEffect
         incoming.value = null
+        if (uri.toString() == DOWNLOADS_LINK) {
+            clearPages()
+            tab = Tab.LIBRARY
+            pages.add(Page.Downloads)
+            return@LaunchedEffect
+        }
         // A magnet is anything at all: a kids profile plays only what it can browse to.
         if (Kids.on) return@LaunchedEffect watch.fail("A kids profile can't open torrents or addons from other apps.")
         val raw = uri.toString()
@@ -355,6 +365,8 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
                 TabBar(tab, choose)
             }
         }
+
+        UpdateCard(watch, Modifier.align(Alignment.TopCenter).statusBarsPadding())
 
         if (watch.phase == Phase.INSPECTING) Opening(watch)
 

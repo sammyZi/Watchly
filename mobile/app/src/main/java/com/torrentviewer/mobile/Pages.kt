@@ -562,11 +562,72 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
         if (torbox.isNotEmpty()) torboxAccount = runCatching { TorBox.account() }.getOrElse { "Not working: ${it.message}" }
     }
     fun set(next: Settings) = SettingsStore.save(next)
+    /** The page open, by its title; null is the list of them. */
+    var page by rememberSaveable { mutableStateOf<String?>(null) }
+    var query by rememberSaveable { mutableStateOf("") }
+    val update by Updates.release.collectAsState()
+    val appContext = LocalContext.current
+    BackHandler(page != null) { page = null }
+    val scroll = rememberScrollState()
+    LaunchedEffect(page) { scroll.scrollTo(0) }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = EDGE).padding(bottom = 32.dp)) {
-        Heading("Settings")
+    Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(horizontal = EDGE).padding(bottom = 32.dp)) {
+        if (page == null) {
+            Heading("Settings")
+            Field(query, { query = it }, "Search settings", Modifier.fillMaxWidth().padding(bottom = 12.dp), leading = L.drawable.lucide_ic_search)
+            SettingsList(
+                listOfNotNull(
+                    // Stays here until it is installed, "Not now" or not: the card is the one that goes away.
+                    update?.let { r ->
+                        listOf(
+                            Entry(L.drawable.lucide_ic_download, "Update available", "Version ${r.version}  ·  ${bytes(r.size)}", "new version upgrade", Ink.accent) {
+                                Updates.download(appContext, r) { watch.notes.tryEmit(it) }
+                            },
+                        )
+                    },
+                    listOf(
+                        Entry(L.drawable.lucide_ic_user, "Account", "Profile, PIN and Stremio account", "lock sign in addons") { page = "Account" },
+                        Entry(L.drawable.lucide_ic_users, "Switch profile", "Change to a different profile", onClick = onSwitchProfile),
+                    ),
+                    listOf(
+                        Entry(L.drawable.lucide_ic_palette, "Appearance", "Theme and home screen genres", "light dark") { page = "Appearance" },
+                    ),
+                    listOf(
+                        Entry(L.drawable.lucide_ic_radio, "Streaming", "Storage, buffer and trackers", "cache magnet") { page = "Streaming" },
+                        Entry(L.drawable.lucide_ic_play, "Playback", "Player, languages and subtitles", "vlc media3 skip intro audio") { page = "Playback" },
+                        Entry(L.drawable.lucide_ic_download, "Downloads", "Network, order and storage", "wi-fi sd card battery") { page = "Downloads" },
+                    ),
+                    listOf(
+                        Entry(L.drawable.lucide_ic_link, "Integrations", "Simkl and MDBList", "tracking watched sync") { page = "Integrations" },
+                        Entry(L.drawable.lucide_ic_key, "Services", "SubDL and TorBox keys", "subtitles api") { page = "Services" },
+                    ),
+                    listOf(
+                        Entry(L.drawable.lucide_ic_history, "Backup", "Save or restore your library", "export import") { page = "Backup" },
+                        Entry(L.drawable.lucide_ic_sparkles, "Welcome tour", "See the first-run tour again", "onboarding") { tourAgain = true },
+                        Entry(L.drawable.lucide_ic_refresh_cw, "Check for updates", "You have version ${BuildConfig.VERSION_NAME}", "new version upgrade") { Updates.checkNow { watch.notes.tryEmit(it) } },
+                    ),
+                ),
+                query,
+            )
+            Text(
+                "Version ${BuildConfig.VERSION_NAME} · built " +
+                    java.text.SimpleDateFormat("d MMM yyyy, HH:mm", java.util.Locale.US).format(java.util.Date(BuildConfig.BUILD_TIME)),
+                Modifier.padding(start = 4.dp, top = 4.dp),
+                style = Type.meta.copy(color = Ink.faint),
+            )
+        } else {
+            Row(Modifier.statusBarsPadding().padding(top = 8.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                RoundIcon(L.drawable.lucide_ic_arrow_left, { page = null })
+                Text(page.orEmpty(), Modifier.padding(start = 12.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
+            }
+        }
 
-        Group("Profile") {
+        if (page == "Integrations") Panel {
+            Text("What you finish here is marked watched on your accounts, and what they have watched shows here. You sign in on each service's own page, so your password never comes to Watchly.", Modifier.padding(bottom = 18.dp), style = Type.meta.copy(color = Ink.faint))
+            com.torrentviewer.core.WATCH_TRACKERS.forEach { TrackerSection(it) }
+        }
+
+        if (page == "Account") Panel {
         Section(
             "Profile",
             when {
@@ -629,7 +690,7 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
         if (Stremio.available) StremioSection(me)
         }
 
-        Group("Streaming") {
+        if (page == "Streaming") Panel {
         Section(
             "Storage for one film",
             "How much of a film may sit on this phone at once. When it fills, what you've watched is let go to make room. Auto uses the free space, keeping a few GB spare.",
@@ -653,8 +714,8 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
         }
         }
 
-        Group("Playback") {
-        Section("Player", "Media3 hands a file it can't play to VLC by itself. VLC from the start plays the most formats and full ASS subtitle styling.") {
+        if (page == "Playback") Panel {
+        Section("Player","Media3 hands a file it can't play to VLC by itself. VLC from the start plays the most formats and full ASS subtitle styling.") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Chip("Media3", !settings.vlcPlayer, onClick = { set(settings.copy(vlcPlayer = false)) })
                 Chip("VLC", settings.vlcPlayer, onClick = { set(settings.copy(vlcPlayer = true)) })
@@ -688,7 +749,7 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
         }
         }
 
-        Group("Services") {
+        if (page == "Services") Panel {
         Section(
             "SubDL key",
             if (subdl.isNotEmpty()) "Saved, encrypted on this phone — Find subtitles searches SubDL too. Enter another to replace it."
@@ -743,8 +804,8 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
         }
         }
 
-        Group("Downloads") {
-        Section("Downloads", "Wi-Fi only holds a download on mobile data — it waits, and carries on when Wi-Fi is back. Use mobile data on a waiting download to let that one through.") {
+        if (page == "Downloads") Panel {
+        Section("Network", "Wi-Fi only holds a download on mobile data — it waits, and carries on when Wi-Fi is back. Use mobile data on a waiting download to let that one through.") {
             var wifiOnly by remember { mutableStateOf(Downloads.wifiOnly) }
             var sdCard by remember { mutableStateOf(Downloads.sdCard) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -795,8 +856,8 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
         }
         }
 
-        Group("App") {
-        Section("Appearance", "Light or dark pages, or whichever the phone is set to. The player stays dark either way.") {
+        if (page == "Appearance") Panel {
+        Section("Theme", "Light or dark pages, or whichever the phone is set to. The player stays dark either way.") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("system" to "System", "light" to "Light", "dark" to "Dark").forEach { (mode, label) ->
                     Chip(label, settings.themeMode == mode, onClick = { set(settings.copy(themeMode = mode)) })
@@ -804,7 +865,20 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
 
-        Section("Backup", "History, resume points, lists, settings, searches and intro marks as one file. Downloads are not in it — they are files on this phone.") {
+        Section("Genres on the home screen", "Leave all off to build the home screen from what you have watched.") {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                GENRES.forEach { g ->
+                    val on = g in settings.genres
+                    Chip(g, on, icon = if (on) L.drawable.lucide_ic_check else null, onClick = {
+                        set(settings.copy(genres = if (on) settings.genres - g else settings.genres + g))
+                    })
+                }
+            }
+        }
+        }
+
+        if (page == "Backup") Panel {
+        Section("Your library", "History, resume points, lists, settings, searches and intro marks as one file. Downloads are not in it — they are files on this phone.") {
             val context = LocalContext.current
             val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
                 uri ?: return@rememberLauncherForActivityResult
@@ -826,28 +900,7 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
                 Button("Restore", { open.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }, icon = L.drawable.lucide_ic_history)
             }
         }
-
-        Section("Genres on the home screen", "Leave all off to build the home screen from what you have watched.") {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                GENRES.forEach { g ->
-                    val on = g in settings.genres
-                    Chip(g, on, icon = if (on) L.drawable.lucide_ic_check else null, onClick = {
-                        set(settings.copy(genres = if (on) settings.genres - g else settings.genres + g))
-                    })
-                }
-            }
         }
-
-        Section("Welcome tour", "What a new install opens with: the welcome, your favourite genres, then signing in to Stremio.") {
-            Button("Show the welcome tour", { tourAgain = true }, icon = L.drawable.lucide_ic_sparkles)
-        }
-        }
-
-        Text(
-            "Version ${BuildConfig.VERSION_NAME} · built " +
-                java.text.SimpleDateFormat("d MMM yyyy, HH:mm", java.util.Locale.US).format(java.util.Date(BuildConfig.BUILD_TIME)),
-            style = Type.meta.copy(color = Ink.faint),
-        )
     }
 
     picking?.let { which ->
@@ -1149,7 +1202,105 @@ private fun AddonCard(a: com.torrentviewer.core.Addon, first: Boolean, last: Boo
 @Composable
 private fun Group(title: String, content: @Composable () -> Unit) {
     Text(title, Modifier.padding(start = 4.dp, top = 6.dp, bottom = 10.dp), style = Type.overline.copy(color = Ink.faint))
+    Panel(content)
+}
+
+/** The card itself. */
+@Composable
+private fun Panel(content: @Composable () -> Unit) {
     Column(Modifier.padding(bottom = 22.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Ink.surface).padding(start = 16.dp, end = 16.dp, top = 18.dp)) { content() }
+}
+
+/** One line of the settings list; [words] are what else it answers to in the search. */
+private class Entry(@androidx.annotation.DrawableRes val icon: Int, val title: String, val hint: String, val words: String = "", val tint: Color? = null, val onClick: () -> Unit) {
+    fun matches(query: String) = listOf(title, hint, words).any { it.contains(query, ignoreCase = true) }
+}
+
+/** The settings as cards of rows; searching runs them together into one card of what matches. */
+@Composable
+private fun SettingsList(groups: List<List<Entry>>, query: String) {
+    val q = query.trim()
+    val shown = if (q.isEmpty()) groups else listOf(groups.flatten().filter { it.matches(q) }).filter { it.isNotEmpty() }
+    if (shown.isEmpty()) Text("No settings match", Modifier.padding(start = 4.dp, bottom = 12.dp), style = Type.meta.copy(color = Ink.faint))
+    shown.forEach { group ->
+        Column(Modifier.padding(bottom = 12.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Ink.surface).padding(vertical = 4.dp)) {
+            group.forEach { e ->
+                Tap(e.onClick, Modifier.fillMaxWidth(), RoundedCornerShape(12.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(Ink.text.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
+                            Lc(e.icon, tint = e.tint ?: Ink.text, size = 18.dp)
+                        }
+                        Column(Modifier.padding(start = 14.dp)) {
+                            Text(e.title, style = Type.body.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(e.hint, style = Type.meta.copy(color = Ink.faint), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A tracking account: its logo, and Connect, which opens its own page with the code filled in. */
+@Composable
+private fun TrackerSection(t: com.torrentviewer.core.Tracker) {
+    val connected by t.connected.collectAsState()
+    var code by remember { mutableStateOf<DeviceCode?>(null) }
+    var note by remember { mutableStateOf<String?>(null) }
+    var job by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val browser = androidx.compose.ui.platform.LocalUriHandler.current
+
+    fun connect() {
+        note = null
+        job?.cancel()
+        job = scope.launch {
+            try {
+                val c = t.start()
+                code = c
+                runCatching { browser.openUri(c.uriComplete) }
+                if (!t.await(c)) note = "That didn't go through — connect again for a new code."
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) note = e.message ?: "Couldn't reach ${t.name}."
+            } finally {
+                code = null
+            }
+        }
+    }
+
+    Column(Modifier.padding(bottom = 18.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // By its domain, from Google's favicon service, as the review sites are.
+            Artwork(
+                "https://www.google.com/s2/favicons?sz=64&domain=${t.site}", t.name,
+                Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)), scale = androidx.compose.ui.layout.ContentScale.Fit, fill = false,
+            )
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text(t.name, style = Type.body.copy(fontWeight = FontWeight.SemiBold))
+                Text(
+                    when {
+                        !t.available -> "Not set up in this build"
+                        connected -> "Connected"
+                        code != null -> "Waiting for your approval…"
+                        else -> "Not connected"
+                    },
+                    style = Type.meta.copy(color = if (connected) Ink.good else Ink.faint),
+                )
+            }
+            when {
+                !t.available -> Unit
+                connected -> Button("Disconnect", { t.disconnect() })
+                code != null -> Button("Cancel", { job?.cancel() })
+                else -> Button("Connect", ::connect, primary = true)
+            }
+        }
+        code?.let { c ->
+            Tap({ runCatching { browser.openUri(c.uriComplete) } }, Modifier.padding(top = 8.dp)) {
+                Text("Approve on the page that opened, or open it again. Code ${c.userCode}", style = Type.meta.copy(color = Ink.faint))
+            }
+        }
+        note?.let { Text(it, Modifier.padding(top = 8.dp), style = Type.meta.copy(color = Ink.faint)) }
+    }
 }
 
 @Composable
