@@ -26,20 +26,4 @@
   <SolidColorBrush x:Key="TintHi" Color="#38ffffff" />
   <SolidColorBrush x:Key="TintLo" Color="#14ffffff" />
   <SolidColorBrush x:Key="Scrim" Color="#8c000000" />
-  <SolidColorBrush x:Key="TabBar" Color="#0a0a0a" />
-  <LinearGradientBrush x:Key="FadeToBg" StartPoint="0,0" EndPoint="0,1">
-    <GradientStop Offset="0" Color="#000a0a0a" />
-    <GradientStop Offset="0.45" Color="#000a0a0a" />
-    <GradientStop Offset="1" Color="#ff0a0a0a" />
-  </LinearGradientBrush>
-  <LinearGradientBrush x:Key="FadeUp" StartPoint="0,1" EndPoint="0,0">
-    <GradientStop Offset="0.2" Color="#ff0a0a0a" />
-    <GradientStop Offset="1" Color="#000a0a0a" />
-  </LinearGradientBrush>
-  <!-- heroScrims: solid page at the left edge, gone by the art's middle. -->
-  <LinearGradientBrush x:Key="FadeLeft" StartPoint="0,0" EndPoint="1,0">
-    <GradientStop Offset="0" Color="#ff0a0a0a" />
-    <GradientStop Offset="0.14" Color="#d90a0a0a" />
-    <GradientStop Offset="0.55" Color="#000a0a0a" />
-  </LinearGradientBrush>
 </ResourceDictionary>

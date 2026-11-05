@@ -68,8 +68,8 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
     val history by History.items.collectAsState()
     /** Where this series was left: the episode after the last one finished, or the one stopped part-way. */
     // What Stremio has seen counts too: after a reinstall, this TV's own history is empty.
-    val stremio by Stremio.library.collectAsState()
-    val continueAt = remember(history, title.episodes, stremio) { continueEpisode(title, history, stremio) }
+    val stremio by WatchedEverywhere.collectAsState(Stremio.library.value)
+    val continueAt =remember(history, title.episodes, stremio) { continueEpisode(title, history, stremio) }
     var season by rememberSaveable(title.imdb) { mutableStateOf<Int?>(null) }
     // Not while the episode list is still loading: that would throw away the season being come back to.
     LaunchedEffect(seasons) {
@@ -166,6 +166,8 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
                 Column(Modifier.onFocusEnter { pin(0) }.padding(start = Safe.x + 12.dp, end = Safe.x).widthIn(max = 600.dp)) {
                     TitleMark(title, Modifier.widthIn(max = 440.dp), maxHeight = 110.dp)
                     Facts(title, Modifier.padding(top = 16.dp))
+                    val finished = history.filter { it.imdb == title.imdb && it.ratio >= WATCHED_AT }.maxOfOrNull { it.at }
+                    if (!title.isSeries && (finished != null || title.imdb in stremio.films)) WatchedBadge(finished, Modifier.padding(top = 12.dp))
                     title.plot?.let { Text(it, Modifier.padding(top = 12.dp), style = Type.body.copy(color = Ink.text.copy(alpha = 0.82f)), maxLines = 4, overflow = TextOverflow.Ellipsis) }
                     if (title.cast.isNotEmpty()) People("Starring", title.cast.take(4).joinToString(", "))
                     if (title.directors.isNotEmpty()) People(if (title.isSeries) "Creators" else "Director", title.directors.take(2).joinToString(", "))

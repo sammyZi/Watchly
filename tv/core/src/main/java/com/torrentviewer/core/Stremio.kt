@@ -70,7 +70,12 @@ data class StremioLibrary(
     val paused: List<Paused> = emptyList(),
     /** The library, newest first. */
     val seen: List<Seen> = emptyList(),
+    /** When each title was last played through, on any device, and not left part-way since. */
+    val finishedAt: Map<String, Long> = emptyMap(),
 ) {
+    /** Played here, then finished on another device: this device's own spot is out of date. A play here since keeps it. */
+    fun finishedSince(item: Item): Boolean = item.imdb?.let { finishedAt[it] }?.let { it > item.lastPlayed } == true
+
     fun pausedAt(imdb: String, ep: Ep?): Double? = paused.find { it.imdb == imdb && it.ep == ep }?.progress
 
     fun pausedSeconds(imdb: String, ep: Ep?): Double? = paused.find { it.imdb == imdb && it.ep == ep }?.seconds
@@ -98,6 +103,7 @@ fun parseLibrary(json: String): StremioLibrary {
     val episodes = mutableMapOf<String, MutableSet<Ep>>()
     val paused = mutableListOf<Pair<String, Paused>>()
     val seen = mutableListOf<Seen>()
+    val finished = mutableMapOf<String, Long>()
     for (it in items) {
         val id = it.str("_id") ?: continue
         val kind = kindOfType(it.optString("type", "movie"))
@@ -111,12 +117,13 @@ fun parseLibrary(json: String): StremioLibrary {
         val duration = state.optLong("duration")
         val part = if (duration > 0) offset.toDouble() / duration else 0.0
         if (through && ep != null && part == 0.0) episodes.getOrPut(id) { mutableSetOf() } += ep
+        if (through && part == 0.0) isoMs(at)?.let { ms -> finished[id] = ms }
         if (offset > 0 && part >= 0.02 && part < WATCHED_AT && (kind == "movie" || ep != null)) {
             paused += at to Paused(id, name, null, ep, part * 100, offset / 1000.0)
         }
         if (!it.optBoolean("removed") && !it.optBoolean("temp")) seen += Seen(id, name, null, kind, at, ep?.let { e -> "S%02dE%02d".format(e.season, e.episode) })
     }
-    return StremioLibrary(films, episodes, paused.sortedByDescending { it.first }.map { it.second }, seen.sortedByDescending { it.at })
+    return StremioLibrary(films, episodes, paused.sortedByDescending { it.first }.map { it.second }, seen.sortedByDescending { it.at }, finished)
 }
 
 private fun utc(pattern: String) = java.text.SimpleDateFormat(pattern, java.util.Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }

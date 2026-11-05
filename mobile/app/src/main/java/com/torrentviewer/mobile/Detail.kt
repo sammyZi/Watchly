@@ -53,6 +53,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.size
 import com.torrentviewer.core.awardsOf
+import com.torrentviewer.core.WatchedBadge
 import com.torrentviewer.core.castPhoto
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -108,23 +109,6 @@ private const val FIRST_EPISODES = 10
 
 /** Past this the list is noise; the best are at the top. */
 private const val MAX_SOURCES = 60
-
-/** A film seen through, and when if it was on this phone: a connected account only says that it was. */
-@Composable
-private fun WatchedBadge(at: Long?, modifier: Modifier = Modifier) {
-    val date = at?.let { java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(it)) }
-    Row(
-        modifier.clip(CircleShape).background(Ink.good.copy(alpha = 0.14f)).padding(start = 5.dp, end = 12.dp, top = 5.dp, bottom = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // The page's colour on the green: white was lost on the bright green of the dark theme.
-        Box(Modifier.size(20.dp).clip(CircleShape).background(Ink.good), contentAlignment = Alignment.Center) {
-            Lc(L.drawable.lucide_ic_check, tint = Ink.bg, size = 13.dp)
-        }
-        Text("Watched", Modifier.padding(start = 7.dp), style = Type.meta.copy(color = Ink.good, fontWeight = FontWeight.SemiBold))
-        date?.let { Text("  ·  $it", style = Type.meta.copy(color = Ink.text.copy(alpha = 0.7f))) }
-    }
-}
 
 fun openUrl(context: Context, url: String) {
     try {

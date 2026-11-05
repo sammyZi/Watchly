@@ -418,26 +418,88 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
     }
     val first = remember { FocusRequester() }
     fun set(next: Settings) = SettingsStore.save(next)
+    /** The page open, by its title; null is the list of them. */
+    var page by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    var query by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    val update by Updates.release.collectAsState()
+    val downloading by Updates.progress.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    fun say(note: String) = Services.watch.notes.tryEmit(note)
+    androidx.activity.compose.BackHandler(page != null) { page = null }
+    val scroll = rememberScrollState()
+    LaunchedEffect(page) { scroll.scrollTo(0) }
 
     Column(
         Modifier.fillMaxSize()
-            // In from the rail: the PIN box is leftmost, so it won the focus search and opened the keyboard.
-            .focusProperties { onEnter = { first.requestFocus() } }
+            // In from the rail: a box on the left won the focus search and opened the keyboard.
+            // Nothing to land on when a search matched nothing: the search box takes it, as it would.
+            .focusProperties { onEnter = { runCatching { first.requestFocus() } } }
             .focusGroup()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scroll)
             .padding(start = GUTTER, end = Safe.x, top = Safe.y, bottom = 120.dp),
     ) {
-        Text("Settings", style = Type.display)
-        // Up here, not at the foot: the D-pad only scrolls as far as the last thing it can focus.
-        Text(
-            "Version ${BuildConfig.VERSION_NAME} · built " +
-                java.text.SimpleDateFormat("d MMM yyyy, HH:mm", java.util.Locale.US).format(java.util.Date(BuildConfig.BUILD_TIME)),
-            Modifier.padding(top = 4.dp, bottom = 26.dp),
-            style = Type.meta.copy(color = Ink.faint),
-        )
+        if (page == null) {
+            Text("Settings", style = Type.display)
+            // Up here, not at the foot: the D-pad only scrolls as far as the last thing it can focus.
+            Text(
+                "Version ${BuildConfig.VERSION_NAME} · built " +
+                    java.text.SimpleDateFormat("d MMM yyyy, HH:mm", java.util.Locale.US).format(java.util.Date(BuildConfig.BUILD_TIME)),
+                Modifier.padding(top = 4.dp, bottom = 18.dp),
+                style = Type.meta.copy(color = Ink.faint),
+            )
+            Field(query, { query = it }, "Search settings", Modifier.widthIn(max = 760.dp).fillMaxWidth().padding(bottom = 14.dp), leading = L.drawable.lucide_ic_search, keyboardOnFocus = false)
+            SettingsList(
+                listOfNotNull(
+                    update?.let { r ->
+                        val p = downloading
+                        listOf(
+                            if (p != null) Entry(L.drawable.lucide_ic_x, "Cancel the update", "Downloading version ${r.version}  ·  ${(p * 100).toInt()}%", tint = Ink.accent, onClick = Updates::cancel)
+                            else Entry(L.drawable.lucide_ic_download, "Update available", "Version ${r.version}  ·  ${bytes(r.size)}", "new version upgrade", Ink.accent) { Updates.download(context, r, ::say) },
+                        )
+                    },
+                    listOf(
+                        Entry(L.drawable.lucide_ic_user, "Account", "Profile, PIN and Stremio account", "lock sign in") { page = "Account" },
+                        Entry(L.drawable.lucide_ic_users, "Switch profile", "Change to a different profile", onClick = onSwitchProfile),
+                    ),
+                    listOf(
+                        Entry(L.drawable.lucide_ic_palette, "Appearance", "Genres on the home screen", "theme") { page = "Appearance" },
+                    ),
+                    listOfNotNull(
+                        Entry(L.drawable.lucide_ic_radio, "Streaming", "Storage, buffer and trackers", "cache magnet") { page = "Streaming" },
+                        Entry(L.drawable.lucide_ic_play, "Playback", "Player and skip intro", "vlc media3") { page = "Playback" },
+                        // A kids profile plays what it can browse to; where streams come from is the grown-ups' call.
+                        if (Kids.on) null else Entry(L.drawable.lucide_ic_puzzle, "Addons", "Where streams and subtitles come from", "stremio debrid") { page = "Addons" },
+                    ),
+                    listOf(
+                        Entry(L.drawable.lucide_ic_link, "Integrations", "Simkl and MDBList", "tracking watched sync") { page = "Integrations" },
+                        Entry(L.drawable.lucide_ic_key, "Services", "SubDL and TorBox keys", "subtitles api") { page = "Services" },
+                    ),
+                    listOf(
+                        Entry(L.drawable.lucide_ic_refresh_cw, "Check for updates", "You have version ${BuildConfig.VERSION_NAME}", "new version upgrade") { Updates.checkNow(::say) },
+                    ),
+                ),
+                query,
+                first,
+            )
+        } else {
+            Row(Modifier.padding(bottom = 24.dp), verticalAlignment = Alignment.CenterVertically) {
+                TvButton("Settings", { page = null }, icon = L.drawable.lucide_ic_arrow_left, requester = first)
+                Spacer(Modifier.width(18.dp))
+                Text(page.orEmpty(), style = Type.display)
+            }
+        }
 
-        // First: the account everything else on this TV comes from. Focus arrives here from the rail.
-        StremioSection(me, requester = first)
+        if (page == "Integrations") {
+            Text(
+                "What you finish here is marked watched on your accounts, and what they have watched shows here. You sign in on your phone, so your password never comes to Watchly.",
+                Modifier.padding(bottom = 24.dp).widthIn(max = 760.dp),
+                style = Type.meta.copy(color = Ink.faint),
+            )
+            WATCH_TRACKERS.forEach { TrackerSection(it) }
+        }
+
+        if (page == "Account") {
+        StremioSection(me)
 
         Section("Profile", if (me.isGuest) "Guest keeps nothing — history and My List go when the app closes." else "Library, My List and resume points belong to this profile.") {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -470,12 +532,14 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
 
-        // A kids profile plays what it can browse to; where streams come from is the grown-ups' call.
-        if (!Kids.on) Section(
-            "Addons",
-            "Where streams and subtitles come from. Add an addon by its link — a public one, your debrid service's, or your own media server's. Watchly comes with none.",
+        }
+
+        if (page == "Addons") Section(
+            "Your addons",
+            "Add an addon by its link — a public one, your debrid service's, or your own media server's. Watchly comes with none.",
         ) { AddonsList() }
 
+        if (page == "Streaming") {
         Section(
             "Storage for one film",
             "How much of a film may sit on this TV at once. When it fills, what you've watched is let go to make room. Auto uses the free space, keeping a few GB spare.",
@@ -491,6 +555,15 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
 
+        Section("Extra trackers","Attach public trackers to bare magnet links so they resolve faster.") {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Chip("On", settings.addTrackers, onClick = { set(settings.copy(addTrackers = true)) })
+                Chip("Off", !settings.addTrackers, onClick = { set(settings.copy(addTrackers = false)) })
+            }
+        }
+        }
+
+        if (page == "Playback") {
         Section(
             "Player",
             "Media3 keeps 4K smooth with subtitles on, and hands a file it can't play to VLC by itself. VLC from the start plays the most formats and full ASS styling, but a weak TV can drop frames each time a subtitle changes.",
@@ -507,7 +580,9 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
                 Chip("Show the button", !settings.autoSkipIntro, onClick = { set(settings.copy(autoSkipIntro = false)) })
             }
         }
+        }
 
+        if (page == "Services") {
         Section(
             "SubDL key",
             if (subdl.isNotEmpty()) "Saved, encrypted on this TV — Find subtitles searches SubDL too. Enter another to replace it."
@@ -564,14 +639,9 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
 
-        Section("Extra trackers","Attach public trackers to bare magnet links so they resolve faster.") {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Chip("On", settings.addTrackers, onClick = { set(settings.copy(addTrackers = true)) })
-                Chip("Off", !settings.addTrackers, onClick = { set(settings.copy(addTrackers = false)) })
-            }
         }
 
-        Section("Genres on the home screen", "Leave all off to build the home screen from what you have watched.") {
+        if (page == "Appearance") Section("Genres on the home screen", "Leave all off to build the home screen from what you have watched.") {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.widthIn(max = 900.dp)) {
                 GENRES.forEach { g ->
                     val on = g in settings.genres
@@ -582,7 +652,107 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
     }
-    first.claim()
+    first.claim(page)
+}
+
+/** One line of the settings list; [words] are what else it answers to in the search. */
+private class Entry(@androidx.annotation.DrawableRes val icon: Int, val title: String, val hint: String, val words: String = "", val tint: Color? = null, val onClick: () -> Unit) {
+    fun matches(query: String) = listOf(title, hint, words).any { it.contains(query, ignoreCase = true) }
+}
+
+/** The phone's settings list for the remote: cards of rows, run together into one by a search. [first] is its first row. */
+@Composable
+private fun SettingsList(groups: List<List<Entry>>, query: String, first: FocusRequester) {
+    val q = query.trim()
+    val shown = if (q.isEmpty()) groups else listOf(groups.flatten().filter { it.matches(q) }).filter { it.isNotEmpty() }
+    if (shown.isEmpty()) Text("No settings match", Modifier.padding(start = 4.dp, bottom = 12.dp), style = Type.meta.copy(color = Ink.faint))
+    val top = shown.firstOrNull()?.firstOrNull()
+    shown.forEach { group ->
+        // Not clipped: that would cut off the focus ring.
+        Column(Modifier.padding(bottom = 14.dp).widthIn(max = 760.dp).fillMaxWidth().background(Ink.surface, RoundedCornerShape(18.dp)).padding(6.dp)) {
+            group.forEach { e ->
+                Focusable(e.onClick, Modifier.fillMaxWidth(), RoundedCornerShape(12.dp), 1.02f, requester = first.takeIf { e === top }) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(Ink.text.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
+                            Lc(e.icon, tint = e.tint ?: Ink.text, size = 20.dp)
+                        }
+                        Column(Modifier.padding(start = 16.dp)) {
+                            Text(e.title, style = Type.body.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(e.hint, style = Type.meta.copy(color = Ink.faint), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A tracking account: its logo, and Connect, which puts up a QR of its own page with the code filled in. */
+@Composable
+private fun TrackerSection(t: Tracker) {
+    val connected by t.connected.collectAsState()
+    var code by remember { mutableStateOf<DeviceCode?>(null) }
+    var note by remember { mutableStateOf<String?>(null) }
+    var job by remember { mutableStateOf<Job?>(null) }
+    val scope = rememberCoroutineScope()
+    // Back while the QR is up closes it right here, rather than leaving the page.
+    androidx.activity.compose.BackHandler(code != null) { job?.cancel() }
+
+    fun connect() {
+        note = null
+        job?.cancel()
+        job = scope.launch {
+            try {
+                val c = t.start()
+                code = c
+                if (!t.await(c)) note = "That didn't go through — connect again for a new code."
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) note = e.message ?: "Couldn't reach ${t.name}."
+            } finally {
+                code = null
+            }
+        }
+    }
+
+    Column(Modifier.padding(bottom = 30.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // By its domain, from Google's favicon service, as the review sites are.
+            Artwork(
+                "https://www.google.com/s2/favicons?sz=64&domain=${t.site}", t.name,
+                Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)), scale = androidx.compose.ui.layout.ContentScale.Fit, fill = false,
+            )
+            Column(Modifier.width(360.dp).padding(horizontal = 16.dp)) {
+                Text(t.name, style = Type.title.copy(fontWeight = FontWeight.Bold))
+                Text(
+                    when {
+                        !t.available -> "Not set up in this build"
+                        connected -> "Connected"
+                        code != null -> "Waiting for your approval…"
+                        else -> "Not connected"
+                    },
+                    style = Type.meta.copy(color = if (connected) Ink.good else Ink.faint),
+                )
+            }
+            // One button that changes its label: a focused button taken away left focus nowhere.
+            if (t.available) TvButton(
+                when { connected -> "Disconnect"; code != null -> "Cancel"; else -> "Connect" },
+                { when { connected -> t.disconnect(); code != null -> job?.cancel(); else -> connect() } },
+                icon = when { connected -> L.drawable.lucide_ic_link; code != null -> L.drawable.lucide_ic_x; else -> L.drawable.lucide_ic_smartphone },
+            )
+        }
+        code?.let { c ->
+            Row(Modifier.padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Qr(c.uriComplete, 168.dp)
+                Spacer(Modifier.width(24.dp))
+                Column(Modifier.widthIn(max = 560.dp)) {
+                    Text("Scan with your phone's camera and approve, or enter this code on ${t.site}", style = Type.meta.copy(color = Ink.faint))
+                    Text(c.userCode, Modifier.padding(vertical = 8.dp), style = Type.display)
+                    Text("This page notices by itself once you've approved.", style = Type.meta.copy(color = Ink.faint))
+                }
+            }
+        }
+        note?.let { Text(it, Modifier.padding(top = 10.dp), style = Type.meta.copy(color = Ink.faint)) }
+    }
 }
 
 /**
@@ -921,10 +1091,14 @@ private fun Tile(name: String, onClick: () -> Unit, requester: FocusRequester? =
 @Composable
 private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, String, String, Boolean) -> Unit, onDelete: () -> Unit, onCancel: () -> Unit) {
     var name by remember { mutableStateOf(profile?.name.orEmpty()) }
-    var icon by remember { mutableStateOf(profile?.let { Avatars.of(it).id } ?: AVATARS[0]) }
+    var icon by remember { mutableStateOf(profile?.let { it.icon ?: Avatars.of(it).id } ?: EMOJI_ICONS[0]) }
     var colour by remember { mutableStateOf(profile?.colour ?: COLOURS[0]) }
     var kids by remember { mutableStateOf(profile?.kids ?: false) }
     val field = remember { FocusRequester() }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var link by remember { mutableStateOf("") }
+    var failed by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = Safe.x, vertical = Safe.y)) {
         Avatar(Profile("preview", name.ifBlank { "?" }, colour, icon), 160.dp)
         Spacer(Modifier.width(48.dp))
@@ -936,13 +1110,34 @@ private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, Strin
                 Field(name, { name = it.take(20) }, "Name", Modifier.fillMaxWidth(), requester = field)
                 Text("ICON", Modifier.padding(top = 22.dp, bottom = 10.dp), style = Type.overline)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    AVATARS.forEach { a ->
+                    EMOJI_ICONS.forEach { a ->
                         Focusable({ icon = a }, Modifier.size(56.dp), RoundedCornerShape(12.dp), 1.12f) {
-                            AvatarTile(Avatars.art(a), colorOf(colour), 56.dp)
+                            AvatarImage(a, colorOf(colour), 56.dp)
                             if (a == icon) Box(Modifier.fillMaxSize().border(3.dp, Ink.accent, RoundedCornerShape(12.dp)))
                         }
                     }
                 }
+                Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Field(link, { link = it.trim() }, "Link to an image", Modifier.width(340.dp), keyboardOnFocus = false)
+                    Spacer(Modifier.width(12.dp))
+                    TvButton(if (link.isNotEmpty()) "Use link" else "Type a link", {
+                        if (link.isNotEmpty()) scope.launch {
+                            val saved = savedPicture(context, link)
+                            failed = saved == null
+                            if (saved != null) {
+                                icon = saved
+                                link = ""
+                            }
+                        }
+                    }, icon = L.drawable.lucide_ic_link)
+                }
+                PhoneKey("image link") { pasted ->
+                    savedPicture(context, pasted.trim())?.let {
+                        icon = it
+                        "Saved — that picture is on the TV now. You can close this page."
+                    } ?: "Couldn't load that picture."
+                }
+                if (failed) Text("Couldn't load that picture.", Modifier.padding(top = 8.dp), style = Type.meta.copy(color = Ink.danger))
                 Text("COLOUR", Modifier.padding(top = 20.dp, bottom = 10.dp), style = Type.overline)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     COLOURS.forEach { c ->

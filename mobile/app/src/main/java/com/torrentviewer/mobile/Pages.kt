@@ -4,8 +4,12 @@ package com.torrentviewer.mobile
 
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
+import com.torrentviewer.core.Updates
+import com.torrentviewer.core.savedPicture
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.torrentviewer.core.Backup
 import androidx.compose.ui.unit.sp
@@ -66,7 +70,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.torrentviewer.core.AVATARS
+import com.torrentviewer.core.EMOJI_ICONS
 import com.torrentviewer.core.Avatar
 import com.torrentviewer.core.CACHE_CAPS
 import com.torrentviewer.core.cacheCapLabel
@@ -101,7 +105,7 @@ import com.torrentviewer.core.Title
 import com.torrentviewer.core.Type
 import com.torrentviewer.core.Watch
 import com.torrentviewer.core.ago
-import com.torrentviewer.core.AvatarTile
+import com.torrentviewer.core.AvatarImage
 import com.torrentviewer.core.Avatars
 import androidx.compose.foundation.border
 import com.torrentviewer.core.colorOf
@@ -1289,9 +1293,9 @@ private fun TrackerSection(t: com.torrentviewer.core.Tracker) {
             }
             when {
                 !t.available -> Unit
-                connected -> Button("Disconnect", { t.disconnect() })
-                code != null -> Button("Cancel", { job?.cancel() })
-                else -> Button("Connect", ::connect, primary = true)
+                connected -> Button("Disconnect", { t.disconnect() }, compact = true)
+                code != null -> Button("Cancel", { job?.cancel() }, compact = true)
+                else -> Button("Connect", ::connect, primary = true, compact = true)
             }
         }
         code?.let { c ->
@@ -1423,9 +1427,28 @@ private fun Tile(name: String, onClick: () -> Unit, face: @Composable androidx.c
 @Composable
 private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, String, String, Boolean) -> Unit, onDelete: () -> Unit, onCancel: () -> Unit) {
     var name by remember { mutableStateOf(profile?.name.orEmpty()) }
-    var icon by remember { mutableStateOf(profile?.let { Avatars.of(it).id } ?: AVATARS[0]) }
+    var icon by remember { mutableStateOf(profile?.let { it.icon ?: Avatars.of(it).id } ?: EMOJI_ICONS[0]) }
     var colour by remember { mutableStateOf(profile?.colour ?: COLOURS[0]) }
     var kids by remember { mutableStateOf(profile?.kids ?: false) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    /** The address being typed; null while that box is closed. */
+    var link by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    var failed by remember { mutableStateOf(false) }
+    fun usePicture(data: Any) {
+        failed = false
+        loading = true
+        scope.launch {
+            val saved = savedPicture(context, data)
+            loading = false
+            if (saved != null) {
+                icon = saved
+                link = null
+            } else failed = true
+        }
+    }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let(::usePicture) }
     Column(Modifier.widthIn(max = 480.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
             Avatar(Profile("preview", name.ifBlank { "?" }, colour, icon), 110.dp)
@@ -1434,15 +1457,26 @@ private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, Strin
             Field(name, { name = it.take(20) }, "Name", Modifier.fillMaxWidth())
             Text("ICON", Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 10.dp), style = Type.overline)
             FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                AVATARS.forEach { a ->
+                EMOJI_ICONS.forEach { a ->
                     Tap({ icon = a }, Modifier.size(54.dp), RoundedCornerShape(12.dp)) {
                         Box {
-                            AvatarTile(Avatars.art(a), colorOf(colour), 54.dp)
+                            AvatarImage(a, colorOf(colour), 54.dp)
                             if (a == icon) Box(Modifier.matchParentSize().border(3.dp, Ink.accent, RoundedCornerShape(12.dp)))
                         }
                     }
                 }
             }
+            Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button("From phone", { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, icon = L.drawable.lucide_ic_image, compact = true)
+                Button("From URL", { link = if (link == null) "" else null }, icon = L.drawable.lucide_ic_link, compact = true)
+            }
+            link?.let { typed ->
+                Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Field(typed, { link = it }, "Link to an image", Modifier.weight(1f), onSubmit = { usePicture(typed.trim()) })
+                    Button(if (loading) "Loading" else "Use", { if (!loading) usePicture(typed.trim()) }, primary = true, compact = true)
+                }
+            }
+            if (failed) Text("Couldn't load that picture.", Modifier.fillMaxWidth().padding(top = 8.dp), style = Type.meta.copy(color = Ink.danger))
             Text("COLOUR", Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 10.dp), style = Type.overline)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 COLOURS.forEach { c ->

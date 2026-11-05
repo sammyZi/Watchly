@@ -52,6 +52,9 @@ object Kv {
 
     private fun at(key: String) = if (profile.isNotEmpty()) "$key@$profile" else key
 
+    /** The first profile, which has what was here before profiles. */
+    val onBareKeys get() = profile.isEmpty()
+
     /** Per-profile. */
     fun get(key: String): String? = at(key).let { if (guest) memory[it] else prefs.getString(it, null) }
 
@@ -155,15 +158,24 @@ val CACHE_CAPS = listOf(0, 2048, 4096, 8192, 16384)
 
 fun cacheCapLabel(mb: Int) = if (mb == 0) "Auto" else "${mb / 1024} GB"
 
+internal const val GENRES_KEY = "genres"
+
 object SettingsStore {
     private val _value = MutableStateFlow(Settings())
     val value: StateFlow<Settings> = _value
 
+    /** Again at each change of profile, for its favourite genres. */
     fun load() {
-        _value.value = fromJson(runCatching { JSONObject(Kv.global("settings") ?: "{}") }.getOrDefault(JSONObject()))
+        val device = fromJson(runCatching { JSONObject(Kv.global("settings") ?: "{}") }.getOrDefault(JSONObject()))
+        _value.value = device.copy(genres = ownGenres(device.genres))
         // In the same stored object, so it comes back with a restored backup too.
         Addons.load()
     }
+
+    /** Each profile's own. [shared] is the list from when the device had one; the first profile keeps it. */
+    private fun ownGenres(shared: List<String>): List<String> =
+        Kv.get(GENRES_KEY)?.let { stored -> runCatching { JSONArray(stored).let { a -> List(a.length()) { a.getString(it) } } }.getOrNull() }
+            ?: if (Kv.onBareKeys) shared else emptyList()
 
     /** Also what a backup restores, so nothing in it is trusted to be in range. */
     fun fromJson(o: JSONObject) = Settings(
@@ -192,11 +204,12 @@ object SettingsStore {
         _value.value = next
         val o = runCatching { JSONObject(Kv.global("settings") ?: "{}") }.getOrDefault(JSONObject())
         o.put("prepareMb", next.prepareMb).put("addTrackers", next.addTrackers)
-            .put("cacheMb", next.cacheCapMb).put("genres", JSONArray(next.genres)).put("vlcPlayer", next.vlcPlayer)
+            .put("cacheMb", next.cacheCapMb).put("vlcPlayer", next.vlcPlayer)
             .put("subLang", next.subLang).put("audioLang", next.audioLang)
             .put("subSize", next.subtitles.size).put("subColor", if (next.subtitles.yellow) "yellow" else "white").put("subBackground", next.subtitles.box)
             .put("playbackRate", next.playbackRate.toDouble()).put("playerScale", next.playerScale).put("streamWholeFile", next.wholeFile).put("themeMode", next.themeMode).put("autoSkipIntro", next.autoSkipIntro)
         Kv.setGlobal("settings", o.toString())
+        Kv.set(GENRES_KEY, JSONArray(next.genres).toString())
     }
 }
 
@@ -271,9 +284,6 @@ val GUEST = Profile("guest", "Guest", "#5b6472")
 
 /** A fixed set, so profiles are told apart by colour as much as by name. */
 val COLOURS = listOf("#e50914", "#2b8cff", "#f5a623", "#3ecf8e", "#a855f7", "#ff6b6b")
-
-/** The faces a profile can pick, by id, in the picker's order; see [Avatars]. */
-val AVATARS: List<String> get() = Avatars.pickable.map { it.id }
 
 object Profiles {
     private val _list = MutableStateFlow<List<Profile>>(emptyList())

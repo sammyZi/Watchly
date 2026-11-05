@@ -1,6 +1,8 @@
+using System.IO;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 
 namespace Watchly.Core;
 
@@ -14,6 +16,81 @@ public static class Avatars
     static readonly Color Cheek = Color.FromRgb(0xFF, 0x8F, 0xB8);
 
     public static readonly IReadOnlyList<AvatarArt> All = Load();
+
+    const string EmojiPrefix = "emoji/";
+
+    /// <summary>core EMOJI_ICONS: Microsoft's Fluent Emoji. A profile's icon is one of these, a drawn face's id, or the path of a picture of its own.</summary>
+    public static readonly string[] Emoji = new[]
+    {
+        "fox", "cat", "dog", "panda", "bear", "koala", "tiger", "lion", "rabbit", "hamster", "frog", "monkey",
+        "penguin", "owl", "unicorn", "dragon", "alien", "invader", "robot", "ghost", "cool", "starstruck", "popcorn", "clapper",
+    }.Select(n => EmojiPrefix + n).ToArray();
+
+    public static bool IsEmoji(string? icon) => icon?.StartsWith(EmojiPrefix) == true;
+
+    static readonly Dictionary<string, ImageSource> Pictures = new();
+
+    /// <summary>The picture of an emoji or a saved icon; null for a drawn face, or a file that isn't on this PC.</summary>
+    public static ImageSource? Picture(string? icon)
+    {
+        if (icon is null || !(IsEmoji(icon) || Path.IsPathRooted(icon))) return null;
+        if (Pictures.TryGetValue(icon, out var known)) return known;
+        try
+        {
+            using var stream = IsEmoji(icon) ? typeof(Avatars).Assembly.GetManifestResourceStream(icon + ".png") : File.OpenRead(icon);
+            if (stream is null) return null;
+            var image = Decode(stream, 0);
+            Pictures[icon] = image;
+            return image;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    static BitmapImage Decode(Stream stream, int width)
+    {
+        var image = new BitmapImage();
+        image.BeginInit();
+        image.CacheOption = BitmapCacheOption.OnLoad;
+        image.DecodePixelWidth = width;
+        image.StreamSource = stream;
+        image.EndInit();
+        image.Freeze();
+        return image;
+    }
+
+    /// <summary>
+    /// A picture from this PC or the web, as a small copy of our own: a link can die, and a file can
+    /// move. Its path, or null if it wouldn't load.
+    /// </summary>
+    // ponytail: a replaced or deleted profile's copy stays behind, ~300 KB each; sweep unreferenced files if that ever adds up.
+    public static async Task<string?> SavePicture(string source)
+    {
+        try
+        {
+            byte[] bytes;
+            if (Uri.TryCreate(source, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https")
+            {
+                using var res = await Net.Send(source, default, true).ConfigureAwait(false);
+                bytes = await res.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+            }
+            else bytes = await File.ReadAllBytesAsync(source).ConfigureAwait(false);
+            var encoder = new PngBitmapEncoder();
+            using (var stream = new MemoryStream(bytes)) encoder.Frames.Add(BitmapFrame.Create(Decode(stream, 512)));
+            var folder = Path.Combine(Store.Root, "profile-icons");
+            Directory.CreateDirectory(folder);
+            var path = Path.Combine(folder, $"{Store.Now}.png");
+            await using (var file = File.Create(path)) encoder.Save(file);
+            return path;
+        }
+        catch (Exception e) when (e is not OutOfMemoryException)
+        {
+            Log.Warn("avatars", $"couldn't save a picture: {e.Message}");
+            return null;
+        }
+    }
 
     /// <summary>What a profile can pick; the guest's own is not among them.</summary>
     public static IReadOnlyList<AvatarArt> Pickable { get; } = All.Where(a => a.Id != GuestArt).ToList();

@@ -72,7 +72,7 @@ fun trackForLang(tracks: List<Track>, code: String): Track? {
  */
 object Backup {
     /** Per profile; settings are the device's. */
-    private val PROFILE_KEYS = listOf("torrent-history", "saved", "searches", "episodes", "intros", "aired-counts")
+    private val PROFILE_KEYS = listOf("torrent-history", "saved", "searches", "episodes", "intros", "aired-counts", GENRES_KEY)
     private const val SETTINGS = "settings"
 
     fun export(now: Long = System.currentTimeMillis()): String {

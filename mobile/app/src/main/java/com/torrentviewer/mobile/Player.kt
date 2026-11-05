@@ -642,7 +642,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
 
     LaunchedEffect(loaded) { if (loaded) show() }
     LaunchedEffect(controls, lastTouch, paused, scrub, panel) {
-        if (!controls || paused || scrub != null || panel != null) return@LaunchedEffect
+        if (!controls || scrub != null || panel != null) return@LaunchedEffect
         delay(HIDE_MS)
         controls = false
     }

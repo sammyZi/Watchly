@@ -16,6 +16,14 @@ public static class Format
         return h > 0 ? $"{h}:{m:00}:{s:00}" : $"{m}:{s:00}";
     }
 
+    /// <summary>core runtimeLabel: "107 min" as "1h 47m" from the hour up; anything else as it came.</summary>
+    public static string Runtime(string runtime)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(runtime.Trim(), @"^(\d+)\s*min$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (!m.Success || !int.TryParse(m.Groups[1].Value, out var minutes) || minutes < 60) return runtime;
+        return minutes % 60 == 0 ? $"{minutes / 60}h" : $"{minutes / 60}h {minutes % 60}m";
+    }
+
     /// <summary>Coarse "how much is left" — 640 -> "11m left".</summary>
     public static string Left(double seconds)
     {

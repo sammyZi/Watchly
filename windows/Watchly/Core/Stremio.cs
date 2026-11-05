@@ -24,6 +24,12 @@ public sealed record StremioLibrary(
 {
     public static readonly StremioLibrary Empty = new(new(), new(), new(), new());
 
+    /// <summary>When each title was last played through, on any device, and not left part-way since.</summary>
+    public Dictionary<string, long> FinishedAt { get; init; } = new();
+
+    /// <summary>Played here, then finished on another device: this PC's own spot is out of date. A play here since keeps it.</summary>
+    public bool FinishedSince(HistoryItem item) => item.Imdb is { } imdb && FinishedAt.TryGetValue(imdb, out var at) && at > item.LastPlayed;
+
     public double? PausedAt(string imdb, (int, int)? ep) => Paused.FirstOrDefault(p => p.Imdb == imdb && p.Ep == ep)?.Progress;
 
     public double? PausedSeconds(string imdb, (int, int)? ep) => Paused.FirstOrDefault(p => p.Imdb == imdb && p.Ep == ep)?.Seconds;
@@ -122,6 +128,7 @@ public static class Stremio
         var episodes = new Dictionary<string, HashSet<(int, int)>>();
         var paused = new List<(string At, StremioPaused P)>();
         var seen = new List<StremioSeen>();
+        var finished = new Dictionary<string, long>();
         foreach (var it in items)
         {
             if (Str(it["_id"]) is not { } id) continue;
@@ -140,6 +147,7 @@ public static class Stremio
                 if (!episodes.TryGetValue(id, out var set)) episodes[id] = set = new();
                 set.Add(done);
             }
+            if (through && part == 0 && DateTimeOffset.TryParse(at, out var when)) finished[id] = when.ToUnixTimeMilliseconds();
             if (offset > 0 && part >= 0.02 && part < WatchedAt && (kind == "movie" || ep is not null))
                 paused.Add((at, new StremioPaused(id, name, null, ep, part * 100, offset / 1000.0)));
             if (!Bool(it["removed"]) && !Bool(it["temp"]))
@@ -147,7 +155,7 @@ public static class Stremio
         }
         return new(films, episodes,
             paused.OrderByDescending(p => p.At, StringComparer.Ordinal).Select(p => p.P).ToList(),
-            seen.OrderByDescending(s => s.At, StringComparer.Ordinal).ToList());
+            seen.OrderByDescending(s => s.At, StringComparer.Ordinal).ToList()) { FinishedAt = finished };
     }
 
     /// <summary>

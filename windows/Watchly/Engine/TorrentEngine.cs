@@ -695,7 +695,8 @@ public sealed class StreamSession : IAsyncDisposable
         this.deleteFiles = deleteFiles;
     }
 
-    public static async Task<StreamSession> Start(Torrent torrent, int fileIndex, bool deleteFilesAfter, string? sourceUri = null, CancellationToken ct = default)
+    /// <param name="resuming">Starting part-way: the player seeks, and can't until it has read the index at the file's end.</param>
+    public static async Task<StreamSession> Start(Torrent torrent, int fileIndex, bool deleteFilesAfter, string? sourceUri = null, CancellationToken ct = default, bool resuming = false)
     {
         var engine = TorrentEngine.Instance;
         if (Pick.IsUnsafe(torrent.Files[fileIndex].Path))
@@ -727,7 +728,7 @@ public sealed class StreamSession : IAsyncDisposable
         // Our own torrent: fetch only the window around the playhead, never the whole film.
         // (Its picker was put in when it was added — MonoTorrent only swaps pickers while stopped.)
         var window = borrowed ? null : engine.WindowOf(manager);
-        window?.Watch(fileIndex);
+        window?.Watch(fileIndex, resuming);
         engine.WindowOf(manager)?.ReadFrom(file);
         if (manager.State is TorrentState.Stopped or TorrentState.Paused or TorrentState.Error) await manager.StartAsync();
         if (!borrowed) _ = CreateSparseWhenDownloading(manager, file);
@@ -890,12 +891,19 @@ public sealed class WindowedRequester : IStreamingPieceRequester
     (int File, int Reader, long From, long To, bool Open) applied = (-1, -1, -2, -2, false);
 
     /// <summary>A stream starts on this file: limit it to the window from now on (no limit until then).</summary>
-    public void Watch(int file)
+    public void Watch(int file, bool resuming = false)
     {
         SetWindow(-1, -1);
         open = false;
+        keepEnd = resuming;
         fileIndex = file;
     }
+
+    /// <summary>
+    /// core prerollTargets: on a resume the file's last piece comes in alongside the rest. Left until
+    /// the player asked, on the phone that one piece alone cost 10–12 s before the seek could happen.
+    /// </summary>
+    volatile bool keepEnd;
 
     ITorrentManagerFile? reading;
 
@@ -969,14 +977,14 @@ public sealed class WindowedRequester : IStreamingPieceRequester
                 var i = f.StartPieceIndex + (start + n) % count;
                 var wanted = left > 0 && !Have(i);
                 if (wanted) left--;
-                outside[i] = !wanted && !(i >= reader && i <= reader + ReadAhead);
+                outside[i] = !wanted && !(i >= reader && i <= reader + ReadAhead) && !(keepEnd && i == f.EndPieceIndex);
             }
             return;
         }
         int PieceAt(long offset) => data.ByteOffsetToPieceIndex(f.OffsetInTorrent + Math.Clamp(offset, 0, Math.Max(0, f.Length - 1)));
         int spanFrom = to > 0 ? PieceAt(from) : int.MaxValue, spanTo = to > 0 ? PieceAt(to) : int.MinValue;
         for (var i = f.StartPieceIndex; i <= f.EndPieceIndex; i++)
-            outside[i] = !((i >= reader && i <= reader + ReadAhead) || (i >= spanFrom && i <= spanTo));
+            outside[i] = !((i >= reader && i <= reader + ReadAhead) || (i >= spanFrom && i <= spanTo) || (keepEnd && i == f.EndPieceIndex));
     }
 
     bool Have(int piece)

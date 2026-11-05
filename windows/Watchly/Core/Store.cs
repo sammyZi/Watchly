@@ -101,6 +101,9 @@ public static class Store
 
     static string Own(string key) => profile.Length > 0 ? $"{key}@{profile}" : key;
 
+    /// <summary>The first profile, which has what was here before profiles.</summary>
+    public static bool OnBareKeys => profile.Length == 0;
+
     public static T LoadOwn<T>(string key, T fallback)
     {
         if (!guest) return Load(Own(key), fallback);

@@ -2,9 +2,11 @@ package com.torrentviewer.core
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -17,8 +19,48 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import android.content.Context
+import android.graphics.Bitmap
+import coil3.SingletonImageLoader
+import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.SuccessResult
+import coil3.request.allowHardware
+import coil3.size.Scale
+import coil3.toBitmap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.io.File
+
+private const val EMOJI = "emoji/"
+
+/**
+ * Profile icons from Microsoft's Fluent Emoji (MIT, assets/emoji/LICENSE). A profile's icon is one of
+ * these, a drawn face's id, or the absolute path of a picture of its own.
+ */
+val EMOJI_ICONS = listOf(
+    "fox", "cat", "dog", "panda", "bear", "koala", "tiger", "lion", "rabbit", "hamster", "frog", "monkey",
+    "penguin", "owl", "unicorn", "dragon", "alien", "invader", "robot", "ghost", "cool", "starstruck", "popcorn", "clapper",
+).map { EMOJI + it }
+
+/**
+ * A picture from the device or the web, as a small copy of our own: leave to read a picked file ends
+ * with the app, and a link can die. Its path, or null if it wouldn't load.
+ */
+// ponytail: a replaced or deleted profile's copy stays behind, ~300 KB each; sweep unreferenced files if that ever adds up.
+suspend fun savedPicture(context: Context, data: Any): String? {
+    val request = ImageRequest.Builder(context).data(data).size(512).scale(Scale.FILL).allowHardware(false).build()
+    val bitmap = (SingletonImageLoader.get(context).execute(request) as? SuccessResult)?.image?.toBitmap() ?: return null
+    return withContext(Dispatchers.IO) {
+        val file = File(File(context.filesDir, "profile-icons").apply { mkdirs() }, "${System.currentTimeMillis()}.png")
+        file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        file.path
+    }
+}
 
 /** One drawn layer of an avatar, on its 100×100 tile. */
 class AvatarLayer(val path: Path, val fill: Color?, val stroke: Color?, val width: Float, val alpha: Float, val dx: Float, val dy: Float)
@@ -95,5 +137,22 @@ fun AvatarTile(art: AvatarArt, colour: Color, size: Dp, modifier: Modifier = Mod
     }
 }
 
+/** A picture on an avatar's tile: an emoji sits inside it, a photo fills it. */
 @Composable
-fun Avatar(profile: Profile, size: Dp, modifier: Modifier = Modifier) = AvatarTile(Avatars.of(profile), colorOf(profile.colour), size, modifier)
+fun AvatarImage(icon: String, colour: Color, size: Dp, modifier: Modifier = Modifier) {
+    val emoji = icon.startsWith(EMOJI)
+    AsyncImage(
+        if (emoji) "file:///android_asset/$icon.png" else File(icon), null,
+        modifier.size(size).clip(RoundedCornerShape(size * 0.22f)).background(Ink.surface2).background(colour.copy(alpha = 0.28f)).padding(if (emoji) size * 0.12f else 0.dp),
+        contentScale = if (emoji) ContentScale.Fit else ContentScale.Crop,
+    )
+}
+
+@Composable
+fun Avatar(profile: Profile, size: Dp, modifier: Modifier = Modifier) {
+    val icon = profile.icon
+    // A photo stays on the device it was picked on: restored from a backup elsewhere, the drawn face stands in.
+    val image = remember(icon) { icon?.takeIf { !profile.isGuest && (it.startsWith(EMOJI) || it.startsWith("/") && File(it).exists()) } }
+    if (image != null) AvatarImage(image, colorOf(profile.colour), size, modifier)
+    else AvatarTile(Avatars.of(profile), colorOf(profile.colour), size, modifier)
+}

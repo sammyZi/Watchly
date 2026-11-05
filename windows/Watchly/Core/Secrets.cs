@@ -19,6 +19,33 @@ public static class Secrets
     /// <summary>The viewer's SubDL key, or "" when none was given.</summary>
     public static string Subdl => subdl ??= Read();
 
+    static string Slot(string name) => Path.Combine(Store.Root, $"secret-{name}.bin");
+
+    /// <summary>A sign-in kept encrypted under its own name; null if there is none or it stopped decrypting.</summary>
+    public static string? Get(string name)
+    {
+        try { return Encoding.UTF8.GetString(Unprotect(System.IO.File.ReadAllBytes(Slot(name)))); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or InvalidOperationException) { return null; }
+    }
+
+    /// <summary>Null forgets it.</summary>
+    public static void Put(string name, string? value)
+    {
+        try
+        {
+            if (value is null) System.IO.File.Delete(Slot(name));
+            else
+            {
+                Directory.CreateDirectory(Store.Root);
+                System.IO.File.WriteAllBytes(Slot(name), Protect(Encoding.UTF8.GetBytes(value)));
+            }
+        }
+        catch (Exception e)
+        {
+            Log.Warn("secrets", $"Could not store {name}: {e.Message}");
+        }
+    }
+
     /// <summary>Blank forgets it.</summary>
     public static void SetSubdl(string key)
     {

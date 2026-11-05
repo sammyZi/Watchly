@@ -1,12 +1,12 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-  <!-- tv/core Theme.kt's Ink, light — the phone's light page. -->
-  <Color x:Key="BgColor">#ffffff</Color>
+  <!-- tv/core Theme.kt's Ink, light: a warm paper page, cards and sheets white on it, the greys warmed to match. -->
+  <Color x:Key="BgColor">#f6f2ee</Color>
   <SolidColorBrush x:Key="Control" Color="#ffffff" />
-  <SolidColorBrush x:Key="Bg" Color="#ffffff" />
-  <SolidColorBrush x:Key="Surface" Color="#f1f1f1" />
-  <SolidColorBrush x:Key="SurfaceAlt" Color="#e4e4e4" />
-  <SolidColorBrush x:Key="Line" Color="#d0d0d0" />
+  <SolidColorBrush x:Key="Bg" Color="#f6f2ee" />
+  <SolidColorBrush x:Key="Surface" Color="#ffffff" />
+  <SolidColorBrush x:Key="SurfaceAlt" Color="#eae4de" />
+  <SolidColorBrush x:Key="Line" Color="#ddd5ce" />
   <SolidColorBrush x:Key="Text" Color="#141414" />
   <SolidColorBrush x:Key="Muted" Color="#575757" />
   <SolidColorBrush x:Key="Faint" Color="#8a8a8a" />
@@ -24,19 +24,4 @@
   <SolidColorBrush x:Key="TintHi" Color="#38141414" />
   <SolidColorBrush x:Key="TintLo" Color="#14141414" />
   <SolidColorBrush x:Key="Scrim" Color="#8c000000" />
-  <SolidColorBrush x:Key="TabBar" Color="#ffffff" />
-  <LinearGradientBrush x:Key="FadeToBg" StartPoint="0,0" EndPoint="0,1">
-    <GradientStop Offset="0" Color="#00ffffff" />
-    <GradientStop Offset="0.45" Color="#00ffffff" />
-    <GradientStop Offset="1" Color="#ffffffff" />
-  </LinearGradientBrush>
-  <LinearGradientBrush x:Key="FadeUp" StartPoint="0,1" EndPoint="0,0">
-    <GradientStop Offset="0.2" Color="#ffffffff" />
-    <GradientStop Offset="1" Color="#00ffffff" />
-  </LinearGradientBrush>
-  <LinearGradientBrush x:Key="FadeLeft" StartPoint="0,0" EndPoint="1,0">
-    <GradientStop Offset="0" Color="#ffffffff" />
-    <GradientStop Offset="0.14" Color="#d9ffffff" />
-    <GradientStop Offset="0.55" Color="#00ffffff" />
-  </LinearGradientBrush>
 </ResourceDictionary>

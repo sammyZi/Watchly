@@ -77,11 +77,11 @@ class MainActivity : FragmentActivity() {
         val systemDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         applyTheme(darkFor(SettingsStore.value.value.themeMode, systemDark))
         incoming.value = intent?.data
-        Updates.check(this)
+        com.torrentviewer.core.Updates.check(this, BuildConfig.VERSION_NAME, "Watchly-phone-", BuildConfig.DEBUG)
         setContent {
             androidx.compose.foundation.layout.Box {
                 App(Services.watch, incoming)
-                Splash(skip = incoming.value != null)
+                com.torrentviewer.core.Splash(skip = incoming.value != null)
             }
         }
         preferHighRefreshRate()
@@ -95,6 +95,7 @@ class MainActivity : FragmentActivity() {
     override fun onResume() {
         super.onResume()
         preferHighRefreshRate()
+        com.torrentviewer.core.refreshWatched()
     }
 
     /** Home while a film plays shrinks it to a window. Android 12+ does this itself from the params' auto-enter. */

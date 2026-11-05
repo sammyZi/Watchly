@@ -4,6 +4,8 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using MonoTorrent;
 using Watchly.Controls;
@@ -120,6 +122,12 @@ public partial class MainWindow : Window
         History.Changed += items => Dispatcher.BeginInvoke(() => { HistoryList = items; LibraryChanged?.Invoke(); });
         Saved.Changed += items => Dispatcher.BeginInvoke(() => { SavedList = items; LibraryChanged?.Invoke(); });
         Stremio.Changed += () => Dispatcher.BeginInvoke(() => LibraryChanged?.Invoke());
+        foreach (var tracker in Trackers.All) tracker.Changed += () => Dispatcher.BeginInvoke(() => LibraryChanged?.Invoke());
+        Activated += (_, _) => Trackers.Refresh();
+        Updates.Changed += () => Dispatcher.BeginInvoke(ShowUpdate);
+        Updates.Check();
+        Root.Children.Add(update);
+        if (openOnStart is null) Splash();
         // New addons bring new home rows, and new answers for every page.
         Addons.Changed += () => Dispatcher.BeginInvoke(() => LibraryChanged?.Invoke());
         // The Instant tag on a release, once TorBox has answered which it has cached.
@@ -187,10 +195,12 @@ public partial class MainWindow : Window
         ProfileButton.ToolTip = $"{profile.Name} — switch profile";
         if (same) return;
         Store.UseProfile(profile.Id, profile.IsGuest);
+        Settings = Settings.ForProfile();
         HistoryList = History.Load();
         SavedList = Saved.Load();
         Links = EpisodeLinks.Load();
         Stremio.Load(profile.Id, profile.IsGuest);
+        foreach (var tracker in Trackers.All) tracker.Load(profile.Id, profile.IsGuest);
         KidsMode.Use(profile);
         // Pages built for the last profile read its library; start again from Home.
         // ponytail: the old tab views stay subscribed to the shell's events; switching is rare, unhook them if it ever shows.
@@ -332,7 +342,7 @@ public partial class MainWindow : Window
 
     void PushLayer(FrameworkElement page)
     {
-        page.SetResourceReference(BackgroundProperty, "Bg");
+        page.SetResourceReference(BackgroundProperty, "PageBg");
         Layers.Children.Add(page);
         ShowTopLayerOnly();
     }
@@ -404,6 +414,75 @@ public partial class MainWindow : Window
         }
     }
 
+    // ── Launch ──────────────────────────────────────────────────────────────
+
+    /// <summary>The floating card at the top while a new version waits, and for as long as it downloads.</summary>
+    readonly ContentControl update = new() { Focusable = false, VerticalAlignment = VerticalAlignment.Top, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 14, 0, 0) };
+
+    public void DownloadUpdate(AppRelease r) => _ = Updates.Download(r, m => Toast(m, true), () => Application.Current.Shutdown());
+
+    void ShowUpdate()
+    {
+        Grid.SetColumnSpan(update, 2);
+        update.Content = null;
+        if (Updates.Found is not { } r || (Updates.Hidden && Updates.Progress is null)) return;
+        var downloading = Updates.Progress is { } p;
+        var words = new StackPanel
+        {
+            VerticalAlignment = VerticalAlignment.Center,
+            Children =
+            {
+                Ui.Text(downloading ? "Downloading update" : "Update available", "Label", "Text", 15, FontWeights.SemiBold),
+                Ui.Text(downloading ? $"Version {r.Version}  ·  {Math.Round((Updates.Progress ?? 0) * 100)}%" : $"Version {r.Version}  ·  {Format.Bytes(r.Size)}", "Meta", "Faint", 13),
+            },
+        };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(28, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        if (downloading) buttons.Children.Add(Ui.Action("Cancel", "x", Updates.Cancel));
+        else
+        {
+            buttons.Children.Add(Ui.Action("Update", "download", () => DownloadUpdate(r), primary: true));
+            var later = Ui.Round("x", () => Updates.Skip(r.Version), "Muted", "Tint", 36, 18, "Not now");
+            later.Margin = new Thickness(8, 0, 0, 0);
+            buttons.Children.Add(later);
+        }
+        var card = Ui.Card(new DockPanel { Children = { words, buttons } }, "Surface", 14, new Thickness(16, 10, 12, 10));
+        card.Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 18, ShadowDepth = 2, Opacity = 0.35 };
+        update.Content = card;
+    }
+
+    /// <summary>
+    /// core Splash: the name, flat on black, each letter rising from behind an unseen line and leaving
+    /// through the top of it, on the phone's timing, while the app loads underneath.
+    /// </summary>
+    void Splash()
+    {
+        const double height = 64;
+        var letters = new StackPanel { Orientation = Orientation.Horizontal, ClipToBounds = true, Height = height, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var screen = new Grid { Background = Brushes.Black, Children = { letters } };
+        Grid.SetColumnSpan(screen, 2);
+        static KeyTime At(double ms) => KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(ms));
+        var rise = new KeySpline(0.16, 1, 0.3, 1);
+        var exit = new KeySpline(0.7, 0, 0.84, 0);
+        var red = new SolidColorBrush(Color.FromRgb(0xe5, 0x09, 0x14));
+        var i = 0;
+        foreach (var letter in "WATCHLY")
+        {
+            var move = new TranslateTransform(0, height);
+            letters.Children.Add(new TextBlock { Text = letter.ToString(), Foreground = red, FontSize = 50, FontWeight = FontWeights.Black, Margin = new Thickness(2, 0, 2, 0), RenderTransform = move, VerticalAlignment = VerticalAlignment.Center });
+            var path = new DoubleAnimationUsingKeyFrames { FillBehavior = FillBehavior.HoldEnd };
+            path.KeyFrames.Add(new DiscreteDoubleKeyFrame(height, At(i * 55)));
+            path.KeyFrames.Add(new SplineDoubleKeyFrame(0, At(i * 55 + 700), rise));
+            path.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(1050 + i * 25)));
+            path.KeyFrames.Add(new SplineDoubleKeyFrame(-height, At(1050 + i * 25 + 360), exit));
+            move.BeginAnimation(TranslateTransform.YProperty, path);
+            i++;
+        }
+        var fade = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(300)) { BeginTime = TimeSpan.FromMilliseconds(1250) };
+        fade.Completed += (_, _) => Root.Children.Remove(screen);
+        Root.Children.Add(screen);
+        screen.BeginAnimation(OpacityProperty, fade);
+    }
+
     // ── Library state ───────────────────────────────────────────────────────
 
     public void ChangeSettings(AppSettings next)
@@ -466,7 +545,7 @@ public partial class MainWindow : Window
             }
         }
         // What Stremio has counts too: after a reinstall, this PC's own history is empty.
-        var stremio = Stremio.Library;
+        var stremio = Trackers.Everywhere;
         foreach (var (imdb, eps) in stremio.Episodes)
             foreach (var (s, e) in eps) Record($"{imdb}:{s}:{e}", 1, 1);
         foreach (var p in stremio.Paused)
@@ -944,7 +1023,11 @@ public partial class MainWindow : Window
         var item = HistoryList.FirstOrDefault(h => h.Uri == uri);
         var of = item?.DurationOf(index);
         if (item is null || of is not > 0 || seconds / of.Value < Stremio.WatchedAt || !stremioMarked.Add($"{uri}#{index}")) return;
-        if (EpisodeOf(item, index) is var (ok, ep) && ok) Stremio.Watched(item, ep);
+        if (EpisodeOf(item, index) is var (ok, ep) && ok)
+        {
+            Stremio.Watched(item, ep);
+            foreach (var tracker in Trackers.All) tracker.Finished(item, ep);
+        }
     }
 
     /// <summary>Files already sent to Stremio as watched this session, so a film goes up once however often its spot is saved.</summary>

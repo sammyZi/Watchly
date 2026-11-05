@@ -46,7 +46,7 @@ public sealed class FilesView : UserControl
             },
         });
 
-        var list = new StackPanel { Margin = new Thickness(24, 0, 24, 40), MaxWidth = 1000, HorizontalAlignment = HorizontalAlignment.Left };
+        var list = new StackPanel { Margin = new Thickness(24, 0, 24, 40) };
         var groups = Pick.GroupByFolder(meta.Files);
         foreach (var group in groups)
         {

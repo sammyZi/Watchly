@@ -276,7 +276,7 @@ class Tracker(
      * reads it all and keeps it for the next launch.
      * ponytail: a full read when anything moved, so finishing a film costs one at next launch; Simkl's date_from deltas if libraries get huge.
      */
-    private fun pull() {
+    fun pull() {
         if (tokens == null) return
         val owner = profile
         AppScope.launch {
@@ -326,6 +326,22 @@ val Mdblist = Tracker(
 }
 
 val WATCH_TRACKERS = listOf(Simkl, Mdblist)
+
+/** Calibration knob: how soon coming back to the app asks the accounts again. */
+private const val REFRESH_MS = 60_000L
+private var refreshedAt = 0L
+
+/**
+ * Coming back to the app: what another device did meanwhile. A TV app stays open for days, so asking
+ * only at launch left a film finished on the phone part-watched here.
+ */
+fun refreshWatched() {
+    val now = System.currentTimeMillis()
+    if (now - refreshedAt < REFRESH_MS) return
+    refreshedAt = now
+    Stremio.pull()
+    WATCH_TRACKERS.forEach { it.pull() }
+}
 
 /** Stremio's library with what the tracking accounts say has been watched. */
 val WatchedEverywhere: Flow<StremioLibrary> = combine(Stremio.library, Simkl.library, Mdblist.library) { a, b, c -> a + b + c }

@@ -453,7 +453,7 @@ public sealed class PlayerView : UserControl, IDisposable
             }
             else
             {
-                session = await StreamSession.Start(request.Torrent!, request.FileIndex, shell.Settings.RemoveFilesAfterStop, request.HistoryUri, life.Token);
+                session = await StreamSession.Start(request.Torrent!, request.FileIndex, shell.Settings.RemoveFilesAfterStop, request.HistoryUri, life.Token, request.ResumeAt > 0);
                 if (disposed) { await session.DisposeAsync(); return; }
                 session.WholeFile = shell.Settings.StreamWholeFile;
                 url = session.Url;

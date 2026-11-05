@@ -31,7 +31,7 @@ public sealed class ProfilesView : UserControl
         this.onCancel = onCancel;
         this.onRemoved = onRemoved;
         mode = profiles.Count == 0 ? Mode.Edit : Mode.Pick;
-        SetResourceReference(BackgroundProperty, "Bg");
+        SetResourceReference(BackgroundProperty, "PageBg");
         Content = root;
         PreviewKeyDown += (_, e) =>
         {
@@ -63,9 +63,24 @@ public sealed class ProfilesView : UserControl
     }
 
     /// <summary>core Avatar: the profile's face on the raised page colour, washed with its colour.</summary>
-    public static FrameworkElement Avatar(Profile p, double size) => Tile(Avatars.Of(p), p.Colour, size);
+    public static FrameworkElement Avatar(Profile p, double size) =>
+        p.IsGuest ? Tile(Avatars.Of(p), p.Colour, size) : IconTile(p.Icon, p.Colour, size, Avatars.Of(p));
 
-    public static FrameworkElement Tile(AvatarArt art, string colourHex, double size)
+    /// <summary>An emoji or saved picture on its tile; for anything else, the drawn face <paramref name="fallback"/>.</summary>
+    public static FrameworkElement IconTile(string? icon, string colourHex, double size, AvatarArt? fallback = null)
+    {
+        if (Avatars.Picture(icon) is not { } picture) return Tile(fallback ?? Avatars.Art(icon), colourHex, size);
+        // An emoji sits inside the tile; a photo fills it, as a brush so the corners clip it.
+        var radius = new CornerRadius(size * 0.22);
+        return Avatars.IsEmoji(icon)
+            ? Tiled(new Image { Source = picture, Stretch = Stretch.Uniform, Margin = new Thickness(size * 0.12) }, colourHex, size)
+            : Tiled(new Border { CornerRadius = radius, Background = new ImageBrush(picture) { Stretch = Stretch.UniformToFill } }, colourHex, size);
+    }
+
+    public static FrameworkElement Tile(AvatarArt art, string colourHex, double size) =>
+        Tiled(new Image { Source = art.Image, Stretch = Stretch.Fill }, colourHex, size);
+
+    static FrameworkElement Tiled(UIElement face, string colourHex, double size)
     {
         Color colour;
         try { colour = (Color)ColorConverter.ConvertFromString(colourHex); }
@@ -79,7 +94,7 @@ public sealed class ProfilesView : UserControl
                 Children =
                 {
                     new Border { CornerRadius = radius, Background = new SolidColorBrush(Color.FromArgb(0x48, colour.R, colour.G, colour.B)) },
-                    new Image { Source = art.Image, Stretch = Stretch.Fill },
+                    face,
                 },
             },
         };
@@ -152,7 +167,7 @@ public sealed class ProfilesView : UserControl
         var editing = target;
         var name = editing?.Name ?? "";
         var colour = editing?.Colour ?? Profiles.Colours[0];
-        var icon = editing is not null ? Avatars.Of(editing).Id : Avatars.Pickable[0].Id;
+        var icon = editing is not null ? editing.Icon ?? Avatars.Of(editing).Id : Avatars.Emoji[0];
         var kids = editing?.Kids ?? false;
         var kidsRow = new StackPanel { Orientation = Orientation.Horizontal };
         var kidsHint = Ui.Text("", "Meta", "Faint", 13);
@@ -175,17 +190,17 @@ public sealed class ProfilesView : UserControl
         var swatches = new StackPanel { Orientation = Orientation.Horizontal };
         void Refresh()
         {
-            preview.Content = Tile(Avatars.Art(icon), colour, 160);
+            preview.Content = IconTile(icon, colour, 160);
             faces.Children.Clear();
-            foreach (var art in Avatars.Pickable)
+            foreach (var emoji in Avatars.Emoji)
             {
-                var chosen = art.Id == icon;
+                var chosen = emoji == icon;
                 var face = Ui.Button(new Border
                 {
                     BorderThickness = new Thickness(3), CornerRadius = new CornerRadius(14), Padding = new Thickness(2),
                     BorderBrush = chosen ? (Brush)FindResource("Accent") : Brushes.Transparent,
-                    Child = Tile(art, colour, 50),
-                }, () => { icon = art.Id; Refresh(); }, "Bare", art.Name);
+                    Child = IconTile(emoji, colour, 50),
+                }, () => { icon = emoji; Refresh(); });
                 face.Margin = new Thickness(0, 0, 6, 6);
                 faces.Children.Add(face);
             }
@@ -201,6 +216,42 @@ public sealed class ProfilesView : UserControl
             }
         }
         Refresh();
+
+        async void UsePicture(string source)
+        {
+            if (await Avatars.SavePicture(source) is not { } saved)
+            {
+                MainWindow.Shell.Toast("Couldn't load that picture", true);
+                return;
+            }
+            icon = saved;
+            Refresh();
+        }
+        var link = new TextBox { Style = (Style)FindResource("Field"), Tag = "Link to an image", FontSize = 14, VerticalAlignment = VerticalAlignment.Center };
+        var linkBox = Ui.Card(link, "Surface", 8, new Thickness(14, 0, 14, 0));
+        linkBox.Height = 44;
+        linkBox.Margin = new Thickness(0, 10, 0, 0);
+        linkBox.Visibility = Visibility.Collapsed;
+        link.KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Enter || link.Text.Trim().Length == 0) return;
+            e.Handled = true;
+            UsePicture(link.Text.Trim());
+            link.Clear();
+            linkBox.Visibility = Visibility.Collapsed;
+        };
+        var fromPc = Ui.Action("From PC", "image", () =>
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "Pictures|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.webp", Title = "Pick a picture" };
+            if (dialog.ShowDialog() == true) UsePicture(dialog.FileName);
+        });
+        var fromUrl = Ui.Action("From URL", "link", () =>
+        {
+            linkBox.Visibility = linkBox.IsVisible ? Visibility.Collapsed : Visibility.Visible;
+            if (linkBox.Visibility == Visibility.Visible) link.Focus();
+        });
+        fromUrl.Margin = new Thickness(10, 0, 0, 0);
+        var ownPicture = new StackPanel { Children = { new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0), Children = { fromPc, fromUrl } }, linkBox } };
 
         var input = new TextBox { Style = (Style)FindResource("Field"), Tag = "Name", Text = name, MaxLength = 20, FontSize = 16 };
         input.TextChanged += (_, _) => { name = input.Text; Refresh(); };
@@ -233,13 +284,13 @@ public sealed class ProfilesView : UserControl
         var heading = Ui.Text(editing is null ? "Add a profile" : "Edit profile", "Display", "Text", 32, FontWeights.Bold);
         var hint = Ui.Text(editing is null ? "Its own library, My List and resume points." : "Change the name, the face or the colour.", "Meta", "Faint", 14);
         hint.Margin = new Thickness(0, 4, 0, 20);
-        var faceLabel = Ui.Text("FACE", "Overline", "Faint");
+        var faceLabel = Ui.Text("ICON", "Overline", "Faint");
         faceLabel.Margin = new Thickness(0, 22, 0, 10);
         var colourLabel = Ui.Text("COLOUR", "Overline", "Faint");
         colourLabel.Margin = new Thickness(0, 16, 0, 10);
         var kidsLabel = Ui.Text("KIDS", "Overline", "Faint");
         kidsLabel.Margin = new Thickness(0, 16, 0, 10);
-        var form = new StackPanel { Width = 600, Margin = new Thickness(48, 0, 0, 0), Children = { heading, hint, field, faceLabel, faces, colourLabel, swatches, kidsLabel, kidsRow, kidsHint, buttons } };
+        var form = new StackPanel { Width = 600, Margin = new Thickness(48, 0, 0, 0), Children = { heading, hint, field, faceLabel, faces, ownPicture, colourLabel, swatches, kidsLabel, kidsRow, kidsHint, buttons } };
         return Centered(new StackPanel { Orientation = Orientation.Horizontal, Children = { preview, form } });
     }
 

@@ -321,10 +321,23 @@ public sealed record AppSettings
     {
         var s = Store.Load(Key, new AppSettings());
         if (s.ThemeMode is not ("system" or "light" or "dark")) s = s with { ThemeMode = "system" };
-        return s with { Genres = s.Genres ?? new() };
+        return s with { Genres = OwnGenres(s.Genres ?? new()) };
     }
 
-    public void Save() => Store.Save(Key, this);
+    /// <summary>Each profile's own. <paramref name="shared"/> is the list from when the PC had one; the first profile keeps it.</summary>
+    static List<string> OwnGenres(List<string> shared) => Store.LoadOwn<List<string>?>(GenresKey, null) ?? (Store.OnBareKeys ? shared : new());
+
+    const string GenresKey = "genres";
+
+    /// <summary>The settings as the profile just switched to has them.</summary>
+    public AppSettings ForProfile() => this with { Genres = OwnGenres(Store.Load(Key, new AppSettings()).Genres ?? new()) };
+
+    /// <summary>The old shared list stays as it was: only the first profile ever reads it, and only until it saves its own.</summary>
+    public void Save()
+    {
+        Store.SaveOwn(GenresKey, Genres);
+        Store.Save(Key, this with { Genres = Store.Load(Key, new AppSettings()).Genres });
+    }
 
     [System.Text.Json.Serialization.JsonIgnore]
     public string DownloadDir => string.IsNullOrWhiteSpace(DownloadFolder) ? Paths.DefaultDownloads : DownloadFolder!;
@@ -503,6 +516,7 @@ public static class Profiles
         Write(Load().Where(p => p.Id != id).ToList());
         Store.WipeProfile(id);
         Stremio.Forget(id);
+        foreach (var t in Trackers.All) t.Forget(id);
     }
 }
 

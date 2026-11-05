@@ -65,7 +65,7 @@ public sealed class DetailView : UserControl, IDisposable
             ColumnDefinitions = { new ColumnDefinition { Width = new GridLength(30, GridUnitType.Star) }, new ColumnDefinition { Width = new GridLength(70, GridUnitType.Star) } },
             RowDefinitions = { new RowDefinition { Height = new GridLength(90, GridUnitType.Star) }, new RowDefinition { Height = new GridLength(10, GridUnitType.Star) } },
         };
-        var art = new Grid { Children = { backdrop, Ui.Brushed(new Border(), "FadeToBg"), Ui.Brushed(new Border(), "FadeLeft") } };
+        var art = Ui.FadedArt(backdrop);
         Grid.SetColumn(art, 1);
         stage.Children.Add(art);
 
@@ -230,6 +230,8 @@ public sealed class DetailView : UserControl, IDisposable
         var facts = Ui.Facts(title);
         facts.Margin = new Thickness(0, 12, 0, 16);
         head.Children.Add(facts);
+        if (title.StremioType == "movie" && (seen >= EpisodeLinks.Watched || Trackers.Everywhere.Films.Contains(title.Imdb)))
+            head.Children.Add(WatchedBadge(seen >= EpisodeLinks.Watched ? shell.HistoryList.Where(h => h.Imdb == title.Imdb).Select(h => (long?)h.LastPlayed).Max() : null));
 
         // The one thing most people want: start the healthiest release — or carry on.
         var label = wait ? saving ? "Starting download…" : "Opening…"
@@ -341,6 +343,25 @@ public sealed class DetailView : UserControl, IDisposable
         button = Ui.IconAction("languages", lang?.Name ?? "Language", () => { menu.PlacementTarget = button; menu.IsOpen = true; }, lang is not null, "Accent", double.NaN);
         button.ContextMenu = menu;
         return button;
+    }
+
+    /// <summary>core WatchedBadge: a film seen through, with the day if it was here; an account only says that it was.</summary>
+    static FrameworkElement WatchedBadge(long? at)
+    {
+        var disc = Ui.Brushed(new Border { Width = 20, Height = 20, CornerRadius = new CornerRadius(10), Child = Ui.Glyph("check", 13, "Bg") }, "Good");
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Children = { disc } };
+        var word = Ui.Text("Watched", "Meta", "Good", 13, FontWeights.SemiBold);
+        word.Margin = new Thickness(7, 0, 0, 0);
+        word.VerticalAlignment = VerticalAlignment.Center;
+        row.Children.Add(word);
+        if (at is { } ms)
+        {
+            var day = Ui.Text($"  ·  {DateTimeOffset.FromUnixTimeMilliseconds(ms).LocalDateTime:d MMM yyyy}", "Meta", "Muted", 13);
+            day.VerticalAlignment = VerticalAlignment.Center;
+            row.Children.Add(day);
+        }
+        var badge = Ui.Brushed(new Border { CornerRadius = new CornerRadius(15), Padding = new Thickness(5, 5, 12, 5), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 16), Child = row }, "GoodSoft");
+        return badge;
     }
 
     /// <summary>The cast as faces: a round photo over each name. Initials until the photos arrive.</summary>

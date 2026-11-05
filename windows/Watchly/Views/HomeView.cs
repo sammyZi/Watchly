@@ -100,7 +100,7 @@ public sealed class HomeView : UserControl
         var scrolled = scroll.VerticalOffset > 240;
         if (scrolled == solid && header.Background is not null) return;
         solid = scrolled;
-        if (scrolled) header.SetResourceReference(Border.BackgroundProperty, "Bg");
+        if (scrolled) header.SetResourceReference(Border.BackgroundProperty, "PageBg");
         // To transparent black: Colors.Transparent is transparent white, and the fade through it reads as a grey band.
         else header.Background = new LinearGradientBrush(Color.FromArgb(0x99, 0, 0, 0), Color.FromArgb(0, 0, 0, 0), 90);
     }
@@ -285,7 +285,7 @@ public sealed class HomeView : UserControl
     {
         personal.Children.Clear();
         // One card per title: its newest started release or episode, while part-watched.
-        var resumable = History.LatestPerTitle(shell.HistoryList).Where(InProgress).Select(item =>
+        var resumable = History.LatestPerTitle(shell.HistoryList).Where(h => InProgress(h) && !Stremio.Library.FinishedSince(h)).Select(item =>
         {
             var index = item.LastFileIndex!.Value;
             var duration = item.DurationOf(index);
@@ -439,9 +439,7 @@ public sealed class HomeView : UserControl
         var art = new Grid { Cursor = Cursors.Hand };
         Grid.SetColumn(art, 1);
         if (title.Wide is { } wide && ImageUrl.Load(wide, 1920) is { } image)
-            art.Children.Add(new Border { Background = new ImageBrush(image) { Stretch = Stretch.UniformToFill, AlignmentY = AlignmentY.Top } });
-        art.Children.Add(Ui.Brushed(new Border(), "FadeToBg"));
-        art.Children.Add(Ui.Brushed(new Border(), "FadeLeft"));
+            art.Children.Add(Ui.FadedArt(new Border { Background = new ImageBrush(image) { Stretch = Stretch.UniformToFill, AlignmentY = AlignmentY.Top } }));
         // Clicking anywhere on the art opens the title, like the phone's full-page Pressable.
         art.MouseLeftButtonUp += (_, _) => shell.OpenTitle(title);
         var stage = new Grid { ColumnDefinitions = { new ColumnDefinition { Width = new GridLength(28, GridUnitType.Star) }, new ColumnDefinition { Width = new GridLength(72, GridUnitType.Star) } }, Children = { art } };

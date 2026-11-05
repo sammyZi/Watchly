@@ -174,4 +174,20 @@ class StremioTest {
         assertFalse(kept.getBoolean("removed"))
         assertTrue(libraryItem(old, "tt2", "x", "series", null, inLibrary = false).getBoolean("removed"))
     }
+
+    /** Part-way on the TV at noon. */
+    private fun library(state: String) = parseLibrary("""{"result":[{"_id":"tt1","type":"movie","name":"Coco","state":$state}]}""")
+    private val played = Item("a", "Coco", at = isoMs("2026-11-05T12:00:00Z")!!, imdb = "tt1")
+
+    @Test fun aFilmFinishedElsewhereAfterThisPlayIsDone() {
+        assertTrue(library("""{"timesWatched":1,"lastWatched":"2026-11-05T13:00:00.000Z"}""").finishedSince(played))
+    }
+
+    @Test fun aFilmFinishedBeforeThisPlayIsARewatch() {
+        assertFalse(library("""{"timesWatched":1,"lastWatched":"2026-11-05T11:00:00.000Z"}""").finishedSince(played))
+    }
+
+    @Test fun aFilmLeftPartWayAgainAfterAnEarlierFinishIsNotDone() {
+        assertFalse(library("""{"timesWatched":1,"timeOffset":600000,"duration":6000000,"lastWatched":"2026-11-05T13:00:00.000Z"}""").finishedSince(played))
+    }
 }

@@ -13,39 +13,236 @@ namespace Watchly.Views;
 public sealed class SettingsView : UserControl
 {
     readonly MainWindow shell = MainWindow.Shell;
-    readonly StackPanel page = new() { Margin = new Thickness(24, 8, 24, 32), MaxWidth = 760, HorizontalAlignment = HorizontalAlignment.Left };
+    readonly StackPanel page = new() { Margin = new Thickness(24, 8, 24, 32) };
 
     static readonly (int Kbps, string Label)[] Limits = { (0, "Unlimited"), (1024, "1 MB/s"), (5 * 1024, "5 MB/s"), (10 * 1024, "10 MB/s") };
 
     public SettingsView()
     {
         var (root, _, body) = Ui.Screen("Settings");
-        body.Content = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = page };
+        scroller = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = page };
+        body.Content = scroller;
         Content = root;
+        var (box, input, _) = Ui.SearchField("Search settings", 44, 10);
+        box.Margin = new Thickness(0, 0, 0, 14);
+        searchBox = box;
+        search = input;
+        search.TextChanged += (_, _) => RenderList();
         shell.SettingsChanged += Render;
         shell.LibraryChanged += () => { if (IsVisible) Render(); };
         IsVisibleChanged += (_, _) => { if (IsVisible) Render(); };
+        Updates.Changed += () => Dispatcher.BeginInvoke(() => { if (IsVisible) Render(); });
         Render();
     }
+
+    readonly ScrollViewer scroller;
+    readonly Border searchBox;
+    readonly TextBox search;
+    /// <summary>The cards side by side, as many as the window has room for.</summary>
+    readonly ColumnWrap list = new() { MinColumn = 440 };
+    /// <summary>The page open, by its title; null is the list of them.</summary>
+    string? current;
 
     AppSettings S => shell.Settings;
 
     void Set(AppSettings next) => shell.ChangeSettings(next);
 
+    void Go(string? to)
+    {
+        current = to;
+        Render();
+        scroller.ScrollToTop();
+    }
+
+    /// <summary>One line of the settings list; Words are what else it answers to in the search.</summary>
+    sealed record Entry(string Icon, string Title, string Hint, string Words, Action Open, string Tint = "Text")
+    {
+        public bool Matches(string query) => new[] { Title, Hint, Words }.Any(s => s.Contains(query, StringComparison.OrdinalIgnoreCase));
+    }
+
+    List<List<Entry>> Entries()
+    {
+        var groups = new List<List<Entry>>();
+        if (Updates.Found is { } r)
+            groups.Add(new()
+            {
+                Updates.Progress is { } p
+                    ? new Entry("x", "Cancel the update", $"Downloading version {r.Version}  ·  {Math.Round(p * 100)}%", "", Updates.Cancel, "Accent")
+                    : new Entry("download", "Update available", $"Version {r.Version}  ·  {Format.Bytes(r.Size)}", "new version upgrade", () => shell.DownloadUpdate(r), "Accent"),
+            });
+        groups.Add(new()
+        {
+            new("user", "Account", "Profile, PIN and Stremio account", "lock sign in", () => Go("Account")),
+            new("users", "Switch profile", "Change to a different profile", "", shell.ShowProfiles),
+        });
+        groups.Add(new() { new("palette", "Appearance", "Theme and home screen genres", "light dark", () => Go("Appearance")) });
+        groups.Add(new()
+        {
+            new("radio", "Streaming", "Trackers and how the cache works", "magnet storage", () => Go("Streaming")),
+            new("play", "Playback", "Skip intros", "player", () => Go("Playback")),
+            new("download", "Downloads", "Folder, speed limits and seeding", "upload", () => Go("Downloads")),
+        });
+        groups.Add(new()
+        {
+            new("link", "Integrations", "Simkl and MDBList", "tracking watched sync", () => Go("Integrations")),
+            new("key", "Services", "SubDL and TorBox keys", "subtitles api", () => Go("Services")),
+        });
+        groups.Add(new()
+        {
+            new("hard-drive", "Storage", "Cache, history and saved torrent info", "clear delete", () => Go("Storage")),
+            new("refresh-cw", "Check for updates", $"You have version {Updates.Version}", "new version upgrade", () => _ = Updates.CheckNow(m => shell.Toast(m))),
+        });
+        return groups;
+    }
+
+    /// <summary>The settings as cards of rows; searching runs them together into one card of what matches.</summary>
+    void RenderList()
+    {
+        list.Children.Clear();
+        var query = search.Text.Trim();
+        var groups = Entries();
+        var shown = query.Length == 0 ? groups : new List<List<Entry>> { groups.SelectMany(g => g).Where(e => e.Matches(query)).ToList() }.Where(g => g.Count > 0).ToList();
+        if (shown.Count == 0) list.Children.Add(Ui.Text("No settings match", "Meta", "Faint", 13));
+        foreach (var group in shown)
+        {
+            var rows = new StackPanel();
+            foreach (var e in group) rows.Children.Add(EntryRow(e));
+            var card = Ui.Card(rows, "Surface", 18, new Thickness(0, 4, 0, 4));
+            card.Margin = new Thickness(0, 0, 12, 12);
+            list.Children.Add(card);
+        }
+    }
+
+    static FrameworkElement EntryRow(Entry e)
+    {
+        var icon = Ui.Brushed(new Border { Width = 38, Height = 38, CornerRadius = new CornerRadius(10), Child = Ui.Glyph(e.Icon, 18, e.Tint) }, "Tint");
+        var words = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(14, 0, 0, 0), Children = { Ui.Text(e.Title, "Label", "Text", 15, FontWeights.SemiBold), Ui.Text(e.Hint, "Meta", "Faint", 13) } };
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(14, 9, 14, 9), Children = { icon, words } };
+        var b = Ui.Button(row, e.Open);
+        b.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        b.HorizontalAlignment = HorizontalAlignment.Stretch;
+        return b;
+    }
+
     void Render()
     {
         page.Children.Clear();
+        if (current is null)
+        {
+            page.Children.Add(searchBox);
+            page.Children.Add(list);
+            RenderList();
+            var version = Ui.Text($"Version {Updates.Version}", "Meta", "Faint", 12);
+            version.Margin = new Thickness(4, 4, 0, 0);
+            page.Children.Add(version);
+            return;
+        }
+        var back = Ui.Round("arrow-left", () => Go(null), "Text", "Tint", 40, 20, "Back");
+        var heading = Ui.Text(current, "TitleText", "Text", 22, FontWeights.Bold);
+        heading.Margin = new Thickness(12, 0, 0, 0);
+        heading.VerticalAlignment = VerticalAlignment.Center;
+        page.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 16), Children = { back, heading } });
 
-        if (shell.Who is { } me) page.Children.Add(ProfileGroup(me));
-        page.Children.Add(StremioGroup());
+        switch (current)
+        {
+            case "Account":
+                if (shell.Who is { } me) page.Children.Add(ProfileGroup(me));
+                page.Children.Add(StremioGroup());
+                break;
+            case "Appearance": Appearance(); break;
+            case "Streaming":
+                page.Children.Add(Note("How storage works here",
+                    "A stream keeps the pieces you watch in a cache and clears it when you stop, unless you turn that off under Storage. " +
+                    "Downloads go to your downloads folder, resume where they left off after a restart, and play in VLC's engine — every format and audio track is supported."));
+                page.Children.Add(Group("Startup speed",
+                    Row("Add public trackers", "Bare magnet links resolve much faster than over DHT alone",
+                        Toggle(S.AddTrackers, v => Set(S with { AddTrackers = v })))));
+                break;
+            case "Playback":
+                page.Children.Add(Group("Playback",
+                    Row("Skip intros automatically", "Where an episode's intro is known, jump past it instead of showing the Skip intro button. Once per episode — seek back to watch it.",
+                        Toggle(S.AutoSkipIntro, v => Set(S with { AutoSkipIntro = v })))));
+                break;
+            case "Downloads": DownloadsPage(); break;
+            case "Integrations": Integrations(); break;
+            case "Services":
+                page.Children.Add(SubdlGroup());
+                page.Children.Add(TorBoxGroup());
+                break;
+            case "Storage": StoragePage(); break;
+        }
+    }
 
+    /// <summary>Waiting on a tracking account's approval: the code, and how to stop waiting.</summary>
+    readonly Dictionary<Tracker, (TrackerCode Code, CancellationTokenSource Stop)> connecting = new();
+
+    void Integrations()
+    {
+        var hint = Ui.Text("What you finish here is marked watched on your accounts, and what they have watched shows here. You sign in on each service's own page, so your password never comes to Watchly.", "Meta", "Faint", 13);
+        hint.TextWrapping = TextWrapping.Wrap;
+        hint.Margin = new Thickness(0, 0, 0, 12);
+        page.Children.Add(hint);
+        foreach (var t in Trackers.All) page.Children.Add(TrackerRow(t));
+    }
+
+    async void Connect(Tracker t)
+    {
+        using var stop = new CancellationTokenSource();
+        try
+        {
+            var code = await t.Start();
+            connecting[t] = (code, stop);
+            Render();
+            Ui.Open(code.Link);
+            if (!await t.Await(code, stop.Token)) shell.Toast("That didn't go through — connect again for a new code", true);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception e) when (e is System.Net.Http.HttpRequestException or TrackerRefused or System.Text.Json.JsonException)
+        {
+            shell.Toast($"Couldn't reach {t.Name}", true);
+        }
+        finally
+        {
+            connecting.Remove(t);
+            Render();
+        }
+    }
+
+    /// <summary>A tracking account: its logo, and Connect, which opens its own page with the code filled in.</summary>
+    FrameworkElement TrackerRow(Tracker t)
+    {
+        var waiting = connecting.TryGetValue(t, out var pending);
+        // By its domain, from Google's favicon service, as the phone's and the TV's.
+        var logo = new Border
+        {
+            Width = 38, Height = 38, CornerRadius = new CornerRadius(10),
+            Background = new ImageBrush(new System.Windows.Media.Imaging.BitmapImage(new Uri($"https://www.google.com/s2/favicons?sz=64&domain={t.Site}"))) { Stretch = Stretch.Uniform },
+            Margin = new Thickness(0, 0, 14, 0),
+        };
+        DockPanel.SetDock(logo, Dock.Left);
+        UIElement? action = !t.Available ? null
+            : t.Connected ? Ui.Action("Disconnect", "x", t.Disconnect)
+            : waiting ? Ui.Action("Cancel", "x", () => pending.Stop.Cancel())
+            : Ui.Action("Connect", "link", () => Connect(t), primary: true);
+        var row = Row(t.Name, !t.Available ? "Not set up in this build" : t.Connected ? "Connected" : waiting ? "Waiting for your approval…" : "Not connected", action);
+        var box = new StackPanel { Children = { new DockPanel { Children = { logo, row } } } };
+        if (waiting)
+        {
+            var open = Ui.Button(Ui.Text("Open the page again", "Label", "Accent", 13, FontWeights.SemiBold), () => Ui.Open(pending.Code.Link));
+            open.HorizontalAlignment = HorizontalAlignment.Left;
+            var words = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(20, 0, 0, 0), Children = { Ui.Text(pending.Code.UserCode, "TitleText", "Text", 28, FontWeights.Bold), open } };
+            box.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 12), Children = { Qr(pending.Code.Link), words } });
+        }
+        return box;
+    }
+
+    void Appearance()
+    {
         page.Children.Add(Group("Appearance",
             ChoiceRow("Theme", "Match Windows, or lock light or dark",
                 new[] { ("system", "System"), ("light", "Light"), ("dark", "Dark") }, S.ThemeMode, v => Set(S with { ThemeMode = v }))));
-
-        page.Children.Add(Note("How storage works here",
-            "A stream keeps the pieces you watch in a cache and clears it when you stop, unless you turn that off below. " +
-            "Downloads go to your downloads folder, resume where they left off after a restart, and play in VLC's engine — every format and audio track is supported."));
 
         var genres = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
         foreach (var g in Meta.Genres)
@@ -63,18 +260,10 @@ public sealed class SettingsView : UserControl
                 genres,
             },
         }));
+    }
 
-        page.Children.Add(Group("Startup speed",
-            Row("Add public trackers", "Bare magnet links resolve much faster than over DHT alone",
-                Toggle(S.AddTrackers, v => Set(S with { AddTrackers = v })))));
-
-        page.Children.Add(Group("Playback",
-            Row("Skip intros automatically", "Where an episode's intro is known, jump past it instead of showing the Skip intro button. Once per episode — seek back to watch it.",
-                Toggle(S.AutoSkipIntro, v => Set(S with { AutoSkipIntro = v })))));
-
-        page.Children.Add(SubdlGroup());
-        page.Children.Add(TorBoxGroup());
-
+    void DownloadsPage()
+    {
         var folder = Ui.Button(Ui.Text("Change", "Label", "Accent", 13, FontWeights.SemiBold), () =>
         {
             var dialog = new OpenFolderDialog { Title = "Where should downloads go?", InitialDirectory = Directory.Exists(S.DownloadDir) ? S.DownloadDir : null };
@@ -102,7 +291,10 @@ public sealed class SettingsView : UserControl
                     Toggle(S.SeedAfterDownload, v => Set(S with { SeedAfterDownload = v }))),
             },
         }));
+    }
 
+    void StoragePage()
+    {
         var clear = Ui.Button(Row("Clear watch history", shell.HistoryList.Count > 0 ? $"{shell.HistoryList.Count} item(s) stored" : "Nothing stored",
             Ui.Glyph("chevron-right", 18, "Faint"), danger: shell.HistoryList.Count > 0), shell.AskClearHistory);
         clear.IsEnabled = shell.HistoryList.Count > 0;

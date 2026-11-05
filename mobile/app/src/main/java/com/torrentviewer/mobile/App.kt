@@ -142,6 +142,7 @@ private val OWNER = Profile("", "Me", COLOURS[0])
 private fun open(profile: Profile) {
     // Before anything is read: every store call below goes through this profile.
     Kv.useProfile(profile.id, profile.isGuest)
+    com.torrentviewer.core.SettingsStore.load()
     History.load()
     SavedStore.load()
     Stremio.load(profile.id, profile.isGuest)

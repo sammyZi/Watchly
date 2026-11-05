@@ -462,6 +462,29 @@ public static class Ui
         return grid;
     }
 
+    static LinearGradientBrush Mask(Point from, Point to, params (byte Alpha, double At)[] stops)
+    {
+        var brush = new LinearGradientBrush { StartPoint = from, EndPoint = to };
+        foreach (var (alpha, at) in stops) brush.GradientStops.Add(new GradientStop(Color.FromArgb(alpha, 0, 0, 0), at));
+        brush.Freeze();
+        return brush;
+    }
+
+    // heroScrims' stops: gone at the left edge, whole by the art's middle; whole down to 45%, gone at the foot.
+    static readonly Brush FadeLeft = Mask(new Point(0, 0), new Point(1, 0), (0, 0), (0x26, 0.14), (0xff, 0.55));
+    static readonly Brush FadeFoot = Mask(new Point(0, 0), new Point(0, 1), (0xff, 0.45), (0, 1));
+
+    /// <summary>
+    /// Hero art fading into the page. The picture itself fades, rather than a flat page colour being
+    /// painted over it: that colour has none of the page's grain, and showed as a box round the art.
+    /// Two panels because an element has one mask.
+    /// </summary>
+    public static Grid FadedArt(UIElement picture) => new()
+    {
+        OpacityMask = FadeFoot,
+        Children = { new Grid { OpacityMask = FadeLeft, Children = { picture } } },
+    };
+
     /// <summary>core Facts: the IMDb badge, then year • runtime • genres.</summary>
     public static FrameworkElement Facts(Core.Title title, int genres = 2)
     {
@@ -481,7 +504,7 @@ public static class Ui
             row.Children.Add(badge);
             row.Children.Add(score);
         }
-        var facts = new[] { title.Year is { Length: > 9 } y ? y[..9] : title.Year, title.Runtime }.Concat(title.Genres.Take(genres)).Where(f => !string.IsNullOrEmpty(f));
+        var facts = new[] { title.Year is { Length: > 9 } y ? y[..9] : title.Year, title.Runtime is { } runtime ? Core.Format.Runtime(runtime) : null }.Concat(title.Genres.Take(genres)).Where(f => !string.IsNullOrEmpty(f));
         var line = Text(string.Join("  •  ", facts), "Meta", "Text", 13);
         line.Opacity = 0.85;
         line.VerticalAlignment = VerticalAlignment.Center;

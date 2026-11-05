@@ -163,6 +163,8 @@ fun Button(
     onColor: Color = Ink.good,
     /** The word's colour, and the flat fill's tint: for a button on something other than the page. */
     tint: Color = Ink.text,
+    /** Beside a line of text in a row, where the full height towers over it. */
+    compact: Boolean = false,
 ) {
     val filled = on == true
     val disc by animateFloatAsState(if (filled) 1f else 0f, if (filled) spring(dampingRatio = 0.55f, stiffness = 420f) else tween(180), label = "disc")
@@ -186,7 +188,7 @@ fun Button(
         Row(
             // The primary one — Play, Watch — a grainy red glow, a shade deeper while pressed; the rest a flat tint.
             (if (primary) Modifier.glow(accentGlow(), 0.85f, 1.1f).background(Color.Black.copy(alpha = if (pressed) 0.18f else 0f)) else Modifier.background(bg))
-                .height(46.dp).padding(horizontal = 20.dp),
+                .height(if (compact) 34.dp else 46.dp).padding(horizontal = if (compact) 14.dp else 20.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
         ) {

@@ -41,7 +41,7 @@ public static class Theme
         if (hwnd == IntPtr.Zero) return;
         var dark = IsLight ? 0 : 1;
         DwmSetWindowAttribute(hwnd, 20, ref dark, sizeof(int)); // DWMWA_USE_IMMERSIVE_DARK_MODE
-        var caption = IsLight ? 0x00FFFFFF : 0x00000000;        // COLORREF, 0x00BBGGRR
+        var caption = IsLight ? 0x00EEF2F6 : 0x00000000;        // COLORREF, 0x00BBGGRR
         DwmSetWindowAttribute(hwnd, 35, ref caption, sizeof(int)); // DWMWA_CAPTION_COLOR
         var text = IsLight ? 0x001A1412 : 0x00FAF5F3;
         DwmSetWindowAttribute(hwnd, 36, ref text, sizeof(int));    // DWMWA_TEXT_COLOR
@@ -60,13 +60,16 @@ public static class Theme
             };
         }
         Application.Current.Resources["AccentGlow"] ??= AccentGlow();
-        var light = mode == "light" || (mode == "system" && SystemLight());
+        // Before the return below: a launch in dark stops there, App.xaml having loaded Dark already.
+        Application.Current.Resources["PageBg"] ??= PageBrush((Color)Application.Current.Resources["BgColor"]);
+        var light =mode == "light" || (mode == "system" && SystemLight());
         var dictionaries = Application.Current.Resources.MergedDictionaries;
         if (dictionaries.Count > 0 && IsLight == light && dictionaries[0].Source is not null) return;
         IsLight = light;
         var palette = new ResourceDictionary { Source = new Uri($"pack://application:,,,/Theme/{(light ? "Light" : "Dark")}.xaml") };
         if (dictionaries.Count == 0) dictionaries.Add(palette);
         else dictionaries[0] = palette;
+        Application.Current.Resources["PageBg"] = PageBrush((Color)palette["BgColor"]);
         Changed?.Invoke();
     }
 
@@ -93,6 +96,32 @@ public static class Theme
         layers.Children.Add(new GeometryDrawing(glow, null, all));
         layers.Children.Add(new ImageDrawing(Grain(), new Rect(0, 0, 1, 1)));
         var brush = new DrawingBrush(layers) { Stretch = Stretch.Fill };
+        brush.Freeze();
+        return brush;
+    }
+
+    /// <summary>
+    /// The page: its colour with core Theme.kt's film grain already in it, one opaque tile, so whatever
+    /// lies on the page or covers it (a layer, the rail, the header) is the same surface. Under half the
+    /// phone's strength: across a whole monitor the same noise read as static.
+    /// </summary>
+    static Brush PageBrush(Color page)
+    {
+        const int w = 256, h = 256;
+        var px = new byte[w * h * 4];
+        var random = new Random(7);
+        for (var i = 0; i < px.Length; i += 4)
+        {
+            var noise = random.Next(2) * 255;
+            var a = random.Next(23) / 255.0 * 0.45;
+            px[i] = (byte)(page.B + (noise - page.B) * a);
+            px[i + 1] = (byte)(page.G + (noise - page.G) * a);
+            px[i + 2] = (byte)(page.R + (noise - page.R) * a);
+            px[i + 3] = 255;
+        }
+        var tile = BitmapSource.Create(w, h, 96, 96, PixelFormats.Bgra32, null, px, w * 4);
+        tile.Freeze();
+        var brush = new ImageBrush(tile) { TileMode = TileMode.Tile, Stretch = Stretch.None, ViewportUnits = BrushMappingMode.Absolute, Viewport = new Rect(0, 0, w, h) };
         brush.Freeze();
         return brush;
     }

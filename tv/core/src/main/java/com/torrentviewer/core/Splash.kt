@@ -1,4 +1,4 @@
-package com.torrentviewer.mobile
+package com.torrentviewer.core
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
@@ -25,7 +25,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.torrentviewer.core.Type
 
 private const val NAME = "WATCHLY"
 private val RED = Color(0xFFE50914)

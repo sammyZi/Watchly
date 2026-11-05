@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A downloaded update, for handing to Android's installer. -->
+<paths>
+    <files-path name="internal" path="." />
+</paths>

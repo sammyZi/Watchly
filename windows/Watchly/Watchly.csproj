@@ -58,9 +58,13 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(SubdlEnv)' != ''">
     <SubdlKey>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(SubdlEnv)')), '(?:EXPO_PUBLIC_)?SUBDL_KEY=(\S+)').Groups[1].Value)</SubdlKey>
+    <SimklClientId>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(SubdlEnv)')), 'SIMKL_CLIENT_ID=(\S+)').Groups[1].Value)</SimklClientId>
+    <MdblistClientId>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(SubdlEnv)')), 'MDBLIST_CLIENT_ID=(\S+)').Groups[1].Value)</MdblistClientId>
   </PropertyGroup>
   <ItemGroup>
     <AssemblyMetadata Include="SubdlKey" Value="$(SubdlKey)" />
+    <AssemblyMetadata Include="SimklClientId" Value="$(SimklClientId)" />
+    <AssemblyMetadata Include="MdblistClientId" Value="$(MdblistClientId)" />
   </ItemGroup>
 
   <ItemGroup>
@@ -70,6 +74,8 @@
     <Resource Include="Assets\app.ico" />
     <!-- The profile faces, drawn from the same file as the phone's and the TV's. -->
     <EmbeddedResource Include="..\..\tv\core\src\main\resources\avatars.json" LogicalName="avatars.json" />
+    <!-- The profile icons, the same files as the phone's and the TV's. MIT, see assets/emoji/LICENSE. -->
+    <EmbeddedResource Include="..\..\tv\core\src\main\assets\emoji\*.png" LogicalName="emoji/%(Filename).png" />
   </ItemGroup>
 
   <ItemGroup>

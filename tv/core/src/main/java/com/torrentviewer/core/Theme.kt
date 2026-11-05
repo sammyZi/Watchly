@@ -68,6 +68,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import coil3.network.NetworkHeaders
+import coil3.network.httpHeaders
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.composables.icons.lucide.R as L
@@ -147,6 +149,8 @@ object Motion {
 fun Lc(@DrawableRes icon: Int, modifier: Modifier = Modifier, tint: Color = Ink.text, size: Dp = 20.dp) =
     Icon(painterResource(icon), null, modifier.size(size), tint = tint)
 
+private val ART_HEADERS = NetworkHeaders.Builder().set("User-Agent", "WatchlyTV/2").build()
+
 /** A network image over a placeholder tinted from the name. */
 @Composable
 /** [fill]: a placeholder under the picture — skipped where the picture covers it anyway and the fill is pure GPU cost. */
@@ -160,7 +164,8 @@ fun Artwork(url: String?, name: String, modifier: Modifier = Modifier, scale: Co
             // Episode stills 404 for much of anime: then the title's own art.
             var src by remember(url) { mutableStateOf(url) }
             AsyncImage(
-                model = remember(src) { ImageRequest.Builder(context).data(src).crossfade(300).build() },
+                // Wikimedia answers OkHttp's own User-Agent with 403: without this, no cast photo loads.
+                model = remember(src) { ImageRequest.Builder(context).data(src).httpHeaders(ART_HEADERS).crossfade(300).build() },
                 onError = { if (fallback != null && src != fallback) src = fallback },
                 placeholder = if (fill) remember { ColorPainter(Ink.surface) } else null,
                 contentDescription = name,
@@ -177,6 +182,23 @@ fun Artwork(url: String?, name: String, modifier: Modifier = Modifier, scale: Co
                 overflow = TextOverflow.Ellipsis,
             )
         }
+    }
+}
+
+/** A film seen through: here, on [at], or on an account, where the day isn't known. */
+@Composable
+fun WatchedBadge(at: Long?, modifier: Modifier = Modifier) {
+    val date = at?.let { java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(it)) }
+    Row(
+        modifier.clip(CircleShape).background(Ink.good.copy(alpha = 0.14f)).padding(start = 5.dp, end = 12.dp, top = 5.dp, bottom = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // The page's colour on the green: white was lost on the bright green of the dark theme.
+        Box(Modifier.size(20.dp).clip(CircleShape).background(Ink.good), contentAlignment = Alignment.Center) {
+            Lc(L.drawable.lucide_ic_check, tint = Ink.bg, size = 13.dp)
+        }
+        Text("Watched", Modifier.padding(start = 7.dp), style = Type.meta.copy(color = Ink.good, fontWeight = FontWeight.SemiBold))
+        date?.let { Text("  ·  $it", style = Type.meta.copy(color = Ink.text.copy(alpha = 0.7f))) }
     }
 }
 

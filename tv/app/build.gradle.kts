@@ -3,8 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-/** From tv/.env, so keys stay out of git: the first of [names] set. */
-fun env(vararg names: String): String = rootProject.file(".env").takeIf { it.exists() }?.readLines().orEmpty()
+/** From tv/.env, then the phone's mobile/.env, so keys stay out of git: the first of [names] set. */
+fun env(vararg names: String): String = listOf(".env", "../mobile/.env").map(rootProject::file).filter { it.exists() }.flatMap { it.readLines() }
     .map { it.trim() }
     .firstOrNull { line -> names.any { line.startsWith("$it=") } }
     ?.substringAfter('=')?.trim().orEmpty()
@@ -23,6 +23,8 @@ android {
         versionCode = 6
         versionName = "2.4.0"
         buildConfigField("String", "SUBDL_KEY", "\"$subdlKey\"")
+        buildConfigField("String", "SIMKL_CLIENT_ID", "\"${env("SIMKL_CLIENT_ID")}\"")
+        buildConfigField("String", "MDBLIST_CLIENT_ID", "\"${env("MDBLIST_CLIENT_ID")}\"")
         buildConfigField("long", "BUILD_TIME", "${System.currentTimeMillis()}L")
     }
 

@@ -24,6 +24,9 @@ object Services {
         Kv.init(context)
         SettingsStore.load()
         Profiles.load()
+        com.torrentviewer.core.Simkl.clientId = BuildConfig.SIMKL_CLIENT_ID
+        com.torrentviewer.core.Mdblist.clientId = BuildConfig.MDBLIST_CLIENT_ID
+        com.torrentviewer.core.Updates.check(context.applicationContext, BuildConfig.VERSION_NAME, "Watchly-tv-", BuildConfig.DEBUG)
         engine = TorrentStream(context.applicationContext)
         watch = Watch(engine)
     }
@@ -37,7 +40,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         Services.init(applicationContext)
         incoming.value = intent?.data
-        setContent { App(Services.watch, incoming) }
+        setContent {
+            androidx.compose.foundation.layout.Box {
+                App(Services.watch, incoming)
+                com.torrentviewer.core.Splash(skip = incoming.value != null)
+            }
+        }
         // Compose paints an opaque page over all of it; the window's own fill was wasted work.
         window.setBackgroundDrawable(null)
         preferHighRefreshRate()
@@ -51,6 +59,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         preferHighRefreshRate()
+        com.torrentviewer.core.refreshWatched()
     }
 
     override fun onDestroy() {

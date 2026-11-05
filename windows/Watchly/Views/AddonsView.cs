@@ -15,8 +15,9 @@ namespace Watchly.Views;
 public sealed class AddonsView : UserControl
 {
     readonly MainWindow shell = MainWindow.Shell;
-    readonly StackPanel page = new() { Margin = new Thickness(24, 8, 24, 32), MaxWidth = 760, HorizontalAlignment = HorizontalAlignment.Left };
-    readonly StackPanel cards = new();
+    readonly StackPanel page = new() { Margin = new Thickness(24, 8, 24, 32) };
+    /// <summary>Side by side, as many as the window has room for.</summary>
+    readonly ColumnWrap cards = new() { MinColumn = 520, FillRow = true };
     readonly WrapPanel pills = new() { Margin = new Thickness(0, 12, 0, 14) };
     readonly TextBox link;
     readonly TextBox query;
@@ -201,7 +202,7 @@ public sealed class AddonsView : UserControl
         body.Children.Add(actions);
 
         var card = Ui.Card(body, "Surface", 14, new Thickness(16));
-        card.Margin = new Thickness(0, 0, 0, 12);
+        card.Margin = new Thickness(0, 0, 12, 12);
         return card;
     }
 }

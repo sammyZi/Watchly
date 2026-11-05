@@ -55,7 +55,17 @@ data class Title(
     val numberedThrough get() = isAnime && episodes.count { it.season > 0 } > 100
 
     /** "2021 · 2h 35m · Sci-Fi · Drama" */
-    fun facts(): List<String> = listOfNotNull(year?.take(9), runtime) + genres.take(3)
+    fun facts(): List<String> = listOfNotNull(year?.take(9), runtime?.let(::runtimeLabel)) + genres.take(3)
+}
+
+/** "107 min" as "1h 47m" from the hour up; anything else as it came. */
+fun runtimeLabel(runtime: String): String {
+    val minutes = Regex("(\\d+)\\s*min", RegexOption.IGNORE_CASE).matchEntire(runtime.trim())?.groupValues?.get(1)?.toInt() ?: return runtime
+    return when {
+        minutes < 60 -> runtime
+        minutes % 60 == 0 -> "${minutes / 60}h"
+        else -> "${minutes / 60}h ${minutes % 60}m"
+    }
 }
 
 /** Not a Cinemeta genre: asking for it switches to the Kitsu anime catalogue. */

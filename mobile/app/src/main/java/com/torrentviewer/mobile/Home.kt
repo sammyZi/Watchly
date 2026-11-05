@@ -197,9 +197,9 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
     }
 
     // One card per title — its latest episode or release — and only if that one is part-watched.
-    val resumable = latestPerTitle(history).filter(::inProgress).take(10)
-    // Left part-way somewhere this phone never saw — another device, before a reinstall: Stremio kept the spot.
     val stremio by com.torrentviewer.core.Stremio.library.collectAsState()
+    val resumable = latestPerTitle(history).filter { inProgress(it) && !stremio.finishedSince(it) }.take(10)
+    // Left part-way somewhere this phone never saw — another device, before a reinstall: Stremio kept the spot.
     val fromStremio = com.torrentviewer.core.Kids.only(stremio.paused.filter { p -> history.none { it.imdb == p.imdb } }.distinctBy { it.imdb }) { Title(it.imdb, it.kind, it.title) }.take(10)
     val watchlist = saved.filter { it.list == "later" }.map { it.asTitle() }
     val heroes = shelves.firstNotNullOfOrNull { state.loaded[it.key]?.takeIf { l -> l.isNotEmpty() } }.orEmpty().take(HEROES)

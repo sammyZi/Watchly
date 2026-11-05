@@ -183,9 +183,9 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit) {
     }
 
     // One card per title — its newest started episode or release — while that one is part-watched.
-    val resumable = latestPerTitle(history).filter(::inProgress).take(8)
-    // Left part-way somewhere this TV never saw — another device, before a reinstall: Stremio kept the spot.
     val stremio by Stremio.library.collectAsState()
+    val resumable = latestPerTitle(history).filter { inProgress(it) && !stremio.finishedSince(it) }.take(8)
+    // Left part-way somewhere this TV never saw — another device, before a reinstall: Stremio kept the spot.
     val fromStremio = Kids.only(stremio.paused.filter { p -> history.none { it.imdb == p.imdb } }.distinctBy { it.imdb }) { Title(it.imdb, it.kind, it.title) }.take(8)
     val resuming = resumable.isNotEmpty() || fromStremio.isNotEmpty()
     var releases by remember { mutableStateOf<List<Item>?>(null) }

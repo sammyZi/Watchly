@@ -94,8 +94,24 @@ fun App(watch: Watch, incoming: MutableState<Uri?>) {
         // at all: every extra full-screen fill was another pass for a TV GPU already behind.
         Box(Modifier.fillMaxSize().background(Ink.bg)) {
             Shell(watch, incoming)
+            UpdateProgress(watch, Modifier.align(Alignment.TopCenter))
             Toast(watch)
         }
+    }
+}
+
+/** A new version is said once, then waits in Settings, where the remote can reach it. This only shows the download. */
+@Composable
+private fun UpdateProgress(watch: Watch, modifier: Modifier = Modifier) {
+    val release by Updates.release.collectAsState()
+    val progress by Updates.progress.collectAsState()
+    LaunchedEffect(release) { release?.let { watch.notes.tryEmit("Version ${it.version} is ready — see Settings") } }
+    val r = release ?: return
+    val p = progress ?: return
+    Column(modifier.padding(top = Safe.y).width(420.dp).background(Ink.surface, RoundedCornerShape(14.dp)).padding(horizontal = 18.dp, vertical = 12.dp)) {
+        Text("Downloading update", style = Type.body.copy(fontWeight = FontWeight.SemiBold))
+        Text("Version ${r.version}  ·  ${(p * 100).toInt()}%", style = Type.meta.copy(color = Ink.faint))
+        ProgressLine(p, Modifier.padding(top = 8.dp))
     }
 }
 
@@ -119,9 +135,11 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     fun enter(profile: Profile) {
         // Before anything is read: every store call below goes through this profile.
         Kv.useProfile(profile.id, profile.isGuest)
+        com.torrentviewer.core.SettingsStore.load()
         History.load()
         SavedStore.load()
         Stremio.load(profile.id, profile.isGuest)
+        com.torrentviewer.core.WATCH_TRACKERS.forEach { it.load(profile.id, profile.isGuest) }
         Kids.use(profile)
         // Rows loaded for the last profile: a kids profile must not inherit a grown-up's, nor the reverse.
         if (who?.kids != profile.kids) {
