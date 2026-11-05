@@ -34,6 +34,17 @@ class ResumeTest {
         assertEquals(0.5, playheadRatio(0.5, 30.0, 0.0), 0.0)
     }
 
+    @Test fun aSpotInAFileOfUnknownLengthUsesTheRuntime() {
+        val carried = Item("a", "Film", at = 1, positions = mapOf(0 to 3000.0))
+        assertEquals(0.0, carried.resumeRatio(0), 0.0)
+        assertEquals(0.5, carried.resumeRatio(0, 6000.0), 0.0)
+    }
+
+    @Test fun theFilesOwnLengthBeatsTheRuntime() {
+        val known = Item("a", "Film", at = 1, positions = mapOf(0 to 3000.0), durations = mapOf(0 to 4000.0))
+        assertEquals(0.75, known.resumeRatio(0, 6000.0), 0.0)
+    }
+
     @Test fun nothingOpensWithoutTheHeader() {
         assertEquals(false, readyToOpen(0, 8, 8, 8, resuming = true))
     }

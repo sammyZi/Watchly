@@ -1126,7 +1126,10 @@ class TorrentStream(
         // only what is rushed; the readahead comes back with the next tick after.
         // Pre-roll is always that narrow, from the first tick: its first 5s used to go to
         // the whole readahead (32-128 pieces) while nothing could play.
-        val starving = blocked >= 0 && clock - blockedFrom > STARVE_MS
+        // Not once every block is out with a peer: narrowing can't speed those up, and it left the
+        // fast peers nothing to do. An 86GB remux fell from 14MB/s to 2MB/s each time a 16MB piece
+        // waited on its last blocks, and the player, needing 9MB/s, ran out again.
+        val starving = blocked >= 0 && clock - blockedFrom > STARVE_MS && !allRequested(h, blocked)
         val width = when {
             !announcedReady -> 0
             starving -> maxOf(2, reach)

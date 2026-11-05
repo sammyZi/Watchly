@@ -192,7 +192,8 @@ class Watch(val engine: TorrentStream) {
         remember(fresh.uri, found, index)
         val started = carried(fresh.uri, found, index)
         val size = found.files.find { it.index == index }?.size ?: 0
-        play(index, started.resumeRatio(index), bitrateOf(size, started.durations[index] ?: runtimeSeconds(from?.runtime)))
+        val runtime = runtimeSeconds((from ?: title)?.runtime)
+        play(index, started.resumeRatio(index, runtime), bitrateOf(size, started.durations[index] ?: runtime))
     }
 
     /**
@@ -312,7 +313,7 @@ class Watch(val engine: TorrentStream) {
             val size = target.files.find { it.index == known }?.size ?: 0
             // An older release's row resumes where the title was last left, not where that release was.
             val started = carried(target.uri, stored, known)
-            play(known, started.resumeRatio(known), bitrateOf(size, started.durations[known] ?: 0.0))
+            play(known, started.resumeRatio(known, runtimeSeconds(title?.runtime)), bitrateOf(size, started.durations[known] ?: 0.0))
             return@launch
         }
         val found = inspect(target) ?: return@launch
@@ -325,7 +326,7 @@ class Watch(val engine: TorrentStream) {
         remember(target.uri, found, index)
         val size = found.files.find { it.index == index }?.size ?: 0
         val started = carried(target.uri, found, index)
-        play(index, started.resumeRatio(index), bitrateOf(size, started.durations[index] ?: 0.0))
+        play(index, started.resumeRatio(index, runtimeSeconds(title?.runtime)), bitrateOf(size, started.durations[index] ?: 0.0))
     }
 
     /**
@@ -355,7 +356,7 @@ class Watch(val engine: TorrentStream) {
         val started = carried(fresh.uri, found, index)
         History.drop(old.uri, engine)
         val size = found.files.find { it.index == index }?.size ?: 0
-        play(index, started.resumeRatio(index), bitrateOf(size, started.durations[index] ?: 0.0))
+        play(index, started.resumeRatio(index, runtimeSeconds(title?.runtime)), bitrateOf(size, started.durations[index] ?: 0.0))
     }
 
     /** From the "which file?" sheet. */
@@ -367,7 +368,7 @@ class Watch(val engine: TorrentStream) {
         remember(target.uri, found, index)
         val started = carried(target.uri, found, index)
         val size = found.files.find { it.index == index }?.size ?: 0
-        play(index, started.resumeRatio(index), bitrateOf(size, started.durations[index] ?: 0.0))
+        play(index, started.resumeRatio(index, runtimeSeconds(title?.runtime)), bitrateOf(size, started.durations[index] ?: 0.0))
     }
 
     /**

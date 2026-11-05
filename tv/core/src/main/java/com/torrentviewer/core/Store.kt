@@ -390,9 +390,14 @@ data class Item(
             return if (of > 0) at / of else 0.0
         }
 
-    fun resumeRatio(index: Int): Double {
+    /**
+     * [runtime] stands in for a file not played far enough to know its length, as a release the
+     * spot was carried over to: at 0 an 86GB resume aimed at the start, and only went for its spot
+     * 35s in, once the player had loaded.
+     */
+    fun resumeRatio(index: Int, runtime: Double = 0.0): Double {
         val p = positions[index] ?: return 0.0
-        val d = durations[index] ?: return 0.0
+        val d = durations[index]?.takeIf { it > 0 } ?: runtime
         if (p <= 0 || d <= 0) return 0.0
         // Measured beats guessed: a 4K MKV resumed at 39% of its time was at 32%
         // of its bytes, so the time guess pre-buffered the wrong spot for 44s.
