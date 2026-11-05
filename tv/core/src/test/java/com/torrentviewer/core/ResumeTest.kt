@@ -33,4 +33,17 @@ class ResumeTest {
     @Test fun unknownRuntimeKeepsTheReading() {
         assertEquals(0.5, playheadRatio(0.5, 30.0, 0.0), 0.0)
     }
+
+    @Test fun nothingOpensWithoutTheHeader() {
+        assertEquals(false, readyToOpen(0, 8, 8, 8, resuming = true))
+    }
+
+    @Test fun aResumeOpensOnTheHeaderAlone() {
+        assertEquals(true, readyToOpen(8, 8, 0, 8, resuming = true))
+    }
+
+    @Test fun aNewStartWaitsForTheViewersBuffer() {
+        assertEquals(false, readyToOpen(8, 8, 8, 16, resuming = false))
+        assertEquals(true, readyToOpen(16, 8, 16, 16, resuming = false))
+    }
 }

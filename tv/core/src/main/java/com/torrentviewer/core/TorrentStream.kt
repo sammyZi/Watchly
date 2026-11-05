@@ -106,10 +106,8 @@ private const val WINDOW_BYTES = 32L * 1024 * 1024
 private const val READAHEAD_BYTES = 128L * 1024 * 1024
 
 /** The same buffers in seconds of playback, when the bitrate is known. */
-private const val PREPARE_SECONDS = 3
 private const val WINDOW_SECONDS = 15
 private const val READAHEAD_SECONDS = 60
-private const val PREPARE_MAX = 24L * 1024 * 1024
 private const val READAHEAD_MAX = 768L * 1024 * 1024
 
 /** Nothing at all arriving this long before the first frame: dead swarm or blocked network. */
@@ -143,10 +141,18 @@ private const val REACH_SECONDS = 16L
  * block out with a single slow peer; the player's buffer holds only ~8s of 4K.
  */
 private const val STUCK_PIECE_MS = 5_000L
-/** The same during pre-roll, once the piece waits only on blocks already out with peers. */
-private const val PREROLL_STUCK_MS = 4_000L
-/** Waiting this long on a piece narrows the fetch to the rushed pieces alone. */
-private const val STARVE_MS = 5_000L
+/**
+ * Every block of the piece is out with a peer, and it still isn't whole: re-ask this soon. A 25GB
+ * remux has 16MB+ pieces, and nothing plays until one is finished, so one slow peer on a last block
+ * holds up everything. Only blocks already out get asked for twice, so the cost is a few duplicate
+ * 16KB blocks. Calibration knob: lower re-asks peers that were about to answer.
+ */
+private const val LAST_BLOCKS_MS = 1_500L
+/**
+ * Waiting this long on a piece narrows the fetch to the rushed pieces alone. A reader only waits when
+ * it has run out, so steady playback never gets here. Calibration knob.
+ */
+private const val STARVE_MS = 2_000L
 
 private const val REMOVE_WAIT_MS = 4_000
 
@@ -223,6 +229,8 @@ class TorrentStream(
     private var lastPiece = 0
     /** Where the player will start reading — the resume point. Pre-roll aims here. */
     private var startPiece = 0
+    /** The resume spot in the file, in bytes. */
+    private var startOffset = 0L
     private var headPiece = 0
     private var tailPiece = 0
     private var ticks = 0
@@ -288,6 +296,10 @@ class TorrentStream(
     private var blockingSince = 0L
     /** Unlike blockingSince, not reset by the stuck-piece kick. */
     private var blockedFrom = 0L
+    /** While a roll has the torrent out of the session: the pieces still safe to read, so the player keeps going. */
+    @Volatile private var rollHave: Set<Int>? = null
+    /** The index pieces last logged as holding up the player. */
+    private var lastIndexWait = emptyList<Int>()
     private var lastKickAt = 0L
 
     /** Last metadata, valid only while its torrent is still in the session (see forgetMeta). */
@@ -534,13 +546,17 @@ class TorrentStream(
             // are dead: at 10s the phone tried ~200 a cycle and sat at 6-16 peers for 30s
             // with 400 in hand. A live peer answers within 5s even after two lost SYNs, so
             // this doubles the dial rate without raising the RAM bracket above.
-            .setInteger(settings_pack.int_types.peer_connect_timeout.swigValue(), 5)
-            // Slow peers must not book a whole piece the player is about to block on.
-            .setInteger(settings_pack.int_types.whole_pieces_threshold.swigValue(), 10)
-            // Re-request an unanswered block after 6s, not 60. A ceiling: libtorrent times each
+            // 3s, as Nuvio's engine dials: 5s kept a slot on a dead peer for longer than it pays.
+            .setInteger(settings_pack.int_types.peer_connect_timeout.swigValue(), 3)
+            // TCP out: uTP backs off whenever the line is busy, and costs a phone more CPU.
+            .setBoolean(settings_pack.bool_types.enable_outgoing_utp.swigValue(), false)
+            // Slow peers must not book a whole piece the player is about to block on; at 0 no
+            // peer books one, so every piece is shared among those that have it.
+            .setInteger(settings_pack.int_types.whole_pieces_threshold.swigValue(), 0)
+            // Re-request an unanswered block after 4s, not 60. A ceiling: libtorrent times each
             // peer by its own replies. At 20s the phone sat on 255 of 256 blocks for 20s, twice
             // in one start, at 150kB/s with fifteen seeds idle.
-            .setInteger(settings_pack.int_types.request_timeout.swigValue(), 6)
+            .setInteger(settings_pack.int_types.request_timeout.swigValue(), 4)
             // An idle peer may also ask for the last blocks of a piece another peer is
             // sitting on. With strict end-game a 16MB piece of a 4K remux waited 20s on one
             // block (141 of 142 done) while seventy peers had nothing to do — the stalls,
@@ -549,6 +565,10 @@ class TorrentStream(
             // "max outstanding piece requests reached", logged every second at 6-7MB/s: the
             // default queue of 500 is too shallow for distant fast seeds.
             .setInteger(settings_pack.int_types.max_out_request_queue.swigValue(), 1500)
+            // Keep a second of requests at each peer, not three: an urgent block joins the back
+            // of that queue. After a seek at 5-6MB/s, piece 951 went 387, 389, 390 of 512 blocks
+            // in 10s and took 24s, while peers worked through the read-ahead booked before it.
+            .setInteger(settings_pack.int_types.request_queue_time.swigValue(), 1)
             // A fast line fills the read-ahead in seconds, and with every wanted piece done
             // libtorrent calls the torrent finished and drops its seeds as "redundant": on
             // the TV, 36 seeds at 6.9MB/s became 0 and 5kB/s just as the zone moved on.
@@ -805,12 +825,9 @@ class TorrentStream(
         if (gen != playGen) return
 
         val perSecond = options.bitrate.takeIf { it > 0 }?.toLong() ?: 0L
-        // Contiguous from the start, so it advances a piece at a time: two pieces at most.
-        prepareBytes = maxOf(
-            options.prepareMb.toLong() * 1024 * 1024,
-            ti.pieceLength().toLong(),
-            minOf(perSecond * PREPARE_SECONDS, PREPARE_MAX),
-        ).coerceAtMost(ti.pieceLength().toLong() * 2)
+        // Only what the viewer asked for in Settings: the player opens the moment it has a header
+        // to read, and buffers as it goes. Contiguous from the start, so two pieces at most.
+        prepareBytes = (options.prepareMb.toLong() * 1024 * 1024).coerceAtMost(ti.pieceLength().toLong() * 2)
         readaheadBytes = maxOf(READAHEAD_BYTES, minOf(perSecond * READAHEAD_SECONDS, READAHEAD_MAX))
         windowPieces = maxOf(2, (maxOf(WINDOW_BYTES, perSecond * WINDOW_SECONDS) / ti.pieceLength()).toInt())
         log(
@@ -896,6 +913,7 @@ class TorrentStream(
         tailPiece = maxOf(firstPiece, ti.mapFile(index, maxOf(0, size - tailBytesFor(size)), 1).piece())
         val startAt = (size * options.startRatio.coerceIn(0.0, 0.99)).toLong()
         startPiece = ti.mapFile(index, startAt, 1).piece()
+        startOffset = startAt
         headPiece = startPiece
         log("play: pieces $firstPiece..$lastPiece, tail from $tailPiece, start $startPiece — setup ${System.currentTimeMillis() - startedAt}ms")
 
@@ -1025,7 +1043,16 @@ class TorrentStream(
             .distinct()
         val open = live.filter { it < tailPiece }.ifEmpty { live }
         val closed = lately.values.map { pieceAt(it.first) }.filter { it < tailPiece && it !in open }.distinct().sorted()
-        val targets = (open + closed).ifEmpty { preroll }
+        // Waiting on the player's piece, the spots it just left get nothing: after a seek they kept
+        // a share of the swarm for the 10s they linger.
+        val waiting = blockingPiece >= 0 && clock - blockedFrom > STARVE_MS
+        // The player waiting on the index comes first: it can't seek, or show anything, without it.
+        // Left at the tail's distant deadline, a resume sat 20s between opening and reaching its
+        // spot, with 64 pieces of read-ahead taking the swarm.
+        val index = live.filter { it >= tailPiece && !h.havePiece(it) }
+        if (index.isNotEmpty() && index != lastIndexWait) log("index: player waiting on piece ${index.first()}")
+        lastIndexWait = index
+        val targets = (index + open + if (waiting) emptyList() else closed).distinct().ifEmpty { preroll }
         headPiece = targets.first()
 
         val status = h.status()
@@ -1046,18 +1073,17 @@ class TorrentStream(
         // peer's last block stalls the start just as it stalls playback.
         val blocked = (if (announcedReady) targets.take(1) else targets)
             .firstOrNull { it in firstPiece..lastPiece && !h.havePiece(it) } ?: -1
-        // Pre-roll re-asks much sooner, but only once every block is done or out with a
-        // peer: on the phone piece 0 sat at 170 of 171 blocks for 20s of a 23s start
-        // while 60 peers ran at 3MB/s. A piece still handing out blocks is just downloading.
-        val stuckAfter = if (announcedReady) STUCK_PIECE_MS else PREROLL_STUCK_MS
+        // Re-asks much sooner once every block is done or out with a peer: on the phone
+        // piece 0 sat at 170 of 171 blocks for 20s of a 23s start while 60 peers ran at
+        // 3MB/s. A piece still handing out blocks is just downloading.
         if (blocked != blockingPiece) {
             blockingPiece = blocked
             blockingSince = clock
             blockedFrom = clock
         } else if (
             blocked >= 0 && status.numPeers() > 0 &&
-            clock - blockingSince > stuckAfter && clock - lastKickAt > stuckAfter &&
-            (announcedReady || allRequested(h, blocked))
+            clock - blockingSince > LAST_BLOCKS_MS && clock - lastKickAt > LAST_BLOCKS_MS &&
+            ((announcedReady && clock - blockingSince > STUCK_PIECE_MS) || allRequested(h, blocked))
         ) {
             lastKickAt = clock
             log("stuck: piece $blocked for ${(clock - blockingSince) / 1000}s (${pieceState(h, blocked)}) — re-asking for it")
@@ -1152,7 +1178,8 @@ class TorrentStream(
         val startAvailable = maxOf(1, lastPiece - startPiece + 1).toLong() * pieceLen
         val startNeed = minOf(if (startPiece == firstPiece) maxOf(prepareBytes, headNeed) else prepareBytes, startAvailable)
         val buffered = minOf(startHave, headHave)
-        val isReady = headHave >= headNeed && startHave >= startNeed
+        val resuming = startPiece != firstPiece
+        val isReady = readyToOpen(headHave, headNeed, startHave, startNeed, resuming)
 
         session.postSessionStats()
         if (ticks % 2 == 0) reportProgress(h, ((buffered * 100 / maxOf(1L, startNeed)).coerceAtMost(100L)).toInt())
@@ -1173,7 +1200,10 @@ class TorrentStream(
             val srv = LocalFileServer(
                 file = path,
                 fileSize = size,
-                available = { offset -> handle?.havePiece(pieceAt(offset)) == true },
+                available = { offset ->
+                    val piece = pieceAt(offset)
+                    rollHave?.contains(piece) ?: (handle?.havePiece(piece) == true)
+                },
                 request = { id, offset ->
                     readers[id] = offset
                     lastReaderAt = offset
@@ -1183,6 +1213,12 @@ class TorrentStream(
             )
             srv.start()
             server = srv
+            // The player reads the header and index before it seeks: the spot keeps coming meanwhile.
+            if (resuming) {
+                seekAfter = 0L
+                seekSetAt = System.currentTimeMillis()
+                readers[SEEK_READER] = startOffset
+            }
             log("ready in ${(System.currentTimeMillis() - readyAt) / 1000}s at ${status.downloadRate() / 1024}kB/s -> ${srv.url}")
             ready.value = Ready(srv.url, ti.files().fileName(fileIndex), subtitleFiles, srv.lanUrl)
         }
@@ -1208,6 +1244,9 @@ class TorrentStream(
         if (!low && (wholeFile || cacheCapBytes <= 0L || onDisk < cacheCapBytes)) return false
 
         val at = readers.values.minOrNull() ?: lastReaderAt.takeIf { it > 0 } ?: return false
+        // Peers take a good 15s to come back, so go with half the read-ahead to play from. Short
+        // of it the cap can wait, the disk can't: `low` goes regardless.
+        if (!low && contiguousFrom(h, ti, pieceAt(at)) < readaheadBytes / 2) return false
         lastRollTick = ticks
 
         // `ti` may die with the torrent: take a copy that owns itself first.
@@ -1228,6 +1267,9 @@ class TorrentStream(
 
         try {
             val hash = own.infoHash()
+            // Before the removal: the server's threads look pieces up through `info`, which would die with it.
+            info = own
+            rollHave = had.toSet()
             runCatching { session.remove(h) }
             forgetMeta()
             var waited = 0
@@ -1239,14 +1281,16 @@ class TorrentStream(
                 log("roll: torrent would not release after ${waited}ms — left alone")
                 return false
             }
-            info = own
             val files = own.files()
             val far = readers.values.filter { pieceAt(it) < tailPiece }.maxOrNull() ?: at
             val cuts = rollCuts(files.fileOffset(fileIndex), files.fileSize(fileIndex), at - REWIND_BYTES, maxOf(at, far) + readaheadBytes, tailPiece, own.pieceLength().toLong())
             val file = File(saveDir, files.filePath(fileIndex))
+            // Off the list before the holes appear, or a reader gets zeros.
+            rollHave = had.filterNot { p -> cuts.any { p in it.pieces } }.toSet()
             val err = if (cuts.isEmpty()) -1 else cuts.firstNotNullOfOrNull { c -> Holes.punch(file, c.from, c.to - c.from).takeIf { it != 0 } } ?: 0
             val kept = if (err == 0) had.filterNot { p -> cuts.any { p in it.pieces } } else emptyList()
             if (err != 0) {
+                rollHave = emptySet()
                 if (cuts.isNotEmpty()) log("roll: could not free in place (error $err) — starting the file over")
                 runCatching {
                     File(saveDir, own.name()).deleteRecursively()
@@ -1287,6 +1331,8 @@ class TorrentStream(
             Log.w(TAG, "roll failed", e)
             failStream("The stream could not be restarted after freeing space.")
             return true
+        } finally {
+            rollHave = null
         }
     }
 

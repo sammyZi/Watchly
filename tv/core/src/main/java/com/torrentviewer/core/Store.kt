@@ -591,6 +591,15 @@ internal fun prerollTargets(first: Int, start: Int, count: Int, last: Int): List
     (listOf(first) + (if (start != first) listOf(last) else emptyList()) + (start until start + count))
         .filter { it <= last }.distinct()
 
+/**
+ * When the player can open. It has work of its own before the first picture (the header, the index,
+ * a seek), so it starts on that as soon as the header is here, while the rest still arrives. A new
+ * start also waits for the viewer's buffer; a resume's spot is fetched meanwhile, and the player
+ * blocks on it if it gets there first.
+ */
+internal fun readyToOpen(head: Long, headNeed: Long, start: Long, startNeed: Long, resuming: Boolean): Boolean =
+    head >= headNeed && (resuming || start >= startNeed)
+
 /** A seek lands on the keyframe before the spot, and those can be seconds apart. */
 private const val KEYFRAME_SECONDS = 5.0
 

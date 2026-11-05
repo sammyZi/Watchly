@@ -1,7 +1,8 @@
 # Third-party notices
 
-Watchly's own source code is under the [MIT License](LICENSE). The apps are built with the
-open-source components below, each under its own license. The full license texts are at the links.
+Watchly's own source code is under the [GNU General Public License v3.0](LICENSE). The apps are
+built with the open-source components below, each under its own license. The full license texts
+are at the links.
 
 ## Android phone and TV (`mobile/`, `tv/`)
 
@@ -18,11 +19,11 @@ open-source components below, each under its own license. The full license texts
 | [JSON-java](https://github.com/stleary/JSON-java) (`org.json`) | [Public domain](https://github.com/stleary/JSON-java/blob/master/LICENSE) |
 | Google Play services Cast framework | [Android Software Development Kit License](https://developer.android.com/studio/terms) |
 | [Google Sans Flex](https://github.com/googlefonts/googlesans-flex) font | [SIL Open Font License 1.1](tv/core/src/main/assets/licenses/GoogleSansFlex-OFL.txt) |
+| [Fluent Emoji](https://github.com/microsoft/fluentui-emoji) profile icons, on Windows too | [MIT](tv/core/src/main/assets/emoji/LICENSE) |
 
 > [!IMPORTANT]
-> The Jellyfin FFmpeg decoder is licensed under the GPL 3.0. The Android APKs include it, so the
-> APKs as a whole are distributed under the terms of the GPL 3.0. Their complete source code is this
-> repository.
+> All of Watchly is distributed under the terms of the GPL 3.0, which the Jellyfin FFmpeg decoder in
+> the Android APKs also requires. Their complete source code is this repository.
 
 ## Windows (`windows/`)
 

@@ -17,10 +17,13 @@ internal object Holes {
 /** A stretch a roll frees: file bytes [from, to), and the pieces they touch, which the torrent no longer has. */
 internal data class Cut(val from: Long, val to: Long, val pieces: IntRange)
 
+/** The start of a file a roll leaves alone: a player that reopens reads the header there before it can seek. */
+private const val ROLL_HEAD_BYTES = 8L * 1024 * 1024
+
 /**
- * Where a roll cuts: all of the file but file bytes [keepFrom]..[keepTo] and the tail from piece
- * [tailFrom] (the index players seek by). What lies ahead goes too: after a seek back, the
- * stretch left behind further on would otherwise sit there, the cap stay full, and the roll
+ * Where a roll cuts: all of the file but its head, file bytes [keepFrom]..[keepTo] and the tail
+ * from piece [tailFrom] (the index players seek by). What lies ahead goes too: after a seek back,
+ * the stretch left behind further on would otherwise sit there, the cap stay full, and the roll
  * come round again and again. Cuts meet the kept pieces on piece boundaries.
  */
 internal fun rollCuts(fileStart: Long, fileLen: Long, keepFrom: Long, keepTo: Long, tailFrom: Int, pieceLen: Long): List<Cut> {
@@ -32,5 +35,6 @@ internal fun rollCuts(fileStart: Long, fileLen: Long, keepFrom: Long, keepTo: Lo
     }
     val from = (fileStart + maxOf(0, keepFrom)) / pieceLen
     val to = (fileStart + keepTo) / pieceLen + 1
-    return listOfNotNull(cut(fileStart / pieceLen, from), cut(to, tailFrom.toLong()))
+    val headEnd = (fileStart + minOf(ROLL_HEAD_BYTES, fileLen) - 1) / pieceLen + 1
+    return listOfNotNull(cut(headEnd, from), cut(maxOf(to, headEnd), tailFrom.toLong()))
 }
