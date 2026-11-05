@@ -30,6 +30,9 @@ import org.libtorrent4j.swig.add_torrent_params
 import org.libtorrent4j.swig.alert
 import org.libtorrent4j.swig.error_code
 import org.libtorrent4j.swig.libtorrent
+import org.libtorrent4j.swig.address
+import org.libtorrent4j.swig.ip_filter
+import org.libtorrent4j.swig.peer_info_vector
 import org.libtorrent4j.swig.settings_pack
 import java.io.File
 import java.net.URL
@@ -148,6 +151,15 @@ private const val STUCK_PIECE_MS = 5_000L
  * 16KB blocks. Calibration knob: lower re-asks peers that were about to answer.
  */
 private const val LAST_BLOCKS_MS = 1_500L
+/**
+ * Waiting this long on a piece with this few blocks to go, peers sitting on requests are dropped.
+ * A backstop, for when focusing on the piece hasn't done it. Calibration knob: at 1.5s a seek went
+ * from 91 peers to 38, took longer, and the blocks stayed where they were.
+ */
+private const val STALLED_AFTER_MS = 5_000L
+private const val LAST_BLOCKS = 32
+/** How long a dropped peer stays out, so it isn't straight back with another block. */
+private const val DROP_MS = 120_000L
 /**
  * Waiting this long on a piece narrows the fetch to the rushed pieces alone. A reader only waits when
  * it has run out, so steady playback never gets here. Calibration knob.
@@ -296,6 +308,8 @@ class TorrentStream(
     private var blockingSince = 0L
     /** Unlike blockingSince, not reset by the stuck-piece kick. */
     private var blockedFrom = 0L
+    /** Peers disconnected for sitting on requests, and when; see [dropStalled]. */
+    private val dropped = HashMap<String, Long>()
     /** While a roll has the torrent out of the session: the pieces still safe to read, so the player keeps going. */
     @Volatile private var rollHave: Set<Int>? = null
     /** The index pieces last logged as holding up the player. */
@@ -1092,6 +1106,7 @@ class TorrentStream(
             runCatching { h.setPieceDeadline(blocked, 0) }
             deadlined.add(blocked)
             blockingSince = clock
+            if (clock - blockedFrom > STALLED_AFTER_MS) runCatching { dropStalled(h, blocked, clock) }.onFailure { log("stalled peers: ${it.message}") }
         }
 
         // Pre-roll watchdog: cached metadata skips inspect()'s own timeout, so a dead
@@ -1112,9 +1127,16 @@ class TorrentStream(
             }
         }
 
+        // The player waiting on a piece's last blocks: for a moment that piece is all there is to do.
+        // A peer only doubles up on a block another holds once it has nothing else to ask for, so
+        // with read-ahead on offer nobody ever did: 2MB took 25s after a seek, while the same piece
+        // as the only one wanted at the start took 1-2s. The read-ahead is back on the next tick.
+        val focus = announcedReady && blocked >= 0 && clock - blockedFrom > LAST_BLOCKS_MS && blocksLeft(h, blocked) <= LAST_BLOCKS
+        val aim = if (focus) listOf(blocked) else targets
+
         // `reach` is what the swarm is told to rush; `width` is what it may fetch at all.
         // Pre-roll targets are already every piece it needs, so nothing past them is rushed.
-        val reach = if (!announcedReady) {
+        val reach = if (!announcedReady || focus) {
             0
         } else {
             val affordable = (status.downloadRate().toLong() * REACH_SECONDS / pieceLen).toInt()
@@ -1126,36 +1148,35 @@ class TorrentStream(
         // only what is rushed; the readahead comes back with the next tick after.
         // Pre-roll is always that narrow, from the first tick: its first 5s used to go to
         // the whole readahead (32-128 pieces) while nothing could play.
-        // Not once every block is out with a peer: narrowing can't speed those up, and it left the
-        // fast peers nothing to do. An 86GB remux fell from 14MB/s to 2MB/s each time a 16MB piece
-        // waited on its last blocks, and the player, needing 9MB/s, ran out again.
+        // Not once every block is out with a peer: narrowing to a few pieces can't speed those up, and
+        // an 86GB remux fell from 14MB/s to 2MB/s each time a 16MB piece waited on its last blocks.
         val starving = blocked >= 0 && clock - blockedFrom > STARVE_MS && !allRequested(h, blocked)
         val width = when {
-            !announcedReady -> 0
+            !announcedReady || focus -> 0
             starving -> maxOf(2, reach)
             else -> maxOf(2, (readaheadBytes / pieceLen).toInt())
         }
-        val back = if (!announcedReady || starving) 0 else maxOf(8, (REWIND_BYTES / pieceLen).toInt())
+        val back = if (!announcedReady || starving || focus) 0 else maxOf(8, (REWIND_BYTES / pieceLen).toInt())
 
         // Download ahead → Whole file: the rest of the film at LOW — but not during pre-roll, nor
         // while the player waits on a piece. With it on from the first tick every peer had LOW
         // pieces queued, so none was idle to take over a slow peer's last blocks: a resume on the
         // phone pulled 12MB/s for 50s (~600MB) while pieces 0 and 1791 sat at 29 of 32 blocks for
         // 20s each, re-asked every 4s.
-        val whole = wholeFile && announcedReady && !starving
+        val whole = wholeFile && announcedReady && !starving && !focus
         // Re-aim with hysteresis: a rewind inside the band already covered is not a new zone.
         val stale = zoneWidth != width ||
             zoneRushedTail != announcedReady ||
             zoneWhole != whole ||
-            zoneStarts.size != targets.size ||
-            targets.any { t -> zoneStarts.none { t >= it - back && t <= it + width / 2 } }
+            zoneStarts.size != aim.size ||
+            aim.any { t -> zoneStarts.none { t >= it - back && t <= it + width / 2 } }
         val clobbered = !stale && zoneIgnored >= 0 &&
             runCatching { h.piecePriority(zoneIgnored) != Priority.IGNORE }.getOrDefault(false)
         if (clobbered) log("zone: priorities were rewritten (piece $zoneIgnored wanted again) — re-applying")
-        if (stale || clobbered) applyZone(h, targets, width, back, rushTail = announcedReady, whole = whole)
+        if (stale || clobbered) applyZone(h, aim, width, back, rushTail = announcedReady, whole = whole)
 
         val keep = mutableSetOf<Int>()
-        targets.forEachIndexed { rank, target ->
+        aim.forEachIndexed { rank, target ->
             val end = minOf(target + reach, lastPiece)
             for (p in target..end) {
                 keep.add(p)
@@ -1429,6 +1450,41 @@ class TorrentStream(
         return "${q.finished()} done, ${q.writing()} writing, ${q.requested()} requested of ${q.blocksInPiece()} blocks"
     }
 
+    /**
+     * A piece down to its last blocks: disconnects the peers sitting on requests, which is the only
+     * way this libtorrent has of getting a block back. An IP filter is how a peer is disconnected
+     * here; it comes off again [DROP_MS] later, at the next drop, or when the stream ends.
+     */
+    private fun dropStalled(h: TorrentHandle, piece: Int, clock: Long) {
+        val left = blocksLeft(h, piece)
+        if (left > LAST_BLOCKS) return
+        val found = peer_info_vector().also { h.swig().get_peer_info(it) }
+        val peers = (0 until found.size).map { i ->
+            val p = found.get(i)
+            PeerLoad(PeerInfo(p).ip().removePrefix("tcp://").substringBeforeLast(':').trim('[', ']'), p.getDownload_queue_length(), p.getPayload_down_speed())
+        }
+        val stalled = stalledPeers(peers)
+        if (stalled.isEmpty()) return
+        log("stalled: dropping ${stalled.size} of ${peers.size} peers holding up piece $piece ($left blocks left)")
+        dropped.values.removeIf { clock - it > DROP_MS }
+        stalled.forEach { dropped[it] = clock }
+        applyDropped()
+    }
+
+    /** Blocks of a piece still to arrive; a piece not begun counts as all of them. */
+    private fun blocksLeft(h: TorrentHandle, piece: Int): Int =
+        runCatching { h.downloadQueue }.getOrNull()?.firstOrNull { it.pieceIndex() == piece }?.let { it.blocksInPiece() - it.finished() - it.writing() } ?: Int.MAX_VALUE
+
+    private fun applyDropped() {
+        val filter = ip_filter()
+        dropped.keys.forEach { ip ->
+            val ec = error_code()
+            val at = address.from_string(ip, ec)
+            if (ec.value() == 0) filter.add_rule(at, at, ip_filter.access_flags.blocked.swigValue().toLong())
+        }
+        session.swig().set_ip_filter(filter)
+    }
+
     /** No block of the piece is left to hand out: what remains waits on peers already asked. */
     private fun allRequested(h: TorrentHandle, piece: Int): Boolean {
         val q = runCatching { h.downloadQueue }.getOrNull()?.firstOrNull { it.pieceIndex() == piece } ?: return false
@@ -1503,6 +1559,10 @@ class TorrentStream(
             }
         }
         dropWarm(keep)
+        if (dropped.isNotEmpty()) {
+            dropped.clear()
+            runCatching { applyDropped() }
+        }
 
         // play() may already have the next torrent writing into saveDir: with `keep`,
         // only the outgoing torrent's tree goes.

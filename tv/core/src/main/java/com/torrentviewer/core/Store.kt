@@ -605,6 +605,27 @@ internal fun prerollTargets(first: Int, start: Int, count: Int, last: Int): List
 internal fun readyToOpen(head: Long, headNeed: Long, start: Long, startNeed: Long, resuming: Boolean): Boolean =
     head >= headNeed && (resuming || start >= startNeed)
 
+/** One connected peer: what it has been asked for, and what it is delivering. */
+internal data class PeerLoad(val ip: String, val queued: Int, val bytesPerSecond: Int)
+
+/** Below this a peer holding requests is sitting on them. Calibration knob: higher drops peers that were only slow. */
+private const val STALLED_BYTES_PER_SECOND = 32 * 1024
+private const val MAX_DROPPED_AT_ONCE = 8
+/** Never thin a small swarm: the holder of a rare piece may be all there is. */
+private const val MIN_PEERS_KEPT = 10
+
+/**
+ * Whom to drop when a piece hangs on its last blocks, slowest first. Asking again can't take a block
+ * from a peer that holds it: a 2MB piece of a 2GB film sat 14s on its last two blocks at 2MB/s with
+ * 94 peers connected. Dropped, a peer's requests go back to the swarm at once.
+ */
+internal fun stalledPeers(peers: List<PeerLoad>): List<String> =
+    peers.filter { it.queued > 0 && it.bytesPerSecond < STALLED_BYTES_PER_SECOND }
+        .sortedBy { it.bytesPerSecond }
+        .take(minOf(MAX_DROPPED_AT_ONCE, peers.size - MIN_PEERS_KEPT).coerceAtLeast(0))
+        .map { it.ip }
+        .distinct()
+
 /** A seek lands on the keyframe before the spot, and those can be seconds apart. */
 private const val KEYFRAME_SECONDS = 5.0
 

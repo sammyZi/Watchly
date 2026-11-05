@@ -45,6 +45,22 @@ class ResumeTest {
         assertEquals(0.75, known.resumeRatio(0, 6000.0), 0.0)
     }
 
+    private fun swarm(n: Int, stalled: Int) = List(n) { i -> PeerLoad("10.0.0.$i", 4, if (i < stalled) i * 1000 else 500_000) }
+
+    @Test fun peersSittingOnRequestsAreDroppedSlowestFirst() {
+        assertEquals(listOf("10.0.0.0", "10.0.0.1"), stalledPeers(swarm(30, 2)))
+    }
+
+    @Test fun aSlowPeerWithNothingAskedOfItStays() {
+        assertEquals(emptyList<String>(), stalledPeers(List(30) { PeerLoad("10.0.0.$it", 0, 0) }))
+    }
+
+    @Test fun droppingStopsAtEightAndLeavesTenPeers() {
+        assertEquals(8, stalledPeers(swarm(30, 20)).size)
+        assertEquals(2, stalledPeers(swarm(12, 12)).size)
+        assertEquals(emptyList<String>(), stalledPeers(swarm(10, 10)))
+    }
+
     @Test fun nothingOpensWithoutTheHeader() {
         assertEquals(false, readyToOpen(0, 8, 8, 8, resuming = true))
     }
