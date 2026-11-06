@@ -55,6 +55,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -114,6 +117,10 @@ import com.torrentviewer.core.NeedsVlc
 import com.torrentviewer.core.TORBOX_STALL_NOTE
 import com.torrentviewer.core.Ep
 import com.torrentviewer.core.Episode
+import com.torrentviewer.core.History
+import com.torrentviewer.core.Stremio
+import com.torrentviewer.core.WatchedEverywhere
+import com.torrentviewer.core.episodeProgress
 import com.torrentviewer.core.ExoView
 import com.torrentviewer.core.Facts
 import com.torrentviewer.core.Secrets
@@ -214,7 +221,7 @@ private const val SEEK_CHECK_MS = 2500L
 /** A seek that has not landed: the player goes on reporting the old time until it does. */
 private class Seeking(val target: Double, val from: Double, val since: Long, val connections: Long)
 
-private enum class Panel { TRACKS, SPEED, ASPECT, FIND, LANG, MORE }
+private enum class Panel { TRACKS, SPEED, ASPECT, FIND, LANG, MORE, EPISODES }
 
 private data class Flash(val seconds: Int, val id: Long)
 
@@ -386,15 +393,8 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         watch.exit()
     }
 
-    fun goNext() {
-        if (advanced) return
-        val sibling = next
-        if (sibling != null) {
-            advanced = true
-            watch.playSibling(sibling)
-            return
-        }
-        val ep = onlineNext ?: return
+    /** An episode not in this torrent: its best stream, found online. */
+    fun findEpisode(ep: Episode, onNone: () -> Unit = {}) {
         val t = title ?: return
         advanced = true
         if (at > 0) watch.savePosition(at)
@@ -405,11 +405,32 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
             if (hit == null) {
                 watch.notes.tryEmit("No sources found for $tag.")
                 advanced = false
-                noNext = true
+                onNone()
             } else {
                 watch.stream(hit, t, tag, ep)
             }
         }
+    }
+
+    fun goNext() {
+        if (advanced) return
+        val sibling = next
+        if (sibling != null) {
+            advanced = true
+            watch.playSibling(sibling)
+            return
+        }
+        findEpisode(onlineNext ?: return) { noNext = true }
+    }
+
+    /** Picked from the list: from this torrent if it holds the episode, else found online. */
+    fun playEpisode(ep: Episode) {
+        panel = null
+        if (advanced || ep.id == episode?.id) return
+        val sibling = watch.fileOf(ep) ?: return findEpisode(ep)
+        advanced = true
+        if (at > 0) watch.savePosition(at)
+        watch.playSibling(sibling)
     }
 
     fun mediaCard() {
@@ -549,12 +570,13 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
 
     /* ------------------------------------------------------------ effects */
 
-    // This episode's intro, from IntroDB.
+    // This episode's or film's intro.
     val imdb = title?.imdb ?: watch.item?.imdb
     val introEp = remember(episode, file) { episode?.let { Ep(it.season, it.episode) } ?: parseEpisode(file?.name.orEmpty()) }
     LaunchedEffect(imdb, introEp) {
-        if (show == null || imdb == null || introEp == null) return@LaunchedEffect
-        IntroDb.intro(imdb, introEp.season, introEp.episode)?.let { intro = it }
+        if (imdb == null) return@LaunchedEffect
+        val found = if (introEp != null) IntroDb.intro(imdb, introEp.season, introEp.episode) else if (title?.isSeries == false) IntroDb.intro(imdb) else null
+        found?.let { intro = it }
     }
 
     // The stream arrives: hand it to the player, with the torrent's own subtitle files.
@@ -994,6 +1016,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                                 pipParams()?.let { p -> runCatching { activity?.enterPictureInPictureMode(p) } }
                             }
                             BarButton(L.drawable.lucide_ic_ellipsis, "More", on = scale != 0 || SLEEP[sleep] != 0 || wholeFile) { panel = Panel.MORE }
+                            if (title?.episodes.orEmpty().isNotEmpty()) BarButton(L.drawable.lucide_ic_list, "Episodes") { panel = Panel.EPISODES }
                             if (next != null || onlineNext != null) BarButton(L.drawable.lucide_ic_skip_forward, "Next episode", onClick = ::goNext)
                         }
                     }
@@ -1242,7 +1265,67 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                 },
                 onDismiss = { panel = Panel.FIND },
             )
+            Panel.EPISODES -> title?.let { EpisodesPanel(it, episode, ::playEpisode) { panel = null } }
             null -> Unit
+        }
+    }
+}
+
+/** Every episode of the show down the right of the picture, by season, the one playing in view; picking one plays it. */
+@Composable
+private fun EpisodesPanel(title: Title, playing: Episode?, onPlay: (Episode) -> Unit, onDismiss: () -> Unit) {
+    BackHandler(onBack = onDismiss)
+    val history by History.items.collectAsState()
+    val library by WatchedEverywhere.collectAsState(Stremio.library.value)
+    val seen = remember(history, library, title.episodes) { episodeProgress(history, title.imdb, library, title.episodes) }
+    // Specials after the seasons.
+    val seasons = remember(title.episodes) { title.episodes.map { it.season }.distinct().sortedBy { if (it == 0) Int.MAX_VALUE else it } }
+    var season by remember { mutableStateOf(playing?.season ?: seasons.first()) }
+    Box(Modifier.fillMaxSize()) {
+        // The picture stays in view beside the list; a tap on it closes the list.
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)).pointerInput(Unit) { awaitEachGesture { awaitFirstDown().consume(); onDismiss() } })
+        Column(
+            Modifier.align(Alignment.CenterEnd).fillMaxHeight().widthIn(max = 400.dp).fillMaxWidth(0.9f)
+                .background(Color.Black.copy(alpha = 0.92f)).pointerInput(Unit) { awaitEachGesture { awaitFirstDown().consume() } }
+                .windowInsetsPadding(WindowInsets.safeDrawing).padding(start = 16.dp, end = 12.dp, top = 12.dp),
+        ) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Episodes", Modifier.weight(1f), style = Type.title.copy(color = Color.White, fontWeight = FontWeight.Bold))
+                Tap(onDismiss, shape = CircleShape) { Lc(L.drawable.lucide_ic_x, Modifier.padding(8.dp), tint = Color.White, size = 22.dp) }
+            }
+            if (seasons.size > 1) Row(Modifier.padding(top = 4.dp, bottom = 4.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                seasons.forEach { s -> Chip(if (s == 0) "Specials" else "Season $s", s == season, onClick = { season = s }) }
+            }
+            key(season) {
+                val shown = remember { title.episodes.filter { it.season == season } }
+                val list = rememberLazyListState(shown.indexOfFirst { it.id == playing?.id }.coerceAtLeast(0))
+                LazyColumn(Modifier.padding(top = 6.dp).weight(1f), state = list, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(shown, key = { it.id }) { ep ->
+                        EpisodeRow(ep, title.wide, ep.id == playing?.id, seen[Ep(ep.season, ep.episode)] ?: 0.0) { onPlay(ep) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EpisodeRow(ep: Episode, fallback: String?, here: Boolean, seen: Double, onClick: () -> Unit) {
+    Tap(onClick, Modifier.fillMaxWidth(), RoundedCornerShape(8.dp)) {
+        Row(Modifier.fillMaxWidth().background(if (here) Color.White.copy(alpha = 0.12f) else Color.Transparent).padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.width(128.dp).aspectRatio(16f / 9f).clip(RoundedCornerShape(6.dp)).background(Color.Black)) {
+                Artwork(ep.thumbnail ?: fallback, ep.name, Modifier.fillMaxSize(), fill = false)
+                if (seen > 0) ProgressLine(seen.toFloat(), Modifier.align(Alignment.BottomStart))
+            }
+            Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                Text(
+                    "${ep.episode}. ${ep.name}",
+                    style = Type.label.copy(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (here) Text("Now playing", Modifier.padding(top = 2.dp), style = Type.meta.copy(color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp))
+            }
         }
     }
 }

@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -121,9 +120,12 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
 
     val list = rememberLazyListState()
     val play = remember { FocusRequester() }
-    /** The first thing under the sources, and how many times the jump to it was pressed. */
-    val extras = remember { FocusRequester() }
-    var jump by remember { mutableIntStateOf(0) }
+    val firstSource = remember { FocusRequester() }
+    /** An episode was picked: its sources are what the remote wants next, past the rows above them. */
+    var toSources by remember { mutableStateOf(false) }
+    // Coming back from the player, the list comes back where it was, down in the sources: to the
+    // top, with Play. Here rather than in the head item, which isn't composed down there.
+    LaunchedEffect(title.imdb) { list.scrollToItem(0) }
 
     fun findSources(ep: Episode?): kotlinx.coroutines.Deferred<List<Hit>> {
         val mine = ++ticket
@@ -170,12 +172,23 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
         // top, or the season row and its episodes in full. A free scroll left both cut in
         // half after going down to the episodes and back up.
         val hasEpisodes = title.isSeries && seasons.isNotEmpty()
-        val sourcesAt = if (hasEpisodes) 2 else 1
-        // The franchise, the cast and what's like it, each its own section under the sources.
-        val extrasAt = sourcesAt + 1 + shown.take(MAX_SOURCES).size
+        // The franchise, the cast and what's like it, each its own section, above the sources:
+        // under as many as forty of those, nobody would reach them.
+        val extrasAt = if (hasEpisodes) 2 else 1
         val castAt = extrasAt + (if (inOrder != null) 1 else 0)
         val moreAt = castAt + (if (people.isNotEmpty()) 1 else 0)
+        val sourcesAt = moreAt + (if (similar.isNotEmpty()) 1 else 0)
         val topPad = with(LocalDensity.current) { (Safe.y + 72.dp).roundToPx() }
+        LaunchedEffect(toSources, shown.isNotEmpty()) {
+            if (!toSources || shown.isEmpty()) return@LaunchedEffect
+            list.scrollToItem(sourcesAt, topPad)
+            // The first source is composed a frame or two after the scroll.
+            for (attempt in 1..10) {
+                if (runCatching { firstSource.requestFocus() }.isSuccess) break
+                kotlinx.coroutines.delay(50)
+            }
+            toSources = false
+        }
         fun pin(index: Int) {
             // Past the list's top padding (the room above the logo), or the section above
             // would still show its last lines over this one.
@@ -197,8 +210,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
                     if (title.cast.isNotEmpty()) People("Starring", title.cast.take(4).joinToString(", "))
                     if (title.directors.isNotEmpty()) People(if (title.isSeries) "Creators" else "Director", title.directors.take(2).joinToString(", "))
                     title.awards?.let { People("Awards", it) }
-                    // Past the column's width: four buttons don't fit in what the words are held to.
-                    Row(Modifier.padding(top = 24.dp).wrapContentWidth(Alignment.Start, unbounded = true), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                         if (!title.isSeries) {
                             // Never disabled: a disabled view cannot hold focus, and the remote would open elsewhere.
                             TvButton(
@@ -237,17 +249,6 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
                             label = "Language: " + if (lang.isEmpty()) "Any" else langName(lang),
                             onClick = { pickingLang = true },
                             icon = L.drawable.lucide_ic_languages,
-                        )
-                        // Under as many as forty sources, these would be forty presses away.
-                        if (inOrder != null || people.isNotEmpty() || similar.isNotEmpty()) TvButton(
-                            label = if (people.isNotEmpty()) "Cast & more" else "More",
-                            onClick = {
-                                scope.launch {
-                                    list.scrollToItem(extrasAt, topPad)
-                                    jump++
-                                }
-                            },
-                            icon = L.drawable.lucide_ic_chevron_down,
                         )
                     }
                 }
@@ -291,14 +292,29 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
                                         busy = busy && episode?.id == ep.id,
                                         seen = progress[Ep(ep.season, ep.episode)] ?: 0.0,
                                         requester = if (i == 0) fallback else null,
-                                        // The sources land just below, already in view; one press down reaches them.
-                                        onClick = { findSources(ep) },
+                                        // Focus goes on to the sources as they land.
+                                        onClick = {
+                                            findSources(ep)
+                                            toSources = true
+                                        },
                                     )
                                 }
                             }
                         }
                     }
                 }
+            }
+
+            inOrder?.let { order ->
+                item(key = "franchise") {
+                    FranchiseRail(order, title.imdb, { onOrder(order) }, onOpen, Modifier.onFocusEnter { pin(extrasAt) }.padding(top = 30.dp))
+                }
+            }
+            if (people.isNotEmpty()) item(key = "cast") {
+                PeopleRail(people, onPerson.takeUnless { Kids.on }, Modifier.onFocusEnter { pin(castAt) }.padding(top = 30.dp))
+            }
+            if (similar.isNotEmpty()) item(key = "similar") {
+                SimilarRail(similar, onOpen, Modifier.onFocusEnter { pin(moreAt) }.padding(top = 30.dp))
             }
 
             item(key = "sources-head") {
@@ -333,25 +349,9 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
             }
             itemsIndexed(shown.take(MAX_SOURCES), key = { _, it -> "src-" + it.id }) { i, hit ->
                 // Arriving from above, the list starts at its heading rather than half in view.
-                Source(hit, Modifier.then(if (i == 0) Modifier.onFocusEnter { pin(sourcesAt) } else Modifier).padding(start = Safe.x + 12.dp, end = Safe.x, bottom = 8.dp), runtimeSeconds(title.runtime)) {
+                Source(hit, Modifier.then(if (i == 0) Modifier.onFocusEnter { pin(sourcesAt) } else Modifier).padding(start = Safe.x + 12.dp, end = Safe.x, bottom = 8.dp), runtimeSeconds(title.runtime), if (i == 0) firstSource else null) {
                     watch.stream(hit, title, episode?.let { episodeTag(it.season, it.episode) }, episode)
                 }
-            }
-            inOrder?.let { order ->
-                item(key = "franchise") {
-                    FranchiseRail(order, title.imdb, { onOrder(order) }, onOpen, extras, Modifier.onFocusEnter { pin(extrasAt) }.padding(top = 30.dp))
-                    if (jump > 0) extras.claim(jump)
-                }
-            }
-            if (people.isNotEmpty()) item(key = "cast") {
-                val first = inOrder == null
-                PeopleRail(people, onPerson.takeUnless { Kids.on }, if (first) extras else null, Modifier.onFocusEnter { pin(castAt) }.padding(top = 30.dp))
-                if (first && jump > 0) extras.claim(jump)
-            }
-            if (similar.isNotEmpty()) item(key = "similar") {
-                val first = inOrder == null && people.isEmpty()
-                SimilarRail(similar, onOpen, if (first) extras else null, Modifier.onFocusEnter { pin(moreAt) }.padding(top = 30.dp))
-                if (first && jump > 0) extras.claim(jump)
             }
         }
         }
@@ -420,7 +420,7 @@ private const val TOO_HEAVY_MBPS = 80.0
  * With [runtimeSeconds], a release too big to stream as it plays says what it needs.
  */
 @Composable
-fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0, onClick: () -> Unit) {
+fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0, requester: FocusRequester? = null, onClick: () -> Unit) {
     val grade = health(hit.seeders)
     // Cached on TorBox: it plays from TorBox's servers, so the swarm's health says nothing.
     val torbox by TorBox.key.collectAsState()
@@ -434,7 +434,7 @@ fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0
         Health.WEAK -> Ink.warn
         Health.DEAD -> Ink.danger
     }
-    Focusable(onClick, modifier.fillMaxWidth().widthIn(max = 860.dp), RoundedCornerShape(8.dp), 1.015f, ring = false) { focused ->
+    Focusable(onClick, modifier.fillMaxWidth().widthIn(max = 860.dp), RoundedCornerShape(8.dp), 1.015f, ring = false, requester = requester) { focused ->
         Row(
             Modifier.background(if (focused) Color.White else Ink.surface.copy(alpha = 0.92f)).fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,

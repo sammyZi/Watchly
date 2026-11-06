@@ -1,10 +1,12 @@
 package com.torrentviewer.core
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
@@ -117,29 +119,35 @@ object Meta {
 
     private val memory = ConcurrentHashMap<String, Any>()
 
-    /** Memory over disk over network; a stale disk copy is served if the fetch fails. */
+    /**
+     * Memory over disk over network; a stale disk copy is served if the fetch fails. Off the main
+     * thread past the memory: callers are on it, and a chart alone parses megabytes of JSON, which
+     * on the TV held pages still and left a third of the frames late.
+     */
     private suspend fun <T> remember(key: String, read: (String) -> T, write: (T) -> String, fetch: suspend () -> T): T {
         @Suppress("UNCHECKED_CAST")
         (memory[key] as T?)?.let { return it }
-        var stale: T? = null
-        Kv.global(STORE + key)?.let { raw ->
-            runCatching {
-                val o = JSONObject(raw)
-                val value = read(o.getString("value"))
-                if (System.currentTimeMillis() - o.getLong("at") < TTL) {
-                    memory[key] = value as Any
-                    return value
+        return withContext(Dispatchers.Default) {
+            var stale: T? = null
+            Kv.cached(STORE + key)?.let { raw ->
+                runCatching {
+                    val o = JSONObject(raw)
+                    val value = read(o.getString("value"))
+                    if (System.currentTimeMillis() - o.getLong("at") < TTL) {
+                        memory[key] = value as Any
+                        return@withContext value
+                    }
+                    stale = value
                 }
-                stale = value
             }
-        }
-        return try {
-            val value = fetch()
-            memory[key] = value as Any
-            Kv.setGlobal(STORE + key, JSONObject().put("at", System.currentTimeMillis()).put("value", write(value)).toString())
-            value
-        } catch (e: Exception) {
-            stale ?: throw e
+            try {
+                val value = fetch()
+                memory[key] = value as Any
+                Kv.cache(STORE + key, JSONObject().put("at", System.currentTimeMillis()).put("value", write(value)).toString())
+                value
+            } catch (e: Exception) {
+                stale ?: throw e
+            }
         }
     }
 

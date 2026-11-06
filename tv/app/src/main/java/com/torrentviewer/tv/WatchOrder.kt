@@ -122,7 +122,7 @@ fun OrderBanner(order: WatchOrder, seen: Set<String>) {
 
 /** A small label over a film's art. */
 @Composable
-private fun ArtTag(text: String, colour: Color, modifier: Modifier = Modifier, words: Color = Color.White) {
+fun ArtTag(text: String, colour: Color, modifier: Modifier = Modifier, words: Color = Color.White) {
     Text(
         text,
         modifier.background(colour, RoundedCornerShape(5.dp)).padding(horizontal = 7.dp, vertical = 3.dp),
@@ -132,8 +132,8 @@ private fun ArtTag(text: String, colour: Color, modifier: Modifier = Modifier, w
 
 /** A film's place in its order, as a poster: its number on it, a tick once seen, a tag on the one open now. */
 @Composable
-private fun OrderPoster(number: Int, imdb: String, here: Boolean, watched: Boolean, requester: FocusRequester?, onClick: () -> Unit) {
-    Focusable(onClick, Modifier.width(112.dp).aspectRatio(2f / 3f), ORDER_SHAPE, 1.07f, requester = requester) {
+private fun OrderPoster(number: Int, imdb: String, here: Boolean, watched: Boolean, onClick: () -> Unit) {
+    Focusable(onClick, Modifier.width(112.dp).aspectRatio(2f / 3f), ORDER_SHAPE, 1.07f) {
         Box(Modifier.fillMaxSize().background(Ink.surface)) {
             Artwork("https://images.metahub.space/poster/medium/$imdb/img", "Film $number", Modifier.fillMaxSize(), fill = false)
             Box(Modifier.matchParentSize().background(Brush.verticalGradient(0.55f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.85f))))
@@ -156,7 +156,7 @@ private fun OrderPoster(number: Int, imdb: String, here: Boolean, watched: Boole
 
 /** On a film's page: the franchise it belongs to, every film of it in order, opened at this one. */
 @Composable
-fun FranchiseRail(order: WatchOrder, imdb: String, onAll: () -> Unit, onOpen: (Title) -> Unit, requester: FocusRequester?, modifier: Modifier = Modifier) {
+fun FranchiseRail(order: WatchOrder, imdb: String, onAll: () -> Unit, onOpen: (Title) -> Unit, modifier: Modifier = Modifier) {
     val seen = seenFilms()
     val at = order.films.indexOf(imdb)
     val done = order.films.count { it in seen }
@@ -180,7 +180,7 @@ fun FranchiseRail(order: WatchOrder, imdb: String, onAll: () -> Unit, onOpen: (T
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 itemsIndexed(order.films, key = { _, id -> id }) { i, id ->
-                    OrderPoster(i + 1, id, id == imdb, id in seen, if (id == imdb) requester else null) { if (id != imdb) onOpen(Title(id, "movie", "")) }
+                    OrderPoster(i + 1, id, id == imdb, id in seen) { if (id != imdb) onOpen(Title(id, "movie", "")) }
                 }
             }
         }

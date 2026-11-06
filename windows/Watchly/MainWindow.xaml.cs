@@ -66,6 +66,8 @@ public sealed record PlaybackRequest
     /// <summary>What <see cref="Link"/>'s server wants with every request.</summary>
     public Dictionary<string, string>? Headers { get; init; }
     public (string Name, Func<Task> Go)? Next { get; init; }
+    /// <summary>Plays another episode of the show, picked from the player's list.</summary>
+    public Func<Title, Episode, Task>? GoEpisode { get; init; }
 }
 
 /// <summary>
@@ -892,6 +894,7 @@ public partial class MainWindow : Window
             HistoryUri = uri,
             SavedSubs = stored.Subtitles?.GetValueOrDefault(index) ?? new(),
             Next = UpNext(stored, torrent, meta, index, detail),
+            GoEpisode = (show, ep) => GoTo(show, ep, stored, torrent, meta),
             Remote = remote,
         };
         var player = OpenPlayer(request);
@@ -930,6 +933,7 @@ public partial class MainWindow : Window
             HistoryUri = target.Uri,
             SavedSubs = stored.Subtitles?.GetValueOrDefault(0) ?? new(),
             Next = UpNext(stored, null, new TorrentMeta(name, new() { file }), 0, detail),
+            GoEpisode = FindEpisode,
             Link = target.Uri,
             Headers = headers,
         });
@@ -970,27 +974,39 @@ public partial class MainWindow : Window
         var i = Meta.IndexOfEpisode(list, meta.Files[index].Name, meta.Files[index].Path);
         if (i < 0 || i + 1 >= list.Count) return null;
         var next = list[i + 1];
-        var tag = Search.EpisodeTag(next.Season, next.Number);
-        var absolute = Meta.AbsoluteNumber(list, next.Season, next.Number);
-        return ($"{tag} · {next.Name}", async () =>
+        return ($"{Search.EpisodeTag(next.Season, next.Number)} · {next.Name}", () => FindEpisode(detail, next));
+    }
+
+    /// <summary>An episode of this show, by asking the addons.</summary>
+    async Task FindEpisode(Title show, Episode ep)
+    {
+        var tag = Search.EpisodeTag(ep.Season, ep.Number);
+        var hits = await Search.SearchEpisode(ep.Id, show.Name, ep.Season, type: show.StremioType, title: show);
+        if (hits.Count == 0)
         {
-            var hits = await Search.SearchEpisode(next.Id, detail.Name, next.Season, type: detail.StremioType, title: detail);
-            if (hits.Count == 0)
-            {
-                Toast($"No streams found for {tag}", true);
-                return;
-            }
-            var local = await StreamHit(hits[0], new OpenOptions
-            {
-                Auto = Search.PickTag(next.Season, next.Number, absolute),
-                KeepProgress = true,
-                Imdb = detail.Imdb,
-                Kind = detail.Kind,
-                Poster = detail.Poster,
-                TitleName = detail.Name,
-            });
-            if (local is not null) Links = EpisodeLinks.Link(next.Id, local);
+            Toast($"No streams found for {tag}", true);
+            return;
+        }
+        var local = await StreamHit(hits[0], new OpenOptions
+        {
+            Auto = Search.PickTag(ep.Season, ep.Number, Meta.AbsoluteNumber(show.Episodes, ep.Season, ep.Number)),
+            KeepProgress = true,
+            Imdb = show.Imdb,
+            Kind = show.Kind,
+            Poster = show.Poster,
+            TitleName = show.Name,
         });
+        if (local is not null) Links = EpisodeLinks.Link(ep.Id, local);
+    }
+
+    /// <summary>An episode picked in the player: from this torrent if it holds it (the largest file, as a pack's extras can carry its number), else found online.</summary>
+    Task GoTo(Title show, Episode ep, HistoryItem stored, Torrent? torrent, TorrentMeta meta)
+    {
+        var at = show.Episodes.FindIndex(e => e.Id == ep.Id);
+        if (torrent is null || meta.Files.Where(f => f.IsVideo && Meta.IndexOfEpisode(show.Episodes, f.Name, f.Path) == at).MaxBy(f => f.Size) is not { } file)
+            return FindEpisode(show, ep);
+        Play(stored.Uri, torrent, meta, file.Index, true);
+        return Task.CompletedTask;
     }
 
     public void PlayLocal(string path, string title) =>

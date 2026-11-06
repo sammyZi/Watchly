@@ -125,8 +125,12 @@ public sealed class PlayerView : UserControl, IDisposable
     bool searchingSubs;
     /// <summary>Everything that is not in the bottom row — the phone's More sheet.</summary>
     bool more;
-    bool SheetOpen => picking || searchingSubs || more;
-    void CloseSheets() => picking = searchingSubs = more = false;
+    bool SheetOpen => picking || searchingSubs || more || episodesOpen;
+    void CloseSheets() => picking = searchingSubs = more = episodesOpen = false;
+    /// <summary>The show this is an episode of, once its episode list is in, and the season on show in the list.</summary>
+    Core.Title? series;
+    int? seriesSeason;
+    bool episodesOpen;
     bool dismissedNext;
     /// <summary>IntroDB's window for this episode, once it answers.</summary>
     Intro? intro;
@@ -230,6 +234,7 @@ public sealed class PlayerView : UserControl, IDisposable
         // Picture mode and speed carry over from the last video (volume already does).
         scaleIdx = Math.Max(0, Array.FindIndex(Scales, s => s.Label == shell.Settings.PlayerScale));
         if (Rates.Contains(shell.Settings.PlaybackRate)) rate = shell.Settings.PlaybackRate;
+        LoadSeries();
         video.Content = overlay;
         Content = video;
 
@@ -289,11 +294,12 @@ public sealed class PlayerView : UserControl, IDisposable
         _ = LoadIntro();
     }
 
-    /// <summary>This episode's intro, from IntroDB. A film has no recurring titles.</summary>
+    /// <summary>This episode's or film's intro.</summary>
     async Task LoadIntro()
     {
-        if (request.Imdb is not { Length: > 0 } imdb || PlayingEp is not { } at) return;
-        intro = await IntroDb.Find(imdb, at.Season, at.Episode);
+        if (request.Imdb is not { Length: > 0 } imdb) return;
+        if (PlayingEp is { } at) intro = await IntroDb.Find(imdb, at.Season, at.Episode);
+        else if (request.Kind == "movie") intro = await IntroDb.Find(imdb);
         if (!disposed && intro is not null) Render();
     }
 
@@ -824,12 +830,92 @@ public sealed class PlayerView : UserControl, IDisposable
         RequestExit();
     }
 
+    async void LoadSeries()
+    {
+        if (request.GoEpisode is null || request.Kind != "tv" || request.Imdb is not { } imdb) return;
+        var show = await Meta.LoadTitle(imdb, "tv");
+        if (show is not { Episodes.Count: > 0 }) return;
+        series = show;
+        // Later, not here: from the cache this runs before the player has finished being built.
+        _ = Dispatcher.BeginInvoke(Render, System.Windows.Threading.DispatcherPriority.Background);
+    }
+
+    /// <summary>Every episode of the show by season, the one playing in view; picking one plays it.</summary>
+    FrameworkElement EpisodeSheet()
+    {
+        var show = series!;
+        var at = Meta.IndexOfEpisode(show.Episodes, request.Title, request.Title);
+        var playing = at >= 0 ? show.Episodes[at] : null;
+        // Specials after the seasons.
+        var seasons = show.Episodes.Select(e => e.Season).Distinct().OrderBy(s => s == 0 ? int.MaxValue : s).ToList();
+        var season = seriesSeason ?? playing?.Season ?? seasons[0];
+        var seen = shell.EpisodeProgress(show.Episodes);
+        var chips = new WrapPanel { Margin = new Thickness(0, 8, 0, 6) };
+        if (seasons.Count > 1)
+            foreach (var s in seasons)
+            {
+                var chip = Controls.Ui.Chip(s == 0 ? "Specials" : $"Season {s}", s == season, () => { seriesSeason = s; Render(); });
+                chip.Margin = new Thickness(0, 0, 8, 6);
+                chips.Children.Add(chip);
+            }
+        var shown = show.Episodes.Where(e => e.Season == season).ToList();
+        const double RowHeight = 84;
+        var rows = new StackPanel();
+        foreach (var ep in shown)
+        {
+            var art = new Grid { Width = 128, Height = 72, Children = { Controls.Ui.Art(ep.Thumbnail ?? show.Wide, ep.Name, 128, 72, 6) } };
+            if (seen.GetValueOrDefault(ep.Id) is > 0 and var part)
+            {
+                var bar = Controls.Ui.Bar(part);
+                bar.VerticalAlignment = VerticalAlignment.Bottom;
+                art.Children.Add(bar);
+            }
+            var here = ep.Id == playing?.Id;
+            var name = WText($"{ep.Number}. {ep.Name}", 14, Brushes.White, FontWeights.SemiBold);
+            name.TextWrapping = TextWrapping.Wrap;
+            name.MaxHeight = 40;
+            name.TextTrimming = TextTrimming.CharacterEllipsis;
+            var words = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0), Children = { name } };
+            if (here) words.Children.Add(WText("Now playing", 12, White(0xb0)));
+            var dock = new DockPanel();
+            DockPanel.SetDock(art, Dock.Left);
+            dock.Children.Add(art);
+            dock.Children.Add(words);
+            var row = Controls.Ui.Button(new Border { Height = RowHeight, Padding = new Thickness(6), CornerRadius = new CornerRadius(8), Background = here ? White(0x1f) : Brushes.Transparent, Child = dock }, () => PlayEpisode(ep));
+            row.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+            rows.Children.Add(row);
+        }
+        var list = new ScrollViewer { MaxHeight = Math.Max(160, ActualHeight / ControlsScale - 280), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = rows };
+        var index = shown.FindIndex(e => e.Id == playing?.Id);
+        if (index > 0) list.Loaded += (_, _) => list.ScrollToVerticalOffset(index * RowHeight);
+        return SheetBox(new StackPanel
+        {
+            Width = 400,
+            Margin = new Thickness(10),
+            Children = { WText("Episodes", 18, Brushes.White, FontWeights.Bold), chips, list },
+        });
+    }
+
+    void PlayEpisode(Episode ep)
+    {
+        CloseSheets();
+        Render();
+        if (request.GoEpisode is not { } go || series is not { } show) return;
+        if (Meta.IndexOfEpisode(show.Episodes, request.Title, request.Title) is >= 0 and var at && show.Episodes[at].Id == ep.Id) return;
+        Leave(() => go(show, ep));
+    }
+
     void PlayNext()
     {
         if (request.Next is not { } next) return;
+        Leave(next.Go);
+    }
+
+    /// <summary>On to another episode.</summary>
+    void Leave(Func<Task> go)
+    {
         SavePosition();
         dismissedNext = true;
-        var go = next.Go;
         var wasFullscreen = fullscreen;
         // Hand the screen back first: if the next episode has to be searched for
         // and nothing turns up, the page underneath is where that is said.
@@ -1987,6 +2073,14 @@ public sealed class PlayerView : UserControl, IDisposable
                 picking = open;
                 Render();
             }));
+            if (series is not null) actions.Children.Add(Action("list", "Episodes", episodesOpen, () =>
+            {
+                var open = !episodesOpen;
+                CloseSheets();
+                episodesOpen = open;
+                seriesSeason = null;
+                Render();
+            }));
             if (request.Next is not null) actions.Children.Add(Action("skip-forward", "Next Episode", false, PlayNext));
             actions.Children.Add(Action("more-horizontal", "More", more, () =>
             {
@@ -2005,6 +2099,7 @@ public sealed class PlayerView : UserControl, IDisposable
 
         if (picking) chrome.Children.Add(TrackSheet());
         if (more) chrome.Children.Add(MoreSheet());
+        if (episodesOpen && series is not null) chrome.Children.Add(EpisodeSheet());
         if (searchingSubs) chrome.Children.Add(SearchSheet());
         if (PauseCard)
         {

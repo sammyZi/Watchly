@@ -330,6 +330,8 @@ class TorrentStream(
     private var lastDropAt = 0L
     /** The fetch stays narrow until then; see [NARROW_HOLD_MS]. */
     private var narrowUntil = 0L
+    /** The width of the narrow fetch; see [steadyWidth]. */
+    private var narrowWidth = 0
 
     /** Last metadata, valid only while its torrent is still in the session (see forgetMeta). */
     private var cachedUri: String? = null
@@ -892,6 +894,7 @@ class TorrentStream(
         lastKickAt = 0L
         lastDropAt = 0L
         narrowUntil = 0L
+        narrowWidth = 0
 
         // Sidecar subs for this file only — a pack can hold hundreds.
         val dir = files.filePath(index).replace("\\", "/").substringBeforeLast("/", "")
@@ -1174,7 +1177,7 @@ class TorrentStream(
         val starving = clock < narrowUntil
         val width = when {
             !announcedReady || focus -> 0
-            starving -> maxOf(2, reach)
+            starving -> steadyWidth(narrowWidth, maxOf(2, reach)).also { narrowWidth = it }
             else -> maxOf(2, (readaheadBytes / pieceLen).toInt())
         }
         val back = if (!announcedReady || starving || focus) 0 else maxOf(8, (REWIND_BYTES / pieceLen).toInt())

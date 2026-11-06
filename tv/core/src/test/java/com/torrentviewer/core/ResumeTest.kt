@@ -55,6 +55,14 @@ class ResumeTest {
         assertEquals(emptyList<String>(), stalledPeers(List(60) { PeerLoad("10.0.0.$it", 0, 0) }, 60))
     }
 
+    @Test fun aNarrowFetchHoldsItsWidthThroughSmallChanges() {
+        assertEquals(8, steadyWidth(8, 9))
+        assertEquals(8, steadyWidth(8, 6))
+        assertEquals(12, steadyWidth(8, 12))
+        assertEquals(4, steadyWidth(8, 4))
+        assertEquals(9, steadyWidth(0, 9))
+    }
+
     @Test fun inASlowSwarmEveryoneIsSlowAndNobodyIsStalled() {
         // Batman Begins: 470kB/s from 61 peers, all under 32KB/s, and these are the peers sending the film.
         assertEquals(emptyList<String>(), stalledPeers(List(61) { PeerLoad("10.0.0.$it", 2, 5_000 + it * 100) }, 61))

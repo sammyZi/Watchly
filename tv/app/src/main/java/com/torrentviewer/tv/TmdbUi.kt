@@ -89,7 +89,7 @@ private fun TmdbCard.asTitle() = Title("", kind, title, year = year, poster = po
 
 /** The cast from TMDB: real photos, who each one plays, and OK through to what else they're in. */
 @Composable
-fun PeopleRail(people: List<CastMember>, onPerson: ((CastMember) -> Unit)?, requester: FocusRequester?, modifier: Modifier = Modifier) {
+fun PeopleRail(people: List<CastMember>, onPerson: ((CastMember) -> Unit)?, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth()) {
         Text("Cast", Modifier.padding(start = ORDER_LEFT, bottom = 12.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
         CompositionLocalProvider(LocalBringIntoViewSpec provides rememberEdgeScroll(ORDER_ROW_LEAD)) {
@@ -98,9 +98,9 @@ fun PeopleRail(people: List<CastMember>, onPerson: ((CastMember) -> Unit)?, requ
                 contentPadding = PaddingValues(start = ORDER_ROW_LEAD, end = Safe.x),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                itemsIndexed(people, key = { _, it -> it.id }) { i, person ->
+                itemsIndexed(people, key = { _, it -> it.id }) { _, person ->
                     Column(Modifier.width(112.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Focusable({ onPerson?.invoke(person) }, Modifier.size(96.dp), CircleShape, 1.08f, requester = if (i == 0) requester else null) {
+                        Focusable({ onPerson?.invoke(person) }, Modifier.size(96.dp), CircleShape, 1.08f) {
                             Box(Modifier.fillMaxSize().clip(CircleShape).background(Ink.surface2), contentAlignment = Alignment.Center) {
                                 Text(person.name.split(' ').mapNotNull { it.firstOrNull()?.uppercase() }.take(2).joinToString(""), style = Type.label.copy(fontWeight = FontWeight.Bold, color = Ink.muted))
                                 person.photo?.let { Artwork(it, person.name, Modifier.fillMaxSize(), fill = false) }
@@ -117,7 +117,7 @@ fun PeopleRail(people: List<CastMember>, onPerson: ((CastMember) -> Unit)?, requ
 
 /** "More like this", from TMDB's recommendations. */
 @Composable
-fun SimilarRail(cards: List<TmdbCard>, onOpen: (Title) -> Unit, requester: FocusRequester?, modifier: Modifier = Modifier) {
+fun SimilarRail(cards: List<TmdbCard>, onOpen: (Title) -> Unit, modifier: Modifier = Modifier) {
     val open = rememberCardOpener(onOpen)
     Column(modifier.fillMaxWidth()) {
         Text("More like this", Modifier.padding(start = ORDER_LEFT, bottom = 12.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
@@ -127,8 +127,8 @@ fun SimilarRail(cards: List<TmdbCard>, onOpen: (Title) -> Unit, requester: Focus
                 contentPadding = PaddingValues(start = ORDER_ROW_LEAD, end = Safe.x),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                itemsIndexed(cards, key = { _, it -> "${it.kind}:${it.id}" }) { i, card ->
-                    PosterCard(card.asTitle(), { open(card) }, sub = card.year, requester = if (i == 0) requester else null)
+                itemsIndexed(cards, key = { _, it -> "${it.kind}:${it.id}" }) { _, card ->
+                    PosterCard(card.asTitle(), { open(card) }, sub = card.year)
                 }
             }
         }

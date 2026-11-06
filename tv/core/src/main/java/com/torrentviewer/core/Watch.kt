@@ -455,6 +455,9 @@ class Watch(val engine: TorrentStream) {
         return episodeOfFile(title?.episodes ?: return null, f.name, folder)
     }
 
+    /** The file of this torrent that is [ep]: the largest, as a pack's extras can carry its number too. */
+    fun fileOf(ep: Episode): TorrentFile? = meta?.files?.filter { it.isVideo && episodeOf(it)?.id == ep.id }?.maxByOrNull { it.size }
+
     /**
      * The episode [file] is, for the player's heading and Up Next: by its name, else — one file, such as an
      * addon's link named "1080p" — the episode it was played as.

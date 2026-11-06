@@ -240,6 +240,16 @@ class LibTest {
         assertEquals("Show.S01E01.mkv", prevEpisode(season, 1)?.name)
         assertEquals("Show.S01E10.mkv", prevEpisode(season, 3)?.name)
         assertNull(prevEpisode(season, 2))
+
+        // Chernobyl's pack: a short extra numbered like each episode, in a folder saying the season.
+        fun inPack(i: Int, name: String, size: Long) = TorrentFile(i, "Chernobyl Season 1/$name", name, size, true, false)
+        val extras = listOf(
+            inPack(0, "Chernobyl - S01E01 - 1.23.45.mkv", 2_400_000_000), inPack(1, "Elements of Chernobyl Episode 1.mkv", 28_000_000),
+            inPack(2, "Chernobyl - S01E02 - Please Remain Calm.mkv", 2_600_000_000), inPack(3, "Elements of Chernobyl Episode 2.mkv", 29_000_000),
+        )
+        assertEquals(2, nextEpisode(extras, 0)?.index)
+        assertEquals(0, prevEpisode(extras, 2)?.index)
+        assertEquals(2, nextEpisode(extras, 1)?.index)
     }
 
     @Test fun anime() {
@@ -601,6 +611,17 @@ class LibTest {
         assertNull(parseIntroDb("""{"recap":{"start_sec":0,"end_sec":79}}"""))
         assertNull(parseIntroDb("""{"intro":{"start_sec":90,"end_sec":90}}"""))
         assertNull(parseIntroDb("not json"))
+    }
+
+    @Test fun theIntroDbAnswer() {
+        assertEquals(Intro(314.528, 331.101), parseTheIntroDb("""{"tmdb_id":1396,"intro":[{"start_ms":314528,"end_ms":331101}],"credits":[{"start_ms":2847619,"end_ms":null}]}"""))
+        // A film's logos: from the very start.
+        assertEquals(Intro(0.0, 38.0), parseTheIntroDb("""{"type":"movie","intro":[{"start_ms":null,"end_ms":38000}]}"""))
+        // Only credits, an intro with no end, junk.
+        assertNull(parseTheIntroDb("""{"credits":[{"start_ms":3426502,"end_ms":null}]}"""))
+        assertNull(parseTheIntroDb("""{"intro":[{"start_ms":5000,"end_ms":null}]}"""))
+        assertNull(parseTheIntroDb("""{"intro":[]}"""))
+        assertNull(parseTheIntroDb("not json"))
     }
 
     @Test fun continuesFromLastWatched() {

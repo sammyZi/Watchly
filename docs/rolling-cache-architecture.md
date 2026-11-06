@@ -179,7 +179,8 @@ Each of these was tuned on a real swarm:
   dropping 20 of the ones sending the film left 13 peers at 155 kB/s.
 - Focus stops at 8 blocks, and narrowing holds for 10 s, because a film the swarm
   could barely keep up with otherwise switched the read-ahead off and on for every
-  piece.
+  piece. The narrow width keeps until the rate moves it by over a quarter
+  (`steadyWidth`), as each new width clears every deadline.
 
 ### Other watchdogs
 

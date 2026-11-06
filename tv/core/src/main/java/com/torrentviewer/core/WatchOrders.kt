@@ -1,8 +1,10 @@
 package com.torrentviewer.core
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -73,13 +75,15 @@ object Tmdb {
     suspend fun title(imdb: String, kind: String): TmdbTitle? {
         if (key.isEmpty()) return null
         titles[imdb]?.let { return it }
-        return runCatching {
-            val found = JSONObject(get("/find/$imdb?external_source=imdb_id"))
-            val tv = kind == "tv"
-            val id = found.optJSONArray(if (tv) "tv_results" else "movie_results")?.optJSONObject(0)?.optInt("id") ?: return null
-            val json = get(if (tv) "/tv/$id?append_to_response=credits,content_ratings,recommendations" else "/movie/$id?append_to_response=credits,release_dates,recommendations")
-            parseTmdbTitle(json, if (tv) "tv" else "movie").also { titles[imdb] = it }
-        }.getOrNull()
+        return withContext(Dispatchers.Default) {
+            runCatching {
+                val found = JSONObject(get("/find/$imdb?external_source=imdb_id"))
+                val tv = kind == "tv"
+                val id = found.optJSONArray(if (tv) "tv_results" else "movie_results")?.optJSONObject(0)?.optInt("id") ?: return@withContext null
+                val json = get(if (tv) "/tv/$id?append_to_response=credits,content_ratings,recommendations" else "/movie/$id?append_to_response=credits,release_dates,recommendations")
+                parseTmdbTitle(json, if (tv) "tv" else "movie").also { titles[imdb] = it }
+            }.getOrNull()
+        }
     }
 
     private val people = java.util.concurrent.ConcurrentHashMap<Int, TmdbPerson>()
@@ -90,7 +94,9 @@ object Tmdb {
     suspend fun person(id: Int): TmdbPerson? {
         if (key.isEmpty()) return null
         people[id]?.let { return it }
-        return runCatching { parseTmdbPerson(get("/person/$id?append_to_response=combined_credits")).also { people[id] = it } }.getOrNull()
+        return withContext(Dispatchers.Default) {
+            runCatching { parseTmdbPerson(get("/person/$id?append_to_response=combined_credits")).also { people[id] = it } }.getOrNull()
+        }
     }
 
     /** What the app knows a card by; null if TMDB has none for it, and it can't be opened. */
@@ -112,7 +118,7 @@ object Tmdb {
         runCatching { JSONObject(Kv.global(slot(imdb)) ?: "") }.getOrNull()?.takeIf { System.currentTimeMillis() - it.optLong("at") < KEEP_MS }?.let { kept ->
             return if (kept.has("id")) WatchOrder(kept.getString("id"), kept.getString("name"), kept.strings("films"), more = kept.optBoolean("more"), fromTmdb = true) else null
         }
-        return runCatching { fetch(imdb).also { keep(imdb, it) } }.getOrNull()
+        return withContext(Dispatchers.Default) { runCatching { fetch(imdb).also { keep(imdb, it) } }.getOrNull() }
     }
 
     private suspend fun fetch(imdb: String): WatchOrder? {

@@ -120,14 +120,17 @@ public static class Pick
     {
         var list = files.ToList();
         var playing = list.FirstOrDefault(f => f.Index == index);
-        if (playing is null || EpisodeKey(playing) is null) return null;
+        if (playing is null || EpisodeKey(playing) is not { } here) return null;
+        // One file per episode, the largest: a pack's extras can carry its numbers. Chernobyl's 28 MB
+        // "Elements of Chernobyl Episode 1" sat between the episodes, so Next opened episode 1 again.
         var ordered = list
             .Where(f => f.IsVideo && !Junk.IsMatch(f.Name))
             .Select(f => (File: f, At: EpisodeKey(f)))
             .Where(e => e.At is not null)
+            .GroupBy(e => e.At!.Value).Select(g => g.MaxBy(e => e.File.Size))
             .OrderBy(e => e.At!.Value.Season).ThenBy(e => e.At!.Value.Episode)
             .ToList();
-        var at = ordered.FindIndex(e => e.File.Index == index);
+        var at = ordered.FindIndex(e => e.At == here);
         return at < 0 || at + 1 >= ordered.Count ? null : ordered[at + 1].File;
     }
 

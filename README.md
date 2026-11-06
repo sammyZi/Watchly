@@ -142,7 +142,7 @@ online subtitles. Without them those features are simply left out.
 | 🎞️ Players | [AndroidX Media3](https://github.com/androidx/media) with the [Jellyfin FFmpeg decoder](https://github.com/jellyfin/jellyfin-androidx-media) · [VLC / libVLC](https://www.videolan.org/vlc/libvlc.html) and [LibVLCSharp](https://github.com/videolan/libvlcsharp) |
 | 🎨 Look | [Jetpack Compose](https://developer.android.com/jetpack/compose) · [Coil](https://github.com/coil-kt/coil) · [Lucide](https://lucide.dev) icons |
 | 🗂️ Titles &amp; art | [Cinemeta](https://v3-cinemeta.strem.io), Stremio's public catalogue · [TVmaze](https://www.tvmaze.com) episode stills · [TMDB](https://www.themoviedb.org) suggestions, cast, age ratings and collections |
-| ⏭️ Intros | [IntroDB](https://introdb.app) |
+| ⏭️ Intros | [IntroDB](https://introdb.app) · [TheIntroDB](https://theintrodb.org) |
 | 💬 Subtitles | Subtitle addons you add · [SubDL](https://subdl.com) with your own free key |
 | 🔗 Peer streams | For addons that send them: [libtorrent](https://libtorrent.org) via [libtorrent4j](https://github.com/aldenml/libtorrent4j) on Android · [MonoTorrent](https://github.com/alanmcgovern/monotorrent) on Windows |
 

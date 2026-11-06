@@ -35,10 +35,16 @@ object Kv {
     private var profile = ""
     private var guest = false
     private val memory = HashMap<String, String>()
+    private lateinit var cacheDir: java.io.File
 
     fun init(context: Context) {
         if (::prefs.isInitialized) return
         prefs = context.getSharedPreferences("watchly", Context.MODE_PRIVATE)
+        cacheDir = java.io.File(context.filesDir, "meta-cache").apply { mkdirs() }
+        // What older builds kept here. Once gone this finds nothing.
+        prefs.all.keys.filter { it.startsWith("meta:") }.takeIf { it.isNotEmpty() }?.let { old ->
+            prefs.edit().apply { old.forEach(::remove) }.apply()
+        }
         importExpo(context)
         Secrets.init(context)
         TorBox.load()
@@ -72,6 +78,23 @@ object Kv {
 
     fun setGlobal(key: String, value: String?) {
         prefs.edit().apply { if (value == null) remove(key) else putString(key, value) }.apply()
+    }
+
+    private fun cacheFile(key: String) =
+        java.io.File(cacheDir, java.security.MessageDigest.getInstance("SHA-1").digest(key.toByteArray()).joinToString("") { "%02x".format(it) })
+
+    /**
+     * Big and rebuilt from the network: a file each. The prefs rewrite everything they hold on every
+     * change, so with shelves in them each saved resume point serialised megabytes on a 2GB TV.
+     */
+    fun cached(key: String): String? = runCatching { cacheFile(key).takeIf { it.exists() }?.readText() }.getOrNull()
+
+    fun cache(key: String, value: String) {
+        runCatching {
+            val file = cacheFile(key)
+            val fresh = java.io.File(file.path + ".new").apply { writeText(value) }
+            fresh.renameTo(file)
+        }
     }
 
     fun wipeProfile(id: String) {
@@ -605,6 +628,14 @@ internal fun prerollTargets(first: Int, start: Int, count: Int, last: Int): List
 internal fun readyToOpen(head: Long, headNeed: Long, start: Long, startNeed: Long, resuming: Boolean): Boolean =
     head >= headNeed && (resuming || start >= startNeed)
 
+/**
+ * The width of a narrow fetch: the one in use ([held]) until [wanted] is more than a quarter off it.
+ * Wanted follows the download rate, and each new width re-applies the zone, which clears every deadline:
+ * a 4K film went 15..24, 15..25, 15..26 and so on, 53 times in two minutes. Calibration knob.
+ */
+internal fun steadyWidth(held: Int, wanted: Int): Int =
+    if (held > 0 && wanted >= held * 3 / 4 && wanted <= held * 5 / 4) held else wanted
+
 /** One connected peer: what it has been asked for, and what it is delivering. */
 internal data class PeerLoad(val ip: String, val queued: Int, val bytesPerSecond: Int)
 
@@ -836,28 +867,37 @@ object Intros {
 }
 
 /**
- * IntroDB (introdb.app): community-submitted intro windows per episode, by IMDb id.
- * Reads need no key; an episode nobody has timed answers 404, which is cached like a hit.
+ * Community-submitted intro windows by IMDb id, from IntroDB (introdb.app) and TheIntroDB
+ * (theintrodb.org), neither needing a key. Each has what the other lacks: of 90 episodes tried
+ * they timed 51 and 57, and 72 between them. TheIntroDB also has films, with no season asked for.
  */
 object IntroDb {
     private const val BASE = "https://api.introdb.app"
-    private val cache = HashMap<String, Intro?>()
+    private const val THE_INTRO_DB = "https://api.theintrodb.org/v2/media"
+    private val cache = HashMap<String, Intro>()
 
-    suspend fun intro(imdb: String, season: Int, episode: Int): Intro? {
+    private suspend fun ask(url: String, parse: (String) -> Intro?): Intro? =
+        runCatching { parse(Net.get(url, timeoutMs = 8000, quiet = true)) }.getOrNull()
+
+    suspend fun intro(imdb: String, season: Int? = null, episode: Int? = null): Intro? {
         if (!imdb.startsWith("tt")) return null
         val key = "$imdb:$season:$episode"
-        synchronized(cache) { if (key in cache) return cache[key] }
-        val found = try {
-            parseIntroDb(Net.get("$BASE/segments?imdb_id=${enc(imdb)}&season=$season&episode=$episode", timeoutMs = 8000, quiet = true))
-        } catch (e: HttpException) {
-            if (e.code != 404) return null
-            null
-        } catch (e: Exception) {
-            return null
-        }
-        synchronized(cache) { cache[key] = found }
+        synchronized(cache) { cache[key]?.let { return it } }
+        val at = if (season == null) "" else "&season=$season&episode=$episode"
+        val found = (if (season == null) null else ask("$BASE/segments?imdb_id=${enc(imdb)}$at", ::parseIntroDb))
+            ?: ask("$THE_INTRO_DB?imdb_id=${enc(imdb)}$at", ::parseTheIntroDb)
+        if (found != null) synchronized(cache) { cache[key] = found }
         return found
     }
+}
+
+/** The first "intro" of a TheIntroDB answer. A start of null is the very beginning; an end of null isn't a window. */
+fun parseTheIntroDb(json: String): Intro? {
+    val seg = runCatching { JSONObject(json).optJSONArray("intro")?.optJSONObject(0) }.getOrNull() ?: return null
+    if (seg.isNull("end_ms")) return null
+    val start = if (seg.isNull("start_ms")) 0.0 else seg.optDouble("start_ms") / 1000
+    val end = seg.optDouble("end_ms") / 1000
+    return if (start >= 0 && end > start) Intro(start, end) else null
 }
 
 /** The "intro" segment of a /segments answer, in seconds (start_sec, else start_ms). */

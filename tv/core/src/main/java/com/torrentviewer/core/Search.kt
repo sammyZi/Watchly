@@ -526,11 +526,14 @@ private fun episodeKey(f: TorrentFile): Ep? =
 /** The episode [step] places from the one playing, in broadcast order, same torrent only. */
 fun siblingEpisode(files: List<TorrentFile>, index: Int, step: Int): TorrentFile? {
     val playing = files.find { it.index == index } ?: return null
-    if (episodeKey(playing) == null) return null
+    val here = episodeKey(playing) ?: return null
+    // One file per episode, the largest: a pack's extras can carry its numbers. Chernobyl's 28MB
+    // "Elements of Chernobyl Episode 1" sat between the episodes, so Next opened episode 1 again.
     val ordered = files.filter { it.isVideo && !JUNK.containsMatchIn(it.name) }
         .mapNotNull { f -> episodeKey(f)?.let { f to it } }
+        .groupBy { it.second }.values.map { same -> same.maxBy { it.first.size } }
         .sortedWith(compareBy({ it.second.season }, { it.second.episode }))
-    val at = ordered.indexOfFirst { it.first.index == index }
+    val at = ordered.indexOfFirst { it.second == here }
     if (at < 0) return null
     return ordered.getOrNull(at + step)?.first
 }

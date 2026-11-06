@@ -48,5 +48,5 @@ of their content is part of this repository, and it belongs to its respective ow
 | [Cinemeta](https://v3-cinemeta.strem.io) (Stremio) | Film and series catalogues, details and artwork |
 | [TVmaze](https://www.tvmaze.com) | Episode stills · API licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
 | [Wikipedia](https://www.wikipedia.org) | Cast photos (freely licensed images only) |
-| [IntroDB](https://introdb.app) | Intro timings for Skip intro |
+| [IntroDB](https://introdb.app), [TheIntroDB](https://theintrodb.org) | Intro timings for Skip intro |
 | [SubDL](https://subdl.com) | Subtitles, with your own key |

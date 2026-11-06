@@ -152,6 +152,9 @@ fun Lc(@DrawableRes icon: Int, modifier: Modifier = Modifier, tint: Color = Ink.
 
 private val ART_HEADERS = NetworkHeaders.Builder().set("User-Agent", "WatchlyTV/2").build()
 
+/** How long a picture fades in. The TV sets 0: each fading card is a redraw per frame, a row at a time. */
+var ArtFadeMs = 300
+
 /** A network image over a placeholder tinted from the name. */
 @Composable
 /** [fill]: a placeholder under the picture — skipped where the picture covers it anyway and the fill is pure GPU cost. */
@@ -166,7 +169,7 @@ fun Artwork(url: String?, name: String, modifier: Modifier = Modifier, scale: Co
             var src by remember(url) { mutableStateOf(url) }
             AsyncImage(
                 // Wikimedia answers OkHttp's own User-Agent with 403: without this, no cast photo loads.
-                model = remember(src) { ImageRequest.Builder(context).data(src).httpHeaders(ART_HEADERS).crossfade(300).build() },
+                model = remember(src) { ImageRequest.Builder(context).data(src).httpHeaders(ART_HEADERS).crossfade(ArtFadeMs).build() },
                 onError = { if (fallback != null && src != fallback) src = fallback },
                 placeholder = if (fill) remember { ColorPainter(Ink.surface) } else null,
                 contentDescription = name,

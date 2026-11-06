@@ -224,14 +224,12 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     val page = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     Box(Modifier.fillMaxSize()) {
-        // One page at a time, faded in. A cross-fade kept the old page composed for the
-        // length of the fade, and its focus claims fought the new page's.
+        // One page at a time, and no fade: a page's alpha draws the whole screen offscreen for
+        // every frame of it, which this TV's GPU can't do at speed, just as the page is busiest.
         val pageKey = top?.key ?: tab.name
         key(pageKey) {
-            val alpha = remember { Animatable(0f) }
-            LaunchedEffect(Unit) { alpha.animateTo(1f, tween(220)) }
             Box(
-                Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha.value }
+                Modifier.fillMaxSize()
                     .focusRequester(page)
                     .focusRestorer()
                     .focusGroup()

@@ -57,6 +57,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -177,7 +180,7 @@ private fun delta(seconds: Double): String {
 
 private enum class Band { SLIDER, TRANSPORT }
 
-private enum class Panel { TRACKS, SPEED, ASPECT, FIND, LANG }
+private enum class Panel { TRACKS, SPEED, ASPECT, FIND, LANG, EPISODES }
 
 @Composable
 fun PlayerScreen(watch: Watch) {
@@ -289,6 +292,27 @@ private fun Player(watch: Watch) {
         if (next == null || advanced) return
         advanced = true
         watch.playSibling(next)
+    }
+
+    /** Picked from the list: from this torrent if it holds the episode, else found online. */
+    fun playEpisode(ep: Episode) {
+        closePanel()
+        if (advanced || ep.id == episode?.id) return
+        val t = title ?: return
+        advanced = true
+        if (at > 0) watch.savePosition(at)
+        watch.fileOf(ep)?.let { return watch.playSibling(it) }
+        val tag = episodeTag(ep.season, ep.episode)
+        say("Finding $tag…")
+        scope.launch {
+            val hit = runCatching { searchEpisode(t, ep.season, ep.episode) }.getOrNull()?.firstOrNull()
+            if (hit == null) {
+                watch.notes.tryEmit("No sources found for $tag.")
+                advanced = false
+            } else {
+                watch.stream(hit, t, tag, ep)
+            }
+        }
     }
 
     val seeking = remember { mutableStateOf<Seeking?>(null) }
@@ -427,7 +451,7 @@ private fun Player(watch: Watch) {
         goNext()
     }
 
-    // This episode's intro: IntroDB's window once it answers; until then, one marked before. A film has none.
+    // This episode's or film's intro, once it's answered for; until then, one marked before.
     val introKey = remember(title, file) {
         if (title?.isSeries == true || parseEpisode(file?.name.orEmpty()) != null) title?.imdb ?: watch.item?.imdb ?: title?.title else null
     }
@@ -435,8 +459,9 @@ private fun Player(watch: Watch) {
     val imdb = title?.imdb ?: watch.item?.imdb
     val introEp = remember(episode, file) { episode?.let { Ep(it.season, it.episode) } ?: parseEpisode(file?.name.orEmpty()) }
     LaunchedEffect(imdb, introEp) {
-        if (introKey == null || imdb == null || introEp == null) return@LaunchedEffect
-        IntroDb.intro(imdb, introEp.season, introEp.episode)?.let { intro = it }
+        if (imdb == null) return@LaunchedEffect
+        val found = if (introEp != null) IntroDb.intro(imdb, introEp.season, introEp.episode) else if (title?.isSeries == false) IntroDb.intro(imdb) else null
+        found?.let { intro = it }
     }
     val skipIntro by remember { derivedStateOf { intro?.covers(at) == true && loaded } }
     fun skipPastIntro() = intro?.let { seekTo(it.end) }
@@ -669,6 +694,7 @@ private fun Player(watch: Watch) {
                             }
                             watch.prev?.let { prev -> Control(L.drawable.lucide_ic_skip_back, "Previous episode", onFocus = toTransport) { watch.playSibling(prev) } }
                             next?.let { Control(L.drawable.lucide_ic_skip_forward, "Next episode", onFocus = toTransport) { goNext() } }
+                            if (title?.episodes.orEmpty().isNotEmpty()) Control(L.drawable.lucide_ic_list, "Episodes", onFocus = toTransport) { panel = Panel.EPISODES }
                             Spacer(Modifier.weight(1f))
                             Control(L.drawable.lucide_ic_captions, "Audio & subtitles", on = subtitle != null, onFocus = toTransport) { panel = Panel.TRACKS }
                             Control(L.drawable.lucide_ic_gauge, "Speed ${rateLabel(rate)}", on = rate != 1f, onFocus = toTransport) { panel = Panel.SPEED }
@@ -828,6 +854,7 @@ private fun Player(watch: Watch) {
                 },
                 onDismiss = { panel = Panel.FIND },
             )
+            Panel.EPISODES -> title?.let { EpisodesPanel(it, episode, ::playEpisode, ::closePanel) }
             null -> Unit
         }
     }
@@ -1324,4 +1351,53 @@ private fun StatsPanel(s: Stats?, progress: Progress?, file: TorrentFile?, durat
             }
         }
     }
+}
+
+/** Every episode of the show down the right of the picture, by season, focus on the one playing; OK plays one. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun EpisodesPanel(title: Title, playing: Episode?, onPlay: (Episode) -> Unit, onDismiss: () -> Unit) {
+    BackHandler(onBack = onDismiss)
+    val history by History.items.collectAsState()
+    val library by WatchedEverywhere.collectAsState(Stremio.library.value)
+    val seen = remember(history, library, title.episodes) { episodeProgress(history, title.imdb, library, title.episodes) }
+    // Specials after the seasons.
+    val seasons = remember(title.episodes) { title.episodes.map { it.season }.distinct().sortedBy { if (it == 0) Int.MAX_VALUE else it } }
+    val start = remember { playing?.season ?: seasons.first() }
+    var season by remember { mutableStateOf(start) }
+    val target = remember { FocusRequester() }
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(440.dp).background(Color.Black.copy(alpha = 0.92f))
+                .padding(start = 20.dp, end = Safe.x, top = Safe.y, bottom = Safe.y),
+        ) {
+            Text("Episodes", Modifier.padding(bottom = 10.dp), style = Type.title.copy(color = Color.White, fontWeight = FontWeight.Bold))
+            if (seasons.size > 1) LazyRow(Modifier.focusRestorer().padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(seasons, key = { it }) { s -> Chip(if (s == 0) "Specials" else "Season $s", s == season, onClick = { season = s }) }
+            }
+            key(season) {
+                val shown = remember { title.episodes.filter { it.season == season } }
+                val aim = shown.indexOfFirst { it.id == playing?.id }.coerceAtLeast(0)
+                androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides rememberMinimalScroll(24.dp)) {
+                    LazyColumn(Modifier.weight(1f).focusRestorer(), state = rememberLazyListState(aim), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        itemsIndexed(shown, key = { _, e -> e.id }) { i, ep ->
+                            Focusable({ onPlay(ep) }, Modifier.fillMaxWidth(), RoundedCornerShape(8.dp), 1.02f, requester = if (i == aim && season == start) target else null) {
+                                Row(Modifier.fillMaxWidth().background(if (ep.id == playing?.id) Color.White.copy(alpha = 0.12f) else Color.Transparent).padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Box(Modifier.width(132.dp).aspectRatio(16f / 9f).clip(RoundedCornerShape(6.dp)).background(Color.Black)) {
+                                        Artwork(ep.thumbnail ?: title.wide, ep.name, Modifier.fillMaxSize(), fill = false)
+                                        seen[Ep(ep.season, ep.episode)]?.takeIf { it > 0 }?.let { ProgressLine(it.toFloat(), Modifier.align(Alignment.BottomStart)) }
+                                    }
+                                    Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                                        Text("${ep.episode}. ${ep.name}", style = Type.label.copy(color = Color.White, fontWeight = FontWeight.SemiBold), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                        if (ep.id == playing?.id) Text("Now playing", Modifier.padding(top = 2.dp), style = Type.meta.copy(color = Color.White.copy(alpha = 0.7f)))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    target.claim()
 }
