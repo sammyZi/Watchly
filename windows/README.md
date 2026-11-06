@@ -16,7 +16,7 @@ the account's addons can be imported.
 | App / UI | .NET 8 + WPF |
 | Player | [LibVLCSharp](https://code.videolan.org/videolan/LibVLCSharp) (VideoLAN's official libVLC binding) — every format VLC plays: HEVC, 10-bit, AV1, EAC3, AC-3, DTS, TrueHD, MKV, AVI; all audio tracks and subtitle formats, GPU decoding |
 | Torrents | [MonoTorrent](https://github.com/alanmcgovern/monotorrent) — streaming (serves the file over a loopback HTTP server with range support, fetching around wherever the player reads) and downloading, one engine for both |
-| Titles, streams, subtitles | Plain HTTP: Cinemeta, your own addons ([Stremio addon protocol](https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/protocol.md)), SubDL, IntroDB |
+| Titles, streams, subtitles | Plain HTTP: Cinemeta, TMDB, your own addons ([Stremio addon protocol](https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/protocol.md)), SubDL, IntroDB |
 
 ## Build and run
 
@@ -85,6 +85,11 @@ DPAPI in `%APPDATA%\Watchly\secrets.bin`, and the addons' links (which can carry
 likewise in `%APPDATA%\Watchly\addons.bin`. A key in `mobile/.env` (`SUBDL_KEY` or
 `EXPO_PUBLIC_SUBDL_KEY`) at build time still works as a fallback.
 
+Picked for you, age ratings, cast pages and film collections need a TMDB key: `TMDB_KEY` in
+`mobile/.env` at build time, embedded in the app's metadata and never committed. Without it they are
+left out. Watch orders read `tv/core`'s `watch-orders.json`, the file the phone and TV use, and the
+IMDb charts need no key.
+
 ### Self-check
 
 ```bash
@@ -110,6 +115,7 @@ name `src/...` files point there.
 | `screens/SearchScreen.tsx` | `Views/SearchView.cs` |
 | `screens/DetailScreen.tsx` | `Views/DetailView.cs` |
 | `screens/CatalogScreen.tsx` | `Views/CatalogView.cs` |
+| Added since, from the Kotlin phone app: Watch orders, Top on IMDb, actor pages | `Views/WatchOrderView.cs`, `Core/WatchOrders.cs` |
 | `screens/HistoryScreen.tsx` + `HistoryRow.tsx` | `Views/LibraryView.cs` |
 | `screens/DownloadsScreen.tsx` + `hooks/useDownloads.ts` | `Views/DownloadsView.xaml` + `Engine/Downloads.cs` |
 | `screens/FilesScreen.tsx` | `Views/FilesView.cs` |

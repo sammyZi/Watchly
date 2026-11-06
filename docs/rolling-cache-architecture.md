@@ -52,13 +52,29 @@ torrent case only.
     │  a poll loop (every 200 ms before the first frame, 500 ms after):
     │  readers → piece zones + deadlines, watchdogs, the rolling cache
     ▼
- Piece data on disk                                <external files>/torrents/
+ Piece data on disk                                <app files>/torrents/
 ```
 
 The player never gets a file path. A partly downloaded file read directly hands
 back zeros where pieces are missing, and the demuxer sees corruption. Over HTTP a
 read for a missing piece simply waits, and every range request tells the engine
 where the player is reading.
+
+### The session
+
+`ensureSession` tunes libtorrent for watching rather than for finishing a download:
+
+| setting | value | why |
+|---|---|---|
+| connections | 200, or 80 under 3 GB of RAM | peers cost native memory; a 2 GB TV with 200 of them and a 4K decoder gets killed |
+| `peer_connect_timeout` | 3 s | a dial in flight counts against the limit, and most tracker peers are dead |
+| `enable_outgoing_utp` | off | uTP backs off whenever the line is busy, and costs a phone more CPU |
+| `whole_pieces_threshold` | 0 | no peer books a whole piece, so every piece is shared among those that have it |
+| `request_timeout` | 4 s | an unanswered block is asked for again; at 20 s a start sat on 255 of 256 blocks |
+| `strict_end_game_mode` | off | an idle peer may also ask for the last blocks another is sitting on |
+| `request_queue_time` | 1 s | an urgent block joins the back of each peer's queue, so a short queue reaches it sooner |
+| `max_out_request_queue` | 1500 | the default of 500 is too shallow for distant fast seeds |
+| `close_redundant_connections` | off | a full read-ahead looks "finished", and libtorrent would drop its seeds |
 
 ---
 
@@ -82,17 +98,22 @@ where the player is reading.
 
    | | rule |
    |---|---|
-   | prepare (pre-roll) | max(the Buffer setting, one piece, bitrate × 3 s up to 24 MB), at most 2 pieces |
-   | readahead | bitrate × 60 s, between 128 MB and 768 MB |
+   | prepare (pre-roll) | the Buffer setting, at most 2 pieces |
+   | readahead | bitrate × 60 s, between 128 MB and 768 MB, and at most half the cap |
    | rush window | max(32 MB, bitrate × 15 s), in pieces |
 
-5. **Pre-roll.** Only what the first frame needs, each its own one-piece zone:
-   the file's first piece (the container header) and the prepare window at the
-   resume point — not at byte 0, because buffering a head the viewer skips is dead
-   time. The first ~2 MB of the tail (Matroska Cues, an MP4 `moov` at the end) is
-   asked for at a distant deadline.
-6. **Ready.** Once the head piece and the prepare window are contiguous on disk,
-   the HTTP server starts and the player gets its URL.
+5. **Pre-roll.** Only what the first frame needs, each its own one-piece zone, in
+   the order the player will ask (`prerollTargets`): the file's first piece (the
+   container header); on a resume its last piece, since a seek can't happen until
+   the player has read the index at the very end (left for later, that one piece
+   cost 10–12 s); then the prepare window at the resume point. The first ~2 MB of
+   the tail (Matroska Cues, an MP4 `moov` at the end) is asked for at a distant
+   deadline.
+6. **Ready** (`readyToOpen`). The player has work of its own before the first
+   picture, so it opens as soon as it can start on that. A new start waits for the
+   head piece and the prepare window; a resume waits for the head piece alone, and
+   a seek aim at the resume point keeps that spot coming while the player reads the
+   header and index. If the player gets there first, the server blocks it.
 
 ---
 
@@ -101,10 +122,13 @@ where the player is reading.
 Every HTTP connection is a **reader** with a byte offset, updated on each pass of
 its copy loop. Each tick turns readers into **targets**:
 
-- The **newest** connection leads: after a seek it is where the picture waits.
 - A reader in the **tail** is the player reading the container index, not
-  playback; it never leads.
+  playback. While that piece is missing it comes first: the player can't seek, or
+  show anything, without it. Once the piece is here it no longer counts.
+- Otherwise the **newest** connection leads: after a seek it is where the picture
+  waits.
 - A reader that closed **lingers 10 s** — players hop between two spots in one file.
+  Those spots lose their share as soon as the player has waited 2 s on its piece.
 - `setPosition(ratio)` plants a **seek aim** before the player reconnects, so a
   resume an hour in does not fetch the head first. It is dropped once a new
   connection reads past the header (16 MB), or after 30 s.
@@ -129,14 +153,38 @@ puts the zone back.
 From each target, `reach` pieces are rushed: as many as the swarm finishes in
 16 s at the current rate, between 2 and the rush window. Each gets `TOP_PRIORITY`
 and a deadline of `rank × 3000 + distance × 300` ms (pre-roll pieces 300 ms apart),
-set once — deadlines are absolute. Deadlines no longer wanted are reset.
+set once — deadlines are absolute. Tail pieces start at 10 s. Deadlines no longer
+wanted are reset.
 
-### Watchdogs
+### When the player waits on a piece
+
+A piece nearly always hangs on its last blocks, each out with one slow peer. A peer
+only doubles up on a block another holds once it has nothing else to ask for, so
+the responses go from gentle to blunt:
+
+| after | condition | response |
+|---|---|---|
+| 1.5 s, then every 1.5 s | every block is done or out with a peer (5 s if blocks are still unasked) | **re-ask**: re-arm that piece alone with `TOP_PRIORITY` and deadline 0, so its blocks go to faster peers too |
+| 1.5 s | 8 blocks or fewer to go | **focus**: that piece is the only one wanted, so idle peers double up on its blocks. 2 MB took 25 s after a seek with read-ahead on offer, and 1–2 s as the only piece wanted. The read-ahead comes back on the next tick |
+| 2 s | blocks still unasked | **narrow**: fetch only the rushed pieces (at least 2) for the next 10 s, as a thin swarm spread over the read-ahead starves the one the player needs. Not while every block is out: narrowing can't speed those up, and an 86 GB remux fell from 14 MB/s to 2 MB/s each time |
+| 5 s, then at most every 5 s | 8 blocks or fewer to go | **drop stalled peers** (`stalledPeers`): up to 4, slowest first, of those holding requests and sending under a quarter of the swarm's typical peer (and under 32 KB/s), never below 40 connected. Disconnecting is the only way to get a block back; an IP filter does it, for 2 minutes |
+
+Each of these was tuned on a real swarm:
+
+- Pausing the torrent instead of re-asking dropped the swarm (71 peers → 18).
+- Dropping peers sooner than 5 s made seeks slower (91 peers → 38), and a small
+  swarm is never thinned, as the holder of a rare piece may be all there is.
+- "Slow" is measured against the swarm, because holding requests means a peer has
+  unchoked us. With a fixed 32 KB/s, every peer of a 470 kB/s swarm counted, and
+  dropping 20 of the ones sending the film left 13 peers at 155 kB/s.
+- Focus stops at 8 blocks, and narrowing holds for 10 s, because a film the swarm
+  could barely keep up with otherwise switched the read-ahead off and on for every
+  piece.
+
+### Other watchdogs
 
 | problem | response |
 |---|---|
-| the piece the player waits on is stuck for 5 s (4 s in pre-roll, once all its blocks are out with peers) | re-arm that piece alone: `TOP_PRIORITY`, deadline 0, so its blocks go to faster peers too. Pausing the torrent instead dropped the swarm (71 peers → 18). It was 20 s, but a 4K player holds only ~8 s of buffer: the TV sat out 20 s on a piece one 16 KB block short, that block out with a single slow peer |
-| waiting on a piece for over 5 s | narrow fetching to the rushed pieces until it lands; a thin swarm spread over the readahead starves the one the player needs |
 | no data at all before the first frame | re-announce every 10 s; give up after 90 s |
 | a file error on the torrent | clear it and carry on |
 | free space under 512 MB | one last roll (see section 4), then stop and clear |
@@ -150,37 +198,50 @@ the free space less 1.5 GB; a fixed size is clamped to that too. The readahead
 never exceeds half the cap.
 
 When the bytes on disk reach the cap — or free space drops under 1.5 GB — and the
-viewer is not in whole-file mode, at most every 30 s:
+viewer is not in whole-file mode, `rollCache` frees what has been watched, in place,
+at most every 30 s. Peers take a good 15 s to come back, so a roll for the cap waits
+until half the read-ahead is on disk to play from; a roll for free space goes
+regardless.
 
 ```
 1. note the earliest reader's offset (or the last one, if all are closed)
-2. copy the metadata, save the peers, clear the deadlines
+2. copy the metadata, save the peers, clear the deadlines, note the pieces held
 3. remove the torrent; wait for libtorrent to let go of it
-4. delete its files
-5. add it again: same metadata, saved peers, same wanted files
-6. aim the new torrent at the noted offset; bump the server's epoch
+4. punch out everything but what is kept (rollCuts)
+5. add it again: same metadata, saved peers, the pieces still held (addKeeping)
+6. reopen the server's readers
 ```
 
-The player's connection survives: its next read blocks until the pieces under the
-playhead arrive again, and the server's epoch makes every reader reopen the file
-(an open handle would keep reading the deleted inode). The cost is one rebuffer —
-a pause of a few seconds — per cap's worth of film.
+`rollCuts` keeps four stretches and frees the rest: the first 8 MB (a player that
+reopens reads the header there), 32 MB behind the earliest reader, the read-ahead
+past the furthest one, and the tail. What lies ahead goes too: after a seek back,
+a stretch left behind further on would keep the cap full and the roll coming round.
+
+Holes are punched by `libholes` (`tv/core/src/main/cpp/holes.c`), which leaves the
+file's size unchanged. The torrent comes back owning the kept pieces through
+`have_pieces`, without hashing the file again, which on a 50 GB film would take
+minutes. While the torrent is away, `rollHave` answers the server's "is this piece
+here?", and pieces leave it before their holes appear, so a reader never gets
+zeros. Playback carries on from the read-ahead while the peers reconnect.
+
+Where a hole can't be punched, the roll falls back to deleting the file and starting
+over at the playhead: one rebuffer per cap's worth of film.
 
 **Whole-file mode** (the player's "Download ahead: whole file") wants every piece
 of the file at LOW outside the zones and stops the rolling, unless the disk runs
-low. For a thin swarm, or to watch on to the end offline.
+low. Not during pre-roll, nor while the player waits on a piece: with LOW pieces
+queued no peer was idle to take over a slow peer's last blocks.
 
-### Why not evict piece by piece
+### Why remove and re-add
 
 libtorrent has no API to forget a piece. Its picker only clears a have-bit on a
-resume-data re-add, a forced recheck or a failed hash; dropping bytes in custom
-storage leaves it believing it still has them, so a backward seek would read
-garbage instead of downloading again. Continuous eviction would need holes punched
-in the file (`fallocate(FALLOC_FL_PUNCH_HOLE)`, NDK only — Java cannot) plus a
-resume-data re-add with a trimmed `have_pieces`, which libtorrent4j does not
-expose. Restarting the torrent at the playhead gets the same bounded disk with
-none of that, at the price of the rebuffer — the trade marked with a `ponytail:`
-note in `rollCache`.
+re-add, a forced recheck or a failed hash. Left alone, the torrent would believe it
+still had the punched pieces, serve zeros to peers, and hand zeros to a backward
+seek. Re-adding with a trimmed `have_pieces` is also what tells peers those pieces
+are gone.
+
+The piece data lives in app-internal storage for this reason: external storage on a
+phone is FUSE, which refuses to punch holes (`EOPNOTSUPP`).
 
 ---
 
@@ -216,7 +277,12 @@ note in `rollCache`.
 - **Resume points** are saved as a time and as the reader's byte position, every
   5 s and on close. The byte position is what pre-roll aims at: a variable-bitrate
   file is not as far through its bytes as through its running time (a resume at
-  39% of the time was at 32% of the bytes).
+  39% of the time was at 32% of the bytes). It is saved less what the player has
+  buffered and a keyframe's worth (`playheadRatio`), since the player reads well
+  ahead of the picture.
+- With no byte position, as for a spot carried over from Stremio, `resumeRatio`
+  works it out from the time and the running time, falling back on the title's own
+  runtime: at 0 an 86 GB resume aimed at the start for its first 35 s.
 
 ---
 
@@ -243,15 +309,15 @@ would not send them.
 
 | where | what | lifetime |
 |---|---|---|
-| `<external files>/torrents/` | piece data of the stream | wiped at launch, on stop, and by a roll |
+| `files/torrents/` | piece data of the stream | wiped at launch and on stop; a roll frees what was watched |
 | `files/torrent-cache/meta/` | `.torrent` files seen before | kept |
 | `files/torrent-cache/peers/` | peers per torrent, so a restart finds them at once | kept |
 | `files/torrent-cache/session.dat` | DHT routing table | kept |
 | `files/torrent-cache/subs/` | downloaded subtitles | until their history entry goes |
 
-Piece data lives in app-specific external storage, not the cache directory:
-Android sweeps cache directories when space runs low, which would truncate the
-film mid-playback.
+Piece data is not in the cache directory: Android sweeps those when space runs low,
+which would truncate the film mid-playback. Nor in external storage, where holes
+can't be punched (section 4). It is the same partition, so the same free space.
 
 ---
 
@@ -266,7 +332,9 @@ The Windows app streams with MonoTorrent and libVLC (`windows/Watchly/Engine/`):
   ~500 KB/s from a swarm that gave qBittorrent 3.8 MB/s.
 - **`WindowedRequester`** wraps it so only a window is fetched — 5 s behind the
   playhead to 5 minutes ahead, moved on the player's tick — and nothing else of
-  the film. "Whole file" lifts the window; so does a download of the same torrent.
+  the film. On a resume the file's last piece comes in alongside, as on Android.
+  "Whole file" lifts the window, 64 pieces at a time; so does a download of the
+  same torrent.
 - There is no cap to roll: the stream's files are deleted when the player closes.
 - Streams come from the viewer's addons here too (`Core/Addons.cs`). A `url`
   stream plays straight in libVLC (`PlayLink` in `MainWindow.xaml.cs`), never
@@ -279,13 +347,17 @@ The Windows app streams with MonoTorrent and libVLC (`windows/Watchly/Engine/`):
 
 | constant | value | in |
 |---|---|---|
-| `PREPARE_SECONDS` / `PREPARE_MAX` | 3 s / 24 MB | `TorrentStream.kt` |
-| `READAHEAD_BYTES` / `READAHEAD_SECONDS` / `READAHEAD_MAX` | 128 MB / 60 s / 768 MB | |
+| `READAHEAD_BYTES` / `READAHEAD_SECONDS` / `READAHEAD_MAX` | 128 MB / 60 s / 768 MB | `TorrentStream.kt` |
 | `WINDOW_BYTES` / `WINDOW_SECONDS` | 32 MB / 15 s | |
 | `REWIND_BYTES` | 32 MB | |
 | `REACH_SECONDS` | 16 s | |
-| `STUCK_PIECE_MS` / `PREROLL_STUCK_MS` / `STARVE_MS` | 5 s / 4 s / 5 s | |
+| `LAST_BLOCKS` / `LAST_BLOCKS_MS` | 8 blocks / 1.5 s | |
+| `STUCK_PIECE_MS` / `STARVE_MS` / `NARROW_HOLD_MS` | 5 s / 2 s / 10 s | |
+| `STALLED_AFTER_MS` / `DROP_MS` | 5 s / 2 min | |
 | `STALL_NO_DATA_MS` / `SHAKE_INTERVAL_MS` | 90 s / 10 s | |
+| `STALLED_BYTES_PER_SECOND` / `STALLED_SHARE` | 32 KB/s / a quarter of the typical peer | `Store.kt` |
+| `MAX_DROPPED_AT_ONCE` / `MIN_PEERS_KEPT` | 4 / 40 | |
+| `ROLL_HEAD_BYTES` | 8 MB | `Holes.kt` |
 | `READER_LINGER_MS` / `SEEK_AIM_MS` / `REOPEN_HEAD_BYTES` | 10 s / 30 s / 16 MB | |
 | `FREE_SPACE_MIN` | 512 MB (rolls under 3×) | |
 | tail fetched | file size / 200, between 2 and 16 MB | `tailBytesFor` |

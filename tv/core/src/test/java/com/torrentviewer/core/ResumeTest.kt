@@ -55,8 +55,18 @@ class ResumeTest {
         assertEquals(emptyList<String>(), stalledPeers(List(60) { PeerLoad("10.0.0.$it", 0, 0) }, 60))
     }
 
-    @Test fun droppingStopsAtEightAndLeavesFortyPeers() {
-        assertEquals(8, stalledPeers(swarm(60, 30), 60).size)
+    @Test fun inASlowSwarmEveryoneIsSlowAndNobodyIsStalled() {
+        // Batman Begins: 470kB/s from 61 peers, all under 32KB/s, and these are the peers sending the film.
+        assertEquals(emptyList<String>(), stalledPeers(List(61) { PeerLoad("10.0.0.$it", 2, 5_000 + it * 100) }, 61))
+    }
+
+    @Test fun aSilentPeerIsStillStalledInASlowSwarm() {
+        val peers = List(60) { PeerLoad("10.0.0.$it", 2, if (it == 0) 0 else 8_000) }
+        assertEquals(listOf("10.0.0.0"), stalledPeers(peers, 60))
+    }
+
+    @Test fun droppingStopsAtFourAndLeavesFortyPeers() {
+        assertEquals(4, stalledPeers(swarm(60, 30), 60).size)
         assertEquals(2, stalledPeers(swarm(42, 42), 42).size)
         assertEquals(emptyList<String>(), stalledPeers(swarm(40, 40), 40))
     }

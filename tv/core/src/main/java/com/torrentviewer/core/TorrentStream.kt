@@ -157,7 +157,12 @@ private const val LAST_BLOCKS_MS = 1_500L
  * from 91 peers to 38, took longer, and the blocks stayed where they were.
  */
 private const val STALLED_AFTER_MS = 5_000L
-private const val LAST_BLOCKS = 32
+/**
+ * A piece this close to done is hanging on its last blocks. Calibration knob: at 32, a quarter of a
+ * 2MB piece, every piece of a film the swarm could barely keep up with counted, and the read-ahead
+ * was switched off for each one, so the next piece started from nothing.
+ */
+private const val LAST_BLOCKS = 8
 /** How long a dropped peer stays out, so it isn't straight back with another block. */
 private const val DROP_MS = 120_000L
 /**
@@ -165,6 +170,12 @@ private const val DROP_MS = 120_000L
  * it has run out, so steady playback never gets here. Calibration knob.
  */
 private const val STARVE_MS = 2_000L
+/**
+ * Having starved, the fetch stays narrow this long past the last wait. Let go with each piece that
+ * landed, it opened to 64 pieces for the 2s until the next wait, the swarm spread over them, and the
+ * zone flipped every couple of seconds. Calibration knob: longer holds a recovering swarm back.
+ */
+private const val NARROW_HOLD_MS = 10_000L
 
 private const val REMOVE_WAIT_MS = 4_000
 
@@ -315,6 +326,10 @@ class TorrentStream(
     /** The index pieces last logged as holding up the player. */
     private var lastIndexWait = emptyList<Int>()
     private var lastKickAt = 0L
+    /** When peers were last dropped: a hanging piece gets one drop per [STALLED_AFTER_MS], not one per re-ask. */
+    private var lastDropAt = 0L
+    /** The fetch stays narrow until then; see [NARROW_HOLD_MS]. */
+    private var narrowUntil = 0L
 
     /** Last metadata, valid only while its torrent is still in the session (see forgetMeta). */
     private var cachedUri: String? = null
@@ -875,6 +890,8 @@ class TorrentStream(
         lately.clear()
         blockingPiece = -1
         lastKickAt = 0L
+        lastDropAt = 0L
+        narrowUntil = 0L
 
         // Sidecar subs for this file only — a pack can hold hundreds.
         val dir = files.filePath(index).replace("\\", "/").substringBeforeLast("/", "")
@@ -1106,7 +1123,10 @@ class TorrentStream(
             runCatching { h.setPieceDeadline(blocked, 0) }
             deadlined.add(blocked)
             blockingSince = clock
-            if (clock - blockedFrom > STALLED_AFTER_MS) runCatching { dropStalled(h, blocked, clock) }.onFailure { log("stalled peers: ${it.message}") }
+            if (clock - blockedFrom > STALLED_AFTER_MS && clock - lastDropAt > STALLED_AFTER_MS) {
+                lastDropAt = clock
+                runCatching { dropStalled(h, blocked, clock) }.onFailure { log("stalled peers: ${it.message}") }
+            }
         }
 
         // Pre-roll watchdog: cached metadata skips inspect()'s own timeout, so a dead
@@ -1150,7 +1170,8 @@ class TorrentStream(
         // the whole readahead (32-128 pieces) while nothing could play.
         // Not once every block is out with a peer: narrowing to a few pieces can't speed those up, and
         // an 86GB remux fell from 14MB/s to 2MB/s each time a 16MB piece waited on its last blocks.
-        val starving = blocked >= 0 && clock - blockedFrom > STARVE_MS && !allRequested(h, blocked)
+        if (blocked >= 0 && clock - blockedFrom > STARVE_MS && !allRequested(h, blocked)) narrowUntil = clock + NARROW_HOLD_MS
+        val starving = clock < narrowUntil
         val width = when {
             !announcedReady || focus -> 0
             starving -> maxOf(2, reach)
@@ -1210,8 +1231,10 @@ class TorrentStream(
 
         if (status.numPeers() > 0 && ++peerSaveTick % 30 == 0) {
             persistPeers()
+            // How many are actually sending: a swarm of seeds can be nearly all choking us.
+            val sending = runCatching { peer_info_vector().also { h.swig().get_peer_info(it) }.let { v -> (0 until v.size).count { v.get(it).getPayload_down_speed() > 1024 } } }.getOrDefault(-1)
             log(
-                "rate ${status.downloadRate() / 1024}kB/s, ${status.numPeers()} peers (${status.numSeeds()} seeds), " +
+                "rate ${status.downloadRate() / 1024}kB/s, ${status.numPeers()} peers (${status.numSeeds()} seeds, $sending sending), " +
                     "readers ${targets.joinToString("/")}, reach $reach, ${deadlined.size} deadlined",
             )
         }

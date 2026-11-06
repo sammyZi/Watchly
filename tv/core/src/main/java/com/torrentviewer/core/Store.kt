@@ -608,9 +608,11 @@ internal fun readyToOpen(head: Long, headNeed: Long, start: Long, startNeed: Lon
 /** One connected peer: what it has been asked for, and what it is delivering. */
 internal data class PeerLoad(val ip: String, val queued: Int, val bytesPerSecond: Int)
 
-/** Below this a peer holding requests is sitting on them. Calibration knob: higher drops peers that were only slow. */
+/** Below this a peer holding requests may be sitting on them. Calibration knob: higher drops peers that were only slow. */
 private const val STALLED_BYTES_PER_SECOND = 32 * 1024
-private const val MAX_DROPPED_AT_ONCE = 8
+/** And it must be this far behind the swarm's typical peer. Calibration knob, as above. */
+private const val STALLED_SHARE = 4
+private const val MAX_DROPPED_AT_ONCE = 4
 /** Never thin a small swarm: the holder of a rare piece may be all there is. A torrent with 17 peers went down to 9. */
 private const val MIN_PEERS_KEPT = 40
 
@@ -619,13 +621,21 @@ private const val MIN_PEERS_KEPT = 40
  * from a peer that holds it: a 2MB piece of a 2GB film sat 14s on its last two blocks at 2MB/s with
  * 94 peers connected. Dropped, a peer's requests go back to the swarm at once. [connected] is how
  * many are really there: [peers] also holds those still being dialled, 176 for 32 connected.
+ *
+ * Slow is measured against the swarm. Holding requests means a peer has unchoked us, so in a thin
+ * swarm these are the very peers sending the film: at 470kB/s from 61 peers every one is under
+ * 32KB/s, and dropping 20 of them left 13 peers at 155kB/s for a minute.
  */
-internal fun stalledPeers(peers: List<PeerLoad>, connected: Int): List<String> =
-    peers.filter { it.queued > 0 && it.bytesPerSecond < STALLED_BYTES_PER_SECOND }
+internal fun stalledPeers(peers: List<PeerLoad>, connected: Int): List<String> {
+    val sending = peers.map { it.bytesPerSecond }.filter { it > 0 }.sorted()
+    val typical = sending.getOrElse(sending.size / 2) { 0 }
+    val floor = minOf(STALLED_BYTES_PER_SECOND, typical / STALLED_SHARE)
+    return peers.filter { it.queued > 0 && it.bytesPerSecond < floor }
         .sortedBy { it.bytesPerSecond }
         .take(minOf(MAX_DROPPED_AT_ONCE, connected - MIN_PEERS_KEPT).coerceAtLeast(0))
         .map { it.ip }
         .distinct()
+}
 
 /** A seek lands on the keyframe before the spot, and those can be seconds apart. */
 private const val KEYFRAME_SECONDS = 5.0

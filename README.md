@@ -33,6 +33,11 @@
     <td valign="top">📺 <b>Binge-ready series</b><br>Seasons and episodes, what you've watched marked, and Skip intro.</td>
     <td valign="top">👤 <b>Made yours</b><br>Profiles with PINs, Kids profiles, your favourite genres up front, light and dark themes, subtitles in your language.</td>
   </tr>
+  <tr>
+    <td valign="top">✨ <b>Picked for you</b><br>Suggestions from what you actually played, each saying why, and never what you've already seen.</td>
+    <td valign="top">🏆 <b>Top on IMDb</b><br>Ranked charts of films and series in your genres, IMDb ratings on every poster, and filters from 7+ to 9+.</td>
+    <td valign="top">🧭 <b>Watch orders</b><br>Franchises film by film, in release or story order, with what's up next.</td>
+  </tr>
 </table>
 
 <a name="install"></a>
@@ -121,7 +126,11 @@ cd tv && ./gradlew compileDebugKotlin testDebugUnitTest
 ```
 
 [`docs/`](docs/rolling-cache-architecture.md) describes how streams reach the
-player, and the streaming cache the apps share.
+player, and the streaming engine and cache the apps share.
+
+Optional keys go in `mobile/.env`, which stays out of git: `TMDB_KEY` for
+suggestions, age ratings, cast pages and film collections, and `SUBDL_KEY` for
+online subtitles. Without them those features are simply left out.
 
 <a name="built-on"></a>
 <h2><img src="https://img.shields.io/badge/Built_on-A855F7?style=for-the-badge" alt="Built on" height="34"></h2>
@@ -132,12 +141,14 @@ player, and the streaming cache the apps share.
 | 🔄 Sync | Your [Stremio](https://www.stremio.com) account: library, Continue Watching, watched marks and addons |
 | 🎞️ Players | [AndroidX Media3](https://github.com/androidx/media) with the [Jellyfin FFmpeg decoder](https://github.com/jellyfin/jellyfin-androidx-media) · [VLC / libVLC](https://www.videolan.org/vlc/libvlc.html) and [LibVLCSharp](https://github.com/videolan/libvlcsharp) |
 | 🎨 Look | [Jetpack Compose](https://developer.android.com/jetpack/compose) · [Coil](https://github.com/coil-kt/coil) · [Lucide](https://lucide.dev) icons |
-| 🗂️ Titles &amp; art | [Cinemeta](https://v3-cinemeta.strem.io), Stremio's public catalogue · [TVmaze](https://www.tvmaze.com) episode stills |
+| 🗂️ Titles &amp; art | [Cinemeta](https://v3-cinemeta.strem.io), Stremio's public catalogue · [TVmaze](https://www.tvmaze.com) episode stills · [TMDB](https://www.themoviedb.org) suggestions, cast, age ratings and collections |
 | ⏭️ Intros | [IntroDB](https://introdb.app) |
 | 💬 Subtitles | Subtitle addons you add · [SubDL](https://subdl.com) with your own free key |
 | 🔗 Peer streams | For addons that send them: [libtorrent](https://libtorrent.org) via [libtorrent4j](https://github.com/aldenml/libtorrent4j) on Android · [MonoTorrent](https://github.com/alanmcgovern/monotorrent) on Windows |
 
-Licenses for all of these are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Watchly is licensed under the [GPL-3.0](LICENSE). Licenses for all of these are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). This product uses the TMDB API but is not
+endorsed or certified by TMDB.
 
 <a name="disclaimer"></a>
 <h2><img src="https://img.shields.io/badge/Disclaimer-5B6472?style=for-the-badge" alt="Disclaimer" height="34"></h2>

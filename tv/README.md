@@ -16,8 +16,9 @@ as the old Expo build, so it installs over it in place. On first launch the old
 build's AsyncStorage database (`RKStorage`) is imported once, so profiles,
 history, My List, recent searches and settings carry over.
 
-"Find subtitles online" asks your subtitle addons; a SubDL key in `tv/.env` (see `.env.example`) adds SubDL;
-it is read into `BuildConfig.SUBDL_KEY` at build time and never committed.
+"Find subtitles online" asks your subtitle addons; a SubDL key (`SUBDL_KEY=…`) adds SubDL. A TMDB key
+(`TMDB_KEY=…`) adds suggestions, age ratings, cast pages and film collections. Both are read from `tv/.env`,
+then `mobile/.env`, into `BuildConfig` at build time and never committed.
 
 ## Layout
 
@@ -25,11 +26,13 @@ it is read into `BuildConfig.SUBDL_KEY` at build time and never committed.
 
 | File | What |
 | --- | --- |
-| `TorrentStream.kt` | The streaming engine: one libtorrent session, piece deadlines aimed at each reader, the rolling cache. Ported from the Expo build's `TorrentStreamModule` minus downloads/notifications/casting. |
+| `TorrentStream.kt` | The streaming engine: one libtorrent session, piece deadlines aimed at each reader, the rolling cache. See [the architecture doc](../docs/rolling-cache-architecture.md). |
+| `Holes.kt`, `cpp/holes.c` | Where a roll cuts, and the native call that frees those stretches of the file in place. |
 | `LocalFileServer.kt` | Loopback HTTP server that blocks on pieces that have not landed, so libVLC never reads holes. |
 | `VlcView.kt` | libVLC surface: AC3/DTS decoders, PGS subtitles, audio focus, stats. |
 | `Watch.kt` | One stream at a time: resolve, pick the file, play, next/previous episode. |
 | `Addons.kt` / `Search.kt` / `Meta.kt` | The addons you add ([Stremio addon protocol](https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/protocol.md)): their catalogues, streams and subtitles; Cinemeta metadata; SubDL. |
+| `ForYou.kt`, `WatchOrders.kt`, `TmdbTitle.kt` | Suggestions, the watch order list, and the TMDB client: ratings, cast, collections. |
 | `Store.kt` | SharedPreferences with the Expo build's keys and JSON; per-profile namespaces; guest in memory only. |
 | `ExoView.kt` | Media3 surface with the FFmpeg audio decoders; `VlcView` takes over when it cannot play a file. |
 | `Theme.kt` | Ink palette, type, artwork, title logos, facts row, progress line, hero scrims, avatars. |
@@ -39,7 +42,8 @@ it is read into `BuildConfig.SUBDL_KEY` at build time and never committed.
 | File | What |
 | --- | --- |
 | `Player.kt` | The player. |
-| `App.kt`, `Home.kt`, `Detail.kt`, `Pages.kt` | Shell, nav rail, screens. |
+| `App.kt`, `Home.kt`, `Detail.kt`, `Pages.kt` | Shell, nav rail, screens. Pages over the tabs stack, and Back takes one off. |
+| `ForYou.kt`, `WatchOrder.kt`, `TmdbUi.kt` | The Top on IMDb page, watch orders, cast, actor pages and More like this. |
 | `Focus.kt` | Focus rings, TV buttons and chips, D-pad scrolling, the TV-safe gutters. |
 
 ## The player
@@ -71,10 +75,11 @@ asks it first, so the phone gets the same.
 ## The rolling cache
 
 A 4K film is tens of gigabytes and a TV has single digits free. libtorrent cannot
-forget a piece, so `rollCache()` removes the torrent, deletes its data and adds
-it again at the playhead; the player's connection survives because the server
-blocks until those pieces return. One rebuffer per roll — **Settings → Storage
-for one film** (default 4 GB) sets the cap.
+forget a piece, so `rollCache()` removes the torrent, punches out what has been
+watched, and adds it again holding what is left, read-ahead included, so playback
+carries on while peers reconnect. Where a hole can't be punched it deletes the file
+and starts over at the playhead, one rebuffer per roll. **Settings → Storage for one
+film** sets the cap (Auto by default: the free space less 1.5 GB).
 
 ## Incoming connections
 
