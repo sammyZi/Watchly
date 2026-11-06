@@ -122,12 +122,20 @@ sealed interface Page {
     data class Detail(val title: Title) : Page
     data class Catalog(val shelf: Shelf) : Page
     data object Downloads : Page
+    data object WatchOrders : Page
+    data class WatchOrder(val order: com.torrentviewer.core.WatchOrder) : Page
+    data class Person(val id: Int, val name: String) : Page
+    data class Top(val kind: String) : Page
 }
 
 private fun keyOf(index: Int, page: Page) = when (page) {
     is Page.Detail -> "detail:$index:${page.title.imdb}"
     is Page.Catalog -> "shelf:$index:${page.shelf.key}"
     Page.Downloads -> "downloads:$index"
+    Page.WatchOrders -> "orders:$index"
+    is Page.WatchOrder -> "order:$index:${page.order.id}"
+    is Page.Person -> "person:$index:${page.id}"
+    is Page.Top -> "top:$index"
 }
 
 /** The profile opened last on this phone, so a phone with one owner never asks. */
@@ -316,14 +324,19 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     BackHandler(pages.isEmpty() && tab != Tab.HOME) { tab = Tab.HOME }
 
     val openTitle: (Title) -> Unit = { pages.add(Page.Detail(it)) }
+    val openOrder: (com.torrentviewer.core.WatchOrder) -> Unit = { pages.add(Page.WatchOrder(it)) }
     val body: @Composable () -> Unit = {
         val top = pages.lastOrNull()
         if (top != null) {
             holder.SaveableStateProvider(keyOf(pages.lastIndex, top)) {
                 when (top) {
-                    is Page.Detail -> DetailScreen(top.title, watch, onBack = ::pop)
+                    is Page.Detail -> DetailScreen(top.title, watch, onOrder = openOrder, onOpen = openTitle, onPerson = { pages.add(Page.Person(it.id, it.name)) }, onBack = ::pop)
+                    is Page.Person -> PersonScreen(top.id, top.name, onOpen = openTitle, onBack = ::pop)
+                    is Page.Top -> TopScreen(top.kind, onOpen = openTitle, onBack = ::pop)
                     is Page.Catalog -> CatalogScreen(top.shelf, onOpen = openTitle, onBack = ::pop)
                     Page.Downloads -> DownloadsScreen(watch, onBack = ::pop)
+                    Page.WatchOrders -> WatchOrdersScreen(onOpen = openOrder, onBack = ::pop)
+                    is Page.WatchOrder -> WatchOrderScreen(top.order, onOpen = openTitle, onBack = ::pop)
                 }
             }
         } else {
@@ -339,7 +352,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
             ) { t ->
                 holder.SaveableStateProvider(t.name) {
                     when (t) {
-                        Tab.HOME -> HomeScreen(home, watch, me, onOpen = openTitle, onShelf = { pages.add(Page.Catalog(it)) }, onProfile = { switching = true })
+                        Tab.HOME -> HomeScreen(home, watch, me, onOpen = openTitle, onShelf = { pages.add(Page.Catalog(it)) }, onTop = { pages.add(Page.Top(it)) }, onOrders = { pages.add(Page.WatchOrders) }, onOrder = openOrder, onProfile = { switching = true })
                         Tab.SEARCH -> SearchScreen(watch, onOpen = openTitle)
                         Tab.ADDONS -> AddonsScreen(watch)
                         Tab.LIBRARY -> LibraryScreen(watch, me, onOpen = openTitle, onDownloads = { pages.add(Page.Downloads) })

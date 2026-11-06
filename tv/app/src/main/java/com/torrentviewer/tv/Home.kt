@@ -106,6 +106,7 @@ class HomeState {
     /** "row/imdb" of the card that opened a title, to hand focus back to. */
     var restore: String? = null
     var picks by mutableStateOf<List<Shelf>>(emptyList())
+    var forYou by mutableStateOf(ForYou())
 
     fun row(key: String) = rows.getOrPut(key) { LazyListState() }
 }
@@ -125,7 +126,7 @@ private fun resumeStamp(item: Item): String? {
 }
 
 @Composable
-fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit) {
+fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit, onTop: (String) -> Unit, onOrders: () -> Unit, onOrder: (WatchOrder) -> Unit) {
     val scope = rememberCoroutineScope()
     val history by History.items.collectAsState()
     val saved by SavedStore.items.collectAsState()
@@ -143,21 +144,35 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit) {
             )
         }
     }
+    // What TMDB suggests for the titles this profile last played or saved: not for kids, whose rows are the family ones.
+    LaunchedEffect(history.size, saved.size, online, Kids.on) {
+        val played = history.sortedByDescending { it.at }.mapNotNull { h -> h.imdb?.let { it to (h.kind ?: "movie") } }
+        val seeds = (played + saved.map { it.imdb to it.kind }).filter { it.first.startsWith("tt") }.distinctBy { it.first }.take(FOR_YOU_SEEDS)
+        if (seeds.isEmpty() || Kids.on) state.forYou = ForYou()
+        else Meta.forYou(seeds).takeIf { it.picks.isNotEmpty() }?.let { state.forYou = it }
+    }
     val chosen = settings.genres.map { Shelf(if (it == ANIME_GENRE) "Anime" else it, kindOfGenre(it), it) }
     val addons by Addons.list.collectAsState()
-    val shelves = remember(chosen, state.picks, Kids.on, addons) {
+    val personal = state.forYou.picks.isNotEmpty()
+    val shelves = remember(chosen, state.picks, Kids.on, addons, personal) {
         if (Kids.on) return@remember KIDS_SHELVES.map { (title, kind, genre) -> Shelf(title, kind, genre) }
         // The viewer's addons' own lists lead, as on Stremio's board.
         val mine = Addons.shelves().map { (title, kind, key) -> Shelf(title, kind, key) }
         val taken = chosen.map { it.key }.toMutableSet()
-        val rest = state.picks.filter { taken.add(it.key) }
+        // A genre's popular list is no suggestion: it's what TMDB's rows replace, with no key or nothing played.
+        val rest = if (personal) emptyList() else state.picks.filter { taken.add(it.key) }
         chosen + mine + rest + SHELVES.filter { it.key !in taken }
+    }
+    // The charts draw on every genre the viewer chose, or on all of them with none chosen.
+    val tops = if (Kids.on) emptyList() else listOf("movie", "tv").flatMap { kind ->
+        settings.genres.ifEmpty { listOf("") }.map { Shelf("", kind, TOP_SHELF + it) }
     }
 
     // Top-down, not all at once: a 2GB television and a burst of parallel fetches do not mix.
     // A kids profile's rows are filtered again once the family list is in.
-    LaunchedEffect(shelves, online, Kids.allowed) {
-        for (shelf in shelves) {
+    LaunchedEffect(shelves, tops, online, Kids.allowed) {
+        val first = maxOf(1, chosen.size)
+        for (shelf in shelves.take(first) + tops + shelves.drop(first)) {
             if (state.loaded[shelf.key].isNullOrEmpty() || Kids.on) {
                 val titles = Kids.only(Meta.peekCatalog(shelf.kind, shelf.genre) ?: Meta.catalog(shelf.kind, shelf.genre))
                 if (titles.isNotEmpty()) state.loaded[shelf.key] = titles
@@ -190,7 +205,30 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit) {
     val resuming = resumable.isNotEmpty() || fromStremio.isNotEmpty()
     var releases by remember { mutableStateOf<List<Item>?>(null) }
     val watchlist = saved.filter { it.list == "later" }.map { it.asTitle() }
-    val fallback = { shelves.firstNotNullOfOrNull { state.loaded[it.key]?.firstOrNull() } ?: watchlist.firstOrNull() }
+    // Nothing already played, seen elsewhere or saved is a suggestion.
+    val everywhere by WatchedEverywhere.collectAsState(stremio)
+    val watched = remember(history, everywhere) { watchedFilms(history, everywhere) }
+    val known = remember(watched, history, saved) { watched + history.mapNotNull { it.imdb } + saved.map { it.imdb } }
+    val picks = state.forYou.picks.filter { it.title.imdb !in known }.take(FOR_YOU_PICKS)
+    val why = picks.associate { it.title.imdb to "Because you watched ${it.because}" }
+    val because = state.forYou.rails.map { (name, titles) -> name to titles.filter { it.imdb !in known } }.filter { it.second.size >= 3 }
+    val charts = tops.groupBy { it.kind }.map { (kind, parts) ->
+        val word = if (kind == "tv") "series" else "movies"
+        val heading = if (settings.genres.isEmpty()) "Top $word on IMDb" else "Top IMDb $word in your genres"
+        Triple(kind, heading, mixTop(parts.map { state.loaded[it.key].orEmpty() }, CHART_SIZE))
+    }
+    // A title shows once, in the first row it lands in; what's been watched, and what the rows above suggest, not at all.
+    val shown = HashSet(watched)
+    picks.mapTo(shown) { it.title.imdb }
+    because.forEach { (_, titles) -> titles.mapTo(shown) { it.imdb } }
+    charts.forEach { (_, _, titles) -> titles.mapTo(shown) { it.imdb } }
+    val rows = shelves.associate { s -> s.key to state.loaded[s.key].orEmpty().filter { shown.add(it.imdb) } }
+    val visible = shelves.filter { state.loaded[it.key].isNullOrEmpty() || rows[it.key].orEmpty().isNotEmpty() }
+    // Before the remote has picked a card: what's suggested, or the first of the chosen genres.
+    val fallback = {
+        interleave(listOf(picks.map { it.title }) + chosen.map { state.loaded[it.key].orEmpty() }).firstOrNull()
+            ?: shelves.firstNotNullOfOrNull { state.loaded[it.key]?.firstOrNull() } ?: watchlist.firstOrNull()
+    }
     // Focus lands on the first card the first time only; afterwards it goes back to the opened one.
     val firstKey = remember { if (state.restore == null) "first" else null }
     val aim: (Title) -> Unit = { state.aim = it }
@@ -223,9 +261,36 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit) {
                     TitleRow(state, "list", watchlist, firstKey != null && !resuming, onFocus = aim, onOpen = onOpen)
                 }
             }.also { at++ }
+            val ordersAt = at
+            if (!Kids.on) item(key = "orders") {
+                Rail("Watch orders", pin(ordersAt)) { OrderRow(state, aim, onOrders, onOrder) }
+            }.also { at++ }
+            val picksAt = at
+            if (picks.isNotEmpty()) item(key = "picks") {
+                Rail("Picked for you", pin(picksAt)) {
+                    TitleRow(state, "picks", picks.map { it.title }, false, onFocus = aim, onOpen = onOpen, stamp = { why[it.imdb] })
+                }
+            }.also { at++ }
+            charts.forEach { (kind, heading, titles) ->
+                val here = at++
+                item(key = "chart:$kind") {
+                    Rail(heading, pin(here)) {
+                        if (titles.isEmpty()) Box(Modifier.height(CARD_H).fillMaxWidth()) { Placeholders() }
+                        else ChartRow(state, "chart:$kind", titles, aim, onOpen, onAll = { onTop(kind) })
+                    }
+                }
+            }
+            because.forEach { (name, titles) ->
+                val here = at++
+                item(key = "because:$name") {
+                    Rail("Because you watched $name", pin(here)) {
+                        TitleRow(state, "because:$name", titles, false, onFocus = aim, onOpen = onOpen)
+                    }
+                }
+            }
             val shelvesAt = at
-            itemsIndexed(shelves, key = { _, s -> s.key }) { i, shelf ->
-                val titles = state.loaded[shelf.key].orEmpty()
+            itemsIndexed(visible, key = { _, s -> s.key }) { i, shelf ->
+                val titles = rows[shelf.key].orEmpty()
                 Rail(shelf.title, pin(shelvesAt + i)) {
                     if (titles.isEmpty()) {
                         Box(Modifier.height(CARD_H).fillMaxWidth()) { Placeholders() }
@@ -249,6 +314,12 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit) {
 
 val CARD_W = 210.dp
 val CARD_H = 118.dp
+
+/** The viewer's latest titles that suggestions are drawn from, and how many of the best to show. */
+private const val FOR_YOU_SEEDS = 4
+private const val FOR_YOU_PICKS = 15
+
+private const val CHART_SIZE = 15
 
 /** A focused card grows from its left edge by this: 13dp on a 210dp card, inside [ROW_GAP], so its ring clears the next card. */
 private const val CARD_GROW = 1.06f
@@ -353,7 +424,7 @@ private fun BillboardArt(title: Title?, modifier: Modifier) {
 }
 
 @Composable
-private fun TitleRow(state: HomeState, row: String, titles: List<Title>, claimFirst: Boolean, onFocus: (Title) -> Unit, onOpen: (Title) -> Unit) {
+private fun TitleRow(state: HomeState, row: String, titles: List<Title>, claimFirst: Boolean, onFocus: (Title) -> Unit, onOpen: (Title) -> Unit, stamp: (Title) -> String? = { null }) {
     val fallback = remember { FocusRequester() }
     CompositionLocalProvider(LocalBringIntoViewSpec provides rowScroll()) {
     LazyRow(
@@ -380,7 +451,7 @@ private fun TitleRow(state: HomeState, row: String, titles: List<Title>, claimFi
                 requester = if (i == 0 && !back) fallback else requester,
                 onFocus = { onFocus(t) },
             ) { focused ->
-                LandscapeCard(t.wide, t.title, focused)
+                LandscapeCard(t.wide, t.title, focused, stamp(t), rating = t.rating)
             }
             if (back) {
                 requester.claim()
@@ -393,11 +464,117 @@ private fun TitleRow(state: HomeState, row: String, titles: List<Title>, claimFi
     }
 }
 
+/** A row's way into its whole list, first in the row: at the end it would be a dozen presses away. */
+@Composable
+private fun SeeAll(label: String, state: HomeState, here: String, requester: FocusRequester, onClick: () -> Unit) {
+    Focusable(
+        onClick = {
+            state.restore = here
+            onClick()
+        },
+        modifier = Modifier.width(150.dp).height(CARD_H),
+        shape = RoundedCornerShape(8.dp),
+        scale = CARD_GROW,
+        origin = TransformOrigin(0f, 0.5f),
+        requester = requester,
+    ) {
+        Column(Modifier.fillMaxSize().background(Ink.surface2).padding(14.dp), verticalArrangement = Arrangement.Center) {
+            Lc(com.composables.icons.lucide.R.drawable.lucide_ic_list, tint = Ink.text, size = 24.dp)
+            Text(label, Modifier.padding(top = 10.dp), style = Type.label.copy(fontWeight = FontWeight.Bold))
+        }
+    }
+    if (state.restore == here) {
+        requester.claim()
+        LaunchedEffect(Unit) { state.restore = null }
+    }
+}
+
+/** A chart: each card carries its rank, large and outlined. */
+@Composable
+private fun ChartRow(state: HomeState, row: String, titles: List<Title>, onFocus: (Title) -> Unit, onOpen: (Title) -> Unit, onAll: () -> Unit) {
+    val fallback = remember { FocusRequester() }
+    CompositionLocalProvider(LocalBringIntoViewSpec provides rowScroll()) {
+    LazyRow(
+        state = state.row(row),
+        modifier = Modifier.padding(start = GUTTER - ROW_LEAD).focusRestorer(fallback),
+        contentPadding = PaddingValues(start = ROW_LEAD, end = Safe.x),
+        horizontalArrangement = Arrangement.spacedBy(ROW_GAP),
+    ) {
+        item(key = "all") { SeeAll("See all", state, "$row/all", fallback, onAll) }
+        itemsIndexed(titles, key = { _, t -> t.imdb }) { i, t ->
+            val here = "$row/${t.imdb}"
+            val requester = remember { FocusRequester() }
+            Focusable(
+                onClick = {
+                    state.restore = here
+                    onOpen(t)
+                },
+                modifier = Modifier.width(CARD_W).height(CARD_H),
+                shape = RoundedCornerShape(8.dp),
+                scale = CARD_GROW,
+                origin = TransformOrigin(0f, 0.5f),
+                requester = requester,
+                onFocus = { onFocus(t) },
+            ) { focused ->
+                LandscapeCard(t.wide, t.title, focused, rating = t.rating)
+                Text(
+                    "${i + 1}",
+                    Modifier.align(Alignment.TopEnd).padding(end = 8.dp),
+                    style = Type.display.copy(color = Color.White.copy(alpha = 0.85f), fontSize = 44.sp, lineHeight = 50.sp, fontWeight = FontWeight.Black, drawStyle = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f)),
+                )
+            }
+            if (state.restore == here) {
+                requester.claim()
+                LaunchedEffect(Unit) { state.restore = null }
+            }
+        }
+    }
+    }
+}
+
+/** The franchises, All first. */
+@Composable
+private fun OrderRow(state: HomeState, onFocus: (Title) -> Unit, onOrders: () -> Unit, onOrder: (WatchOrder) -> Unit) {
+    val seen = seenFilms()
+    val fallback = remember { FocusRequester() }
+    CompositionLocalProvider(LocalBringIntoViewSpec provides rowScroll()) {
+    LazyRow(
+        state = state.row("orders"),
+        modifier = Modifier.padding(start = GUTTER - ROW_LEAD).focusRestorer(fallback),
+        contentPadding = PaddingValues(start = ROW_LEAD, end = Safe.x),
+        horizontalArrangement = Arrangement.spacedBy(ROW_GAP),
+    ) {
+        item(key = "all") { SeeAll("See all ${WatchOrders.all.size}", state, "orders/all", fallback, onOrders) }
+        itemsIndexed(WatchOrders.all.take(12), key = { _, o -> o.id }) { _, order ->
+            val here = "orders/${order.id}"
+            val requester = remember { FocusRequester() }
+            Focusable(
+                onClick = {
+                    state.restore = here
+                    onOrder(order)
+                },
+                modifier = Modifier.width(320.dp).height(CARD_H),
+                shape = RoundedCornerShape(8.dp),
+                scale = 1.04f,
+                origin = TransformOrigin(0f, 0.5f),
+                requester = requester,
+                onFocus = { onFocus(Title(order.films.first(), "movie", order.name)) },
+            ) { OrderBanner(order, seen) }
+            if (state.restore == here) {
+                requester.claim()
+                LaunchedEffect(Unit) { state.restore = null }
+            }
+        }
+    }
+    }
+}
+
 /** 16:9 art with the name set over a fade, the way Netflix's boxart reads. */
 @Composable
-private fun LandscapeCard(art: String?, name: String, focused: Boolean, stamp: String? = null, progress: Float? = null) {
+private fun LandscapeCard(art: String?, name: String, focused: Boolean, stamp: String? = null, progress: Float? = null, rating: String? = null) {
     Box(Modifier.fillMaxSize()) {
         Artwork(art, name, Modifier.fillMaxSize())
+        rating?.takeIf { it.isNotBlank() }?.let { ImdbMark(it, Modifier.align(Alignment.TopStart).padding(6.dp)) }
         // Only over the bottom half, where the name sits: the top of it was transparent and still cost a fill.
         Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().fillMaxHeight(0.6f).background(Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black.copy(alpha = if (focused) 0.85f else 0.75f))))
         Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 10.dp, end = 10.dp, bottom = if (progress != null) 6.dp else 8.dp)) {
@@ -465,10 +642,11 @@ private fun ResumeRow(state: HomeState, items: List<Item>, fromStremio: List<Pau
 
 /** Posters, for search results. */
 @Composable
-fun PosterCard(title: Title, onClick: () -> Unit, modifier: Modifier = Modifier, sub: String? = null) {
+fun PosterCard(title: Title, onClick: () -> Unit, modifier: Modifier = Modifier, sub: String? = null, requester: FocusRequester? = null) {
     Column(modifier.width(130.dp)) {
-        Focusable(onClick, Modifier.width(130.dp).height(195.dp), RoundedCornerShape(8.dp), 1.08f) {
+        Focusable(onClick, Modifier.width(130.dp).height(195.dp), RoundedCornerShape(8.dp), 1.08f, requester = requester) {
             Artwork(title.poster, title.title, Modifier.fillMaxSize())
+            title.rating?.takeIf { it.isNotBlank() }?.let { ImdbMark(it, Modifier.align(Alignment.BottomStart).padding(6.dp)) }
         }
         Text(title.title, Modifier.padding(top = 8.dp), style = Type.meta.copy(color = Ink.text, fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
         sub?.let { Text(it, style = Type.meta.copy(color = Ink.faint), maxLines = 1) }

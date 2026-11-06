@@ -41,6 +41,7 @@ object Services {
         Profiles.load()
         com.torrentviewer.core.Simkl.clientId = BuildConfig.SIMKL_CLIENT_ID
         com.torrentviewer.core.Mdblist.clientId = BuildConfig.MDBLIST_CLIENT_ID
+        com.torrentviewer.core.Tmdb.key = BuildConfig.TMDB_KEY
         // 6882: the TV (6881) and the Windows app (51413) may share the router.
         // lan: the stream is also served to the network, for a Cast receiver to fetch.
         engine = TorrentStream(context.applicationContext, port = 6882, lan = true)

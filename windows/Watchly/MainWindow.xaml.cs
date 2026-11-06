@@ -389,6 +389,10 @@ public partial class MainWindow : Window
     }
 
     public void OpenTitle(Title title) => PushLayer(new DetailView(title));
+    public void OpenOrders() => PushLayer(new WatchOrdersView());
+    public void OpenTop(string kind) => PushLayer(new TopView(kind));
+    public void OpenOrder(WatchOrder order) => PushLayer(new WatchOrderView(order));
+    public void OpenPerson(int id, string name) => PushLayer(new PersonView(id, name));
 
     public void GoBack()
     {

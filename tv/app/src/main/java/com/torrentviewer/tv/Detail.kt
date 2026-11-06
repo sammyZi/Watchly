@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -31,6 +32,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
@@ -57,10 +59,22 @@ private const val MAX_SOURCES = 40
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
+fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (WatchOrder) -> Unit, onOpen: (Title) -> Unit, onPerson: (CastMember) -> Unit) {
     val scope = rememberCoroutineScope()
     var title by remember(initial.imdb) { mutableStateOf(initial) }
     LaunchedEffect(initial.imdb) { Meta.title(initial.imdb, initial.kind)?.let { title = it } }
+    // Rating, cast and what's like it. Without a key or a connection the page is as it was.
+    val tmdb by produceState<TmdbTitle?>(null, initial.imdb) { value = Tmdb.title(initial.imdb, initial.kind) }
+    val certificate = tmdb?.certificate
+    if (Kids.on && tooOldForKids(certificate)) {
+        TooOldForKids(title, certificate.orEmpty(), onBack)
+        return
+    }
+    val inOrder by produceState(WatchOrders.of(initial.imdb), initial.imdb) {
+        if (value == null && initial.kind != "tv") value = Tmdb.orderOf(initial.imdb)
+    }
+    val people = tmdb?.cast.orEmpty()
+    val similar = tmdb?.similar.orEmpty().takeUnless { Kids.on }.orEmpty()
     val saved by SavedStore.items.collectAsState()
     val inList = saved.any { it.imdb == title.imdb && it.list == "later" }
 
@@ -107,6 +121,9 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
 
     val list = rememberLazyListState()
     val play = remember { FocusRequester() }
+    /** The first thing under the sources, and how many times the jump to it was pressed. */
+    val extras = remember { FocusRequester() }
+    var jump by remember { mutableIntStateOf(0) }
 
     fun findSources(ep: Episode?): kotlinx.coroutines.Deferred<List<Hit>> {
         val mine = ++ticket
@@ -154,6 +171,10 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
         // half after going down to the episodes and back up.
         val hasEpisodes = title.isSeries && seasons.isNotEmpty()
         val sourcesAt = if (hasEpisodes) 2 else 1
+        // The franchise, the cast and what's like it, each its own section under the sources.
+        val extrasAt = sourcesAt + 1 + shown.take(MAX_SOURCES).size
+        val castAt = extrasAt + (if (inOrder != null) 1 else 0)
+        val moreAt = castAt + (if (people.isNotEmpty()) 1 else 0)
         val topPad = with(LocalDensity.current) { (Safe.y + 72.dp).roundToPx() }
         fun pin(index: Int) {
             // Past the list's top padding (the room above the logo), or the section above
@@ -167,12 +188,17 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
                     TitleMark(title, Modifier.widthIn(max = 440.dp), maxHeight = 110.dp)
                     Facts(title, Modifier.padding(top = 16.dp))
                     val finished = history.filter { it.imdb == title.imdb && it.ratio >= WATCHED_AT }.maxOfOrNull { it.at }
-                    if (!title.isSeries && (finished != null || title.imdb in stremio.films)) WatchedBadge(finished, Modifier.padding(top = 12.dp))
+                    val seen = !title.isSeries && (finished != null || title.imdb in stremio.films)
+                    if (seen || certificate != null) Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        certificate?.let { CertificateBadge(it) }
+                        if (seen) WatchedBadge(finished)
+                    }
                     title.plot?.let { Text(it, Modifier.padding(top = 12.dp), style = Type.body.copy(color = Ink.text.copy(alpha = 0.82f)), maxLines = 4, overflow = TextOverflow.Ellipsis) }
                     if (title.cast.isNotEmpty()) People("Starring", title.cast.take(4).joinToString(", "))
                     if (title.directors.isNotEmpty()) People(if (title.isSeries) "Creators" else "Director", title.directors.take(2).joinToString(", "))
                     title.awards?.let { People("Awards", it) }
-                    Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    // Past the column's width: four buttons don't fit in what the words are held to.
+                    Row(Modifier.padding(top = 24.dp).wrapContentWidth(Alignment.Start, unbounded = true), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                         if (!title.isSeries) {
                             // Never disabled: a disabled view cannot hold focus, and the remote would open elsewhere.
                             TvButton(
@@ -211,6 +237,17 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
                             label = "Language: " + if (lang.isEmpty()) "Any" else langName(lang),
                             onClick = { pickingLang = true },
                             icon = L.drawable.lucide_ic_languages,
+                        )
+                        // Under as many as forty sources, these would be forty presses away.
+                        if (inOrder != null || people.isNotEmpty() || similar.isNotEmpty()) TvButton(
+                            label = if (people.isNotEmpty()) "Cast & more" else "More",
+                            onClick = {
+                                scope.launch {
+                                    list.scrollToItem(extrasAt, topPad)
+                                    jump++
+                                }
+                            },
+                            icon = L.drawable.lucide_ic_chevron_down,
                         )
                     }
                 }
@@ -299,6 +336,22 @@ fun DetailScreen(initial: Title, watch: Watch, onOpen: (Title) -> Unit) {
                 Source(hit, Modifier.then(if (i == 0) Modifier.onFocusEnter { pin(sourcesAt) } else Modifier).padding(start = Safe.x + 12.dp, end = Safe.x, bottom = 8.dp), runtimeSeconds(title.runtime)) {
                     watch.stream(hit, title, episode?.let { episodeTag(it.season, it.episode) }, episode)
                 }
+            }
+            inOrder?.let { order ->
+                item(key = "franchise") {
+                    FranchiseRail(order, title.imdb, { onOrder(order) }, onOpen, extras, Modifier.onFocusEnter { pin(extrasAt) }.padding(top = 30.dp))
+                    if (jump > 0) extras.claim(jump)
+                }
+            }
+            if (people.isNotEmpty()) item(key = "cast") {
+                val first = inOrder == null
+                PeopleRail(people, onPerson.takeUnless { Kids.on }, if (first) extras else null, Modifier.onFocusEnter { pin(castAt) }.padding(top = 30.dp))
+                if (first && jump > 0) extras.claim(jump)
+            }
+            if (similar.isNotEmpty()) item(key = "similar") {
+                val first = inOrder == null && people.isEmpty()
+                SimilarRail(similar, onOpen, if (first) extras else null, Modifier.onFocusEnter { pin(moreAt) }.padding(top = 30.dp))
+                if (first && jump > 0) extras.claim(jump)
             }
         }
         }

@@ -112,6 +112,9 @@ import com.torrentviewer.core.colorOf
 import com.torrentviewer.core.parseEpisode
 import com.torrentviewer.core.searchStreams
 import com.torrentviewer.core.sortTitles
+import com.torrentviewer.core.ADDON_SHELF
+import com.torrentviewer.core.TOP_SHELF
+import com.torrentviewer.core.imdbScore
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -128,10 +131,12 @@ private fun subOf(t: Title) = listOfNotNull(if (t.isSeries) "Series" else "Film"
 /** A whole shelf as a grid, with the phone's four orders. */
 @Composable
 fun CatalogScreen(shelf: Shelf, onOpen: (Title) -> Unit, onBack: () -> Unit) {
-    var titles by remember { mutableStateOf(Meta.peekCatalog(shelf.kind, shelf.genre)) }
-    LaunchedEffect(shelf.key) { if (titles.isNullOrEmpty()) titles = Meta.catalog(shelf.kind, shelf.genre) }
     var sort by rememberSaveable { mutableStateOf(Sort.POPULAR) }
-    val shown = remember(titles, sort) { sortTitles(titles.orEmpty(), sort) }
+    // Top rated is the genre's real best, not just its fifty most popular reordered. An addon's list is only itself.
+    val source = if (sort == Sort.RATING && shelf.genre?.startsWith(ADDON_SHELF) != true) TOP_SHELF + shelf.genre.orEmpty() else shelf.genre
+    var titles by remember(source) { mutableStateOf(Meta.peekCatalog(shelf.kind, source)) }
+    LaunchedEffect(source) { if (titles.isNullOrEmpty()) titles = Meta.catalog(shelf.kind, source) }
+    val shown = remember(titles, sort) { sortTitles(Kids.only(titles.orEmpty()), sort) }
     Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             POSTER,
@@ -177,7 +182,7 @@ private val DECADES = listOf(2020 to "2020s", 2010 to "2010s", 2000 to "2000s", 
 private fun decadeOf(t: Title) = t.year?.take(4)?.toIntOrNull()?.let { if (it < 1990) 0 else it / 10 * 10 }
 
 /** Which filter's list is up. */
-private enum class Picking { KIND, GENRE, DECADE, SORT, QUALITY, ORDER }
+private enum class Picking { KIND, GENRE, DECADE, RATING, SORT, QUALITY, ORDER }
 
 /** How releases are ordered: the ranking (seeds, then fit), or by size. */
 private enum class HitOrder(val label: String) { BEST("Best match"), BIGGEST("Biggest"), SMALLEST("Smallest") }
@@ -200,18 +205,21 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
     var kind by rememberSaveable { mutableStateOf<String?>(null) }
     var genre by rememberSaveable { mutableStateOf<String?>(null) }
     var decade by rememberSaveable { mutableStateOf<Int?>(null) }
+    var atLeast by rememberSaveable { mutableStateOf<Int?>(null) }
     var sort by rememberSaveable { mutableStateOf(Sort.POPULAR) }
     var quality by rememberSaveable { mutableStateOf<String?>(null) }
     var order by rememberSaveable { mutableStateOf(HitOrder.BEST) }
     var picking by remember { mutableStateOf<Picking?>(null) }
-    val filtered = !torrents && (kind != null || genre != null || decade != null || sort != Sort.POPULAR) || torrents && (quality != null || order != HitOrder.BEST)
+    val filtered = !torrents && (kind != null || genre != null || decade != null || atLeast != null || sort != Sort.POPULAR) || torrents && (quality != null || order != HitOrder.BEST)
+    /** Going by rating: browse the best of the genre, or of everything, not only what's popular this week. */
+    val byRating = sort == Sort.RATING || atLeast != null
 
-    LaunchedEffect(query, torrents, genre, kind) {
+    LaunchedEffect(query, torrents, genre, kind, byRating) {
         val q = query.trim()
         if (q.length < 2) {
             hits = null
             // Nothing typed, a genre picked: that genre's shelf, films and series together unless one is chosen.
-            val g = genre
+            val g = if (byRating) TOP_SHELF + genre.orEmpty() else genre
             results = if (!torrents && g != null) {
                 busy = true
                 coroutineScope {
@@ -242,6 +250,7 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
         sortTitles(
             list.filter { t ->
                 (kind == null || t.kind == kind) && (decade == null || decadeOf(t) == decade) &&
+                    atLeast.let { it == null || (t.imdbScore ?: 0.0) >= it } &&
                     // A genre's own shelf is that genre already; a search result says so in its genres.
                     (genre == null || browsing || genre in t.genres)
             },
@@ -293,13 +302,14 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
                         Chip(when (kind) { "movie" -> "Films"; "tv" -> "Series"; else -> "Films & series" }, kind != null, onClick = { picking = Picking.KIND })
                         Chip(genre ?: "Any genre", genre != null, onClick = { picking = Picking.GENRE })
                         Chip(DECADES.find { it.first == decade }?.second ?: "Any year", decade != null, onClick = { picking = Picking.DECADE })
+                        Chip(atLeast?.let { "IMDb $it+" } ?: "Any rating", atLeast != null, onClick = { picking = Picking.RATING })
                         Chip(if (sort == Sort.POPULAR) "Best match" else sort.label, sort != Sort.POPULAR, onClick = { picking = Picking.SORT })
                     } else {
                         Chip(quality ?: "Any quality", quality != null, onClick = { picking = Picking.QUALITY })
                         Chip(order.label, order != HitOrder.BEST, onClick = { picking = Picking.ORDER })
                     }
                     if (filtered) Chip("Clear", false, icon = L.drawable.lucide_ic_x, onClick = {
-                        kind = null; genre = null; decade = null; sort = Sort.POPULAR; quality = null; order = HitOrder.BEST
+                        kind = null; genre = null; decade = null; atLeast = null; sort = Sort.POPULAR; quality = null; order = HitOrder.BEST
                     })
                 }
                 if (recents.isNotEmpty() && results == null && hits == null) {
@@ -350,6 +360,7 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
             Picking.KIND -> Sheet("Show", listOf(Option<String?>(null, "Films & series"), Option("movie", "Films"), Option("tv", "Series")), kind, { kind = it; close() }, close)
             Picking.GENRE -> Sheet("Genre", listOf(Option<String?>(null, "Any genre")) + GENRES.map { Option<String?>(it, it) }, genre, { genre = it; close() }, close)
             Picking.DECADE -> Sheet("Year", listOf(Option<Int?>(null, "Any year")) + DECADES.map { (y, label) -> Option<Int?>(y, label) }, decade, { decade = it; close() }, close)
+            Picking.RATING -> Sheet("IMDb rating", listOf(Option<Int?>(null, "Any rating")) + listOf(6, 7, 8, 9).map { Option<Int?>(it, "IMDb $it+") }, atLeast, { atLeast = it; close() }, close)
             Picking.SORT -> Sheet("Order", Sort.entries.map { Option(it, if (it == Sort.POPULAR) "Best match" else it.label) }, sort, { sort = it; close() }, close)
             Picking.QUALITY -> Sheet("Quality", listOf(Option<String?>(null, "Any quality")) + listOf("4K", "1080p", "720p").map { Option<String?>(it, it) }, quality, { quality = it; close() }, close)
             Picking.ORDER -> Sheet("Order", HitOrder.entries.map { Option(it, it.label) }, order, { order = it; close() }, close)
@@ -618,6 +629,11 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
                     java.text.SimpleDateFormat("d MMM yyyy, HH:mm", java.util.Locale.US).format(java.util.Date(BuildConfig.BUILD_TIME)),
                 Modifier.padding(start = 4.dp, top = 4.dp),
                 style = Type.meta.copy(color = Ink.faint),
+            )
+            Text(
+                "This product uses the TMDB API but is not endorsed or certified by TMDB.",
+                Modifier.padding(start = 4.dp, top = 6.dp),
+                style = Type.meta.copy(color = Ink.faint, fontSize = 11.sp),
             )
         } else {
             Row(Modifier.statusBarsPadding().padding(top = 8.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {

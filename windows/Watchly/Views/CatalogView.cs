@@ -30,6 +30,15 @@ public sealed class CatalogView : UserControl
 
         var chips = new WrapPanel { Margin = new Thickness(24, 0, 24, 4) };
         var grid = new ContentControl { Focusable = false };
+        // Top rated is the genre's real best, not just its most popular reordered. An addon's list is only itself.
+        List<Title>? best = null;
+        async void Sort(string key)
+        {
+            sort = key;
+            if (key == "rating" && best is null && shelf.Genre?.StartsWith(Addons.ShelfPrefix) != true)
+                best = KidsMode.Only(await Meta.LoadTop(shelf.Kind, shelf.Genre));
+            Show();
+        }
         void Show()
         {
             chips.Children.Clear();
@@ -39,11 +48,11 @@ public sealed class CatalogView : UserControl
             chips.Children.Add(sliders);
             foreach (var (key, label) in Meta.Sorts)
             {
-                var chip = Ui.Chip(label, sort == key, () => { sort = key; Show(); });
+                var chip = Ui.Chip(label, sort == key, () => Sort(key));
                 chip.Margin = new Thickness(0, 0, 8, 6);
                 chips.Children.Add(chip);
             }
-            grid.Content = Ui.Grid(Meta.SortTitles(titles, sort));
+            grid.Content = Ui.Grid(Meta.SortTitles(sort == "rating" && best is { Count: > 0 } ? best : titles, sort));
         }
         Show();
 

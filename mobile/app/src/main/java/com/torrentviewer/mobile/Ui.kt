@@ -53,6 +53,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -103,6 +104,7 @@ import com.torrentviewer.core.glow
 import com.torrentviewer.core.Lc
 import com.torrentviewer.core.Motion
 import com.torrentviewer.core.Note
+import com.torrentviewer.core.ImdbMark
 import com.torrentviewer.core.ProgressLine
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -515,15 +517,16 @@ private val CARD = RoundedCornerShape(10.dp)
 @Composable
 fun TitleCard(
     art: String?, name: String, onClick: () -> Unit, modifier: Modifier = Modifier,
-    info: String? = null, badge: String? = null, progress: Float? = null, onLongClick: (() -> Unit)? = null,
+    info: String? = null, badge: String? = null, progress: Float? = null, onLongClick: (() -> Unit)? = null, rating: String? = null,
 ) {
     Column(modifier) {
         Tap(onClick, Modifier.fillMaxWidth().aspectRatio(2f / 3f), CARD, onLongClick) {
             Artwork(art, name, Modifier.fillMaxSize())
             Box(Modifier.matchParentSize().border(1.dp, Ink.stroke, CARD))
+            rating?.takeIf { it.isNotBlank() }?.let { ImdbMark(it, Modifier.align(Alignment.BottomStart).padding(6.dp)) }
             badge?.let {
                 Text(
-                    it, Modifier.align(Alignment.TopStart).padding(6.dp).background(Ink.accent, RoundedCornerShape(5.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+                    it, Modifier.align(Alignment.TopStart).padding(6.dp).wrapContentSize(Alignment.TopStart).background(Ink.accent, RoundedCornerShape(5.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
                     style = Type.meta.copy(fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold), maxLines = 1,
                 )
             }
@@ -535,13 +538,10 @@ fun TitleCard(
     }
 }
 
-/** "2019  ·  ★ 8.1": what a title's card says under its name. */
-fun cardInfo(t: Title) = listOfNotNull(t.year?.take(4), t.rating?.takeIf { it.isNotBlank() }?.let { "★ $it" }).joinToString("  ·  ")
-
 /** Posters, for search results, lists and whole shelves. */
 @Composable
 fun PosterCard(title: Title, onClick: () -> Unit, modifier: Modifier = Modifier, sub: String? = null, onLongClick: (() -> Unit)? = null) =
-    TitleCard(title.poster, title.title, onClick, modifier, info = sub, onLongClick = onLongClick)
+    TitleCard(title.poster ?: title.wide, title.title, onClick, modifier, info = sub, onLongClick = onLongClick, rating = title.rating)
 
 /** Cards still on their way: the same shape, gently pulsing. */
 @Composable

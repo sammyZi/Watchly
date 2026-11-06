@@ -3,6 +3,8 @@ package com.torrentviewer.core
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
@@ -71,6 +73,25 @@ fun runtimeLabel(runtime: String): String {
 /** Not a Cinemeta genre: asking for it switches to the Kitsu anime catalogue. */
 const val ANIME_GENRE = "Anime"
 
+/** Before a genre, or alone for all of them: [Meta.catalog] answers with the best by IMDb rating. */
+const val TOP_SHELF = "top:"
+
+/** The IMDb rating as a number; null when it has none yet. */
+val Title.imdbScore get() = rating?.toDoubleOrNull()
+
+private const val TOP_SIZE = 60
+
+/** Best first, each title once. Unrated titles can't be ranked, so they aren't. */
+fun bestRated(titles: List<Title>): List<Title> =
+    titles.filter { it.imdbScore != null }.distinctBy { it.imdb }.sortedByDescending { it.imdbScore }.take(TOP_SIZE)
+
+/** One from each list in turn, each title once: no list crowds out the others. */
+fun interleave(lists: List<List<Title>>): List<Title> =
+    (0 until (lists.maxOfOrNull { it.size } ?: 0)).flatMap { i -> lists.mapNotNull { it.getOrNull(i) } }.distinctBy { it.imdb }
+
+/** A chart over several genres: each gets its share of the [size] places, then they rank by rating together. */
+fun mixTop(lists: List<List<Title>>, size: Int): List<Title> = interleave(lists).take(size).sortedByDescending { it.imdbScore }
+
 val GENRES = listOf(
     ANIME_GENRE, "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary", "Drama", "Family", "Fantasy",
     "History", "Horror", "Mystery", "Romance", "Sci-Fi", "Sport", "Thriller", "War", "Western",
@@ -85,6 +106,9 @@ object Meta {
     /** Search has to go through the front door, which actually reads the query. */
     private const val SEARCH = "https://v3-cinemeta.strem.io/catalog"
     private const val ANIME = "https://anime-kitsu.strem.fun/catalog/series/kitsu-anime-trending.json"
+    private const val ANIME_TOP = "https://anime-kitsu.strem.fun/catalog/series/kitsu-anime-rating"
+    /** 300 of the most popular: past that a genre has nothing left rated high enough to rank. */
+    private const val TOP_PAGES = 6
 
     /** A day: charts move slowly and ratings slower. */
     private const val TTL = 24 * 60 * 60 * 1000L
@@ -131,11 +155,64 @@ object Meta {
                 val metas = JSONObject(Net.get("${addon.url}/catalog/${list.type}/${enc(list.id)}.json", quiet = true)).optJSONArray("metas") ?: JSONArray()
                 return@remember toTitles(metas, kindOfType(list.type), anyId = true, type = list.type)
             }
+            if (genre?.startsWith(TOP_SHELF) == true) return@remember topRated(kind, genre.removePrefix(TOP_SHELF).ifEmpty { null })
             val type = if (kind == "tv") "series" else "movie"
             val url = if (genre == ANIME_GENRE) ANIME else "$CATALOG/$type/top${genre?.let { "/genre=${enc(it)}" }.orEmpty()}.json"
             toTitles(JSONObject(Net.get(url)).optJSONArray("metas") ?: JSONArray(), kind)
         }
     }.getOrDefault(emptyList())
+
+    /**
+     * IMDb's best of a genre. Cinemeta has no list by rating (its imdbRating catalogue is new releases), so
+     * this reads well down the popular list and ranks that: being popular is what rules out a 9.8 from forty votes.
+     */
+    private suspend fun topRated(kind: String, genre: String?): List<Title> = coroutineScope {
+        val type = if (kind == "tv") "series" else "movie"
+        val pages = if (genre == ANIME_GENRE && kind == "tv") (0 until 5).map { "$ANIME_TOP/skip=${it * 20}.json" }
+        else {
+            val named = (if (genre == ANIME_GENRE) "Animation" else genre)?.let { "genre=${enc(it)}&" }.orEmpty()
+            (0 until TOP_PAGES).map { "$CATALOG/$type/top/${named}skip=${it * 50}.json" }
+        }
+        pages.map { url ->
+            async { runCatching { toTitles(JSONObject(Net.get(url, quiet = true)).optJSONArray("metas") ?: JSONArray(), kind) }.getOrDefault(emptyList()) }
+        }.awaitAll().flatten().let(::bestRated).also { check(it.isNotEmpty()) { "no top list" } }
+    }
+
+    /** The chart for several [genres] at once. */
+    suspend fun topOf(kind: String, genres: List<String>): List<Title> = mixTop(genres.map { catalog(kind, TOP_SHELF + it) }, TOP_SIZE)
+
+    /** The same, if every genre's list is already in memory. */
+    fun peekTopOf(kind: String, genres: List<String>): List<Title>? =
+        mixTop(genres.map { peekCatalog(kind, TOP_SHELF + it) ?: return null }, TOP_SIZE)
+
+    /** A card's title in full, for its IMDb rating and art; not kept, as the whole answer is. */
+    private suspend fun cardTitle(card: TmdbCard): Title? {
+        val imdb = Tmdb.imdbOf(card) ?: return null
+        val type = if (card.kind == "tv") "series" else "movie"
+        return runCatching { toTitles(JSONArray().put(JSONObject(Net.get("$BASE/$type/$imdb.json", quiet = true)).getJSONObject("meta").put("imdb_id", imdb)), card.kind).first() }
+            .getOrElse { Title(imdb, card.kind, card.title, year = card.year, poster = card.poster) }
+    }
+
+    /**
+     * What to watch next, from TMDB's recommendations for the viewer's own titles ([seeds], newest first,
+     * as IMDb id and kind). Empty with no key. Kept a day, for that set of titles.
+     */
+    suspend fun forYou(seeds: List<Pair<String, String>>): ForYou = runCatching {
+        remember("foryou:" + seeds.joinToString(",") { it.first }, ::forYouFrom, ::forYouJson) {
+            coroutineScope {
+                val asked = seeds.map { (imdb, kind) -> async { title(imdb, kind)?.title to Tmdb.title(imdb, kind)?.similar.orEmpty() } }.awaitAll()
+                val plan = planForYou(asked.mapNotNull { (name, cards) -> name?.takeIf { it.isNotEmpty() && cards.isNotEmpty() }?.let { it to cards } })
+                val gate = Semaphore(8)
+                val found = (plan.picks.map { it.first } + plan.rails.flatMap { it.second }).distinct()
+                    .map { card -> async { gate.withPermit { card to cardTitle(card) } } }.awaitAll()
+                    .mapNotNull { (card, title) -> title?.takeIf(::worthSuggesting)?.let { card to it } }.toMap()
+                ForYou(
+                    plan.picks.mapNotNull { (card, because) -> found[card]?.let { Pick(it, because) } },
+                    plan.rails.map { (name, cards) -> name to cards.mapNotNull { found[it] } },
+                ).also { check(it.picks.isNotEmpty()) { "nothing to suggest" } }
+            }
+        }
+    }.getOrDefault(ForYou())
 
     /**
      * A title's full entry: from the viewer's meta addons first, in their order and by the types they
@@ -457,7 +534,7 @@ fun toEpisodes(videos: JSONArray?): List<Episode> {
     }.sortedWith(compareBy({ it.season }, { it.episode }))
 }
 
-private fun titlesJson(list: List<Title>): String = JSONArray(list.map { t ->
+internal fun titlesJson(list: List<Title>): String = JSONArray(list.map { t ->
     JSONObject().put("imdb_id", t.imdb).put("kind", t.kind).put("type", t.type).put("name", t.title).put("year", t.year).put("imdbRating", t.rating)
         .put("genre", JSONArray(t.genres)).put("poster", t.poster).put("description", t.plot).put("cast", JSONArray(t.cast))
         .put("director", JSONArray(t.directors)).put("awards", t.awards).put("background", t.backdrop).put("logo", t.logo)
@@ -468,7 +545,7 @@ private fun titlesJson(list: List<Title>): String = JSONArray(list.map { t ->
         }))
 }).toString()
 
-private fun titlesFrom(raw: String): List<Title> {
+internal fun titlesFrom(raw: String): List<Title> {
     val a = JSONArray(raw)
     return a.objects().flatMap { o -> toTitles(JSONArray().put(o), o.optString("kind", "movie"), withEpisodes = true, anyId = true) }
 }

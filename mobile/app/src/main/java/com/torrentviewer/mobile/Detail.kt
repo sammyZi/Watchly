@@ -54,6 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.size
 import com.torrentviewer.core.awardsOf
 import com.torrentviewer.core.WatchedBadge
+import com.torrentviewer.core.CertificateBadge
 import com.torrentviewer.core.castPhoto
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -122,11 +123,18 @@ fun openUrl(context: Context, url: String) {
  * on it; turned, it sits behind on the right and the words run down the left, as on the TV.
  */
 @Composable
-fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
+fun DetailScreen(initial: Title, watch: Watch, onOrder: (com.torrentviewer.core.WatchOrder) -> Unit, onOpen: (Title) -> Unit, onPerson: (com.torrentviewer.core.CastMember) -> Unit, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var title by remember(initial.imdb) { mutableStateOf(initial) }
     LaunchedEffect(initial.imdb) { Meta.title(initial.imdb, initial.kind)?.let { title = it } }
+    // Rating, cast and what's like it. Without a key or a connection the page is as it was.
+    val tmdb by produceState<com.torrentviewer.core.TmdbTitle?>(null, initial.imdb) { value = com.torrentviewer.core.Tmdb.title(initial.imdb, initial.kind) }
+    val certificate = tmdb?.certificate
+    if (com.torrentviewer.core.Kids.on && com.torrentviewer.core.tooOldForKids(certificate)) {
+        TooOldForKids(title, certificate.orEmpty(), onBack)
+        return
+    }
     val saved by SavedStore.items.collectAsState()
     val history by History.items.collectAsState()
     val inList = saved.any { it.imdb == title.imdb && it.list == "later" }
@@ -279,7 +287,15 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                     Facts(title.copy(genres = title.genres.take(2)))
                     // On any release here, or on a connected account from another device; a series shows it per episode.
                     val finished = history.filter { it.imdb == title.imdb && it.ratio >= com.torrentviewer.core.WATCHED_AT }.maxOfOrNull { it.at }
-                    if (!title.isSeries && (finished != null || title.imdb in stremio.films)) WatchedBadge(finished, Modifier.padding(top = 12.dp))
+                    val seenIt = !title.isSeries && (finished != null || title.imdb in stremio.films)
+                    if (seenIt || certificate != null) Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        certificate?.let { CertificateBadge(it) }
+                        if (seenIt) WatchedBadge(finished)
+                    }
+                    // The list first, as someone chose its order; TMDB for any other film. A series has its seasons.
+                    val inOrder by produceState(com.torrentviewer.core.WatchOrders.of(title.imdb), title.imdb) {
+                        if (value == null && !title.isSeries) value = com.torrentviewer.core.Tmdb.orderOf(title.imdb)
+                    }
                     Spacer(Modifier.height(16.dp))
                     // Part-way through — whichever release or episode was last played — Resume leads, Start over under it.
                     val last = remember(history, title.imdb) { latestPerTitle(history.filter { it.imdb == title.imdb }).firstOrNull() }
@@ -346,8 +362,14 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit) {
                         "Language: " + if (lang.isEmpty()) "Any" else langName(lang), lang.isNotEmpty(),
                         onClick = { pickingLang = true }, modifier = Modifier.padding(top = 14.dp), icon = L.drawable.lucide_ic_languages,
                     )
-                    if (title.cast.isNotEmpty()) CastRow(title.cast)
+                    inOrder?.let { order -> FranchiseRail(order, title.imdb, { onOrder(order) }, onOpen, Modifier.padding(top = 20.dp)) }
+                    val people = tmdb?.cast.orEmpty()
+                    if (people.isNotEmpty()) PeopleRow(people, onPerson.takeUnless { com.torrentviewer.core.Kids.on })
+                    else if (title.cast.isNotEmpty()) CastRow(title.cast)
                     title.awards?.let { AwardsCard(it) }
+                    // Not for kids: recommendations have no rating until they're opened.
+                    val similar = tmdb?.similar.orEmpty()
+                    if (similar.isNotEmpty() && !com.torrentviewer.core.Kids.on) SimilarRail(similar, onOpen, Modifier.padding(top = 20.dp))
                 }
             }
 

@@ -20,6 +20,7 @@ are at the links.
 | Google Play services Cast framework | [Android Software Development Kit License](https://developer.android.com/studio/terms) |
 | [Google Sans Flex](https://github.com/googlefonts/googlesans-flex) font | [SIL Open Font License 1.1](tv/core/src/main/assets/licenses/GoogleSansFlex-OFL.txt) |
 | [Fluent Emoji](https://github.com/microsoft/fluentui-emoji) profile icons, on Windows too | [MIT](tv/core/src/main/assets/emoji/LICENSE) |
+| [TMDB](https://www.themoviedb.org) film collections, for watch orders | [API terms](https://www.themoviedb.org/api-terms-of-use). This product uses the TMDB API but is not endorsed or certified by TMDB. |
 
 > [!IMPORTANT]
 > All of Watchly is distributed under the terms of the GPL 3.0, which the Jellyfin FFmpeg decoder in

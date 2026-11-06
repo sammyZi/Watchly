@@ -45,7 +45,15 @@ public sealed class HomeView : UserControl
 
     /// <summary>A shelf's titles for today — see Recommend. Genre shelves share titles out between them.</summary>
     List<Title> Today(Shelf shelf, List<Title> pool, HashSet<string?> watched) =>
-        Recommend.ForToday(pool, shelf.Genre, taste, watched, onePerGenre: shelf.Genre is not null && shelf.Genre != Meta.AnimeGenre);
+        Recommend.ForToday(pool.Where(t => !suggestedIds.Contains(t.Imdb)).ToList(), shelf.Genre, taste, watched, onePerGenre: shelf.Genre is not null && shelf.Genre != Meta.AnimeGenre);
+
+    /// <summary>What TMDB suggests for this profile's own titles, and the ids of all the rows above the genres, which those don't repeat.</summary>
+    ForYou forYou = new(new(), new());
+    HashSet<string> suggestedIds = new();
+    readonly StackPanel suggested = new();
+
+    /// <summary>The viewer's latest titles that suggestions are drawn from, and how many of the best to show.</summary>
+    const int ForYouSeeds = 4, ForYouPicks = 15, ChartSize = 15;
     readonly Dictionary<string, (FrameworkElement Container, ContentControl Body)> shelfControls = new();
     List<Shelf> picks = new();
     int version;
@@ -67,6 +75,7 @@ public sealed class HomeView : UserControl
 
         page.Children.Add(hero);
         page.Children.Add(personal);
+        page.Children.Add(suggested);
         page.Children.Add(shelves);
         header.Child = Ui.Text("WATCHLY", "TitleText", "Accent", 20, FontWeights.Black);
         Header();
@@ -147,7 +156,8 @@ public sealed class HomeView : UserControl
         // The viewer's addons' own lists lead, as on Stremio's board.
         chosen.AddRange(Addons.Shelves());
         var taken = chosen.Select(s => s.Key).ToHashSet();
-        var rest = picks.Where(p => taken.Add(p.Key)).ToList();
+        // A genre's popular list is no suggestion: it's what TMDB's rows replace, with no key or nothing played.
+        var rest = forYou.Picks.Count > 0 ? new List<Shelf>() : picks.Where(p => taken.Add(p.Key)).ToList();
         var fixedList = Fixed.Where(s => taken.Add(s.Key)).ToList();
 
         // Include all genres from Meta.Genres
@@ -173,6 +183,7 @@ public sealed class HomeView : UserControl
         // Before the taste lookup, not after it: that walks up to thirty titles'
         // records, and every shelf used to sit on a spinner until it finished.
         LoadMissing();
+        LoadSuggested(mine);
 
         // What is mid-way leads the taste signal, then the rest, then saved titles.
         var recent = shell.HistoryList;
@@ -198,6 +209,64 @@ public sealed class HomeView : UserControl
 
         // The recommended shelves only exist now; fetch theirs too.
         LoadMissing();
+    }
+
+    /// <summary>Picked for you, the charts over the viewer's genres, and a row per title — mobile Home.kt. Not for kids, whose rows are the family ones.</summary>
+    async void LoadSuggested(int mine)
+    {
+        if (KidsMode.On)
+        {
+            forYou = new(new(), new());
+            suggested.Children.Clear();
+            return;
+        }
+        var seeds = shell.HistoryList.OrderByDescending(h => h.LastPlayed).Where(h => h.Imdb is not null).Select(h => (h.Imdb!, h.Kind ?? "movie"))
+            .Concat(shell.SavedList.Select(s => (s.Imdb, s.Kind)))
+            .Where(s => s.Item1.StartsWith("tt")).DistinctBy(s => s.Item1).Take(ForYouSeeds).ToList();
+        var genres = shell.Settings.Genres.ToList();
+        var films = Meta.TopOf("movie", genres);
+        var series = Meta.TopOf("tv", genres);
+        var found = await Tmdb.Suggest(seeds);
+        var had = forYou.Picks.Count > 0;
+        var charts = new[] { (Kind: "movie", Word: "movies", Titles: await films), (Kind: "tv", Word: "series", Titles: await series) };
+        if (mine != version) return;
+        forYou = found;
+
+        var known = WatchOrders.Seen(shell.HistoryList);
+        known.UnionWith(shell.HistoryList.Select(h => h.Imdb).OfType<string>());
+        known.UnionWith(shell.SavedList.Select(s => s.Imdb));
+        var ids = new HashSet<string>();
+        suggested.Children.Clear();
+        void Row(string heading, Action? seeAll, FrameworkElement row) =>
+            suggested.Children.Add(new StackPanel { Margin = new Thickness(0, RowGap, 0, 0), Children = { Ui.Head(heading, seeAll), row } });
+        ScrollViewer Strip(IEnumerable<UIElement> items)
+        {
+            var strip = OrderUi.Strip(items);
+            strip.Padding = new Thickness(24, 0, 24, 0);
+            return strip;
+        }
+
+        var chosen = found.Picks.Where(p => !known.Contains(p.Title.Imdb)).Take(ForYouPicks).ToList();
+        if (chosen.Count > 0) Row("Picked for you", null, Strip(chosen.Select(OrderUi.PickCard)));
+        ids.UnionWith(chosen.Select(p => p.Title.Imdb));
+        foreach (var (kind, word, titles) in charts)
+        {
+            var top = titles.Take(ChartSize).ToList();
+            if (top.Count == 0) continue;
+            Row(genres.Count == 0 ? $"Top {word} on IMDb" : $"Top IMDb {word} in your genres", () => shell.OpenTop(kind), Strip(top.Select((t, i) => OrderUi.Ranked(i + 1, t, this))));
+            ids.UnionWith(top.Select(t => t.Imdb));
+        }
+        foreach (var rail in found.Rails)
+        {
+            var titles = rail.Titles.Where(t => !known.Contains(t.Imdb)).ToList();
+            if (titles.Count < 3) continue;
+            Row($"Because you watched {rail.Name}", null, (FrameworkElement)Ui.Rail(titles, "RailCard", CardHeight));
+            ids.UnionWith(titles.Select(t => t.Imdb));
+        }
+        suggestedIds = ids;
+        // The genre rows drop what's now above them, and the ones TMDB's rows replace, once; not on every refresh.
+        if (had != found.Picks.Count > 0) BuildShelves();
+        else BuildHero(AllShelves(), shell.HistoryList.Select(h => h.Imdb).Where(i => i is not null).ToHashSet());
     }
 
     readonly HashSet<string> requested = new();
@@ -306,6 +375,19 @@ public sealed class HomeView : UserControl
 
         var favorites = Saved.InList(shell.SavedList, "favorite").Select(s => s.AsTitle()).ToList();
         if (favorites.Count > 0) personal.Children.Add(Section("Liked", null, favorites, "RailCard"));
+
+        if (!KidsMode.On)
+        {
+            var seen = WatchOrders.Seen(shell.HistoryList);
+            var strip = OrderUi.Strip(WatchOrders.All.Take(12).Select(o =>
+            {
+                var banner = OrderUi.Banner(o, seen, 330);
+                banner.Margin = new Thickness(0, 0, 10, 0);
+                return banner;
+            }));
+            strip.Padding = new Thickness(24, 0, 24, 0);
+            personal.Children.Add(new StackPanel { Margin = new Thickness(0, RowGap, 0, 0), Children = { Ui.Head("Watch orders", shell.OpenOrders), strip } });
+        }
     }
 
     static FrameworkElement Section(string title, Action? seeAll, System.Collections.IEnumerable items, string template) => new StackPanel
@@ -378,11 +460,17 @@ public sealed class HomeView : UserControl
     void BuildHero(List<Shelf> all, HashSet<string?> watched)
     {
         var chosen = Chosen();
-        var heroShelf = chosen.FirstOrDefault() ?? picks.FirstOrDefault() ?? Fixed[0];
-        var heroFrom = loaded.ContainsKey(heroShelf.Key) ? heroShelf : Fixed[0];
-        var source = loaded.GetValueOrDefault(heroFrom.Key) ?? new();
-        // Today's picks too, but from the whole pool (not one genre's share), so the banner changes daily.
-        var titles = Recommend.ForToday(source, heroFrom.Genre, taste, watched, onePerGenre: false).Take(6).ToList();
+        // What's suggested, then every chosen genre in turn, so one genre doesn't fill the banner.
+        var lists = new List<List<Title>> { forYou.Picks.Select(p => p.Title).Where(t => !watched.Contains(t.Imdb)).ToList() };
+        lists.AddRange(chosen.Where(s => loaded.ContainsKey(s.Key)).Select(s => Recommend.ForToday(loaded[s.Key], s.Genre, taste, watched, onePerGenre: false)));
+        var titles = Meta.Interleave(lists).Take(6).ToList();
+        if (titles.Count == 0)
+        {
+            var heroShelf = picks.FirstOrDefault() ?? Fixed[0];
+            var heroFrom = loaded.ContainsKey(heroShelf.Key) ? heroShelf : Fixed[0];
+            // Today's picks too, but from the whole pool (not one genre's share), so the banner changes daily.
+            titles = Recommend.ForToday(loaded.GetValueOrDefault(heroFrom.Key) ?? new(), heroFrom.Genre, taste, watched, onePerGenre: false).Take(6).ToList();
+        }
         var key = string.Join("|", titles.Select(t => t.Imdb)) + Theme.IsLight;
         if (key == heroKey) return;
         heroKey = key;

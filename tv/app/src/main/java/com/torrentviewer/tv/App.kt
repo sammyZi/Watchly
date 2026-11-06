@@ -87,6 +87,16 @@ enum class Tab(val label: String, @DrawableRes val icon: Int) {
     SETTINGS("Settings", L.drawable.lucide_ic_settings),
 }
 
+/** A page opened over the tabs. They stack: a film, its franchise, another film, an actor; Back takes one off. */
+private sealed interface Stop {
+    val key: String
+    data class Film(val title: Title) : Stop { override val key get() = title.imdb }
+    data object Orders : Stop { override val key get() = "orders" }
+    data class Order(val order: WatchOrder) : Stop { override val key get() = "order:${order.id}" }
+    data class Person(val id: Int, val name: String) : Stop { override val key get() = "person:$id" }
+    data class Top(val kind: String) : Stop { override val key get() = "top" }
+}
+
 @Composable
 fun App(watch: Watch, incoming: MutableState<Uri?>) {
     MaterialTheme(colorScheme = darkColorScheme(primary = Ink.accent, background = Ink.bg, surface = Ink.surface)) {
@@ -127,7 +137,11 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     }
     var switching by remember { mutableStateOf(false) }
     var tab by remember { mutableStateOf(Tab.HOME) }
-    var detail by remember { mutableStateOf<Title?>(null) }
+    var stops by remember { mutableStateOf(emptyList<Stop>()) }
+    val open = { stop: Stop -> stops = stops + stop }
+    val openTitle = { t: Title -> open(Stop.Film(t)) }
+    val openOrder = { o: WatchOrder -> open(Stop.Order(o)) }
+    val back = { stops = stops.dropLast(1) }
     // A detail page keeps its season and episode while the player is up, and when gone back to.
     val pages = rememberSaveableStateHolder()
     val home = remember { HomeState() }
@@ -168,7 +182,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         incoming.value = null
         // A magnet is anything at all: a kids profile plays only what it can browse to.
         if (Kids.on) return@LaunchedEffect watch.fail("A kids profile can't open torrents or addons from other apps.")
-        detail = null
+        stops = emptyList()
         val raw = uri.toString()
         if (raw.startsWith("stremio://", ignoreCase = true)) {
             // Not in this effect: clearing incoming above restarts it, which cancelled the fetch half-way.
@@ -201,8 +215,9 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         return
     }
 
-    BackHandler(detail != null) { detail = null }
-    BackHandler(detail == null && tab != Tab.HOME) { tab = Tab.HOME }
+    val top = stops.lastOrNull()
+    BackHandler(top != null) { back() }
+    BackHandler(top == null && tab != Tab.HOME) { tab = Tab.HOME }
 
     val rail = remember { FocusRequester() }
     /** The page as one focus group that remembers its last card — where Right from the rail goes. */
@@ -211,7 +226,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     Box(Modifier.fillMaxSize()) {
         // One page at a time, faded in. A cross-fade kept the old page composed for the
         // length of the fade, and its focus claims fought the new page's.
-        val pageKey = detail?.imdb ?: tab.name
+        val pageKey = top?.key ?: tab.name
         key(pageKey) {
             val alpha = remember { Animatable(0f) }
             LaunchedEffect(Unit) { alpha.animateTo(1f, tween(220)) }
@@ -222,25 +237,32 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
                     .focusGroup()
                     // Left off the edge of a page always reaches the rail, whatever lies between.
                     .onPreviewKeyEvent { e ->
-                        if (detail != null || e.type != KeyEventType.KeyDown || e.key != Key.DirectionLeft) return@onPreviewKeyEvent false
+                        if (top != null || e.type != KeyEventType.KeyDown || e.key != Key.DirectionLeft) return@onPreviewKeyEvent false
                         if (!focusManager.moveFocus(FocusDirection.Left)) runCatching { rail.requestFocus() }
                         true
                     },
             ) {
-                val open = detail
-                if (open != null) {
-                    pages.SaveableStateProvider(open.imdb) { DetailScreen(open, watch, onOpen = { detail = it }) }
+                if (top != null) {
+                    pages.SaveableStateProvider(top.key) {
+                        when (top) {
+                            is Stop.Film -> DetailScreen(top.title, watch, onBack = back, onOrder = openOrder, onOpen = openTitle, onPerson = { open(Stop.Person(it.id, it.name)) })
+                            Stop.Orders -> WatchOrdersScreen(onOpen = openOrder)
+                            is Stop.Order -> WatchOrderScreen(top.order, onOpen = openTitle)
+                            is Stop.Person -> PersonScreen(top.id, top.name, onOpen = openTitle)
+                            is Stop.Top -> TopScreen(top.kind, onOpen = openTitle)
+                        }
+                    }
                 } else {
                     when (tab) {
-                        Tab.HOME -> HomeScreen(home, watch, onOpen = { detail = it })
-                        Tab.SEARCH -> SearchScreen(watch, onOpen = { detail = it })
-                        Tab.LIBRARY -> LibraryScreen(watch, who!!, onOpen = { detail = it })
+                        Tab.HOME -> HomeScreen(home, watch, onOpen = openTitle, onTop = { open(Stop.Top(it)) }, onOrders = { open(Stop.Orders) }, onOrder = openOrder)
+                        Tab.SEARCH -> SearchScreen(watch, onOpen = openTitle)
+                        Tab.LIBRARY -> LibraryScreen(watch, who!!, onOpen = openTitle)
                         Tab.SETTINGS -> SettingsScreen(who!!, onSwitchProfile = { switching = true })
                     }
                 }
             }
         }
-        if (detail == null) NavRail(tab, who!!, rail, page, onTab = { tab = it }, onProfile = { switching = true })
+        if (top == null) NavRail(tab, who!!, rail, page, onTab = { tab = it }, onProfile = { switching = true })
 
         if (watch.phase == Phase.INSPECTING) Opening(watch)
 

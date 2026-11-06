@@ -27,6 +27,8 @@ public sealed class SearchView : UserControl
     List<string> recent = Searches.Load();
     string? kind;
     string? genre;
+    /// <summary>The lowest IMDb rating shown; null is any.</summary>
+    int? atLeast;
     bool torrents;
     bool busy;
     List<Title>? titles;
@@ -122,6 +124,9 @@ public sealed class SearchView : UserControl
             Add(Ui.Rule());
             Add(Ui.Chip("Films", kind == "movie", () => { kind = kind == "movie" ? null : "movie"; BuildChips(); Render(); }, "film"));
             Add(Ui.Chip("Series", kind == "tv", () => { kind = kind == "tv" ? null : "tv"; BuildChips(); Render(); }, "tv"));
+            Add(Ui.Rule());
+            foreach (var min in new[] { 7, 8, 9 })
+                Add(Ui.Chip($"IMDb {min}+", atLeast == min, () => { atLeast = atLeast == min ? null : min; BuildChips(); Run(); }));
         }
         // Search results carry no genres, so these belong to browsing only.
         if (!torrents && Query.Length == 0)
@@ -174,12 +179,13 @@ public sealed class SearchView : UserControl
         List<Title> mixed;
         if (q.Length == 0 && genre == Meta.AnimeGenre)
         {
-            mixed = await Meta.LoadCatalog("tv", Meta.AnimeGenre);
+            mixed = await (atLeast is null ? Meta.LoadCatalog("tv", Meta.AnimeGenre) : Meta.LoadTop("tv", Meta.AnimeGenre));
         }
         else
         {
-            var filmsJob = q.Length > 0 ? Meta.SearchTitles(q, "movie") : Meta.LoadCatalog("movie");
-            var seriesJob = q.Length > 0 ? Meta.SearchTitles(q, "tv") : Meta.LoadCatalog("tv");
+            // Going by rating, browse the best of the genre, not only what's popular this week.
+            var filmsJob = q.Length > 0 ? Meta.SearchTitles(q, "movie") : atLeast is null ? Meta.LoadCatalog("movie") : Meta.LoadTop("movie", genre);
+            var seriesJob = q.Length > 0 ? Meta.SearchTitles(q, "tv") : atLeast is null ? Meta.LoadCatalog("tv") : Meta.LoadTop("tv", genre);
             // And every addon catalogue that searches, as Stremio asks them all.
             var addonsJob = q.Length > 0 && !KidsMode.On ? Meta.SearchAddons(q) : Task.FromResult(new List<Title>());
             var films = await filmsJob;
@@ -229,7 +235,7 @@ public sealed class SearchView : UserControl
             return;
         }
 
-        var shown = (titles ?? new()).Where(t => (kind is null || t.Kind == kind) && (genre is null || genre == Meta.AnimeGenre || t.Genres.Contains(genre))).ToList();
+        var shown = (titles ?? new()).Where(t => (kind is null || t.Kind == kind) && (atLeast is null || (t.Score ?? 0) >= atLeast) && (genre is null || genre == Meta.AnimeGenre || t.Genres.Contains(genre))).ToList();
         var page = new StackPanel();
         if (shown.Count > 0)
         {

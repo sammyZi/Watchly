@@ -32,11 +32,35 @@
     </Grid>
   </DataTemplate>
 
+  <!-- core ImdbMark: the rating on a poster, on art, so white on a dark plate in either theme. -->
+  <DataTemplate x:Key="ImdbMark" DataType="{x:Type core:Title}">
+    <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="6" CornerRadius="5" Background="#B8000000">
+      <Border.Style>
+        <Style TargetType="Border">
+          <Style.Triggers>
+            <DataTrigger Binding="{Binding Rating}" Value="{x:Null}">
+              <Setter Property="Visibility" Value="Collapsed" />
+            </DataTrigger>
+          </Style.Triggers>
+        </Style>
+      </Border.Style>
+      <StackPanel Orientation="Horizontal">
+        <Border Background="{DynamicResource Imdb}" CornerRadius="5" Padding="4,1">
+          <TextBlock Text="IMDb" FontSize="9" FontWeight="Black" Foreground="Black" />
+        </Border>
+        <TextBlock Text="{Binding Rating}" Foreground="White" FontSize="11" FontWeight="Bold" Margin="4,0,5,0" VerticalAlignment="Center" />
+      </StackPanel>
+    </Border>
+  </DataTemplate>
+
   <!-- Home's rows (mobile Home.kt TitleRow): the poster alone, 2:3. -->
   <DataTemplate x:Key="RailCard" DataType="{x:Type core:Title}">
     <Button Style="{StaticResource Bare}" Width="140" Height="210" Margin="0,0,10,0" VerticalAlignment="Top"
             Command="{x:Static local:Cmd.OpenTitle}" CommandParameter="{Binding}" ToolTip="{Binding Name}">
-      <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource Art}" />
+      <Grid>
+        <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource Art}" />
+        <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource ImdbMark}" />
+      </Grid>
     </Button>
   </DataTemplate>
 
@@ -45,7 +69,10 @@
     <Button Style="{StaticResource Bare}" Width="140" Margin="0,0,10,0" VerticalAlignment="Top"
             Command="{x:Static local:Cmd.OpenTitle}" CommandParameter="{Binding}" ToolTip="{Binding Name}">
       <StackPanel>
-        <ContentPresenter Height="210" Content="{Binding}" ContentTemplate="{StaticResource Art}" />
+        <Grid Height="210">
+          <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource Art}" />
+          <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource ImdbMark}" />
+        </Grid>
         <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource Text}" Margin="0,6,0,0" TextTrimming="CharacterEllipsis" />
         <TextBlock FontSize="12" FontWeight="Medium" Foreground="{DynamicResource Faint}" TextTrimming="CharacterEllipsis">
           <TextBlock.Text>

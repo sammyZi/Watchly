@@ -444,8 +444,13 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             Text(
                 "Version ${BuildConfig.VERSION_NAME} · built " +
                     java.text.SimpleDateFormat("d MMM yyyy, HH:mm", java.util.Locale.US).format(java.util.Date(BuildConfig.BUILD_TIME)),
-                Modifier.padding(top = 4.dp, bottom = 18.dp),
+                Modifier.padding(top = 4.dp),
                 style = Type.meta.copy(color = Ink.faint),
+            )
+            Text(
+                "This product uses the TMDB API but is not endorsed or certified by TMDB.",
+                Modifier.padding(top = 2.dp, bottom = 18.dp),
+                style = Type.meta.copy(color = Ink.faint, fontSize = 11.sp),
             )
             Field(query, { query = it }, "Search settings", Modifier.widthIn(max = 760.dp).fillMaxWidth().padding(bottom = 14.dp), leading = L.drawable.lucide_ic_search, keyboardOnFocus = false)
             SettingsList(

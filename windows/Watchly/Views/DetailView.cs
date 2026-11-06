@@ -47,6 +47,9 @@ public sealed class DetailView : UserControl, IDisposable
     CancellationTokenSource? searching;
     int searchGen;
     FrameworkElement? sourcesAnchor;
+    /// <summary>Rating, cast and what's alike. Without a key or a connection the page is as it was.</summary>
+    TmdbTitle? tmdb;
+    WatchOrder? inOrder;
 
     public Title Current => title;
 
@@ -86,9 +89,22 @@ public sealed class DetailView : UserControl, IDisposable
         shell.LibraryChanged += OnLibrary;
         shell.OpeningChanged += Render;
 
+        inOrder = WatchOrders.Of(seed.Imdb);
         Render();
         LoadFull();
+        LoadTmdb();
         FindReleases();
+    }
+
+    async void LoadTmdb()
+    {
+        tmdb = await Tmdb.Title(title.Imdb, title.Kind);
+        if (tmdb is not null) Render();
+        if (inOrder is null && title.Kind == "movie" && await Tmdb.OrderOf(title.Imdb) is { } order)
+        {
+            inOrder = order;
+            Render();
+        }
     }
 
     public void Dispose()
@@ -204,6 +220,15 @@ public sealed class DetailView : UserControl, IDisposable
         var offset = scroll.VerticalOffset;
         content.Children.Clear();
 
+        // Genres let it through, its rating doesn't: a kids profile stops here.
+        if (KidsMode.On && Tmdb.TooOldForKids(tmdb?.Certificate))
+        {
+            searching?.Cancel();
+            backdrop.Background = null;
+            content.Children.Add(Ui.Empty("lock", "Not for this profile", $"{title.Name} is rated {tmdb!.Certificate}. Switch to a grown-up's profile to watch it."));
+            return;
+        }
+
         var url = title.Wide;
         if (url is not null && url != backdropUrl && ImageUrl.Load(url, 1920) is { } image)
         {
@@ -230,8 +255,11 @@ public sealed class DetailView : UserControl, IDisposable
         var facts = Ui.Facts(title);
         facts.Margin = new Thickness(0, 12, 0, 16);
         head.Children.Add(facts);
+        var marks = new StackPanel { Orientation = Orientation.Horizontal };
+        if (tmdb?.Certificate is { } certificate) marks.Children.Add(CertificateBadge(certificate));
         if (title.StremioType == "movie" && (seen >= EpisodeLinks.Watched || Trackers.Everywhere.Films.Contains(title.Imdb)))
-            head.Children.Add(WatchedBadge(seen >= EpisodeLinks.Watched ? shell.HistoryList.Where(h => h.Imdb == title.Imdb).Select(h => (long?)h.LastPlayed).Max() : null));
+            marks.Children.Add(WatchedBadge(seen >= EpisodeLinks.Watched ? shell.HistoryList.Where(h => h.Imdb == title.Imdb).Select(h => (long?)h.LastPlayed).Max() : null));
+        if (marks.Children.Count > 0) head.Children.Add(marks);
 
         // The one thing most people want: start the healthiest release — or carry on.
         var label = wait ? saving ? "Starting download…" : "Opening…"
@@ -297,12 +325,16 @@ public sealed class DetailView : UserControl, IDisposable
         actions.Children.Add(LanguageAction());
         head.Children.Add(actions);
 
-        if (title.Cast.Count > 0) head.Children.Add(CastRow());
+        if (tmdb?.Cast.Count > 0) head.Children.Add(PeopleRow(tmdb.Cast));
+        else if (title.Cast.Count > 0) head.Children.Add(CastRow());
         if (title.Awards is not null) head.Children.Add(AwardsCard(title.Awards));
         content.Children.Add(head);
 
+        if (inOrder is { } order) content.Children.Add(FranchiseRail(order));
         if (title.Kind == "tv") RenderEpisodes(progress);
         RenderReviews();
+        if (tmdb?.Similar.Count > 0 && !KidsMode.On)
+            content.Children.Add(new StackPanel { Width = ListWidth, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 26, 0, 0), Children = { Heading("More like this"), OrderUi.Strip(tmdb.Similar.Select(OrderUi.Card)) } });
         RenderSources(fresh, shown, wait);
 
         Dispatcher.BeginInvoke(() => scroll.ScrollToVerticalOffset(offset), DispatcherPriority.Loaded);
@@ -362,6 +394,73 @@ public sealed class DetailView : UserControl, IDisposable
         }
         var badge = Ui.Brushed(new Border { CornerRadius = new CornerRadius(15), Padding = new Thickness(5, 5, 12, 5), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 16), Child = row }, "GoodSoft");
         return badge;
+    }
+
+    /// <summary>The film's age rating, as a small outlined mark.</summary>
+    static FrameworkElement CertificateBadge(string certificate)
+    {
+        var badge = new Border { CornerRadius = new CornerRadius(4), BorderThickness = new Thickness(1), Padding = new Thickness(6, 2, 6, 2), Margin = new Thickness(0, 0, 10, 16), VerticalAlignment = VerticalAlignment.Center, Child = Ui.Text(certificate, "Meta", "Muted", 12, FontWeights.SemiBold) };
+        badge.SetResourceReference(Border.BorderBrushProperty, "Muted");
+        return badge;
+    }
+
+    /// <summary>On a film's page: the franchise it belongs to, every film of it in order, opened at this one.</summary>
+    FrameworkElement FranchiseRail(WatchOrder order)
+    {
+        var seen = WatchOrders.Seen(shell.HistoryList);
+        var at = order.Films.IndexOf(title.Imdb);
+        var done = order.Films.Count(seen.Contains);
+        var name = Ui.Text(order.Name, "TitleText", "Text", 18, FontWeights.Bold);
+        var line = Ui.Text(string.Join("  ·  ", new[] { $"Film {at + 1} of {order.Films.Count}", done > 0 ? $"{done} watched" : null }.Where(s => s is not null)), "Meta", "Faint", 12);
+        var link = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Children = { Ui.Text("Watch order", "Meta"), Ui.Glyph("chevron-right", 16, "Muted") } };
+        DockPanel.SetDock(link, Dock.Right);
+        var head = Ui.Button(new DockPanel { Children = { link, new StackPanel { Children = { name, line } } } }, () => shell.OpenOrder(order));
+        head.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        head.Margin = new Thickness(0, 0, 0, 10);
+        var strip = OrderUi.Strip(order.Films.Select((id, i) => (UIElement)OrderUi.Poster(i + 1, id, id == title.Imdb, seen.Contains(id), () =>
+        {
+            if (id != title.Imdb) shell.OpenTitle(new Title { Imdb = id });
+        })));
+        strip.Loaded += (_, _) => strip.ScrollToHorizontalOffset(Math.Max(0, at - 1) * 110);
+        return new StackPanel { Width = ListWidth, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 26, 0, 0), Children = { head, strip } };
+    }
+
+    /// <summary>The cast from TMDB: real photos, who each one plays, and a click through to what else they're in.</summary>
+    FrameworkElement PeopleRow(List<CastMember> people)
+    {
+        var faces = people.Select(person =>
+        {
+            var face = Ui.Brushed(new Border
+            {
+                Width = 64,
+                Height = 64,
+                CornerRadius = new CornerRadius(32),
+                Child = Ui.Text(string.Concat(person.Name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(w => char.ToUpper(w[0]))), "Label", "Muted", 15, FontWeights.Bold),
+            }, "SurfaceAlt");
+            ((FrameworkElement)face.Child).HorizontalAlignment = HorizontalAlignment.Center;
+            ((FrameworkElement)face.Child).VerticalAlignment = VerticalAlignment.Center;
+            var photo = new System.Windows.Shapes.Ellipse { Width = 64, Height = 64 };
+            if (ImageUrl.Load(person.Photo, 128) is { } image) photo.Fill = new ImageBrush(image) { Stretch = Stretch.UniformToFill, AlignmentY = AlignmentY.Top };
+            var name = Ui.Text(person.Name, "Meta", "Text", 12, FontWeights.SemiBold);
+            name.TextWrapping = TextWrapping.Wrap;
+            name.TextAlignment = TextAlignment.Center;
+            name.MaxHeight = 34;
+            name.Margin = new Thickness(0, 6, 0, 0);
+            var column = new StackPanel { Width = 84, Children = { new Grid { Width = 64, Children = { face, photo } }, name } };
+            if (person.Role is not null)
+            {
+                var role = Ui.Text(person.Role, "Meta", "Faint", 11);
+                role.TextWrapping = TextWrapping.Wrap;
+                role.TextAlignment = TextAlignment.Center;
+                role.MaxHeight = 30;
+                column.Children.Add(role);
+            }
+            var button = Ui.Button(column, () => { if (!KidsMode.On) shell.OpenPerson(person.Id, person.Name); });
+            button.Margin = new Thickness(0, 0, 10, 0);
+            button.VerticalAlignment = VerticalAlignment.Top;
+            return (UIElement)button;
+        });
+        return new StackPanel { Margin = new Thickness(0, 18, 0, 0), Children = { Heading("Cast", 16), OrderUi.Strip(faces) } };
     }
 
     /// <summary>The cast as faces: a round photo over each name. Initials until the photos arrive.</summary>

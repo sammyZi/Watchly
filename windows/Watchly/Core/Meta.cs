@@ -49,6 +49,10 @@ public sealed record Title
     /// <summary>Long-running anime, listed by each episode's number through the show rather than by season.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public bool NumberedThrough => Genres.Any(g => g is Meta.AnimeGenre or "Animation") && Episodes.Count(e => e.Season > 0) > 100;
+
+    /// <summary>The IMDb rating as a number; null when it has none yet.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public double? Score => double.TryParse(Rating, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var n) ? n : null;
 }
 
 public sealed record Shelf(string Heading, string Kind, string? Genre = null)
@@ -63,6 +67,10 @@ public static class Meta
     const string Catalog = "https://cinemeta-catalogs.strem.io/top/catalog";
     const string SearchUrl = "https://v3-cinemeta.strem.io/catalog";
     const string Anime = "https://anime-kitsu.strem.fun/catalog/series/kitsu-anime-trending.json";
+    const string AnimeTop = "https://anime-kitsu.strem.fun/catalog/series/kitsu-anime-rating";
+    /// <summary>300 of the most popular: past that a genre has nothing left rated high enough to rank.</summary>
+    const int TopPages = 6;
+    const int TopSize = 60;
 
     public const string AnimeGenre = "Anime";
 
@@ -339,6 +347,53 @@ public static class Meta
             return titles;
         }, new List<Title>());
     }
+
+    /// <summary>One from each list in turn, each title once: no list crowds out the others.</summary>
+    public static List<Title> Interleave(IReadOnlyList<List<Title>> lists)
+    {
+        var turns = new List<Title>();
+        for (var i = 0; i < (lists.Count == 0 ? 0 : lists.Max(l => l.Count)); i++)
+            foreach (var list in lists)
+                if (i < list.Count) turns.Add(list[i]);
+        return UniqueById(turns);
+    }
+
+    /// <summary>A chart over several genres: each gets its share of the places, then they rank by rating together.</summary>
+    public static List<Title> MixTop(IReadOnlyList<List<Title>> lists, int size) =>
+        Interleave(lists).Take(size).OrderByDescending(t => t.Score).ToList();
+
+    public static List<Title>? PeekTop(string kind, string? genre) => PeekCatalog(kind, "top:" + genre);
+
+    /// <summary>
+    /// IMDb's best of a genre (core Meta.topRated). Cinemeta has no list by rating (its imdbRating catalogue is new
+    /// releases), so this reads well down the popular list and ranks that: being popular rules out a 9.8 from forty votes.
+    /// </summary>
+    public static Task<List<Title>> LoadTop(string kind, string? genre = null)
+    {
+        var key = $"shelf-{kind}-top:{genre}";
+        var type = kind == "tv" ? "series" : "movie";
+        var named = genre == AnimeGenre ? "Animation" : genre;
+        var pages = genre == AnimeGenre && kind == "tv"
+            ? Enumerable.Range(0, 5).Select(i => $"{AnimeTop}/skip={i * 20}.json")
+            : Enumerable.Range(0, TopPages).Select(i => $"{Catalog}/{type}/top/{(named is null ? "" : $"genre={Uri.EscapeDataString(named)}&")}skip={i * 50}.json");
+        return Once(key, async () =>
+        {
+            var titles = await Remember("pool-" + key, async () =>
+            {
+                var bodies = await Task.WhenAll(pages.Select(async page => { try { return await Net.Json(page, default, true); } catch { return null; } }));
+                var found = UniqueById(bodies.SelectMany(b => b?["metas"] is JsonArray metas ? ToTitles(metas, kind) : new List<Title>()))
+                    .Where(t => t.Score is not null).OrderByDescending(t => t.Score).Take(TopSize).ToList();
+                if (found.Count == 0) throw new InvalidOperationException("no top list");
+                return found;
+            });
+            Settled[key] = titles;
+            return titles;
+        }, new List<Title>());
+    }
+
+    /// <summary>The chart for several genres at once; none is all of them.</summary>
+    public static async Task<List<Title>> TopOf(string kind, IReadOnlyList<string> genres) =>
+        genres.Count == 0 ? await LoadTop(kind) : MixTop(await Task.WhenAll(genres.Select(g => LoadTop(kind, g))), TopSize);
 
     public static Task<List<Title>> SearchTitles(string query, string kind)
     {

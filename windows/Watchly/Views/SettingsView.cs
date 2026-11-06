@@ -135,6 +135,9 @@ public sealed class SettingsView : UserControl
             var version = Ui.Text($"Version {Updates.Version}", "Meta", "Faint", 12);
             version.Margin = new Thickness(4, 4, 0, 0);
             page.Children.Add(version);
+            var credit = Ui.Text("This product uses the TMDB API but is not endorsed or certified by TMDB.", "Meta", "Faint", 11);
+            credit.Margin = new Thickness(4, 2, 0, 0);
+            page.Children.Add(credit);
             return;
         }
         var back = Ui.Round("arrow-left", () => Go(null), "Text", "Tint", 40, 20, "Back");

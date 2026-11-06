@@ -441,9 +441,10 @@ public static class Ui
     /// core TitleMark: the title's logo when Cinemeta has one, else its name set large. The
     /// name shows until the logo lands, and stays if it never does.
     /// </summary>
-    public static FrameworkElement TitleMark(Core.Title title, double maxHeight, double maxWidth, double fontSize = 28)
+    public static FrameworkElement TitleMark(Core.Title title, double maxHeight, double maxWidth, double fontSize = 28, Brush? colour = null)
     {
         var name = Text(title.Name, "Display", "Text", fontSize);
+        if (colour is not null) name.Foreground = colour;
         name.TextWrapping = TextWrapping.Wrap;
         name.MaxWidth = maxWidth;
         name.HorizontalAlignment = HorizontalAlignment.Left;

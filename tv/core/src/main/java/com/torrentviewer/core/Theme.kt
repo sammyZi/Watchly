@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -183,6 +184,31 @@ fun Artwork(url: String?, name: String, modifier: Modifier = Modifier, scale: Co
             )
         }
     }
+}
+
+/** The IMDb rating on a poster: on art, so white on a dark plate in either theme. */
+@Composable
+fun ImdbMark(rating: String, modifier: Modifier = Modifier) {
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(5.dp)
+    // Wrapped: some parents hand their children their own size as a minimum, and the plate would cover the poster.
+    Row(modifier.wrapContentSize(Alignment.BottomStart).background(Color.Black.copy(alpha = 0.72f), shape).padding(end = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            "IMDb",
+            Modifier.background(Ink.imdb, shape).padding(horizontal = 4.dp, vertical = 1.dp),
+            style = Type.meta.copy(color = Color.Black, fontSize = 9.sp, fontWeight = FontWeight.Black),
+        )
+        Text(rating, Modifier.padding(start = 4.dp), style = Type.meta.copy(color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold))
+    }
+}
+
+/** The film's age rating, as a small outlined mark. */
+@Composable
+fun CertificateBadge(certificate: String, modifier: Modifier = Modifier) {
+    Text(
+        certificate,
+        modifier.border(1.dp, Ink.muted, androidx.compose.foundation.shape.RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+        style = Type.meta.copy(color = Ink.muted, fontWeight = FontWeight.SemiBold, fontSize = 12.sp),
+    )
 }
 
 /** A film seen through: here, on [at], or on an account, where the day isn't known. */

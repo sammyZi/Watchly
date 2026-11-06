@@ -84,6 +84,7 @@ import com.torrentviewer.core.quality
 import com.torrentviewer.core.bytes
 import com.torrentviewer.core.playedSize
 import com.torrentviewer.core.remoteArt
+import com.torrentviewer.core.TOP_SHELF
 import kotlinx.coroutines.delay
 import com.composables.icons.lucide.R as L
 
@@ -114,6 +115,12 @@ private val SHELVES = listOf(
 /** How many titles of the lead shelf the hero swipes through. */
 private const val HEROES = 6
 
+/** The viewer's latest titles that suggestions are drawn from, and how many of the best to show. */
+private const val FOR_YOU_SEEDS = 4
+private const val FOR_YOU_PICKS = 15
+
+private const val CHART_SIZE = 15
+
 /** Survives opening a title, so coming back lands on the same row, same card. */
 class HomeState {
     val list = LazyListState()
@@ -122,6 +129,7 @@ class HomeState {
     var heroCount by mutableIntStateOf(0)
     val hero = PagerState { heroCount }
     var picks by mutableStateOf<List<Shelf>>(emptyList())
+    var forYou by mutableStateOf(com.torrentviewer.core.ForYou())
     var fresh by mutableStateOf<List<NewEpisodes.Fresh>>(emptyList())
 
     fun row(key: String) = rows.getOrPut(key) { LazyListState() }
@@ -155,7 +163,7 @@ fun posterWidth() = if (isWide()) 140.dp else 108.dp
 private val CARD_GAP = 12.dp
 
 @Composable
-fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> Unit, onShelf: (Shelf) -> Unit, onProfile: () -> Unit) {
+fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> Unit, onShelf: (Shelf) -> Unit, onTop: (String) -> Unit, onOrders: () -> Unit, onOrder: (com.torrentviewer.core.WatchOrder) -> Unit, onProfile: () -> Unit) {
     val history by History.items.collectAsState()
     val saved by SavedStore.items.collectAsState()
     val settings by SettingsStore.value.collectAsState()
@@ -168,6 +176,13 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
             Shelf(if (i == 0) "Because you watched ${genre.lowercase()}" else "More ${genre.lowercase()}", kind, genre)
         }
     }
+    // What TMDB suggests for the titles this profile last played or saved: not for kids, whose rows are the family ones.
+    LaunchedEffect(history.size, saved.size, online, com.torrentviewer.core.Kids.on) {
+        val played = history.sortedByDescending { it.at }.mapNotNull { h -> h.imdb?.let { it to (h.kind ?: "movie") } }
+        val seeds = (played + saved.map { it.imdb to it.kind }).filter { it.first.startsWith("tt") }.distinctBy { it.first }.take(FOR_YOU_SEEDS)
+        if (seeds.isEmpty() || com.torrentviewer.core.Kids.on) state.forYou = com.torrentviewer.core.ForYou()
+        else Meta.forYou(seeds).takeIf { it.picks.isNotEmpty() }?.let { state.forYou = it }
+    }
     // Followed series — watched or saved — with episodes out since their page was last opened.
     LaunchedEffect(history.size, saved.size, online) {
         val shows = history.filter { it.kind == "tv" }.mapNotNull { it.imdb } + saved.filter { it.kind == "tv" }.map { it.imdb }
@@ -176,19 +191,27 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
     val chosen = settings.genres.map { Shelf(if (it == ANIME_GENRE) "Anime" else it, kindOfGenre(it), it) }
     val kids = com.torrentviewer.core.Kids
     val addons by com.torrentviewer.core.Addons.list.collectAsState()
-    val shelves = remember(chosen, state.picks, kids.on, addons) {
+    val personal = state.forYou.picks.isNotEmpty()
+    val shelves = remember(chosen, state.picks, kids.on, addons, personal) {
         if (kids.on) return@remember com.torrentviewer.core.KIDS_SHELVES.map { (title, kind, genre) -> Shelf(title, kind, genre) }
         // The viewer's addons' own lists lead, as on Stremio's board.
         val mine = com.torrentviewer.core.Addons.shelves().map { (title, kind, key) -> Shelf(title, kind, key) }
         val taken = chosen.map { it.key }.toMutableSet()
-        val rest = state.picks.filter { taken.add(it.key) }
+        // A genre's popular list is no suggestion: it's what TMDB's rows replace, with no key or nothing played.
+        val rest = if (personal) emptyList() else state.picks.filter { taken.add(it.key) }
         chosen + mine + rest + SHELVES.filter { it.key !in taken }
+    }
+    // The charts draw on every genre the viewer chose, or on all of them with none chosen.
+    val tops = if (kids.on) emptyList() else listOf("movie", "tv").flatMap { kind ->
+        settings.genres.ifEmpty { listOf("") }.map { Shelf("", kind, TOP_SHELF + it) }
     }
 
     // Top-down, not all at once: a phone on mobile data and a burst of parallel fetches do not mix.
     // A kids profile's rows are filtered again once the family list is in.
-    LaunchedEffect(shelves, online, kids.allowed) {
-        for (shelf in shelves) {
+    LaunchedEffect(shelves, tops, online, kids.allowed) {
+        // The chosen genres first: the hero is made of them.
+        val first = maxOf(1, chosen.size)
+        for (shelf in shelves.take(first) + tops + shelves.drop(first)) {
             if (state.loaded[shelf.key].isNullOrEmpty() || kids.on) {
                 val titles = kids.only(Meta.peekCatalog(shelf.kind, shelf.genre) ?: Meta.catalog(shelf.kind, shelf.genre))
                 if (titles.isNotEmpty()) state.loaded[shelf.key] = titles
@@ -202,13 +225,30 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
     // Left part-way somewhere this phone never saw — another device, before a reinstall: Stremio kept the spot.
     val fromStremio = com.torrentviewer.core.Kids.only(stremio.paused.filter { p -> history.none { it.imdb == p.imdb } }.distinctBy { it.imdb }) { Title(it.imdb, it.kind, it.title) }.take(10)
     val watchlist = saved.filter { it.list == "later" }.map { it.asTitle() }
-    val heroes = shelves.firstNotNullOfOrNull { state.loaded[it.key]?.takeIf { l -> l.isNotEmpty() } }.orEmpty().take(HEROES)
-    SideEffect { state.heroCount = heroes.size }
     var menu by remember { mutableStateOf<Item?>(null) }
     var releases by remember { mutableStateOf<List<Item>?>(null) }
+    // Nothing already played, seen elsewhere or saved is a suggestion.
+    val everywhere by com.torrentviewer.core.WatchedEverywhere.collectAsState(stremio)
+    val watched = remember(history, everywhere) { com.torrentviewer.core.watchedFilms(history, everywhere) }
+    val known = remember(watched, history, saved) { watched + history.mapNotNull { it.imdb } + saved.map { it.imdb } }
+    val picks = state.forYou.picks.filter { it.title.imdb !in known }.take(FOR_YOU_PICKS)
+    val because = state.forYou.rails.map { (name, titles) -> name to titles.filter { it.imdb !in known } }.filter { it.second.size >= 3 }
+    val charts = tops.groupBy { it.kind }.map { (kind, parts) ->
+        val word = if (kind == "tv") "series" else "movies"
+        val heading = if (settings.genres.isEmpty()) "Top $word on IMDb" else "Top IMDb $word in your genres"
+        Triple(kind, heading, com.torrentviewer.core.mixTop(parts.map { state.loaded[it.key].orEmpty() }, CHART_SIZE))
+    }
+    // What's suggested, then every chosen genre in turn, so one genre doesn't fill the hero.
+    val mixed = com.torrentviewer.core.interleave(listOf(picks.map { it.title }) + chosen.map { state.loaded[it.key].orEmpty() }).filter { it.imdb !in watched }
+    val heroes = mixed.ifEmpty { shelves.firstNotNullOfOrNull { state.loaded[it.key]?.takeIf { l -> l.isNotEmpty() } }.orEmpty() }.take(HEROES)
+    SideEffect { state.heroCount = heroes.size }
     // A title shows once, in the first row it lands in: genre rows overlap, and the week's
-    // big film otherwise led half the page. "See all" still lists a shelf in full.
-    val seen = HashSet<String>()
+    // big film otherwise led half the page. "See all" still lists a shelf in full. What's been
+    // watched is left out, and so is whatever the rows above already suggest.
+    val seen = HashSet(watched)
+    picks.mapTo(seen) { it.title.imdb }
+    because.forEach { (_, titles) -> titles.mapTo(seen) { it.imdb } }
+    charts.forEach { (_, _, titles) -> titles.mapTo(seen) { it.imdb } }
     val rows = shelves.associate { s -> s.key to state.loaded[s.key].orEmpty().filter { seen.add(it.imdb) } }
     val visible = shelves.filter { state.loaded[it.key].isNullOrEmpty() || rows[it.key].orEmpty().isNotEmpty() }
 
@@ -249,6 +289,10 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
                     }
                 }
             }
+            // A list by hand isn't sorted for children: their rows stay the family ones.
+            if (!com.torrentviewer.core.Kids.on) item(key = "orders") {
+                Rail("Watch orders", onMore = onOrders) { WatchOrderRow(onOrder) }
+            }
             if (state.fresh.isNotEmpty()) item(key = "fresh") {
                 Rail("New Episodes") {
                     LazyRow(state = state.row("fresh"), contentPadding = PaddingValues(horizontal = EDGE), horizontalArrangement = Arrangement.spacedBy(CARD_GAP)) {
@@ -263,6 +307,17 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
             }
             if (watchlist.isNotEmpty()) item(key = "list") {
                 Rail("My List") { TitleRow(state.row("list"), watchlist, onOpen) }
+            }
+            if (picks.isNotEmpty()) item(key = "picks") {
+                Rail("Picked for you") { PickedRow(state.row("picks"), picks, onOpen) }
+            }
+            items(charts, key = { "chart:${it.first}" }) { (kind, heading, titles) ->
+                Rail(heading, onMore = { onTop(kind) }) {
+                    if (titles.isEmpty()) Placeholders() else TopRow(state.row("chart:$kind"), titles, onOpen)
+                }
+            }
+            items(because, key = { "because:${it.first}" }) { (name, titles) ->
+                Rail("Because you watched $name") { TitleRow(state.row("because:$name"), titles, onOpen) }
             }
             itemsIndexed(visible, key = { _, s -> s.key }) { _, shelf ->
                 val titles = rows[shelf.key].orEmpty()
@@ -363,7 +418,7 @@ private fun Placeholders() {
 private fun TitleRow(state: LazyListState, titles: List<Title>, onOpen: (Title) -> Unit) {
     LazyRow(state = state, contentPadding = PaddingValues(horizontal = EDGE), horizontalArrangement = Arrangement.spacedBy(CARD_GAP)) {
         items(titles, key = { it.imdb }) { t ->
-            TitleCard(t.poster ?: t.wide, t.title, { onOpen(t) }, Modifier.width(posterWidth()), info = cardInfo(t))
+            TitleCard(t.poster ?: t.wide, t.title, { onOpen(t) }, Modifier.width(posterWidth()), info = t.year?.take(4), rating = t.rating)
         }
     }
 }
