@@ -169,6 +169,14 @@ public sealed class DetailView : UserControl, IDisposable
     /// <summary>"S2:E4", as the phone and the TV write an episode.</summary>
     static string Short(Episode ep) => $"S{ep.Season}:E{ep.Number}";
 
+    /// <summary>Nothing found; with a language picked, that is the likely reason, so it says so.</summary>
+    string NoneFound()
+    {
+        if (!Addons.HasStreams) return Addons.NoneYet;
+        var what = picked is null ? title.Name : Short(picked);
+        return lang is null ? $"No sources found for {what}" : $"No {what} in {lang.Name} — change the language and try again";
+    }
+
     /// <summary>Releases for the selected episode (or the film), debounced across season flips.</summary>
     void FindReleases(bool debounce = false)
     {
@@ -199,8 +207,7 @@ public sealed class DetailView : UserControl, IDisposable
                 saveWhenFound = false;
                 // Downloads are torrents; a link is streamed only.
                 if (sources.FirstOrDefault(h => h.IsTorrent) is { } hit) { Save(hit.Uri); return; }
-                var what = picked is null ? title.Name : Short(picked);
-                shell.Toast(lang is null ? $"No sources found for {what}" : $"No {what} in {lang.Name} — change the language and try again", true);
+                shell.Toast(NoneFound(), true);
             }
             Render();
         }));
@@ -266,8 +273,13 @@ public sealed class DetailView : UserControl, IDisposable
             : best is null ? fresh && sources is not null ? "No sources" : "Finding sources…"
             : canResume ? "Resume  ·  " + (picked is null ? "" : Short(picked) + "  ·  ") + (TimeLeft() ?? $"{Math.Round(seen)}%")
             : picked is not null ? $"Play {Short(picked)}" : "Play";
-        var play = Ui.Action(label, "play", () => { if (best is not null) Start(best, false); }, primary: true);
-        play.IsHitTestVisible = live;
+        var play = Ui.Action(label, "play", () =>
+        {
+            if (best is not null) Start(best, false);
+            else if (fresh && sources is not null) shell.Toast(NoneFound(), true);
+            else shell.Toast("Still finding sources…");
+        }, primary: true);
+        play.IsHitTestVisible = !wait;
         play.Opacity = live ? 1 : 0.6;
         head.Children.Add(play);
         if (canResume)
@@ -304,7 +316,20 @@ public sealed class DetailView : UserControl, IDisposable
         {
             var crew = new TextBlock { FontSize = 13, FontWeight = FontWeights.Medium, Margin = new Thickness(0, 8, 0, 0), TextWrapping = TextWrapping.Wrap };
             crew.Inlines.Add(new System.Windows.Documents.Run((title.Kind == "tv" ? "Creators" : "Director") + ": ") { Foreground = (Brush)FindResource("Faint") });
-            crew.Inlines.Add(new System.Windows.Documents.Run(string.Join(", ", title.Directors.Take(2))) { Foreground = (Brush)FindResource("Muted") });
+            var first = true;
+            foreach (var name in title.Directors.Take(2))
+            {
+                if (!first) crew.Inlines.Add(new System.Windows.Documents.Run(", ") { Foreground = (Brush)FindResource("Faint") });
+                first = false;
+                // A link once TMDB has told us who they are; a kids profile has no actor pages.
+                if (!KidsMode.On && tmdb?.Directors.FirstOrDefault(d => Tmdb.SameName(d.Name, name)) is { } person)
+                {
+                    var link = new System.Windows.Documents.Hyperlink(new System.Windows.Documents.Run(name)) { Foreground = (Brush)FindResource("Text"), Cursor = System.Windows.Input.Cursors.Hand };
+                    link.Click += (_, _) => shell.OpenPerson(person.Id, person.Name);
+                    crew.Inlines.Add(link);
+                }
+                else crew.Inlines.Add(new System.Windows.Documents.Run(name) { Foreground = (Brush)FindResource("Muted") });
+            }
             head.Children.Add(crew);
         }
 
@@ -761,7 +786,7 @@ public sealed class DetailView : UserControl, IDisposable
         if (sources is null || !fresh) block.Children.Add(Busy("Asking your addons…"));
         else if (error is not null) block.Children.Add(Note(error, "Danger"));
         else if (sources.Count == 0) block.Children.Add(Note(
-            !Addons.HasStreams ? "No streaming sources available yet. Add a Stremio add-on under Settings → Add-ons, or search Google for popular Stremio streaming add-ons."
+            !Addons.HasStreams ? Addons.NoneYet
             : lang is not null ? $"Nothing found in {lang.Name}. Change the language and try again."
             : "Nothing found. Try another episode, or add another addon under Settings → Addons."));
 

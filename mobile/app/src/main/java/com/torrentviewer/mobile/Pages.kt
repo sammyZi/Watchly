@@ -583,10 +583,12 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
     val update by Updates.release.collectAsState()
     val appContext = LocalContext.current
     BackHandler(page != null) { page = null }
-    val scroll = rememberScrollState()
-    LaunchedEffect(page) { scroll.scrollTo(0) }
+    // The list keeps its own place, for coming back to; a page always opens at its top.
+    val listScroll = rememberScrollState()
+    val pageScroll = rememberScrollState()
+    LaunchedEffect(page) { if (page != null) pageScroll.scrollTo(0) }
 
-    Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(horizontal = EDGE).padding(bottom = 32.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(if (page == null) listScroll else pageScroll).padding(horizontal = EDGE).padding(bottom = 32.dp)) {
         if (page == null) {
             Heading("Settings")
             Field(query, { query = it }, "Search settings", Modifier.fillMaxWidth().padding(bottom = 12.dp), leading = L.drawable.lucide_ic_search)
@@ -621,6 +623,11 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
                         Entry(L.drawable.lucide_ic_sparkles, "Welcome tour", "See the first-run tour again", "onboarding") { tourAgain = true },
                         Entry(L.drawable.lucide_ic_refresh_cw, "Check for updates", "You have version ${BuildConfig.VERSION_NAME}", "new version upgrade") { Updates.checkNow { watch.notes.tryEmit(it) } },
                     ),
+                    listOf(
+                        Entry(L.drawable.lucide_ic_scale, "Legal notice", "Watchly is a media player only", "disclaimer copyright dmca") { page = "Legal notice" },
+                        Entry(L.drawable.lucide_ic_shield, "Privacy policy", "What stays here and what is sent", "data") { page = "Privacy policy" },
+                        Entry(L.drawable.lucide_ic_file_text, "Terms and conditions", "The rules for using Watchly", "agreement licence") { page = "Terms and conditions" },
+                    ),
                 ),
                 query,
             )
@@ -641,6 +648,10 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
                 Text(page.orEmpty(), Modifier.padding(start = 12.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
             }
         }
+
+        if (page == "Legal notice") Panel { LegalText(com.torrentviewer.core.Legal.NOTICE) }
+        if (page == "Privacy policy") Panel { LegalText(com.torrentviewer.core.Legal.PRIVACY) }
+        if (page == "Terms and conditions") Panel { LegalText(com.torrentviewer.core.Legal.TERMS) }
 
         if (page == "Integrations") Panel {
             Text("What you finish here is marked watched on your accounts, and what they have watched shows here. You sign in on each service's own page, so your password never comes to Watchly.", Modifier.padding(bottom = 18.dp), style = Type.meta.copy(color = Ink.faint))

@@ -217,7 +217,7 @@ fun Button(
 
 /** A pill of choices — seasons, qualities, genres, sorts. */
 @Composable
-fun Chip(label: String, on: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, @DrawableRes icon: Int? = null) {
+fun Chip(label: String, on: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, @DrawableRes icon: Int? = null, @DrawableRes trailing: Int? = null, compact: Boolean = false) {
     Tap(onClick, modifier, CircleShape) { pressed ->
         val bg = when {
             on -> Ink.accent
@@ -225,12 +225,38 @@ fun Chip(label: String, on: Boolean, onClick: () -> Unit, modifier: Modifier = M
             else -> Ink.text.copy(alpha = 0.08f)
         }
         val fg = if (on) Color.White else Ink.muted
-        Row(Modifier.background(bg).height(36.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.background(bg).height(if (compact) 32.dp else 36.dp).padding(horizontal = if (compact) 11.dp else 16.dp), verticalAlignment = Alignment.CenterVertically) {
             if (icon != null) {
                 Lc(icon, tint = fg, size = 16.dp)
                 Spacer(Modifier.width(8.dp))
             }
-            Text(label, style = Type.label.copy(fontSize = 14.sp, color = fg, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium), maxLines = 1)
+            Text(label, style = Type.label.copy(fontSize = if (compact) 13.sp else 14.sp, color = fg, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium), maxLines = 1)
+            if (trailing != null) {
+                Spacer(Modifier.width(if (compact) 3.dp else 6.dp))
+                Lc(trailing, tint = fg, size = if (compact) 14.dp else 16.dp)
+            }
+        }
+    }
+}
+
+/** A pill naming the current choice; a tap drops the [options] under it. */
+@Composable
+fun Dropdown(label: String, options: List<String>, onPick: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Chip(label, false, { open = true }, trailing = L.drawable.lucide_ic_chevron_down, compact = true)
+        // Capped: the genre list is long, and an uncapped menu ran off the bottom of the screen.
+        androidx.compose.material3.DropdownMenu(open, { open = false }, Modifier.heightIn(max = 320.dp), containerColor = Ink.surface) {
+            options.forEach { option ->
+                val here = option == label
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { Text(option, style = Type.label.copy(fontSize = 14.sp, color = if (here) Ink.accent else Ink.text, fontWeight = if (here) FontWeight.SemiBold else FontWeight.Medium)) },
+                    onClick = {
+                        open = false
+                        onPick(option)
+                    },
+                )
+            }
         }
     }
 }

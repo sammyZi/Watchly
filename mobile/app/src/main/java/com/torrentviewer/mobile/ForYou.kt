@@ -2,7 +2,7 @@ package com.torrentviewer.mobile
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,7 +23,6 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -121,6 +120,7 @@ private val MINIMUMS = listOf<Pair<Double?, String>>(null to "Any rating", 7.0 t
 private const val YOUR_GENRES = "your genres"
 
 /** The best by IMDb rating: films or series, the viewer's genres or any one, and how high to start. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun TopScreen(startKind: String, onOpen: (Title) -> Unit, onBack: () -> Unit) {
     BackHandler(onBack = onBack)
@@ -148,15 +148,16 @@ fun TopScreen(startKind: String, onOpen: (Title) -> Unit, onBack: () -> Unit) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Heading("Top on IMDb", Modifier.padding(start = 48.dp))
-                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Chip("Films", kind == "movie", onClick = { kind = "movie" })
-                        Chip("Series", kind == "tv", onClick = { kind = "tv" })
-                        MINIMUMS.forEach { (min, label) -> Chip(label, atLeast == min, onClick = { atLeast = min }) }
-                    }
-                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (settings.genres.isNotEmpty()) Chip("Your genres", genre == YOUR_GENRES, onClick = { genre = YOUR_GENRES })
-                        Chip("All genres", genre == null, onClick = { genre = null })
-                        genres.forEach { g -> Chip(g, genre == g, onClick = { genre = g }) }
+                    // Small enough for one line; wrapped, not scrolled, where it still doesn't fit: a menu opens
+                    // under its chip, so none may sit off the screen's edge.
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Dropdown(if (kind == "tv") "Series" else "Films", listOf("Films", "Series"), { kind = if (it == "Series") "tv" else "movie" })
+                        Dropdown(MINIMUMS.first { it.first == atLeast }.second, MINIMUMS.map { it.second }, { picked -> atLeast = MINIMUMS.first { it.second == picked }.first })
+                        Dropdown(
+                            if (genre == YOUR_GENRES) "Your genres" else genre ?: "All genres",
+                            listOfNotNull("Your genres".takeIf { settings.genres.isNotEmpty() }, "All genres") + genres,
+                            { genre = when (it) { "Your genres" -> YOUR_GENRES; "All genres" -> null; else -> it } },
+                        )
                     }
                 }
             }

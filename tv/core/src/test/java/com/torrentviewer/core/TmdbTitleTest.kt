@@ -43,6 +43,21 @@ class TmdbTitleTest {
         assertFalse(tooOldForKids(null))
     }
 
+    @Test fun aFilmsDirectorAndASeriesCreatorsAreFound() {
+        val film = """{"credits":{"cast":[],"crew":[{"id":7,"name":"Jonathan Demme","job":"Director"},{"id":8,"name":"Someone","job":"Producer"}]}}"""
+        assertEquals(listOf(7 to "Jonathan Demme"), parseTmdbTitle(film, "movie").directors.map { it.id to it.name })
+        val show = """{"created_by":[{"id":5,"name":"Vince Gilligan"}]}"""
+        assertEquals(listOf(5), parseTmdbTitle(show, "tv").directors.map { it.id })
+        assertTrue(sameName("jonathan demme", "Jonathan Demme") && !sameName("", ""))
+    }
+
+    @Test fun aDirectorsPageHoldsWhatTheyDirected() {
+        val json = """{"name":"Jonathan Demme","known_for_department":"Directing","combined_credits":{"cast":[],"crew":[
+            {"id":1,"media_type":"movie","title":"Philadelphia","poster_path":"/1.jpg","popularity":50,"job":"Director","genre_ids":[18]},
+            {"id":2,"media_type":"movie","title":"Score","poster_path":"/2.jpg","popularity":99,"job":"Composer","genre_ids":[18]}]}}"""
+        assertEquals(listOf("Philadelphia"), parseTmdbPerson(json).credits.map { it.title })
+    }
+
     @Test fun anActorsCreditsAreBestKnownFirstAndOnceEach() {
         val json = """{"name":"Tobey Maguire","profile_path":"/p.jpg","known_for_department":"Acting","biography":"Born 1975.",
           "combined_credits":{"cast":[

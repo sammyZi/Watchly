@@ -239,4 +239,7 @@ object Addons {
 
     /** Any addon that can find streams at all: without one, there is nothing to play but links. */
     val hasStreams get() = _list.value.any { a -> a.on && a.resources.any { it.name == "stream" } }
+
+    /** What to say while [hasStreams] is false. */
+    const val NONE_YET = "No add-ons found yet. Search Google for popular Stremio add-ons to discover available streaming sources."
 }

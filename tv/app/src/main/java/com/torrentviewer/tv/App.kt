@@ -125,8 +125,22 @@ private fun UpdateProgress(watch: Watch, modifier: Modifier = Modifier) {
     }
 }
 
+/** The date of the legal text last accepted. */
+private const val AGREED = "tv:agreed"
+
 @Composable
 private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
+    // Before anything else, for everyone, and again whenever the words change: what was accepted is
+    // kept by its date, so a new date in legal.json asks again.
+    var accepted by remember { mutableStateOf(Kv.global(AGREED)) }
+    if (accepted != Legal.UPDATED) {
+        Agreement(changed = accepted != null) {
+            Kv.setGlobal(AGREED, Legal.UPDATED)
+            accepted = Legal.UPDATED
+        }
+        return
+    }
+
     val profiles by Profiles.list.collectAsState()
     var who by remember { mutableStateOf<Profile?>(null) }
     // An edit to the profile in use — its name, face or colour — shows at once.

@@ -262,4 +262,7 @@ public static class Addons
 
     /// <summary>Any addon that can find streams at all: without one, there is nothing to play but links.</summary>
     public static bool HasStreams => List.Any(a => a.On && a.Resources.Any(r => r.Name == "stream"));
+
+    /// <summary>What to say while <see cref="HasStreams"/> is false.</summary>
+    public const string NoneYet = "No add-ons found yet. Search Google for popular Stremio add-ons to discover available streaming sources.";
 }

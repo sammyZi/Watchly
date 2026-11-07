@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -215,8 +216,11 @@ fun DetailScreen(initial: Title, watch: Watch, onOrder: (com.torrentviewer.core.
     }
 
     /** Nothing found; with a language picked, that is the likely reason, so it says so. */
-    fun noneFound(what: String) =
-        if (lang.isEmpty()) "No sources found for $what." else "No $what in ${langName(lang)} — change the language and try again."
+    fun noneFound(what: String) = when {
+        !Addons.hasStreams -> Addons.NONE_YET
+        lang.isEmpty() -> "No sources found for $what."
+        else -> "No $what in ${langName(lang)} — change the language and try again."
+    }
 
     fun downloadEpisode(ep: Episode) = scope.launch {
         val ready = if (episode?.id == ep.id && shown.isNotEmpty()) shown else findSources(ep).await()
@@ -322,7 +326,7 @@ fun DetailScreen(initial: Title, watch: Watch, onOrder: (com.torrentviewer.core.
                                 busy -> "Finding sources…"
                                 else -> "No sources"
                             },
-                            onClick = { shown.firstOrNull()?.let { watch.stream(it, title) } },
+                            onClick = { shown.firstOrNull()?.let { watch.stream(it, title) } ?: watch.notes.tryEmit(if (busy) "Still finding sources…" else noneFound(title.title)) },
                             modifier = Modifier.fillMaxWidth(),
                             icon = L.drawable.lucide_ic_play,
                             primary = true,
@@ -345,7 +349,7 @@ fun DetailScreen(initial: Title, watch: Watch, onOrder: (com.torrentviewer.core.
                             Text(plot,style = Type.body.copy(color = Ink.text.copy(alpha = 0.85f)), maxLines = if (expanded) Int.MAX_VALUE else 4, overflow = TextOverflow.Ellipsis)
                         }
                     }
-                    if (title.directors.isNotEmpty()) People(if (title.isSeries) "Creators" else "Director", title.directors.take(2).joinToString(", "))
+                    if (title.directors.isNotEmpty()) Crew(if (title.isSeries) "Creators" else "Director", title.directors.take(2), tmdb?.directors.orEmpty(), onPerson.takeUnless { com.torrentviewer.core.Kids.on })
                     // However many actions there are, they share the width evenly.
                     Row(Modifier.fillMaxWidth().padding(top = 14.dp)) {
                         val share = Modifier.weight(1f)
@@ -577,7 +581,7 @@ private fun LazyListScope.sources(
                 busy -> Note("${shown.size} so far · finding more…", Modifier.padding(bottom = 8.dp))
                 hits?.isEmpty() == true -> Note(
                     when {
-                        !Addons.hasStreams -> "No add-ons found yet. Search Google for popular Stremio add-ons to discover available streaming sources."
+                        !Addons.hasStreams -> Addons.NONE_YET
                         language != null -> "Nothing found in $language. Change the language and try again."
                         else -> "Nothing found. Try another episode, or add another addon in the Addons tab."
                     },
@@ -596,6 +600,21 @@ private fun People(label: String, value: String) {
     Row(Modifier.padding(top = 8.dp)) {
         Text("$label: ", style = Type.meta.copy(color = Ink.faint))
         Text(value, style = Type.meta.copy(color = Ink.muted), maxLines = 2, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** "Director: A, B", each name opening their page once TMDB has told us who they are. */
+@Composable
+private fun Crew(label: String, names: List<String>, known: List<com.torrentviewer.core.CastMember>, onPerson: ((com.torrentviewer.core.CastMember) -> Unit)?) {
+    Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("$label: ", style = Type.meta.copy(color = Ink.faint))
+        names.forEachIndexed { i, name ->
+            if (i > 0) Text(", ", style = Type.meta.copy(color = Ink.faint))
+            val person = known.firstOrNull { com.torrentviewer.core.sameName(it.name, name) }
+            if (person != null && onPerson != null)
+                Text(name, Modifier.clickable { onPerson(person) }.padding(vertical = 6.dp), style = Type.meta.copy(color = Ink.text, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline))
+            else Text(name, Modifier.padding(vertical = 6.dp), style = Type.meta.copy(color = Ink.muted))
+        }
     }
 }
 

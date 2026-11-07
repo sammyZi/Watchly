@@ -1,0 +1,33 @@
+{
+  "_": "The words on the accept screen and the legal pages, read by the phone, the TV and Windows. Change updated with the words: a new date asks everyone to accept them again.",
+  "updated": "Last updated 6 November 2026",
+  "summary": "Watchly is only a media player and a film and series suggestion app. It does not host, upload, share or own any content, and it comes with no sources. What it plays comes from the add-ons, links and servers you add yourself. You are responsible for what you add and play.",
+  "accept": "To use Watchly, please read and accept the Privacy policy, the Terms and conditions and the Legal notice.",
+  "notice": [
+    {"heading": "Media player only", "text": "Watchly does not host, upload, share, index or own any content, and it ships with no sources. Suggestions are titles and artwork from public metadata services, not offers of anything to watch."},
+    {"heading": "Your responsibility", "text": "Watchly does not run, endorse or control the add-ons, links and servers you add. You are responsible for what you add and play, and for following the copyright laws where you live. Please only watch what you have the right to."},
+    {"heading": "No affiliation", "text": "Watchly is an independent project, not affiliated with, endorsed by or sponsored by Stremio, any add-on, debrid service or metadata provider, Google, Microsoft or any studio. Names and logos belong to their owners. Titles, posters and artwork come from the services you use and belong to their owners."},
+    {"heading": "Copyright holders", "text": "Watchly holds nothing to take down. Notices about content belong with the add-on or service that provides it."},
+    {"heading": "Credits", "text": "This product uses the TMDB API but is not endorsed or certified by TMDB."}
+  ],
+  "privacy": [
+    {"heading": "In short", "text": "Watchly has no account of its own, no ads and no analytics. The developer runs no server and receives none of your data."},
+    {"heading": "Kept on your device", "text": "Watch history, resume points, My List, likes, profiles, settings and any keys you enter stay on this device, and keys are stored encrypted. A backup file is only made when you ask for one. Removing the app removes this data, but not finished downloads."},
+    {"heading": "Sent to services", "text": "To work, the app asks other services directly from your device. Each one sees your IP address and what was asked for, such as a title's ID: Cinemeta and Metahub (titles and artwork), TMDB (suggestions, cast and ratings), Kitsu (anime), TVmaze (episodes), Wikipedia (cast photos), IntroDB and TheIntroDB (skip intro timings), SubDL (subtitles) and GitHub (checking for updates)."},
+    {"heading": "Services you add", "text": "Add-ons, media servers, TorBox, Stremio, Simkl and MDBList are used only if you add or connect them. They receive what they need to work, which can include what you watch. Their own privacy policies apply."},
+    {"heading": "Torrents", "text": "When a source is a torrent, your IP address is visible to the other peers sharing it, as with any BitTorrent app, and the app shares what it downloads while it plays."},
+    {"heading": "Casting", "text": "If you use Google Cast, the stream and its details go to the Cast device you choose."},
+    {"heading": "Children", "text": "Watchly is not made to collect anything about children. A kids profile limits what is shown on this device."},
+    {"heading": "Changes", "text": "If this policy changes, the new version comes with an app update."},
+    {"heading": "Contact", "text": "Questions go to the project's page: github.com/sammyZi/Watchly"}
+  ],
+  "terms": [
+    {"heading": "Using Watchly", "text": "By using Watchly you accept these terms. If you don't accept them, please don't use the app."},
+    {"heading": "What it is", "text": "Watchly is a media player and a film and series suggestion app. It provides no content and no sources."},
+    {"heading": "Your responsibility", "text": "You choose what to add and play. You agree to use Watchly lawfully, to only watch what you have the right to, and not to use it to infringe anyone's rights."},
+    {"heading": "Other services", "text": "Add-ons, servers and other third-party services are not part of Watchly and have their own terms. They may change or stop working at any time."},
+    {"heading": "Licence", "text": "Watchly is free software under the GNU General Public License, version 3. The licence and the third-party notices come with the source code at github.com/sammyZi/Watchly."},
+    {"heading": "No warranty", "text": "Watchly is provided as is, without any warranty, to the extent the law allows. Its developers are not liable for any loss or damage from using it, or for anything you play with it."},
+    {"heading": "Changes", "text": "These terms can change with an app update. Using the app after that means you accept the new terms."}
+  ]
+}

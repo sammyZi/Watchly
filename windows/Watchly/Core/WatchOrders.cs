@@ -12,6 +12,9 @@ namespace Watchly.Core;
 /// </summary>
 public sealed record WatchOrder(string Id, string Name, List<string> Films, List<string> Story, bool More, bool FromTmdb = false)
 {
+    /// <summary>Its films', once <see cref="WatchOrders.Tag"/> has them.</summary>
+    public List<string> Genres { get; init; } = new();
+
     public static string Poster(string imdb) => $"https://images.metahub.space/poster/medium/{imdb}/img";
     public string Art => $"https://images.metahub.space/background/medium/{Films[0]}/img";
 
@@ -26,6 +29,11 @@ public sealed record WatchOrder(string Id, string Name, List<string> Films, List
 /// <summary>The hand-kept list in tv/core's watch-orders.json, the file the phone and TV read.</summary>
 public static class WatchOrders
 {
+    const string GenresKey = "order-genres";
+    /// <summary>Cinemeta often gives one film a single genre: The Dark Knight's first is only Crime.</summary>
+    const int FilmsAsked = 2;
+    const int AtOnce = 8;
+
     static List<WatchOrder>? all;
 
     public static List<WatchOrder> All => all ??= Read();
@@ -34,8 +42,54 @@ public static class WatchOrders
     {
         using var stream = typeof(WatchOrders).Assembly.GetManifestResourceStream("watch-orders.json")!;
         using var reader = new StreamReader(stream);
+        var kept = Store.Load(GenresKey, new Dictionary<string, List<string>>());
         return JsonNode.Parse(reader.ReadToEnd())!["orders"]!.AsArray().Select(o => new WatchOrder(
-            (string)o!["id"]!, (string)o["name"]!, Strings(o["films"]), Strings(o["story"]), o["more"]?.GetValue<bool>() ?? false)).ToList();
+            (string)o!["id"]!, (string)o["name"]!, Strings(o["films"]), Strings(o["story"]), o["more"]?.GetValue<bool>() ?? false)
+            { Genres = kept.GetValueOrDefault((string)o["id"]!) ?? new() }).ToList();
+    }
+
+    /// <summary>Each franchise's genres, from its first films. Asked for once and kept: a film's genres don't change. True if any came.</summary>
+    public static async Task<bool> Tag()
+    {
+        var kept = All.Where(o => o.Genres.Count > 0).ToDictionary(o => o.Id, o => o.Genres);
+        var came = false;
+        foreach (var batch in All.Where(o => o.Genres.Count == 0).Chunk(AtOnce))
+        {
+            var found = await Task.WhenAll(batch.Select(async o =>
+            {
+                var titles = await Task.WhenAll(o.Films.Take(FilmsAsked).Select(f => Meta.LoadTitle(f, "movie")));
+                return (o.Id, Genres: titles.Where(t => t is not null).SelectMany(t => t!.Genres).Distinct().ToList());
+            }));
+            foreach (var (id, genres) in found.Where(f => f.Genres.Count > 0))
+            {
+                kept[id] = genres;
+                came = true;
+            }
+            try { Store.Save(GenresKey, kept); } catch { }
+        }
+        if (came) all = All.Select(o => o with { Genres = kept.GetValueOrDefault(o.Id) ?? new() }).ToList();
+        return came;
+    }
+
+    /// <summary>
+    /// Franchises for one viewer (core rankOrders): those begun and not finished, then the genres taking turns, so
+    /// one with many franchises can't crowd out the others, then the rest. Those all seen go last.
+    /// </summary>
+    public static List<WatchOrder> Rank(IReadOnlyList<string> genres, HashSet<string>? seen = null, HashSet<string>? begun = null)
+    {
+        var open = All.Where(o => seen is null || !o.Films.All(seen.Contains)).ToList();
+        var going = open.Where(o => begun is not null && o.Films.Any(begun.Contains));
+        var lists = genres.Select(g => open.Where(o => o.Genres.Contains(g)).ToList()).ToList();
+        var chosen = Enumerable.Range(0, lists.Count == 0 ? 0 : lists.Max(l => l.Count)).SelectMany(i => lists.Where(l => i < l.Count).Select(l => l[i]));
+        return going.Concat(chosen).Concat(open).Concat(All).Distinct().ToList();
+    }
+
+    /// <summary>The row on Home: only what fits the viewer; everything when nothing does, or the genres haven't come yet.</summary>
+    public static List<WatchOrder> ForHome(IReadOnlyList<string> genres, HashSet<string> seen, HashSet<string> begun, int size = 12)
+    {
+        var ranked = Rank(genres, seen, begun);
+        var fits = ranked.Where(o => !o.Films.All(seen.Contains) && (o.Genres.Any(genres.Contains) || o.Films.Any(begun.Contains))).ToList();
+        return (genres.Count == 0 || All.All(o => o.Genres.Count == 0) || fits.Count == 0 ? ranked : fits).Take(size).ToList();
     }
 
     static List<string> Strings(JsonNode? list) => list is JsonArray a ? a.Select(s => (string)s!).ToList() : new();
@@ -72,7 +126,8 @@ public sealed record CastMember(int Id, string Name, string? Role, string? Photo
 /// <summary>A title known by TMDB's id: its IMDb id, which the app goes by, is asked for only when it's opened.</summary>
 public sealed record TmdbCard(int Id, string Kind, string Title, string? Poster, string? Year);
 
-public sealed record TmdbTitle(string? Certificate, List<CastMember> Cast, List<TmdbCard> Similar);
+/// <summary><see cref="Directors"/>: who made it, for their pages — a film's director, a series' creators.</summary>
+public sealed record TmdbTitle(string? Certificate, List<CastMember> Cast, List<TmdbCard> Similar, List<CastMember> Directors);
 
 public sealed record TmdbPerson(string Name, string? Photo, string? KnownFor, string? About, List<TmdbCard> Credits);
 
@@ -143,7 +198,16 @@ public static class Tmdb
     static TmdbTitle ParseTitle(JsonNode o, string kind) => new(
         CertificateOf(o, kind),
         Rows(o["credits"]?["cast"]).Take(14).Select(c => new CastMember(Int(c["id"]), Str(c["name"]) ?? "", Str(c["character"]), Image("w185", Str(c["profile_path"])))).ToList(),
-        Rows(o["recommendations"]?["results"]).Where(r => !Flag(r["adult"])).Select(r => CardOf(r, kind)).OfType<TmdbCard>().Take(15).ToList());
+        Rows(o["recommendations"]?["results"]).Where(r => !Flag(r["adult"])).Select(r => CardOf(r, kind)).OfType<TmdbCard>().Take(15).ToList(),
+        Rows(o["credits"]?["crew"]).Where(c => Str(c["job"]) == "Director").Concat(Rows(o["created_by"]))
+            .Select(c => new CastMember(Int(c["id"]), Str(c["name"]) ?? "", null, null)).DistinctBy(c => c.Id).ToList());
+
+    /// <summary>"Jonathan Demme" and "jonathan demme" are one name: only letters and digits count.</summary>
+    public static bool SameName(string a, string b)
+    {
+        static string Squash(string s) => string.Concat(s.Where(char.IsLetterOrDigit)).ToLowerInvariant();
+        return Squash(a).Length > 0 && Squash(a) == Squash(b);
+    }
 
     /// <summary>A title's rating, cast and recommendations.</summary>
     public static async Task<TmdbTitle?> Title(string imdb, string kind)
@@ -173,7 +237,8 @@ public static class Tmdb
         try
         {
             var o = await Get($"/person/{id}?append_to_response=combined_credits");
-            var credits = Rows(o["combined_credits"]?["cast"])
+            // What they acted in, and what they directed or created: a director's page is the second.
+            var credits = Rows(o["combined_credits"]?["cast"]).Concat(Rows(o["combined_credits"]?["crew"]).Where(c => Str(c["job"]) is "Director" or "Creator"))
                 .Where(c => !Flag(c["adult"]) && Str(c["media_type"]) is "movie" or "tv" && !Rows(c["genre_ids"]).Any(g => NotShows.Contains(Int(g))))
                 .OrderByDescending(c => Num(c["popularity"]))
                 .Select(c => CardOf(c, Str(c["media_type"])!)).OfType<TmdbCard>()

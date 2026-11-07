@@ -153,13 +153,17 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
     /** What the big button plays: the episode being looked at, where the series was left, or the first of the season. */
     val upNext = episode ?: continueAt ?: episodes.firstOrNull()
 
+    /** Nothing found; with a language picked, that is the likely reason, so it says so. */
+    fun noneFound(what: String) = when {
+        !Addons.hasStreams -> Addons.NONE_YET
+        lang.isEmpty() -> "No sources found for $what."
+        else -> "No $what in ${langName(lang)} — change the language and try again."
+    }
+
     fun playEpisode(ep: Episode) = scope.launch {
         val ready = if (episode?.id == ep.id && shown.isNotEmpty()) shown else findSources(ep).await()
         ready.firstOrNull()?.let { watch.stream(it, title, episodeTag(ep.season, ep.episode), ep) }
-            ?: watch.notes.tryEmit(
-                if (lang.isEmpty()) "No sources found for ${episodeTag(ep.season, ep.episode)}."
-                else "No ${episodeTag(ep.season, ep.episode)} in ${langName(lang)} — change the language and try again.",
-            )
+            ?: watch.notes.tryEmit(noneFound(episodeTag(ep.season, ep.episode)))
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -208,7 +212,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
                     }
                     title.plot?.let { Text(it, Modifier.padding(top = 12.dp), style = Type.body.copy(color = Ink.text.copy(alpha = 0.82f)), maxLines = 4, overflow = TextOverflow.Ellipsis) }
                     if (title.cast.isNotEmpty()) People("Starring", title.cast.take(4).joinToString(", "))
-                    if (title.directors.isNotEmpty()) People(if (title.isSeries) "Creators" else "Director", title.directors.take(2).joinToString(", "))
+                    if (title.directors.isNotEmpty()) Crew(if (title.isSeries) "Creators" else "Director", title.directors.take(2), tmdb?.directors.orEmpty(), onPerson.takeUnless { Kids.on })
                     title.awards?.let { People("Awards", it) }
                     Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                         if (!title.isSeries) {
@@ -220,7 +224,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
                                     busy -> "Finding sources…"
                                     else -> "No sources"
                                 },
-                                onClick = { shown.firstOrNull()?.let { watch.stream(it, title) } },
+                                onClick = { shown.firstOrNull()?.let { watch.stream(it, title) } ?: watch.notes.tryEmit(if (busy) "Still finding sources…" else noneFound(title.title)) },
                                 icon = L.drawable.lucide_ic_play,
                                 primary = true,
                                 requester = play,
@@ -338,7 +342,7 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
                         busy -> Note("${shown.size} so far · finding more…", Modifier.padding(bottom = 10.dp))
                         hits?.isEmpty() == true -> Note(
                             when {
-                                !Addons.hasStreams -> "No streaming sources available yet. Add a Stremio add-on under Settings → Add-ons, or search Google for popular Stremio streaming add-ons."
+                                !Addons.hasStreams -> Addons.NONE_YET
                                 lang.isNotEmpty() -> "Nothing found in ${langName(lang)}. Change the language and try again."
                                 else -> "Nothing found. Try another episode, or add another addon under Settings → Addons."
                             },
@@ -378,6 +382,23 @@ private fun People(label: String, value: String) {
     Row(Modifier.padding(top = 8.dp)) {
         Text("$label: ", style = Type.meta.copy(color = Ink.faint))
         Text(value, style = Type.meta.copy(color = Ink.muted), maxLines = 2, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** "Director: A, B", each name opening their page once TMDB has told us who they are; the remote can land on it. */
+@Composable
+private fun Crew(label: String, names: List<String>, known: List<CastMember>, onPerson: ((CastMember) -> Unit)?) {
+    Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("$label: ", style = Type.meta.copy(color = Ink.faint))
+        names.forEachIndexed { i, name ->
+            if (i > 0) Text(", ", style = Type.meta.copy(color = Ink.faint))
+            val person = known.firstOrNull { sameName(it.name, name) }
+            if (person != null && onPerson != null)
+                Focusable({ onPerson(person) }, Modifier, RoundedCornerShape(6.dp), 1.06f) {
+                    Text(name, Modifier.padding(horizontal = 6.dp, vertical = 3.dp), style = Type.meta.copy(color = Ink.text, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline))
+                }
+            else Text(name, style = Type.meta.copy(color = Ink.muted))
+        }
     }
 }
 

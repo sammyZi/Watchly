@@ -129,6 +129,14 @@ public partial class MainWindow : Window
         Updates.Changed += () => Dispatcher.BeginInvoke(ShowUpdate);
         Updates.Check();
         Root.Children.Add(update);
+        // Over everything, for everyone, and again whenever the words change.
+        if (AgreementView.Needed)
+        {
+            AgreementView? agreement = null;
+            agreement = new AgreementView(() => Root.Children.Remove(agreement));
+            Grid.SetColumnSpan(agreement, 2);
+            Root.Children.Add(agreement);
+        }
         if (openOnStart is null) Splash();
         // New addons bring new home rows, and new answers for every page.
         Addons.Changed += () => Dispatcher.BeginInvoke(() => LibraryChanged?.Invoke());

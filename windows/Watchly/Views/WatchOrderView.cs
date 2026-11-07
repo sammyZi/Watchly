@@ -200,7 +200,7 @@ public sealed class WatchOrdersView : UserControl
         void Show()
         {
             grid.Children.Clear();
-            foreach (var order in WatchOrders.All.Where(o => o.Matches(input.Text)))
+            foreach (var order in WatchOrders.Rank(MainWindow.Shell.Settings.Genres).Where(o => o.Matches(input.Text)))
             {
                 var banner = OrderUi.Banner(order, seen);
                 banner.Margin = new Thickness(0, 0, 12, 12);

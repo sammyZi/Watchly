@@ -93,7 +93,9 @@ its share of the places (`mixTop`), and See all opens the full page.
 
 **Watch orders.** 67 franchises kept by hand in `watch-orders.json`, shared with
 the TV and Windows, in release or story order, and any other film's TMDB collection
-in release order. Title pages add the franchise, the age rating, TMDB's cast with
+in release order. The Home row follows the viewer: franchises begun or saved lead,
+then their genres take turns (Cinemeta's, from each franchise's first two films,
+fetched once), and finished ones drop out. Title pages add the franchise, the age rating, TMDB's cast with
 actor pages, and More like this. A kids profile stops at titles rated above PG.
 Without a key, cast photos come from Wikipedia (freely licensed images, performers
 only).

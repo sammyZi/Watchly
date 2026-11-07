@@ -92,6 +92,12 @@ public sealed class SettingsView : UserControl
             new("hard-drive", "Storage", "Cache, history and saved torrent info", "clear delete", () => Go("Storage")),
             new("refresh-cw", "Check for updates", $"You have version {Updates.Version}", "new version upgrade", () => _ = Updates.CheckNow(m => shell.Toast(m))),
         });
+        groups.Add(new()
+        {
+            new("info", "Legal notice", "Watchly is a media player only", "disclaimer copyright dmca", () => Go("Legal notice")),
+            new("lock", "Privacy policy", "What stays here and what is sent", "data", () => Go("Privacy policy")),
+            new("file", "Terms and conditions", "The rules for using Watchly", "agreement licence", () => Go("Terms and conditions")),
+        });
         return groups;
     }
 
@@ -173,6 +179,9 @@ public sealed class SettingsView : UserControl
                 page.Children.Add(TorBoxGroup());
                 break;
             case "Storage": StoragePage(); break;
+            case "Legal notice": page.Children.Add(AgreementView.Sections(Legal.Notice)); break;
+            case "Privacy policy": page.Children.Add(AgreementView.Sections(Legal.Privacy)); break;
+            case "Terms and conditions": page.Children.Add(AgreementView.Sections(Legal.Terms)); break;
         }
     }
 

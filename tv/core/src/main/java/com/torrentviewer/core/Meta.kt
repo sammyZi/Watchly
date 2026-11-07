@@ -87,9 +87,12 @@ private const val TOP_SIZE = 60
 fun bestRated(titles: List<Title>): List<Title> =
     titles.filter { it.imdbScore != null }.distinctBy { it.imdb }.sortedByDescending { it.imdbScore }.take(TOP_SIZE)
 
-/** One from each list in turn, each title once: no list crowds out the others. */
-fun interleave(lists: List<List<Title>>): List<Title> =
-    (0 until (lists.maxOfOrNull { it.size } ?: 0)).flatMap { i -> lists.mapNotNull { it.getOrNull(i) } }.distinctBy { it.imdb }
+/** One from each list in turn: no list crowds out the others. */
+fun <T> turns(lists: List<List<T>>): List<T> =
+    (0 until (lists.maxOfOrNull { it.size } ?: 0)).flatMap { i -> lists.mapNotNull { it.getOrNull(i) } }
+
+/** [turns], each title once. */
+fun interleave(lists: List<List<Title>>): List<Title> = turns(lists).distinctBy { it.imdb }
 
 /** A chart over several genres: each gets its share of the [size] places, then they rank by rating together. */
 fun mixTop(lists: List<List<Title>>, size: Int): List<Title> = interleave(lists).take(size).sortedByDescending { it.imdbScore }

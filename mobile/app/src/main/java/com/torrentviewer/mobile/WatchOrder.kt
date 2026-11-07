@@ -56,6 +56,8 @@ import com.torrentviewer.core.Ink
 import com.torrentviewer.core.Lc
 import com.torrentviewer.core.Meta
 import com.torrentviewer.core.ProgressLine
+import com.torrentviewer.core.SavedStore
+import com.torrentviewer.core.SettingsStore
 import com.torrentviewer.core.Stremio
 import com.torrentviewer.core.Title
 import com.torrentviewer.core.TitleMark
@@ -63,8 +65,10 @@ import com.torrentviewer.core.Type
 import com.torrentviewer.core.WatchOrder
 import com.torrentviewer.core.WatchOrders
 import com.torrentviewer.core.WatchedEverywhere
+import com.torrentviewer.core.homeOrders
 import com.torrentviewer.core.nextUp
 import com.torrentviewer.core.orderLine
+import com.torrentviewer.core.rankOrders
 import com.torrentviewer.core.runtimeLabel
 import com.torrentviewer.core.totalRuntime
 import com.torrentviewer.core.watchedFilms
@@ -122,12 +126,18 @@ private fun OrderCard(order: WatchOrder, seen: Set<String>, onClick: () -> Unit,
     }
 }
 
-/** The rail on Home: the first few, and See all. */
+/** The rail on Home: what fits this viewer's [genres] and what they began. */
 @Composable
-fun WatchOrderRow(onOpen: (WatchOrder) -> Unit) {
+fun WatchOrderRow(genres: List<String>, onOpen: (WatchOrder) -> Unit) {
     val seen = seenFilms()
+    val orders by WatchOrders.tagged.collectAsState()
+    val history by History.items.collectAsState()
+    val saved by SavedStore.items.collectAsState()
+    val shown = remember(orders, genres, seen, history, saved) {
+        homeOrders(orders, genres, seen, seen + history.mapNotNull { it.imdb } + saved.map { it.imdb })
+    }
     LazyRow(contentPadding = PaddingValues(horizontal = EDGE), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        items(WatchOrders.all.take(12), key = { it.id }) { order ->
+        items(shown, key = { it.id }) { order ->
             OrderCard(order, seen, { onOpen(order) }, Modifier.width(310.dp))
         }
     }
@@ -194,7 +204,10 @@ fun WatchOrdersScreen(onOpen: (WatchOrder) -> Unit, onBack: () -> Unit) {
     BackHandler(onBack = onBack)
     val seen = seenFilms()
     var query by rememberSaveable { mutableStateOf("") }
-    val shown = WatchOrders.all.filter { it.matches(query) }
+    val orders by WatchOrders.tagged.collectAsState()
+    val settings by SettingsStore.value.collectAsState()
+    val ranked = remember(orders, settings.genres) { rankOrders(orders, settings.genres) }
+    val shown = ranked.filter { it.matches(query) }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.statusBarsPadding().padding(horizontal = EDGE).padding(top = 8.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             RoundIcon(L.drawable.lucide_ic_arrow_left, onBack)

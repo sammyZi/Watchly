@@ -34,8 +34,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -54,6 +56,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.torrentviewer.core.Artwork
+import com.torrentviewer.core.Ink
 import com.torrentviewer.core.Meta
 import com.torrentviewer.core.Title
 import com.torrentviewer.core.Type
@@ -62,6 +65,44 @@ import com.composables.icons.lucide.R as L
 
 /** Settings asks for the tour again; the shell shows it until it is done. */
 var tourAgain by androidx.compose.runtime.mutableStateOf(false)
+
+/** A legal page's sections: a heading over its text. */
+@Composable
+fun LegalText(sections: List<Pair<String, String>>) {
+    Text(com.torrentviewer.core.Legal.UPDATED, Modifier.padding(bottom = 14.dp), style = Type.meta.copy(color = Ink.faint))
+    sections.forEach { (heading, text) ->
+        Text(heading, style = Type.label.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold))
+        Text(text, Modifier.padding(top = 4.dp, bottom = 16.dp), style = Type.body.copy(color = Ink.muted, fontSize = 14.sp, lineHeight = 20.sp))
+    }
+}
+
+/** What the viewer confirms before using the app; [changed]: they accepted an older version. Back leaves the app. */
+@Composable
+fun Agreement(changed: Boolean, onAgree: () -> Unit) {
+    var reading by remember { mutableStateOf<Pair<String, List<Pair<String, String>>>?>(null) }
+    val legal = com.torrentviewer.core.Legal
+    Column(Modifier.fillMaxSize().background(Ink.bg).statusBarsPadding().navigationBarsPadding().padding(horizontal = EDGE + 8.dp, vertical = 24.dp)) {
+        val open = reading
+        if (open != null) {
+            BackHandler { reading = null }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RoundIcon(L.drawable.lucide_ic_arrow_left, { reading = null })
+                Text(open.first, Modifier.padding(start = 12.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
+            }
+            Column(Modifier.padding(top = 16.dp).weight(1f).verticalScroll(rememberScrollState())) { LegalText(open.second) }
+        } else {
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.Center) {
+                Text(if (changed) "Our terms have changed" else "Before you start", style = Type.hero.copy(fontSize = 34.sp, lineHeight = 38.sp))
+                Text(legal.SUMMARY, Modifier.padding(top = 12.dp), style = Type.body.copy(color = Ink.muted, fontSize = 16.sp, lineHeight = 23.sp))
+                Text(legal.ACCEPT, Modifier.padding(top = 12.dp), style = Type.body.copy(color = Ink.muted, fontSize = 16.sp, lineHeight = 23.sp))
+            }
+            Button("Privacy policy", { reading = "Privacy policy" to legal.PRIVACY }, Modifier.fillMaxWidth(), icon = L.drawable.lucide_ic_shield)
+            Button("Terms and conditions", { reading = "Terms and conditions" to legal.TERMS }, Modifier.padding(top = 10.dp).fillMaxWidth(), icon = L.drawable.lucide_ic_file_text)
+            Button("Legal notice", { reading = "Legal notice" to legal.NOTICE }, Modifier.padding(top = 10.dp).fillMaxWidth(), icon = L.drawable.lucide_ic_scale)
+            Button("I accept", onAgree, Modifier.padding(top = 18.dp).fillMaxWidth(), icon = L.drawable.lucide_ic_check, primary = true)
+        }
+    }
+}
 
 /** The onboarding's pages, in order. */
 private const val WELCOME = 0

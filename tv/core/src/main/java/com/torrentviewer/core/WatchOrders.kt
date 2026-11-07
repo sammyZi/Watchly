@@ -4,15 +4,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
 /**
  * A franchise. [films] is release order; [story], when not empty, the order events happen in. [more]:
- * another is on the way. [fromTmdb]: not from the list, so its page has to credit TMDB.
+ * another is on the way. [fromTmdb]: not from the list, so its page has to credit TMDB. [genres]: its
+ * films', once [WatchOrders.tag] has them.
  */
-data class WatchOrder(val id: String, val name: String, val films: List<String>, val story: List<String> = emptyList(), val more: Boolean = false, val fromTmdb: Boolean = false) {
+data class WatchOrder(val id: String, val name: String, val films: List<String>, val story: List<String> = emptyList(), val more: Boolean = false, val fromTmdb: Boolean = false, val genres: List<String> = emptyList()) {
     /** Medium posters straight from the id: a card needs no title loaded first. */
     fun posters(count: Int = 3) = films.take(count).map { "https://images.metahub.space/poster/medium/$it/img" }
 
@@ -35,12 +38,54 @@ object WatchOrders {
 
     /** The first order a film belongs to, for the link on its page. */
     fun of(imdb: String): WatchOrder? = all.firstOrNull { imdb in it.films }
+
+    private const val GENRES = "order-genres"
+    /** Cinemeta often gives one film a single genre: The Dark Knight's first is only Crime. */
+    private const val FILMS_ASKED = 2
+    private const val AT_ONCE = 8
+
+    private val _tagged by lazy { MutableStateFlow(all) }
+
+    /** [all] with the genres known so far. */
+    val tagged: StateFlow<List<WatchOrder>> get() = _tagged
+
+    /** Each franchise's genres, from its first films. Asked for once and kept: a film's genres don't change. */
+    suspend fun tag() = withContext(Dispatchers.Default) {
+        val kept = runCatching { JSONObject(Kv.cached(GENRES) ?: "{}") }.getOrDefault(JSONObject())
+        fun show() { _tagged.value = all.map { it.copy(genres = kept.strings(it.id)) } }
+        show()
+        all.filterNot { kept.has(it.id) }.chunked(AT_ONCE).forEach { batch ->
+            batch.map { o ->
+                async { o.id to o.films.take(FILMS_ASKED).flatMap { Meta.title(it, "movie")?.genres.orEmpty() }.distinct() }
+            }.awaitAll().filter { it.second.isNotEmpty() }.forEach { (id, genres) -> kept.put(id, JSONArray(genres)) }
+            Kv.cache(GENRES, kept.toString())
+        }
+        show()
+    }
 }
 
 fun parseWatchOrders(json: String): List<WatchOrder> =
     JSONObject(json).getJSONArray("orders").objects().map {
         WatchOrder(it.getString("id"), it.getString("name"), it.strings("films"), it.strings("story"), it.optBoolean("more"))
     }
+
+/**
+ * Franchises for one viewer: those [begun] and not finished, then [genres] taking turns, so one with many
+ * franchises can't crowd out the others, then the rest. Those all [seen] go last.
+ */
+fun rankOrders(orders: List<WatchOrder>, genres: List<String>, seen: Set<String> = emptySet(), begun: Set<String> = emptySet()): List<WatchOrder> {
+    val open = orders.filterNot { o -> o.films.all { it in seen } }
+    val going = open.filter { o -> o.films.any { it in begun } }
+    val chosen = turns(genres.map { g -> open.filter { g in it.genres } })
+    return (going + chosen + open + orders).distinct()
+}
+
+/** The row on Home: only what fits the viewer; everything when nothing does, or the genres haven't come yet. */
+fun homeOrders(orders: List<WatchOrder>, genres: List<String>, seen: Set<String>, begun: Set<String>, size: Int = 12): List<WatchOrder> {
+    val ranked = rankOrders(orders, genres, seen, begun)
+    val fits = ranked.filter { o -> !o.films.all { it in seen } && (o.genres.any { it in genres } || o.films.any { it in begun }) }
+    return (if (genres.isEmpty() || orders.all { it.genres.isEmpty() }) ranked else fits.ifEmpty { ranked }).take(size)
+}
 
 /** A TMDB collection: what is out, oldest first, by TMDB id; [more] when a part has no date yet or one still to come. */
 data class TmdbCollection(val name: String, val parts: List<Int>, val more: Boolean)

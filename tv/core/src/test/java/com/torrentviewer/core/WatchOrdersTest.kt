@@ -22,6 +22,32 @@ class WatchOrdersTest {
         orders.forEach { assertEquals(it.name, it.films.size, it.films.distinct().size) }
     }
 
+    private fun order(id: String, vararg genres: String) = WatchOrder(id, id, listOf("${id}1", "${id}2"), genres = genres.toList())
+
+    @Test fun chosenGenresTakeTurnsAndLead() {
+        val all = listOf(order("a", "Action"), order("b", "Action"), order("c", "Action"), order("h", "Horror"), order("d", "Drama"))
+        assertEquals(listOf("a", "h", "b", "c", "d"), rankOrders(all, listOf("Action", "Horror")).map { it.id })
+    }
+
+    @Test fun whatWasBegunLeadsAndWhatIsFinishedGoesLast() {
+        val all = listOf(order("done", "Action"), order("a", "Action"), order("begun", "Drama"))
+        val ranked = rankOrders(all, listOf("Action"), seen = setOf("done1", "done2", "begun1"), begun = setOf("done1", "begun1"))
+        assertEquals(listOf("begun", "a", "done"), ranked.map { it.id })
+    }
+
+    @Test fun homeShowsOnlyWhatFitsUnlessNothingDoes() {
+        val all = listOf(order("a", "Action"), order("h", "Horror"), order("saved", "Drama"))
+        assertEquals(listOf("saved", "h"), homeOrders(all, listOf("Horror"), emptySet(), setOf("saved1")).map { it.id })
+        assertEquals(listOf("a", "h", "saved"), homeOrders(all, listOf(ANIME_GENRE), emptySet(), emptySet()).map { it.id })
+        assertEquals(listOf("a", "h", "saved"), homeOrders(all, emptyList(), emptySet(), emptySet()).map { it.id })
+    }
+
+    /** Before the genres come, a saved film mustn't leave the row with one card. */
+    @Test fun homeShowsEverythingUntilTheGenresCome() {
+        val all = listOf(order("a"), order("b"))
+        assertEquals(listOf("b", "a"), homeOrders(all, listOf("Horror"), emptySet(), setOf("b1")).map { it.id })
+    }
+
     /** A typo in one list would drop a film from it unnoticed. */
     @Test fun aStoryOrderHoldsTheSameFilms() {
         orders.filter { it.story.isNotEmpty() }.forEach { assertEquals(it.name, it.films.toSet(), it.story.toSet()) }

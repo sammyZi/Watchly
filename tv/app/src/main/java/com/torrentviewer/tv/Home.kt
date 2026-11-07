@@ -105,6 +105,8 @@ class HomeState {
     var aim by mutableStateOf<Title?>(null)
     /** "row/imdb" of the card that opened a title, to hand focus back to. */
     var restore: String? = null
+    /** The watch orders row as last shown, for the remote to land back on. */
+    var orders: List<WatchOrder> = emptyList()
     var picks by mutableStateOf<List<Shelf>>(emptyList())
     var forYou by mutableStateOf(ForYou())
 
@@ -133,6 +135,7 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit, onTop: (
     val settings by SettingsStore.value.collectAsState()
     val online by Net.online.collectAsState()
 
+    LaunchedEffect(online) { WatchOrders.tag() }
     // Shelves inferred from what has been watched: the lead pick says so.
     LaunchedEffect(history.size, saved.size, online) {
         val seen = (history.mapNotNull { h -> h.imdb?.let { it to (h.kind ?: "movie") } } + saved.map { it.imdb to it.kind }).take(30)
@@ -263,7 +266,8 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit, onTop: (
             }.also { at++ }
             val ordersAt = at
             if (!Kids.on) item(key = "orders") {
-                Rail("Watch orders", pin(ordersAt)) { OrderRow(state, aim, onOrders, onOrder) }
+                // Nothing chosen: what they watch stands in.
+                Rail("Watch orders", pin(ordersAt)) { OrderRow(state, settings.genres.ifEmpty { state.picks.mapNotNull { it.genre } }, aim, onOrders, onOrder) }
             }.also { at++ }
             val picksAt = at
             if (picks.isNotEmpty()) item(key = "picks") {
@@ -534,9 +538,18 @@ private fun ChartRow(state: HomeState, row: String, titles: List<Title>, onFocus
 
 /** The franchises, All first. */
 @Composable
-private fun OrderRow(state: HomeState, onFocus: (Title) -> Unit, onOrders: () -> Unit, onOrder: (WatchOrder) -> Unit) {
+private fun OrderRow(state: HomeState, genres: List<String>, onFocus: (Title) -> Unit, onOrders: () -> Unit, onOrder: (WatchOrder) -> Unit) {
     val seen = seenFilms()
     val fallback = remember { FocusRequester() }
+    val orders by WatchOrders.tagged.collectAsState()
+    val history by History.items.collectAsState()
+    val saved by SavedStore.items.collectAsState()
+    // Ranked as the row comes on screen, not while the remote is on it; back from a franchise it stays
+    // as it was, or a card that moved would leave the remote nowhere to land.
+    val shown = remember(genres) {
+        if (state.restore?.startsWith("orders/") == true) state.orders
+        else homeOrders(orders, genres, seen, seen + history.mapNotNull { it.imdb } + saved.map { it.imdb }).also { state.orders = it }
+    }
     CompositionLocalProvider(LocalBringIntoViewSpec provides rowScroll()) {
     LazyRow(
         state = state.row("orders"),
@@ -545,7 +558,7 @@ private fun OrderRow(state: HomeState, onFocus: (Title) -> Unit, onOrders: () ->
         horizontalArrangement = Arrangement.spacedBy(ROW_GAP),
     ) {
         item(key = "all") { SeeAll("See all ${WatchOrders.all.size}", state, "orders/all", fallback, onOrders) }
-        itemsIndexed(WatchOrders.all.take(12), key = { _, o -> o.id }) { _, order ->
+        itemsIndexed(shown, key = { _, o -> o.id }) { _, order ->
             val here = "orders/${order.id}"
             val requester = remember { FocusRequester() }
             Focusable(

@@ -60,6 +60,7 @@ import com.torrentviewer.core.Ink
 import com.torrentviewer.core.Lc
 import com.torrentviewer.core.Meta
 import com.torrentviewer.core.ProgressLine
+import com.torrentviewer.core.SettingsStore
 import com.torrentviewer.core.Stremio
 import com.torrentviewer.core.Title
 import com.torrentviewer.core.TitleMark
@@ -70,6 +71,7 @@ import com.torrentviewer.core.WatchedEverywhere
 import com.torrentviewer.core.heroScrims
 import com.torrentviewer.core.nextUp
 import com.torrentviewer.core.orderLine
+import com.torrentviewer.core.rankOrders
 import com.torrentviewer.core.runtimeLabel
 import com.torrentviewer.core.totalRuntime
 import com.torrentviewer.core.watchedFilms
@@ -197,9 +199,12 @@ fun WatchOrdersScreen(onOpen: (WatchOrder) -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
     /** The card that opened a franchise, to come back to. */
     var last by rememberSaveable { mutableStateOf<String?>(null) }
-    val aim = remember { last ?: WatchOrders.all.first().id }
+    val orders by WatchOrders.tagged.collectAsState()
+    val settings by SettingsStore.value.collectAsState()
+    val ranked = remember(orders, settings.genres) { rankOrders(orders, settings.genres) }
+    val aim = remember { last ?: ranked.first().id }
     val target = remember { FocusRequester() }
-    val shown = WatchOrders.all.filter { it.matches(query) }
+    val shown = ranked.filter { it.matches(query) }
 
     CompositionLocalProvider(LocalBringIntoViewSpec provides rememberMinimalScroll(40.dp)) {
         LazyVerticalGrid(

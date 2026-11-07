@@ -482,6 +482,11 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
                     listOf(
                         Entry(L.drawable.lucide_ic_refresh_cw, "Check for updates", "You have version ${BuildConfig.VERSION_NAME}", "new version upgrade") { Updates.checkNow(::say) },
                     ),
+                    listOf(
+                        Entry(L.drawable.lucide_ic_scale, "Legal notice", "Watchly is a media player only", "disclaimer copyright dmca") { page = "Legal notice" },
+                        Entry(L.drawable.lucide_ic_shield, "Privacy policy", "What stays here and what is sent", "data") { page = "Privacy policy" },
+                        Entry(L.drawable.lucide_ic_file_text, "Terms and conditions", "The rules for using Watchly", "agreement licence") { page = "Terms and conditions" },
+                    ),
                 ),
                 query,
                 first,
@@ -493,6 +498,10 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
                 Text(page.orEmpty(), style = Type.display)
             }
         }
+
+        if (page == "Legal notice") LegalText(com.torrentviewer.core.Legal.NOTICE)
+        if (page == "Privacy policy") LegalText(com.torrentviewer.core.Legal.PRIVACY)
+        if (page == "Terms and conditions") LegalText(com.torrentviewer.core.Legal.TERMS)
 
         if (page == "Integrations") {
             Text(

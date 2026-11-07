@@ -169,6 +169,7 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
     val settings by SettingsStore.value.collectAsState()
     val online by Net.online.collectAsState()
 
+    LaunchedEffect(online) { com.torrentviewer.core.WatchOrders.tag() }
     // Shelves inferred from what has been watched: the lead pick says so.
     LaunchedEffect(history.size, saved.size, online) {
         val seen = (history.mapNotNull { h -> h.imdb?.let { it to (h.kind ?: "movie") } } + saved.map { it.imdb to it.kind }).take(30)
@@ -291,7 +292,8 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
             }
             // A list by hand isn't sorted for children: their rows stay the family ones.
             if (!com.torrentviewer.core.Kids.on) item(key = "orders") {
-                Rail("Watch orders", onMore = onOrders) { WatchOrderRow(onOrder) }
+                // Nothing chosen: what they watch stands in.
+                Rail("Watch orders", onMore = onOrders) { WatchOrderRow(settings.genres.ifEmpty { state.picks.mapNotNull { it.genre } }, onOrder) }
             }
             if (state.fresh.isNotEmpty()) item(key = "fresh") {
                 Rail("New Episodes") {

@@ -12,7 +12,14 @@ data class CastMember(val id: Int, val name: String, val role: String?, val phot
 /** A title known by TMDB's id: its IMDb id, which the app goes by, is asked for only when it's opened. */
 data class TmdbCard(val id: Int, val kind: String, val title: String, val poster: String?, val year: String?)
 
-data class TmdbTitle(val certificate: String?, val cast: List<CastMember>, val similar: List<TmdbCard>)
+/** [directors]: who made it, for their pages — a film's director, a series' creators. */
+data class TmdbTitle(val certificate: String?, val cast: List<CastMember>, val similar: List<TmdbCard>, val directors: List<CastMember> = emptyList())
+
+/** "Jonathan Demme" and "jonathan demme" are one name: only letters and digits count. */
+fun sameName(a: String, b: String): Boolean {
+    fun squash(s: String) = s.lowercase().filter(Char::isLetterOrDigit)
+    return squash(a).isNotEmpty() && squash(a) == squash(b)
+}
 
 data class TmdbPerson(val name: String, val photo: String?, val knownFor: String?, val about: String?, val credits: List<TmdbCard>)
 
@@ -44,13 +51,18 @@ fun parseTmdbTitle(json: String, kind: String): TmdbTitle {
     }
     val similar = o.optJSONObject("recommendations")?.optJSONArray("results")?.objects().orEmpty()
         .filterNot { it.optBoolean("adult") }.mapNotNull { cardOf(it, kind) }.take(15)
-    return TmdbTitle(certificateOf(o, kind), cast, similar)
+    val directors = (o.optJSONObject("credits")?.optJSONArray("crew")?.objects().orEmpty().filter { it.optString("job") == "Director" } +
+        o.optJSONArray("created_by")?.objects().orEmpty())
+        .map { CastMember(it.optInt("id"), it.optString("name"), null, null) }.distinctBy { it.id }
+    return TmdbTitle(certificateOf(o, kind), cast, similar, directors)
 }
 
 /** /person with combined_credits appended: what they're in, best known first, each title once. */
 fun parseTmdbPerson(json: String): TmdbPerson {
     val o = JSONObject(json)
-    val credits = o.optJSONObject("combined_credits")?.optJSONArray("cast")?.objects().orEmpty()
+    val all = o.optJSONObject("combined_credits")
+    // What they acted in, and what they directed or created: a director's page is the second.
+    val credits = (all?.optJSONArray("cast")?.objects().orEmpty() + all?.optJSONArray("crew")?.objects().orEmpty().filter { it.optString("job") in setOf("Director", "Creator") })
         .filterNot { it.optBoolean("adult") }
         .filter { c -> c.optString("media_type") in setOf("movie", "tv") && c.optJSONArray("genre_ids")?.let { g -> (0 until g.length()).none { g.optInt(it) in NOT_SHOWS } } != false }
         .sortedByDescending { it.optDouble("popularity") }
