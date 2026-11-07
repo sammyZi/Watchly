@@ -171,7 +171,7 @@ fun TvButton(
 
 /** A pill of choices — seasons, qualities, genres. */
 @Composable
-fun Chip(label: String, on: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, @DrawableRes icon: Int? = null, requester: FocusRequester? = null) {
+fun Chip(label: String, on: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, @DrawableRes icon: Int? = null, requester: FocusRequester? = null, @DrawableRes trailing: Int? = null, trailingTint: Color? = null) {
     Focusable(onClick, modifier, CircleShape, 1.06f, ring = false, requester = requester) { focused ->
         val bg = when {
             focused -> Color.White
@@ -185,6 +185,10 @@ fun Chip(label: String, on: Boolean, onClick: () -> Unit, modifier: Modifier = M
                 Spacer(Modifier.width(8.dp))
             }
             Text(label, style = Type.label.copy(color = fg, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium))
+            if (trailing != null) {
+                Spacer(Modifier.width(6.dp))
+                Lc(trailing, tint = trailingTint ?: fg, size = 16.dp)
+            }
         }
     }
 }

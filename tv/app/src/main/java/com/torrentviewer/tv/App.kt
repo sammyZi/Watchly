@@ -97,6 +97,9 @@ private sealed interface Stop {
     data class Top(val kind: String) : Stop { override val key get() = "top" }
 }
 
+/** A stremio:// link that wants to add an addon, until the viewer says yes or no. */
+private var pendingAddon by mutableStateOf<String?>(null)
+
 @Composable
 fun App(watch: Watch, incoming: MutableState<Uri?>) {
     MaterialTheme(colorScheme = darkColorScheme(primary = Ink.accent, background = Ink.bg, surface = Ink.surface)) {
@@ -106,6 +109,24 @@ fun App(watch: Watch, incoming: MutableState<Uri?>) {
             Shell(watch, incoming)
             UpdateProgress(watch, Modifier.align(Alignment.TopCenter))
             Toast(watch)
+            // An addon decides what the app is offered to play, so one from a link is added only on a yes.
+            pendingAddon?.let { link ->
+                Sheet(
+                    title = "Add this addon?",
+                    options = listOf(
+                        Option(true, "Add ${addonHost(link) ?: "this addon"}", "Only add addons you trust: it chooses what you are offered to play."),
+                        Option(false, "Cancel"),
+                    ),
+                    selected = null,
+                    onPick = { yes ->
+                        pendingAddon = null
+                        if (yes) AppScope.launch {
+                            watch.notes.tryEmit(runCatching { Addons.add(link) }.fold({ "Added ${it.name} — see Settings → Addons" }, { it.message ?: "Couldn't add that addon" }))
+                        }
+                    },
+                    onDismiss = { pendingAddon = null },
+                )
+            }
         }
     }
 }
@@ -199,10 +220,8 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         stops = emptyList()
         val raw = uri.toString()
         if (raw.startsWith("stremio://", ignoreCase = true)) {
-            // Not in this effect: clearing incoming above restarts it, which cancelled the fetch half-way.
-            AppScope.launch {
-                watch.notes.tryEmit(runCatching { Addons.add(raw) }.fold({ "Added ${it.name} — see Settings → Addons" }, { it.message ?: "Couldn't add that addon" }))
-            }
+            // Asked first, over everything: any web page can send one of these links.
+            pendingAddon = raw
             return@LaunchedEffect
         }
         if (!isTorrentSource(raw)) return@LaunchedEffect

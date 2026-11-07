@@ -609,6 +609,18 @@ fun episodeProgress(items: List<Item>, imdb: String, stremio: StremioLibrary = S
     return out
 }
 
+/** Watched through, as Stremio is told: an anime's ending song isn't worth waiting through for the tick. */
+fun isWatched(progress: Double) = progress >= WATCHED_AT
+
+/**
+ * Every episode of [season] that is out [today] (yyyy-MM-dd) has been watched through: the tick on a
+ * season in a list. One not out yet doesn't hold it back, and a season with nothing out has none.
+ */
+fun seasonWatched(episodes: List<Episode>, season: Int, seen: Map<Ep, Double>, today: String): Boolean {
+    val out = episodes.filter { it.season == season && (it.released.isNullOrBlank() || it.released.take(10) <= today) }
+    return out.isNotEmpty() && out.all { isWatched(seen[Ep(it.season, it.episode)] ?: 0.0) }
+}
+
 /**
  * What is fetched before the player gets the URL, in the order it will ask: the header, then for a
  * resume the file's last piece, then the resume point. A seek can't happen until the player has

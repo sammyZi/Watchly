@@ -82,6 +82,17 @@ public static class Meta
 
     public static string KindOfGenre(string genre) => genre == AnimeGenre ? "tv" : "movie";
 
+    /// <summary>
+    /// Every episode of the season that is out today has been watched through (core seasonWatched): the tick on a
+    /// season in a list. One not out yet doesn't hold it back, and a season with nothing out has none.
+    /// </summary>
+    public static bool SeasonWatched(IEnumerable<Episode> episodes, int season, IReadOnlyDictionary<string, double> seen)
+    {
+        var today = DateTime.Now.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        var out_ = episodes.Where(e => e.Season == season && (string.IsNullOrWhiteSpace(e.Released) || string.CompareOrdinal(e.Released.Length > 10 ? e.Released[..10] : e.Released, today) <= 0)).ToList();
+        return out_.Count > 0 && out_.All(e => seen.GetValueOrDefault(e.Id) >= Stremio.WatchedAt);
+    }
+
     static readonly ConcurrentDictionary<string, Task<object?>> Cache = new();
     static readonly TimeSpan Ttl = TimeSpan.FromDays(1);
     const string StorePrefix = "meta4-";

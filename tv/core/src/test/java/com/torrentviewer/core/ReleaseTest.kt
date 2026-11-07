@@ -13,6 +13,11 @@ class ReleaseTest {
         ${asset("Watchly-phone-v2.4.1-armeabi-v7a.apk")},${asset("Watchly-phone-v2.4.1-arm64-v8a.apk")},${asset("Watchly-phone-v2.4.1-universal.apk")},
         ${asset("Watchly-tv-v2.4.1-arm64-v8a.apk")},${asset("Watchly-windows-v2.4.1-x64-setup.exe")}]}"""
 
+    @Test fun anAddonLinkIsAskedAboutByItsSiteAlone() {
+        assertEquals("addon.example.com", addonHost("stremio://addon.example.com/secretconfig123/manifest.json"))
+        assertNull(addonHost("ftp://addon.example.com/x"))
+    }
+
     @Test fun onlyNewerCounts() {
         assertTrue(isNewerVersion("v2.4.1", "2.4.0"))
         assertTrue(isNewerVersion("2.10.0", "2.9.9"))
@@ -32,6 +37,16 @@ class ReleaseTest {
 
     @Test fun fallsBackToUniversal() {
         assertTrue(parseRelease(json, listOf("x86_64"), "Watchly-phone-")!!.url.endsWith("-universal.apk"))
+    }
+
+    /** The update is code that gets installed: from this project's releases only, and checked against a stated checksum. */
+    @Test fun refusesAFileFromElsewhereOrWithoutAChecksum() {
+        val name = "Watchly-phone-v2.4.1-arm64-v8a.apk"
+        val elsewhere = """{"name":"$name","size":1,"digest":"sha256:abc","browser_download_url":"https://evil.example/$name"}"""
+        val unchecked = """{"name":"$name","size":1,"browser_download_url":"${RELEASE_FILES}v2.4.1/$name"}"""
+        listOf(elsewhere, unchecked).forEach {
+            assertNull(parseRelease("""{"tag_name":"v2.4.1","assets":[$it]}""", listOf("arm64-v8a"), "Watchly-phone-"))
+        }
     }
 
     @Test fun nothingForThisApp() {

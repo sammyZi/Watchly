@@ -71,6 +71,9 @@ fun addonBase(raw: String): String? {
     return s.takeIf { runCatching { java.net.URI(it).host }.getOrNull().orEmpty().isNotEmpty() }
 }
 
+/** Which site an addon link is for, to ask before adding it: not the path, which can carry the viewer's keys. */
+fun addonHost(raw: String): String? = addonBase(raw)?.let { runCatching { java.net.URI(it).host }.getOrNull() }
+
 /**
  * The TV page a `watchly://tv-addons?to=…` link names, from the TV's QR. Only a page on the home
  * network, in the TV's own shape, is ever sent the addons — their links can carry keys, and any

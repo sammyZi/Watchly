@@ -639,11 +639,21 @@ public partial class MainWindow : Window
         if (KidsMode.On) { Toast("A kids profile can't open torrents or addons from other apps.", true); return; }
         if (source.StartsWith("stremio://", StringComparison.OrdinalIgnoreCase))
         {
-            _ = InstallAddon(source);
+            // Asked first: any web page can send one of these links, and an addon decides what the app is offered to play.
+            Confirm("Add this addon?", $"{AddonHost(source) ?? "This addon"}. Only add addons you trust: it chooses what you are offered to play.",
+                "Add", () => _ = InstallAddon(source), "puzzle", destructive: false);
             return;
         }
         torrentMode = null;
         _ = OpenUri(source, new OpenOptions());
+    }
+
+    /// <summary>Which site an addon link is for: not the path, which can carry the viewer's keys.</summary>
+    static string? AddonHost(string link)
+    {
+        var s = link.Trim();
+        if (s.StartsWith("stremio://", StringComparison.OrdinalIgnoreCase)) s = "https://" + s["stremio://".Length..];
+        return Uri.TryCreate(s, UriKind.Absolute, out var uri) && uri.Host.Length > 0 ? uri.Host : null;
     }
 
     async Task InstallAddon(string link)

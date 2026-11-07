@@ -854,7 +854,7 @@ public sealed class PlayerView : UserControl, IDisposable
         if (seasons.Count > 1)
             foreach (var s in seasons)
             {
-                var chip = Controls.Ui.Chip(s == 0 ? "Specials" : $"Season {s}", s == season, () => { seriesSeason = s; Render(); });
+                var chip = Controls.Ui.Chip(s == 0 ? "Specials" : $"Season {s}", s == season, () => { seriesSeason = s; Render(); }, done: Meta.SeasonWatched(show.Episodes, s, seen));
                 chip.Margin = new Thickness(0, 0, 8, 6);
                 chips.Children.Add(chip);
             }
@@ -864,18 +864,33 @@ public sealed class PlayerView : UserControl, IDisposable
         foreach (var ep in shown)
         {
             var art = new Grid { Width = 128, Height = 72, Children = { Controls.Ui.Art(ep.Thumbnail ?? show.Wide, ep.Name, 128, 72, 6) } };
-            if (seen.GetValueOrDefault(ep.Id) is > 0 and var part)
+            var watched = seen.GetValueOrDefault(ep.Id) >= Stremio.WatchedAt;
+            if (seen.GetValueOrDefault(ep.Id) is > 0 and < Stremio.WatchedAt and var part)
             {
                 var bar = Controls.Ui.Bar(part);
                 bar.VerticalAlignment = VerticalAlignment.Bottom;
                 art.Children.Add(bar);
             }
+            // Watched through: a green disc with a tick on the picture, and the word under the name.
+            if (watched)
+                art.Children.Add(new Border
+                {
+                    Width = 18, Height = 18, CornerRadius = new CornerRadius(9), Background = (Brush)FindResource("Good"),
+                    HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 4, 4, 0),
+                    Child = Controls.Ui.Glyph("check", 12, "OnAccent"),
+                });
             var here = ep.Id == playing?.Id;
             var name = WText($"{ep.Number}. {ep.Name}", 14, Brushes.White, FontWeights.SemiBold);
             name.TextWrapping = TextWrapping.Wrap;
             name.MaxHeight = 40;
             name.TextTrimming = TextTrimming.CharacterEllipsis;
             var words = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0), Children = { name } };
+            if (watched)
+                words.Children.Add(new StackPanel
+                {
+                    Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0),
+                    Children = { Controls.Ui.Glyph("check", 13, "Good"), WText(" Watched", 12, (Brush)FindResource("Good"), FontWeights.SemiBold) },
+                });
             if (here) words.Children.Add(WText("Now playing", 12, White(0xb0)));
             var dock = new DockPanel();
             DockPanel.SetDock(art, Dock.Left);
@@ -885,14 +900,24 @@ public sealed class PlayerView : UserControl, IDisposable
             row.HorizontalContentAlignment = HorizontalAlignment.Stretch;
             rows.Children.Add(row);
         }
-        var list = new ScrollViewer { MaxHeight = Math.Max(160, ActualHeight / ControlsScale - 280), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = rows };
+        var heading = WText("Episodes", 18, Brushes.White, FontWeights.Bold);
+        // The list gets what is left above the controls once the heading and the season chips have theirs: a show
+        // with many seasons wraps its chips onto more lines, and a fixed share left the last row cut off.
+        double Taken(FrameworkElement e)
+        {
+            e.Measure(new Size(400, double.PositiveInfinity));
+            return e.DesiredSize.Height;
+        }
+        // The sheet's own margins (68 above, 96 below), padding (12) and the page's margin (20).
+        var room = ActualHeight / ControlsScale - 68 - 96 - 12 - 20;
+        var list = new ScrollViewer { MaxHeight = Math.Max(120, room - Taken(heading) - Taken(chips)), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = rows };
         var index = shown.FindIndex(e => e.Id == playing?.Id);
         if (index > 0) list.Loaded += (_, _) => list.ScrollToVerticalOffset(index * RowHeight);
         return SheetBox(new StackPanel
         {
             Width = 400,
             Margin = new Thickness(10),
-            Children = { WText("Episodes", 18, Brushes.White, FontWeights.Bold), chips, list },
+            Children = { heading, chips, list },
         });
     }
 

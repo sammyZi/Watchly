@@ -2,6 +2,9 @@ package com.torrentviewer.core
 
 import org.json.JSONObject
 
+/** Where this project's release files are. An update from anywhere else is not offered. */
+internal const val RELEASE_FILES = "https://github.com/sammyZi/Watchly/releases/download/"
+
 /** A published version, and the one file of it for this device. */
 data class AppRelease(val version: String, val url: String, val size: Long, val sha256: String?)
 
@@ -25,7 +28,8 @@ fun parseRelease(json: String, abis: List<String>, prefix: String): AppRelease? 
     val o = JSONObject(json)
     val version = o.getString("tag_name").removePrefix("v")
     val assets = o.getJSONArray("assets").objects().filter { it.optString("name").startsWith(prefix) }
-    (abis + "universal").firstNotNullOfOrNull { abi -> assets.find { it.optString("name").endsWith("-$abi.apk") } }?.let {
-        AppRelease(version, it.getString("browser_download_url"), it.optLong("size"), it.str("digest")?.removePrefix("sha256:"))
-    }
+    (abis + "universal").firstNotNullOfOrNull { abi -> assets.find { it.optString("name").endsWith("-$abi.apk") } }
+        // Only this project's own release files, and only with the checksum GitHub states for them.
+        ?.takeIf { it.optString("browser_download_url").startsWith(RELEASE_FILES) && it.str("digest") != null }
+        ?.let { AppRelease(version, it.getString("browser_download_url"), it.optLong("size"), it.str("digest")?.removePrefix("sha256:")) }
 }.getOrNull()

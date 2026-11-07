@@ -422,7 +422,8 @@ public static class Ui
         return (box, input, trailing);
     }
 
-    public static ToggleButton Chip(string label, bool on, Action onClick, string? icon = null, string style = "Chip")
+    /// <param name="done">A green tick after the word: a season watched through.</param>
+    public static ToggleButton Chip(string label, bool on, Action onClick, string? icon = null, string style = "Chip", bool done = false)
     {
         var content = new StackPanel { Orientation = Orientation.Horizontal };
         var chip = new ToggleButton { Style = S(style), IsChecked = on, Content = content };
@@ -433,6 +434,12 @@ public static class Ui
             content.Children.Add(glyph);
         }
         content.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center });
+        if (done)
+        {
+            var tick = Glyph("check", 13, "Good");
+            tick.Margin = new Thickness(5, 0, 0, 0);
+            content.Children.Add(tick);
+        }
         chip.Click += (_, _) => { chip.IsChecked = on; onClick(); };
         return chip;
     }

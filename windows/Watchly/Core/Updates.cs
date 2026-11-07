@@ -15,6 +15,8 @@ public sealed record AppRelease(string Version, string Url, long Size, string? S
 public static class Updates
 {
     const string Latest = "https://api.github.com/repos/sammyZi/Watchly/releases/latest";
+    /// <summary>Where this project's release files are. An update from anywhere else is not offered.</summary>
+    const string ReleaseFiles = "https://github.com/sammyZi/Watchly/releases/download/";
     const string SkippedKey = "update-skipped";
 
     public static string Version => typeof(Updates).Assembly.GetName().Version?.ToString(3) ?? "0";
@@ -50,7 +52,11 @@ public static class Updates
         var version = o?["tag_name"]?.GetValue<string>().TrimStart('v');
         var asset = (o?["assets"] as JsonArray)?.FirstOrDefault(a => a?["name"]?.GetValue<string>() is { } name && name.StartsWith("Watchly-windows-") && name.EndsWith("-setup.exe"));
         if (version is null || asset is null) return null;
-        return new AppRelease(version, asset["browser_download_url"]!.GetValue<string>(), asset["size"]?.GetValue<long>() ?? 0, asset["digest"]?.GetValue<string>().Replace("sha256:", ""));
+        // Run as soon as it is downloaded, so: this project's own release files only, and only with the checksum GitHub states for them.
+        var url = asset["browser_download_url"]!.GetValue<string>();
+        var digest = asset["digest"]?.GetValue<string>();
+        if (!url.StartsWith(ReleaseFiles, StringComparison.Ordinal) || digest is null) return null;
+        return new AppRelease(version, url, asset["size"]?.GetValue<long>() ?? 0, digest.Replace("sha256:", ""));
     }
 
     static async Task<AppRelease?> Ask()

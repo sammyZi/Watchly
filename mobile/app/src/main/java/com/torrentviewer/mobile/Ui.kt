@@ -217,7 +217,7 @@ fun Button(
 
 /** A pill of choices — seasons, qualities, genres, sorts. */
 @Composable
-fun Chip(label: String, on: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, @DrawableRes icon: Int? = null, @DrawableRes trailing: Int? = null, compact: Boolean = false) {
+fun Chip(label: String, on: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, @DrawableRes icon: Int? = null, @DrawableRes trailing: Int? = null, compact: Boolean = false, trailingTint: Color? = null) {
     Tap(onClick, modifier, CircleShape) { pressed ->
         val bg = when {
             on -> Ink.accent
@@ -233,7 +233,7 @@ fun Chip(label: String, on: Boolean, onClick: () -> Unit, modifier: Modifier = M
             Text(label, style = Type.label.copy(fontSize = if (compact) 13.sp else 14.sp, color = fg, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium), maxLines = 1)
             if (trailing != null) {
                 Spacer(Modifier.width(if (compact) 3.dp else 6.dp))
-                Lc(trailing, tint = fg, size = if (compact) 14.dp else 16.dp)
+                Lc(trailing, tint = trailingTint ?: fg, size = if (compact) 14.dp else 16.dp)
             }
         }
     }

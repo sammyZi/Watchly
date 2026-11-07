@@ -121,6 +121,8 @@ import com.torrentviewer.core.History
 import com.torrentviewer.core.Stremio
 import com.torrentviewer.core.WatchedEverywhere
 import com.torrentviewer.core.episodeProgress
+import com.torrentviewer.core.isWatched
+import com.torrentviewer.core.seasonWatched
 import com.torrentviewer.core.ExoView
 import com.torrentviewer.core.Facts
 import com.torrentviewer.core.Secrets
@@ -250,13 +252,15 @@ fun PlayerScreen(watch: Watch) {
     key(watch.playId) { Player(watch, sleep, sleepEnds) }
 }
 
-/** Landscape, bars hidden, screen kept on — for as long as the player is up. Brightness goes back to the system's after. */
+/**
+ * Landscape, bars hidden, screen kept on — for as long as the player is up. The rest of the app is
+ * portrait only (the manifest says so), and that is where it goes back to. Brightness goes back to the system's after.
+ */
 @Composable
 private fun Fullscreen() {
     val activity = LocalActivity.current ?: return
     val view = LocalView.current
     DisposableEffect(Unit) {
-        val before = activity.requestedOrientation
         activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         val bars = WindowCompat.getInsetsController(activity.window, view)
         bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -266,7 +270,7 @@ private fun Fullscreen() {
             view.keepScreenOn = false
             bars.show(WindowInsetsCompat.Type.systemBars())
             activity.window.attributes = activity.window.attributes.apply { screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE }
-            activity.requestedOrientation = before
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
     }
 }
@@ -1278,6 +1282,7 @@ private fun EpisodesPanel(title: Title, playing: Episode?, onPlay: (Episode) -> 
     val history by History.items.collectAsState()
     val library by WatchedEverywhere.collectAsState(Stremio.library.value)
     val seen = remember(history, library, title.episodes) { episodeProgress(history, title.imdb, library, title.episodes) }
+    val today = remember { java.time.LocalDate.now().toString() }
     // Specials after the seasons.
     val seasons = remember(title.episodes) { title.episodes.map { it.season }.distinct().sortedBy { if (it == 0) Int.MAX_VALUE else it } }
     var season by remember { mutableStateOf(playing?.season ?: seasons.first()) }
@@ -1294,7 +1299,11 @@ private fun EpisodesPanel(title: Title, playing: Episode?, onPlay: (Episode) -> 
                 Tap(onDismiss, shape = CircleShape) { Lc(L.drawable.lucide_ic_x, Modifier.padding(8.dp), tint = Color.White, size = 22.dp) }
             }
             if (seasons.size > 1) Row(Modifier.padding(top = 4.dp, bottom = 4.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                seasons.forEach { s -> Chip(if (s == 0) "Specials" else "Season $s", s == season, onClick = { season = s }) }
+                seasons.forEach { s ->
+                    // A green tick on a season watched through.
+                    val done = seasonWatched(title.episodes, s, seen, today)
+                    Chip(if (s == 0) "Specials" else "Season $s", s == season, onClick = { season = s }, trailing = L.drawable.lucide_ic_check.takeIf { done }, trailingTint = Ink.good)
+                }
             }
             key(season) {
                 val shown = remember { title.episodes.filter { it.season == season } }
@@ -1311,11 +1320,15 @@ private fun EpisodesPanel(title: Title, playing: Episode?, onPlay: (Episode) -> 
 
 @Composable
 private fun EpisodeRow(ep: Episode, fallback: String?, here: Boolean, seen: Double, onClick: () -> Unit) {
+    val watched = isWatched(seen)
     Tap(onClick, Modifier.fillMaxWidth(), RoundedCornerShape(8.dp)) {
         Row(Modifier.fillMaxWidth().background(if (here) Color.White.copy(alpha = 0.12f) else Color.Transparent).padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.width(128.dp).aspectRatio(16f / 9f).clip(RoundedCornerShape(6.dp)).background(Color.Black)) {
                 Artwork(ep.thumbnail ?: fallback, ep.name, Modifier.fillMaxSize(), fill = false)
-                if (seen > 0) ProgressLine(seen.toFloat(), Modifier.align(Alignment.BottomStart))
+                if (seen > 0 && !watched) ProgressLine(seen.toFloat(), Modifier.align(Alignment.BottomStart))
+                if (watched) Box(Modifier.align(Alignment.TopEnd).padding(4.dp).size(18.dp).clip(CircleShape).background(Ink.good), contentAlignment = Alignment.Center) {
+                    Lc(L.drawable.lucide_ic_check, tint = Color.White, size = 12.dp)
+                }
             }
             Column(Modifier.padding(start = 12.dp).weight(1f)) {
                 Text(
@@ -1324,6 +1337,10 @@ private fun EpisodeRow(ep: Episode, fallback: String?, here: Boolean, seen: Doub
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (watched) Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Lc(L.drawable.lucide_ic_check, tint = Ink.good, size = 13.dp)
+                    Text(" Watched", style = Type.meta.copy(color = Ink.good, fontSize = 12.sp, fontWeight = FontWeight.SemiBold))
+                }
                 if (here) Text("Now playing", Modifier.padding(top = 2.dp), style = Type.meta.copy(color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp))
             }
         }

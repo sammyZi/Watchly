@@ -1361,6 +1361,7 @@ private fun EpisodesPanel(title: Title, playing: Episode?, onPlay: (Episode) -> 
     val history by History.items.collectAsState()
     val library by WatchedEverywhere.collectAsState(Stremio.library.value)
     val seen = remember(history, library, title.episodes) { episodeProgress(history, title.imdb, library, title.episodes) }
+    val today = remember { java.time.LocalDate.now().toString() }
     // Specials after the seasons.
     val seasons = remember(title.episodes) { title.episodes.map { it.season }.distinct().sortedBy { if (it == 0) Int.MAX_VALUE else it } }
     val start = remember { playing?.season ?: seasons.first() }
@@ -1373,7 +1374,11 @@ private fun EpisodesPanel(title: Title, playing: Episode?, onPlay: (Episode) -> 
         ) {
             Text("Episodes", Modifier.padding(bottom = 10.dp), style = Type.title.copy(color = Color.White, fontWeight = FontWeight.Bold))
             if (seasons.size > 1) LazyRow(Modifier.focusRestorer().padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(seasons, key = { it }) { s -> Chip(if (s == 0) "Specials" else "Season $s", s == season, onClick = { season = s }) }
+                items(seasons, key = { it }) { s ->
+                    // A green tick on a season watched through.
+                    val done = seasonWatched(title.episodes, s, seen, today)
+                    Chip(if (s == 0) "Specials" else "Season $s", s == season, onClick = { season = s }, trailing = L.drawable.lucide_ic_check.takeIf { done }, trailingTint = Ink.good)
+                }
             }
             key(season) {
                 val shown = remember { title.episodes.filter { it.season == season } }
@@ -1385,10 +1390,18 @@ private fun EpisodesPanel(title: Title, playing: Episode?, onPlay: (Episode) -> 
                                 Row(Modifier.fillMaxWidth().background(if (ep.id == playing?.id) Color.White.copy(alpha = 0.12f) else Color.Transparent).padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Box(Modifier.width(132.dp).aspectRatio(16f / 9f).clip(RoundedCornerShape(6.dp)).background(Color.Black)) {
                                         Artwork(ep.thumbnail ?: title.wide, ep.name, Modifier.fillMaxSize(), fill = false)
-                                        seen[Ep(ep.season, ep.episode)]?.takeIf { it > 0 }?.let { ProgressLine(it.toFloat(), Modifier.align(Alignment.BottomStart)) }
+                                        val part = seen[Ep(ep.season, ep.episode)] ?: 0.0
+                                        if (part > 0 && !isWatched(part)) ProgressLine(part.toFloat(), Modifier.align(Alignment.BottomStart))
+                                        if (isWatched(part)) Box(Modifier.align(Alignment.TopEnd).padding(5.dp).size(20.dp).clip(CircleShape).background(Ink.good), contentAlignment = Alignment.Center) {
+                                            Lc(L.drawable.lucide_ic_check, tint = Color.White, size = 13.dp)
+                                        }
                                     }
                                     Column(Modifier.padding(start = 12.dp).weight(1f)) {
                                         Text("${ep.episode}. ${ep.name}", style = Type.label.copy(color = Color.White, fontWeight = FontWeight.SemiBold), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                        if (isWatched(seen[Ep(ep.season, ep.episode)] ?: 0.0)) Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Lc(L.drawable.lucide_ic_check, tint = Ink.good, size = 14.dp)
+                                            Text(" Watched", style = Type.meta.copy(color = Ink.good, fontWeight = FontWeight.SemiBold))
+                                        }
                                         if (ep.id == playing?.id) Text("Now playing", Modifier.padding(top = 2.dp), style = Type.meta.copy(color = Color.White.copy(alpha = 0.7f)))
                                     }
                                 }

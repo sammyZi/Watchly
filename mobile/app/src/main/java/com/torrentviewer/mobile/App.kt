@@ -90,6 +90,7 @@ import com.torrentviewer.core.Kids
 import com.torrentviewer.core.Addons
 import com.torrentviewer.core.AppScope
 import com.torrentviewer.core.Net
+import com.torrentviewer.core.addonHost
 import com.torrentviewer.core.tvDropUrl
 import com.torrentviewer.core.SavedStore
 import com.torrentviewer.core.Spinner
@@ -259,6 +260,8 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
 
     /** The TV page asking for this phone's addons, from its QR, until the viewer says yes or no. */
     var sendTo by remember { mutableStateOf<String?>(null) }
+    /** A stremio:// link that wants to add an addon, until the viewer says yes or no. */
+    var pendingAddon by remember { mutableStateOf<String?>(null) }
 
     // Another app handed us a torrent, or an addon page's Install button a stremio:// link,
     // or the TV's QR page its watchly:// link asking for the addons.
@@ -276,10 +279,8 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         if (Kids.on) return@LaunchedEffect watch.fail("A kids profile can't open torrents or addons from other apps.")
         val raw = uri.toString()
         if (raw.startsWith("stremio://", ignoreCase = true)) {
-            // Not in this effect: clearing incoming above restarts it, which cancelled the fetch half-way.
-            AppScope.launch {
-                watch.notes.tryEmit(runCatching { Addons.add(raw) }.fold({ "Added ${it.name} — see the Addons tab" }, { it.message ?: "Couldn't add that addon" }))
-            }
+            // Asked first, below: any web page can send one of these links.
+            pendingAddon = raw
             return@LaunchedEffect
         }
         if (raw.startsWith("watchly://tv-addons", ignoreCase = true)) {
@@ -405,6 +406,25 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
                 empty = "This torrent holds no video.",
                 onPick = { watch.pick(item, meta, it) },
                 onDismiss = { watch.choose = null },
+            )
+        }
+
+        // An addon decides what the app is offered to play, so one from a link is added only on a yes.
+        pendingAddon?.let { link ->
+            Sheet(
+                title = "Add this addon?",
+                options = listOf(
+                    Option(true, "Add ${addonHost(link) ?: "this addon"}", "Only add addons you trust: it chooses what you are offered to play."),
+                    Option(false, "Cancel"),
+                ),
+                selected = null,
+                onPick = { yes ->
+                    pendingAddon = null
+                    if (yes) AppScope.launch {
+                        watch.notes.tryEmit(runCatching { Addons.add(link) }.fold({ "Added ${it.name} — see the Addons tab" }, { it.message ?: "Couldn't add that addon" }))
+                    }
+                },
+                onDismiss = { pendingAddon = null },
             )
         }
 
