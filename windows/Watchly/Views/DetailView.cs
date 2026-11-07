@@ -342,10 +342,14 @@ public sealed class DetailView : UserControl, IDisposable
         if (title.Kind != "tv")
             actions.Children.Add(Ui.IconAction("download", "Download", () =>
             {
-                if (bestTorrent is not null) Save(bestTorrent.Uri);
-                else shell.Toast(!(fresh && sources is not null) ? "Still finding sources…"
-                    : sources.Count > 0 ? "Links stream only — there is no torrent here to download."
-                    : lang is null ? "No sources to download." : $"Nothing in {lang.Name} — change the language and try again.");
+                if (!(fresh && sources is not null)) shell.Toast("Still finding sources…");
+                else if (bestTorrent is null) shell.Toast(sources.Count > 0 ? "Links stream only — there is no torrent here to download." : NoneFound());
+                else
+                {
+                    // The releases to choose from, each with its own download button, not whichever came first.
+                    shell.Toast("Pick a release to download");
+                    ScrollToSources();
+                }
             }, width: double.NaN));
         actions.Children.Add(LanguageAction());
         head.Children.Add(actions);
@@ -735,13 +739,7 @@ public sealed class DetailView : UserControl, IDisposable
             picked = captured;
             FindReleases(debounce: true);
             Render();
-            // Move down to this episode's torrents — after Render's own scroll restore, once laid out.
-            Dispatcher.BeginInvoke(() =>
-            {
-                if (sourcesAnchor is null) return;
-                var y = sourcesAnchor.TransformToAncestor(content).Transform(new Point(0, 0)).Y;
-                scroll.ScrollToVerticalOffset(Math.Max(0, y - 20));
-            }, DispatcherPriority.Loaded);
+            ScrollToSources();
         });
         row.Padding = new Thickness(8, 10, 8, 10);
         row.Margin = new Thickness(-8, 0, -8, 0);
@@ -749,6 +747,14 @@ public sealed class DetailView : UserControl, IDisposable
         if (on) row.SetResourceReference(BackgroundProperty, "TintLo");
         return row;
     }
+
+    /// <summary>Move down to the torrents — after Render's own scroll restore, once laid out.</summary>
+    void ScrollToSources() => Dispatcher.BeginInvoke(() =>
+    {
+        if (sourcesAnchor is null) return;
+        var y = sourcesAnchor.TransformToAncestor(content).Transform(new Point(0, 0)).Y;
+        scroll.ScrollToVerticalOffset(Math.Max(0, y - 20));
+    }, DispatcherPriority.Loaded);
 
     void RenderSources(bool fresh, List<Hit>? shown, bool wait)
     {

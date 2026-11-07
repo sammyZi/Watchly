@@ -49,6 +49,7 @@ import com.torrentviewer.core.ago
 import com.torrentviewer.core.bytes
 import com.torrentviewer.core.absoluteNumber
 import com.torrentviewer.core.episodeTag
+import com.torrentviewer.core.left
 import com.torrentviewer.core.pickTag
 import com.torrentviewer.core.parseEpisode
 import com.torrentviewer.core.speed
@@ -207,7 +208,12 @@ private fun ActiveRow(row: LiveDownload, onPause: () -> Unit, onResume: () -> Un
                     maxLines = 2,
                 )
                 if (row.total > 0) Text(
-                    listOfNotNull(if (pack) "$savedCount of ${wanted.size} episodes saved" else null, "${bytes(row.done)} of ${bytes(row.total)}").joinToString("  ·  "),
+                    listOfNotNull(
+                        if (pack) "$savedCount of ${wanted.size} episodes saved" else null,
+                        "${bytes(row.done)} of ${bytes(row.total)}",
+                        // At the rate it is going now: it moves with the swarm, and is only said while there is a rate.
+                        if (row.state == DlState.DOWNLOADING && row.speed > 0) left((row.total - row.done).toDouble() / row.speed) else null,
+                    ).joinToString("  ·  "),
                     style = Type.meta.copy(fontSize = 12.sp, color = Ink.faint),
                     maxLines = 1,
                 )

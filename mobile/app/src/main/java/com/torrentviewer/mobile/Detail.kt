@@ -178,6 +178,8 @@ fun DetailScreen(initial: Title, watch: Watch, onOrder: (com.torrentviewer.core.
     var ticket by remember { mutableIntStateOf(0) }
     val shown = hits.orEmpty().filter { quality == null || it.quality == quality }
     var sheet by remember { mutableStateOf(false) }
+    /** A film's Download: its releases, to pick one from. */
+    var downloadSheet by remember { mutableStateOf(false) }
     var reviews by remember { mutableStateOf(false) }
     /** The releases' language, by its code; empty is any language. */
     var lang by rememberSaveable(title.imdb) { mutableStateOf("") }
@@ -356,9 +358,7 @@ fun DetailScreen(initial: Title, watch: Watch, onOrder: (com.torrentviewer.core.
                         // Green tick for My List, red heart for Like — each fills its disc when on.
                         Action(if (inList) L.drawable.lucide_ic_check else L.drawable.lucide_ic_plus, if (inList) "In My List" else "My List", { SavedStore.toggle(title) }, modifier = share, on = inList, onColor = Ink.good)
                         Action(L.drawable.lucide_ic_heart, if (liked) "Liked" else "Like", { SavedStore.toggle(title, "favorite") }, modifier = share, on = liked, onColor = Ink.accent)
-                        if (!title.isSeries) Action(L.drawable.lucide_ic_download, "Download", {
-                            shown.firstOrNull()?.let { keep(it, null) } ?: watch.notes.tryEmit(if (busy) "Still finding sources…" else noneFound(title.title))
-                        }, modifier = share)
+                        if (!title.isSeries) Action(L.drawable.lucide_ic_download, "Download", { downloadSheet = true }, modifier = share)
                         title.trailer?.let { id -> Action(L.drawable.lucide_ic_film, "Trailer", { openUrl(context, "https://www.youtube.com/watch?v=$id") }, modifier = share) }
                         Action(L.drawable.lucide_ic_message_square_text, "Reviews", { reviews = true }, modifier = share)
                     }
@@ -494,6 +494,25 @@ fun DetailScreen(initial: Title, watch: Watch, onOrder: (com.torrentviewer.core.
             }
         }
     }
+    // A film's Download lists its releases to pick from, rather than keeping whichever came first.
+    if (downloadSheet) {
+        BottomSheet("Download: pick a release", onDismiss = { downloadSheet = false }) {
+            LazyColumn {
+                sources(title, null, hits, shown, busy, quality, { quality = it }, Modifier, heading = false, language = searchLang()?.name, onDownload = { hit ->
+                    downloadSheet = false
+                    keep(hit, null)
+                }) { hit ->
+                    // A link streams only; the download engine is a torrent client.
+                    if (hit.direct || hit.external) watch.notes.tryEmit("That one is a link and streams only. Pick a torrent to download.")
+                    else {
+                        downloadSheet = false
+                        keep(hit, null)
+                    }
+                }
+            }
+        }
+    }
+
     // "Download season": the packs to choose from, best first; a tap keeps that one.
     seasonPacks?.let { (s, packs) ->
         BottomSheet("Season $s packs", onDismiss = { seasonPacks = null }) {
