@@ -192,6 +192,21 @@ public static class Meta
             return title is { NumberedThrough: true } ? await WithStills(title) : title;
         }), null);
 
+    /// <summary>Just a film's genres, for <see cref="WatchOrders.Tag"/>: no addons asked, and nothing built or kept but the names.</summary>
+    public static async Task<List<string>> GenresOf(string imdb)
+    {
+        try
+        {
+            using var res = await Net.Send($"{Base}/movie/{imdb}.json");
+            var meta = JsonNode.Parse(await res.Content.ReadAsStringAsync())?["meta"];
+            return ((meta?["genre"] ?? meta?["genres"]) as JsonArray)?.Select(g => S(g)).OfType<string>().ToList() ?? new();
+        }
+        catch (Exception e) when (e is System.Net.Http.HttpRequestException or OperationCanceledException or System.Text.Json.JsonException or InvalidOperationException)
+        {
+            return new();
+        }
+    }
+
     static async Task<Title?> FromAddons(string id, string kind)
     {
         var first = kind == "tv" ? "series" : "movie";

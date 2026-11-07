@@ -355,7 +355,7 @@ public sealed class HomeView : UserControl
     /// <summary>Beside the taste lookup, not before it: the first time, this is over a hundred small requests.</summary>
     async void TagOrders(int mine)
     {
-        if (await WatchOrders.Tag() && mine == version) BuildPersonal();
+        if (!KidsMode.On && await WatchOrders.Tag() && mine == version) BuildPersonal();
     }
 
     void BuildPersonal()

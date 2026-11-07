@@ -4,6 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
@@ -42,25 +43,33 @@ object WatchOrders {
     private const val GENRES = "order-genres"
     /** Cinemeta often gives one film a single genre: The Dark Knight's first is only Crime. */
     private const val FILMS_ASKED = 2
-    private const val AT_ONCE = 8
+    private const val AT_ONCE = 4
+    /** Home gets to load first: on a 2GB TV this was competing with it for the CPU. */
+    private const val SETTLE_MS = 5_000L
 
-    private val _tagged by lazy { MutableStateFlow(all) }
+    private fun keptGenres() = runCatching { JSONObject(Kv.cached(GENRES) ?: "{}") }.getOrDefault(JSONObject())
+
+    private fun withGenres(kept: JSONObject) = all.map { it.copy(genres = kept.strings(it.id)) }
+
+    // What was kept is there from the first frame: the TV ranks its row once, as it comes on screen.
+    private val _tagged by lazy { MutableStateFlow(withGenres(keptGenres())) }
 
     /** [all] with the genres known so far. */
     val tagged: StateFlow<List<WatchOrder>> get() = _tagged
 
     /** Each franchise's genres, from its first films. Asked for once and kept: a film's genres don't change. */
     suspend fun tag() = withContext(Dispatchers.Default) {
-        val kept = runCatching { JSONObject(Kv.cached(GENRES) ?: "{}") }.getOrDefault(JSONObject())
-        fun show() { _tagged.value = all.map { it.copy(genres = kept.strings(it.id)) } }
-        show()
-        all.filterNot { kept.has(it.id) }.chunked(AT_ONCE).forEach { batch ->
+        val kept = keptGenres()
+        val missing = all.filterNot { kept.has(it.id) }
+        if (missing.isEmpty()) return@withContext
+        delay(SETTLE_MS)
+        missing.chunked(AT_ONCE).forEach { batch ->
             batch.map { o ->
-                async { o.id to o.films.take(FILMS_ASKED).flatMap { Meta.title(it, "movie")?.genres.orEmpty() }.distinct() }
+                async { o.id to o.films.take(FILMS_ASKED).flatMap { Meta.genresOf(it) }.distinct() }
             }.awaitAll().filter { it.second.isNotEmpty() }.forEach { (id, genres) -> kept.put(id, JSONArray(genres)) }
             Kv.cache(GENRES, kept.toString())
         }
-        show()
+        _tagged.value = withGenres(kept)
     }
 }
 

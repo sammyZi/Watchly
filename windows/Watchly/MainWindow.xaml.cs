@@ -114,12 +114,9 @@ public partial class MainWindow : Window
         InitializeComponent();
         BuildTabBar();
         waitingToOpen = openOnStart;
-        // A PC is mostly one person's: straight back into whoever was last in. Who's watching
-        // only when there was nobody, it was the guest, or that profile is locked with a PIN.
-        if (Store.Load<string?>(LastProfileKey, null) is { } last && Profiles.Load().FirstOrDefault(p => p.Id == last && p.Pin is null) is { } again)
-            Enter(again);
-        else
-            ShowProfiles();
+        // Nothing starts, and nothing is asked of any service, until the terms are accepted.
+        var agreed = !AgreementView.Needed;
+        if (agreed) Begin();
 
         History.Changed += items => Dispatcher.BeginInvoke(() => { HistoryList = items; LibraryChanged?.Invoke(); });
         Saved.Changed += items => Dispatcher.BeginInvoke(() => { SavedList = items; LibraryChanged?.Invoke(); });
@@ -127,13 +124,18 @@ public partial class MainWindow : Window
         foreach (var tracker in Trackers.All) tracker.Changed += () => Dispatcher.BeginInvoke(() => LibraryChanged?.Invoke());
         Activated += (_, _) => Trackers.Refresh();
         Updates.Changed += () => Dispatcher.BeginInvoke(ShowUpdate);
-        Updates.Check();
+        if (agreed) Updates.Check();
         Root.Children.Add(update);
         // Over everything, for everyone, and again whenever the words change.
-        if (AgreementView.Needed)
+        if (!agreed)
         {
-            AgreementView? agreement = null;
-            agreement = new AgreementView(() => Root.Children.Remove(agreement));
+            agreement = new AgreementView(() =>
+            {
+                Root.Children.Remove(agreement);
+                agreement = null;
+                Begin();
+                Updates.Check();
+            });
             Grid.SetColumnSpan(agreement, 2);
             Root.Children.Add(agreement);
         }
@@ -165,6 +167,21 @@ public partial class MainWindow : Window
     /// Who's watching, over everything — at every launch, as on the TV, since whoever sits
     /// down at a shared PC is not necessarily whoever got up. Back only once someone is in.
     /// </summary>
+    /// <summary>The accept screen, while it is up: the keys and a dropped file wait for it.</summary>
+    AgreementView? agreement;
+
+    /// <summary>
+    /// A PC is mostly one person's: straight back into whoever was last in. Who's watching only when
+    /// there was nobody, it was the guest, or that profile is locked with a PIN.
+    /// </summary>
+    void Begin()
+    {
+        if (Store.Load<string?>(LastProfileKey, null) is { } last && Profiles.Load().FirstOrDefault(p => p.Id == last && p.Pin is null) is { } again)
+            Enter(again);
+        else
+            ShowProfiles();
+    }
+
     public void ShowProfiles()
     {
         if (picker is not null) Root.Children.Remove(picker);
@@ -414,7 +431,7 @@ public partial class MainWindow : Window
     void OnKey(object sender, KeyEventArgs e)
     {
         // Who's watching takes its own keys: Escape steps back through it.
-        if (picker is not null) return;
+        if (picker is not null || agreement is not null) return;
         if (PlayerHost.Content is PlayerView player)
         {
             player.HandleKey(e);
@@ -671,6 +688,7 @@ public partial class MainWindow : Window
 
     void OnDropSource(object sender, DragEventArgs e)
     {
+        if (agreement is not null) return;
         var source = e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } files && files[0].EndsWith(".torrent", StringComparison.OrdinalIgnoreCase)
             ? files[0]
             : e.Data.GetData(DataFormats.UnicodeText) as string;

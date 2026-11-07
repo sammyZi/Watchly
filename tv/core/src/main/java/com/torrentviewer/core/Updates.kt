@@ -54,6 +54,8 @@ object Updates {
 
     /** At launch, quietly. The debug build is another app beside this one: an update would not replace it. */
     fun check(context: Context, version: String, prefix: String, debug: Boolean) {
+        // Once a run: the shell calling this comes back whenever the activity is recreated, and would delete a download.
+        if (this.prefix.isNotEmpty()) return
         this.version = version
         this.prefix = prefix
         if (debug) return
@@ -112,7 +114,8 @@ object Updates {
     private suspend fun fetch(r: AppRelease, to: File) {
         val sha = MessageDigest.getInstance("SHA-256")
         var done = 0L
-        URL(r.url).openStream().use { input ->
+        // Timed out, not left blocked in a read: nothing could cancel that, and every retry found it still running.
+        URL(r.url).openConnection().apply { connectTimeout = 15_000; readTimeout = 30_000 }.getInputStream().use { input ->
             to.outputStream().use { output ->
                 val buffer = ByteArray(64 * 1024)
                 while (true) {

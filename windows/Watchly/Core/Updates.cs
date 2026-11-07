@@ -128,8 +128,12 @@ public static class Updates
                 var buffer = new byte[64 * 1024];
                 long done = 0;
                 int n;
+                // Given up after this long with nothing arriving, rather than left waiting for ever.
+                var stalled = TimeSpan.FromSeconds(30);
+                cancel.CancelAfter(stalled);
                 while ((n = await input.ReadAsync(buffer, cancel.Token)) > 0)
                 {
+                    cancel.CancelAfter(stalled);
                     await output.WriteAsync(buffer.AsMemory(0, n), cancel.Token);
                     sha.AppendData(buffer, 0, n);
                     done += n;

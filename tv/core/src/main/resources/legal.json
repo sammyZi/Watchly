@@ -12,7 +12,7 @@
   ],
   "privacy": [
     {"heading": "In short", "text": "Watchly has no account of its own, no ads and no analytics. The developer runs no server and receives none of your data."},
-    {"heading": "Kept on your device", "text": "Watch history, resume points, My List, likes, profiles, settings and any keys you enter stay on this device, and keys are stored encrypted. A backup file is only made when you ask for one. Removing the app removes this data, but not finished downloads."},
+    {"heading": "Kept on your device", "text": "Watch history, resume points, My List, likes, profiles, settings and any keys you enter stay on this device, and keys are stored encrypted. A backup file is only made when you ask for one. Removing the app removes this data, except finished downloads. On Windows, the uninstaller asks whether to keep it."},
     {"heading": "Sent to services", "text": "To work, the app asks other services directly from your device. Each one sees your IP address and what was asked for, such as a title's ID: Cinemeta and Metahub (titles and artwork), TMDB (suggestions, cast and ratings), Kitsu (anime), TVmaze (episodes), Wikipedia (cast photos), IntroDB and TheIntroDB (skip intro timings), SubDL (subtitles) and GitHub (checking for updates)."},
     {"heading": "Services you add", "text": "Add-ons, media servers, TorBox, Stremio, Simkl and MDBList are used only if you add or connect them. They receive what they need to work, which can include what you watch. Their own privacy policies apply."},
     {"heading": "Torrents", "text": "When a source is a torrent, your IP address is visible to the other peers sharing it, as with any BitTorrent app, and the app shares what it downloads while it plays."},

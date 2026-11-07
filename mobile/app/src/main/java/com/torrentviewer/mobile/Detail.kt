@@ -178,7 +178,7 @@ fun DetailScreen(initial: Title, watch: Watch, onOrder: (com.torrentviewer.core.
     var ticket by remember { mutableIntStateOf(0) }
     val shown = hits.orEmpty().filter { quality == null || it.quality == quality }
     var sheet by remember { mutableStateOf(false) }
-    /** A film's Download: its releases, to pick one from. */
+    /** Download on a film or an episode: its releases, to pick one from. */
     var downloadSheet by remember { mutableStateOf(false) }
     var reviews by remember { mutableStateOf(false) }
     /** The releases' language, by its code; empty is any language. */
@@ -224,10 +224,10 @@ fun DetailScreen(initial: Title, watch: Watch, onOrder: (com.torrentviewer.core.
         else -> "No $what in ${langName(lang)} — change the language and try again."
     }
 
-    fun downloadEpisode(ep: Episode) = scope.launch {
-        val ready = if (episode?.id == ep.id && shown.isNotEmpty()) shown else findSources(ep).await()
-        // Downloads are torrents; a link is streamed only.
-        ready.firstOrNull { !it.direct }?.let { keep(it, ep) } ?: watch.notes.tryEmit(noneFound(episodeTag(ep.season, ep.episode)))
+    /** An episode's Download: its releases to pick from, as a film's. */
+    fun downloadEpisode(ep: Episode) {
+        if (episode?.id != ep.id) findSources(ep)
+        downloadSheet = true
     }
 
     /**
@@ -494,19 +494,20 @@ fun DetailScreen(initial: Title, watch: Watch, onOrder: (com.torrentviewer.core.
             }
         }
     }
-    // A film's Download lists its releases to pick from, rather than keeping whichever came first.
+    // Download lists the releases to pick from, rather than keeping whichever came first.
     if (downloadSheet) {
-        BottomSheet("Download: pick a release", onDismiss = { downloadSheet = false }) {
+        val ep = episode
+        BottomSheet(ep?.let { "Download ${episodeTag(it.season, it.episode)}: pick a release" } ?: "Download: pick a release", onDismiss = { downloadSheet = false }) {
             LazyColumn {
-                sources(title, null, hits, shown, busy, quality, { quality = it }, Modifier, heading = false, language = searchLang()?.name, onDownload = { hit ->
+                sources(title, ep, hits, shown, busy, quality, { quality = it }, Modifier, heading = false, language = searchLang()?.name, onDownload = { hit ->
                     downloadSheet = false
-                    keep(hit, null)
+                    keep(hit, ep)
                 }) { hit ->
                     // A link streams only; the download engine is a torrent client.
                     if (hit.direct || hit.external) watch.notes.tryEmit("That one is a link and streams only. Pick a torrent to download.")
                     else {
                         downloadSheet = false
-                        keep(hit, null)
+                        keep(hit, ep)
                     }
                 }
             }
@@ -622,13 +623,14 @@ private fun People(label: String, value: String) {
     }
 }
 
-/** "Director: A, B", each name opening their page once TMDB has told us who they are. */
+/** "Director: A, B", each name opening their page once TMDB has told us who they are. Long names wrap to a new line. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun Crew(label: String, names: List<String>, known: List<com.torrentviewer.core.CastMember>, onPerson: ((com.torrentviewer.core.CastMember) -> Unit)?) {
-    Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("$label: ", style = Type.meta.copy(color = Ink.faint))
+    androidx.compose.foundation.layout.FlowRow(Modifier.padding(top = 2.dp)) {
+        Text("$label: ", Modifier.padding(vertical = 6.dp), style = Type.meta.copy(color = Ink.faint))
         names.forEachIndexed { i, name ->
-            if (i > 0) Text(", ", style = Type.meta.copy(color = Ink.faint))
+            if (i > 0) Text(", ", Modifier.padding(vertical = 6.dp), style = Type.meta.copy(color = Ink.faint))
             val person = known.firstOrNull { com.torrentviewer.core.sameName(it.name, name) }
             if (person != null && onPerson != null)
                 Text(name, Modifier.clickable { onPerson(person) }.padding(vertical = 6.dp), style = Type.meta.copy(color = Ink.text, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline))

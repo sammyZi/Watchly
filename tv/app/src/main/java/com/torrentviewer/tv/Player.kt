@@ -1361,7 +1361,6 @@ private fun EpisodesPanel(title: Title, playing: Episode?, onPlay: (Episode) -> 
     val history by History.items.collectAsState()
     val library by WatchedEverywhere.collectAsState(Stremio.library.value)
     val seen = remember(history, library, title.episodes) { episodeProgress(history, title.imdb, library, title.episodes) }
-    val today = remember { java.time.LocalDate.now().toString() }
     // Specials after the seasons.
     val seasons = remember(title.episodes) { title.episodes.map { it.season }.distinct().sortedBy { if (it == 0) Int.MAX_VALUE else it } }
     val start = remember { playing?.season ?: seasons.first() }
@@ -1376,7 +1375,7 @@ private fun EpisodesPanel(title: Title, playing: Episode?, onPlay: (Episode) -> 
             if (seasons.size > 1) LazyRow(Modifier.focusRestorer().padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(seasons, key = { it }) { s ->
                     // A green tick on a season watched through.
-                    val done = seasonWatched(title.episodes, s, seen, today)
+                    val done = seasonWatched(title.episodes, s, seen)
                     Chip(if (s == 0) "Specials" else "Season $s", s == season, onClick = { season = s }, trailing = L.drawable.lucide_ic_check.takeIf { done }, trailingTint = Ink.good)
                 }
             }

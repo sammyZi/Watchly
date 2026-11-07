@@ -41,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -123,9 +124,14 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
     val firstSource = remember { FocusRequester() }
     /** An episode was picked: its sources are what the remote wants next, past the rows above them. */
     var toSources by remember { mutableStateOf(false) }
+    /** The rail a card on it opened another page from, kept over that page; back here, focus goes to it. */
+    var leftFrom by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    /** Which rail this visit came back to; null is arriving, or back from the player, which belong at the top with Play. */
+    val backTo = remember { leftFrom }
+    LaunchedEffect(Unit) { leftFrom = null }
     // Coming back from the player, the list comes back where it was, down in the sources: to the
     // top, with Play. Here rather than in the head item, which isn't composed down there.
-    LaunchedEffect(title.imdb) { list.scrollToItem(0) }
+    LaunchedEffect(title.imdb) { if (backTo == null) list.scrollToItem(0) }
 
     fun findSources(ep: Episode?): kotlinx.coroutines.Deferred<List<Hit>> {
         val mine = ++ticket
@@ -256,9 +262,11 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
                         )
                     }
                 }
-                play.claim(title.imdb to (upNext != null))
-                // Open at the top, logo and buttons in view, whatever focus scrolled.
-                LaunchedEffect(title.imdb, upNext != null) { list.scrollToItem(0) }
+                if (backTo == null) {
+                    play.claim(title.imdb to (upNext != null))
+                    // Open at the top, logo and buttons in view, whatever focus scrolled.
+                    LaunchedEffect(title.imdb, upNext != null) { list.scrollToItem(0) }
+                }
             }
 
             if (hasEpisodes) {
@@ -311,14 +319,20 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
 
             inOrder?.let { order ->
                 item(key = "franchise") {
-                    FranchiseRail(order, title.imdb, { onOrder(order) }, onOpen, Modifier.onFocusEnter { pin(extrasAt) }.padding(top = 30.dp))
+                    val here = remember { FocusRequester() }
+                    FranchiseRail(order, title.imdb, { leftFrom = "franchise"; onOrder(order) }, { leftFrom = "franchise"; onOpen(it) }, Modifier.focusRequester(here).onFocusEnter { pin(extrasAt) }.padding(top = 30.dp))
+                    if (backTo == "franchise") here.claim()
                 }
             }
             if (people.isNotEmpty()) item(key = "cast") {
-                PeopleRail(people, onPerson.takeUnless { Kids.on }, Modifier.onFocusEnter { pin(castAt) }.padding(top = 30.dp))
+                val here = remember { FocusRequester() }
+                PeopleRail(people, onPerson.takeUnless { Kids.on }?.let { open -> { p: CastMember -> leftFrom = "cast"; open(p) } }, Modifier.focusRequester(here).onFocusEnter { pin(castAt) }.padding(top = 30.dp))
+                if (backTo == "cast") here.claim()
             }
             if (similar.isNotEmpty()) item(key = "similar") {
-                SimilarRail(similar, onOpen, Modifier.onFocusEnter { pin(moreAt) }.padding(top = 30.dp))
+                val here = remember { FocusRequester() }
+                SimilarRail(similar, { leftFrom = "similar"; onOpen(it) }, Modifier.focusRequester(here).onFocusEnter { pin(moreAt) }.padding(top = 30.dp))
+                if (backTo == "similar") here.claim()
             }
 
             item(key = "sources-head") {
@@ -385,19 +399,20 @@ private fun People(label: String, value: String) {
     }
 }
 
-/** "Director: A, B", each name opening their page once TMDB has told us who they are; the remote can land on it. */
+/** "Director: A, B", each name opening their page once TMDB has told us who they are; the remote can land on it. Long names wrap. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun Crew(label: String, names: List<String>, known: List<CastMember>, onPerson: ((CastMember) -> Unit)?) {
-    Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("$label: ", style = Type.meta.copy(color = Ink.faint))
+    androidx.compose.foundation.layout.FlowRow(Modifier.padding(top = 8.dp)) {
+        Text("$label: ", Modifier.padding(vertical = 3.dp), style = Type.meta.copy(color = Ink.faint))
         names.forEachIndexed { i, name ->
-            if (i > 0) Text(", ", style = Type.meta.copy(color = Ink.faint))
+            if (i > 0) Text(", ", Modifier.padding(vertical = 3.dp), style = Type.meta.copy(color = Ink.faint))
             val person = known.firstOrNull { sameName(it.name, name) }
             if (person != null && onPerson != null)
                 Focusable({ onPerson(person) }, Modifier, RoundedCornerShape(6.dp), 1.06f) {
                     Text(name, Modifier.padding(horizontal = 6.dp, vertical = 3.dp), style = Type.meta.copy(color = Ink.text, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline))
                 }
-            else Text(name, style = Type.meta.copy(color = Ink.muted))
+            else Text(name, Modifier.padding(vertical = 3.dp), style = Type.meta.copy(color = Ink.muted))
         }
     }
 }

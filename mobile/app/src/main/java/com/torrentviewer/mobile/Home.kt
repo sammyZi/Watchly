@@ -169,7 +169,7 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
     val settings by SettingsStore.value.collectAsState()
     val online by Net.online.collectAsState()
 
-    LaunchedEffect(online) { com.torrentviewer.core.WatchOrders.tag() }
+    LaunchedEffect(online, com.torrentviewer.core.Kids.on) { if (!com.torrentviewer.core.Kids.on) com.torrentviewer.core.WatchOrders.tag() }
     // Shelves inferred from what has been watched: the lead pick says so.
     LaunchedEffect(history.size, saved.size, online) {
         val seen = (history.mapNotNull { h -> h.imdb?.let { it to (h.kind ?: "movie") } } + saved.map { it.imdb to it.kind }).take(30)

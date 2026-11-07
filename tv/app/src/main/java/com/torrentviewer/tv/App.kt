@@ -162,6 +162,10 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         return
     }
 
+    // After the terms: nothing is asked of GitHub until they are accepted.
+    val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    LaunchedEffect(Unit) { Updates.check(appContext, BuildConfig.VERSION_NAME, "Watchly-tv-", BuildConfig.DEBUG) }
+
     val profiles by Profiles.list.collectAsState()
     var who by remember { mutableStateOf<Profile?>(null) }
     // An edit to the profile in use — its name, face or colour — shows at once.

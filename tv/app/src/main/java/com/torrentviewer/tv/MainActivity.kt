@@ -28,7 +28,6 @@ object Services {
         com.torrentviewer.core.Mdblist.clientId = BuildConfig.MDBLIST_CLIENT_ID
         com.torrentviewer.core.Tmdb.key = BuildConfig.TMDB_KEY
         com.torrentviewer.core.ArtFadeMs = 0
-        com.torrentviewer.core.Updates.check(context.applicationContext, BuildConfig.VERSION_NAME, "Watchly-tv-", BuildConfig.DEBUG)
         engine = TorrentStream(context.applicationContext)
         watch = Watch(engine)
     }

@@ -57,8 +57,8 @@ public static class WatchOrders
         {
             var found = await Task.WhenAll(batch.Select(async o =>
             {
-                var titles = await Task.WhenAll(o.Films.Take(FilmsAsked).Select(f => Meta.LoadTitle(f, "movie")));
-                return (o.Id, Genres: titles.Where(t => t is not null).SelectMany(t => t!.Genres).Distinct().ToList());
+                var genres = await Task.WhenAll(o.Films.Take(FilmsAsked).Select(Meta.GenresOf));
+                return (o.Id, Genres: genres.SelectMany(g => g).Distinct().ToList());
             }));
             foreach (var (id, genres) in found.Where(f => f.Genres.Count > 0))
             {

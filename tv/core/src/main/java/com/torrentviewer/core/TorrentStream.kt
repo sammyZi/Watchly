@@ -1053,6 +1053,7 @@ class TorrentStream(
         // ones already open, which are where the player is leaving from, nor for a reopened
         // player re-reading the header and the index on its way to the target.
         val clock = System.currentTimeMillis()
+        expireDropped(clock)
         if (readers.containsKey(SEEK_READER)) {
             val arrived = readers.entries.any { it.key > seekAfter && it.value >= REOPEN_HEAD_BYTES && pieceAt(it.value) < tailPiece }
             if (arrived || clock - seekSetAt > SEEK_AIM_MS) readers.remove(SEEK_READER)
@@ -1479,7 +1480,7 @@ class TorrentStream(
     /**
      * A piece down to its last blocks: disconnects the peers sitting on requests, which is the only
      * way this libtorrent has of getting a block back. An IP filter is how a peer is disconnected
-     * here; it comes off again [DROP_MS] later, at the next drop, or when the stream ends.
+     * here; it comes off again [DROP_MS] later, or when the stream ends.
      */
     private fun dropStalled(h: TorrentHandle, piece: Int, clock: Long) {
         val left = blocksLeft(h, piece)
@@ -1493,9 +1494,13 @@ class TorrentStream(
         val stalled = stalledPeers(peers, connected)
         if (stalled.isEmpty()) return
         log("stalled: dropping ${stalled.size} of $connected peers holding up piece $piece ($left blocks left)")
-        dropped.values.removeIf { clock - it > DROP_MS }
         stalled.forEach { dropped[it] = clock }
         applyDropped()
+    }
+
+    /** Every tick, not only at the next drop: a film playing steadily has none, and a small swarm needs those peers back. */
+    private fun expireDropped(clock: Long) {
+        if (dropped.values.removeIf { clock - it > DROP_MS }) runCatching { applyDropped() }
     }
 
     /** Blocks of a piece still to arrive; a piece not begun counts as all of them. */

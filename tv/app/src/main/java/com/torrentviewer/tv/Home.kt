@@ -135,7 +135,7 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit, onTop: (
     val settings by SettingsStore.value.collectAsState()
     val online by Net.online.collectAsState()
 
-    LaunchedEffect(online) { WatchOrders.tag() }
+    LaunchedEffect(online, Kids.on) { if (!Kids.on) WatchOrders.tag() }
     // Shelves inferred from what has been watched: the lead pick says so.
     LaunchedEffect(history.size, saved.size, online) {
         val seen = (history.mapNotNull { h -> h.imdb?.let { it to (h.kind ?: "movie") } } + saved.map { it.imdb to it.kind }).take(30)

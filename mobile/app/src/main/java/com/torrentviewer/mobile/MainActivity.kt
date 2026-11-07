@@ -78,7 +78,6 @@ class MainActivity : FragmentActivity() {
         val systemDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         applyTheme(darkFor(SettingsStore.value.value.themeMode, systemDark))
         incoming.value = intent?.data
-        com.torrentviewer.core.Updates.check(this, BuildConfig.VERSION_NAME, "Watchly-phone-", BuildConfig.DEBUG)
         setContent {
             androidx.compose.foundation.layout.Box {
                 App(Services.watch, incoming)

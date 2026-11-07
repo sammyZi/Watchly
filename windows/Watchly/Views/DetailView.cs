@@ -41,7 +41,6 @@ public sealed class DetailView : UserControl, IDisposable
     bool plotOpen;
     bool saving;
     /// <summary>An episode's download button asked before its releases were in: keep the best once they are.</summary>
-    bool saveWhenFound;
     string? error;
     string? backdropUrl;
     CancellationTokenSource? searching;
@@ -202,13 +201,6 @@ public sealed class DetailView : UserControl, IDisposable
             if (t.IsFaulted) error = t.Exception?.GetBaseException().Message;
             sourceKey = key;
             if (wanted is not null && !sources.Any(h => h.Quality == wanted)) wanted = null;
-            if (saveWhenFound)
-            {
-                saveWhenFound = false;
-                // Downloads are torrents; a link is streamed only.
-                if (sources.FirstOrDefault(h => h.IsTorrent) is { } hit) { Save(hit.Uri); return; }
-                shell.Toast(NoneFound(), true);
-            }
             Render();
         }));
     }
@@ -903,18 +895,17 @@ public sealed class DetailView : UserControl, IDisposable
         Render();
     }
 
-    /// <summary>An episode's own download: its best release, looked up first if the list shows another's.</summary>
+    /// <summary>An episode's Download: its releases to pick from, each with its own download button.</summary>
     void DownloadEpisode(Episode ep)
     {
-        if (picked?.Id == ep.Id && sourceKey == PickKey && sources?.FirstOrDefault(h => h.IsTorrent) is { } ready)
+        if (picked?.Id != ep.Id || sourceKey != PickKey)
         {
-            Save(ready.Uri);
-            return;
+            picked = ep;
+            FindReleases();
         }
-        picked = ep;
-        saveWhenFound = true;
-        FindReleases();
         Render();
+        shell.Toast("Pick a release to download");
+        ScrollToSources();
     }
 
     async void Start(Hit hit, bool startOver)

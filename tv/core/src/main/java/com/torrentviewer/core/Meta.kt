@@ -241,6 +241,12 @@ object Meta {
         }
     }.getOrNull()
 
+    /** Just a film's genres, for [WatchOrders.tag]: no addons asked, and nothing built or kept but the names. */
+    suspend fun genresOf(imdb: String): List<String> = runCatching {
+        val meta = JSONObject(Net.get("$BASE/movie/$imdb.json", quiet = true)).getJSONObject("meta")
+        (meta.optJSONArray("genre") ?: meta.optJSONArray("genres"))?.let { g -> (0 until g.length()).map { g.optString(it) } }.orEmpty()
+    }.getOrDefault(emptyList())
+
     private suspend fun fromAddons(id: String, kind: String): Title? {
         val first = if (kind == "tv") "series" else "movie"
         for (a in Addons.list.value) for (type in a.metaTypes(id, first)) {
