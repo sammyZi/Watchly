@@ -10,6 +10,7 @@
   <img src="https://img.shields.io/badge/Android_TV-Google_TV-2B8CFF?style=flat-square&logo=android&logoColor=white" alt="Android TV and Google TV">
   <img src="https://img.shields.io/badge/Windows-10_%7C_11-0078D4?style=flat-square" alt="Windows 10 and 11">
   <a href="https://github.com/sammyZi/Watchly/releases/latest"><img src="https://img.shields.io/github/v/release/sammyZi/Watchly?style=flat-square&color=E50914&label=release" alt="Latest release"></a>
+  <a href="https://github.com/sammyZi/Watchly/releases"><img src="https://img.shields.io/github/downloads/sammyZi/Watchly/total?style=flat-square&color=A855F7&label=downloads" alt="Total downloads"></a>
   <img src="https://hits.sh/github.com/sammyZi/Watchly.svg?style=flat-square&label=views&color=F59E0B" alt="Views">
 </p>
 
