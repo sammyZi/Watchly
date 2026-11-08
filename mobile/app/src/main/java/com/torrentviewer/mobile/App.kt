@@ -402,7 +402,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
             }
         }
 
-        UpdateCard(Modifier.align(Alignment.TopCenter).statusBarsPadding())
+        UpdateCard(watch, Modifier.align(Alignment.TopCenter).statusBarsPadding())
 
         if (watch.phase == Phase.INSPECTING) Opening(watch)
 

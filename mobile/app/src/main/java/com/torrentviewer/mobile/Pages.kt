@@ -598,7 +598,7 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
                     update?.let { r ->
                         listOf(
                             Entry(L.drawable.lucide_ic_download, "Update available", "Version ${r.version}  ·  ${bytes(r.size)}", "new version upgrade", Ink.accent) {
-                                openUrl(appContext, r.url)
+                                downloadUpdate(appContext, r) { watch.notes.tryEmit(it) }
                             },
                         )
                     },
