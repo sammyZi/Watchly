@@ -12,8 +12,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- The one-time "let downloads run in the background" prompt (battery optimisation off). -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <!-- In-app updates: handing a downloaded release to the system installer. -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- No REQUEST_INSTALL_PACKAGES: an update opens in the browser, which installs it. Play Protect
+         flagged a sideloaded app that downloads and installs APKs itself as possibly harmful. -->
 
     <application
         android:allowBackup="false"

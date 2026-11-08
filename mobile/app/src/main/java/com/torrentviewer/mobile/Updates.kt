@@ -25,42 +25,35 @@ import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.R as L
 import com.torrentviewer.core.Ink
 import com.torrentviewer.core.Lc
-import com.torrentviewer.core.ProgressLine
 import com.torrentviewer.core.Type
 import com.torrentviewer.core.Updates
-import com.torrentviewer.core.Watch
 import com.torrentviewer.core.bytes
 
-/** Floating at the top of the screen while a new version is waiting, and for as long as it downloads. */
+/**
+ * Floating at the top of the screen while a new version is waiting. Update opens the APK in the
+ * browser, which downloads it and hands it to Android's installer: this app has no leave to install.
+ */
 @Composable
-fun UpdateCard(watch: Watch, modifier: Modifier = Modifier) {
+fun UpdateCard(modifier: Modifier = Modifier) {
     val release by Updates.release.collectAsState()
     val hidden by Updates.hidden.collectAsState()
-    val progress by Updates.progress.collectAsState()
     val r = release ?: return
-    val p = progress
-    if (hidden && p == null) return
+    if (hidden) return
     val context = LocalContext.current
     val shape = RoundedCornerShape(14.dp)
-    Column(modifier.fillMaxWidth().padding(horizontal = EDGE, vertical = 8.dp).shadow(8.dp, shape).clip(shape).background(Ink.surface).padding(horizontal = 14.dp, vertical = 10.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(if (p != null) "Downloading update" else "Update available", style = Type.body.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(
-                    if (p != null) "Version ${r.version}  ·  ${(p * 100).toInt()}%" else "Version ${r.version}  ·  ${bytes(r.size)}",
-                    style = Type.meta.copy(color = Ink.faint), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (p != null) Button("Cancel", Updates::cancel, compact = true)
-            else {
-                Button("Update", { Updates.download(context, r) { watch.notes.tryEmit(it) } }, primary = true, compact = true)
-                Spacer(Modifier.width(4.dp))
-                // A cross rather than a "Not now" button: side by side, the two left the words three lines.
-                Tap({ Updates.skip(r.version) }, Modifier.size(36.dp), CircleShape) {
-                    Lc(L.drawable.lucide_ic_x, Modifier.align(Alignment.Center), tint = Ink.muted, size = 18.dp)
-                }
-            }
+    Row(
+        modifier.fillMaxWidth().padding(horizontal = EDGE, vertical = 8.dp).shadow(8.dp, shape).clip(shape).background(Ink.surface).padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Update available", style = Type.body.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("Version ${r.version}  ·  ${bytes(r.size)}", style = Type.meta.copy(color = Ink.faint), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (p != null) ProgressLine(p, Modifier.padding(top = 8.dp))
+        Button("Update", { openUrl(context, r.url) }, primary = true, compact = true)
+        Spacer(Modifier.width(4.dp))
+        // A cross rather than a "Not now" button: side by side, the two left the words three lines.
+        Tap({ Updates.skip(r.version) }, Modifier.size(36.dp), CircleShape) {
+            Lc(L.drawable.lucide_ic_x, Modifier.align(Alignment.Center), tint = Ink.muted, size = 18.dp)
+        }
     }
 }
