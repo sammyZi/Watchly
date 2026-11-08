@@ -222,6 +222,8 @@ private fun Player(watch: Watch) {
     var tracks by remember { mutableStateOf<Tracks?>(null) }
     var subtitle by remember { mutableStateOf<Int?>(null) }
     var audio by remember { mutableStateOf<Int?>(null) }
+    /** Audio, subtitles: the preferred language already tried, or the viewer already chose. */
+    val langDone = remember { booleanArrayOf(false, false) }
     var rate by remember { mutableFloatStateOf(1f) }
     var scale by remember { mutableIntStateOf(0) }
     var noNext by remember { mutableStateOf(false) }
@@ -575,6 +577,7 @@ private fun Player(watch: Watch) {
                         tracks = null
                         subtitle = null
                         audio = null
+                        langDone.fill(false)
                         vlc = true
                     }
                     var recoveries = 0
@@ -607,6 +610,22 @@ private fun Player(watch: Watch) {
                         // The panel says what is really on screen, not what was last picked: a
                         // subtitle just downloaded is turned on by the view itself.
                         subtitle = t.spuId.takeIf { it >= 0 }
+                        // The Settings languages, once each, the first time the file lists any.
+                        val prefs = SettingsStore.value.value
+                        if (!langDone[0] && t.audio.isNotEmpty()) {
+                            langDone[0] = true
+                            trackForLang(t.audio, prefs.audioLang)?.let { a ->
+                                audio = a.id
+                                v.setAudioTrack(a.id)
+                            }
+                        }
+                        if (!langDone[1] && t.subtitles.isNotEmpty()) {
+                            langDone[1] = true
+                            if (prefs.subLang.isNotEmpty()) trackForLang(t.subtitles, prefs.subLang)?.let { s ->
+                                subtitle = s.id
+                                v.setSubtitleTrack(s.id)
+                            }
+                        }
                     }
                     v.onEnded = {
                         // A stream that gave up mid-film looks like the end to libVLC: reopen
@@ -785,10 +804,12 @@ private fun Player(watch: Watch) {
                 subSize = SettingsStore.value.collectAsState().value.subtitles.size,
                 onSubSize = { step -> view.value?.subtitleStyle = SettingsStore.resizeSubtitles(step) },
                 onSubtitle = {
+                    langDone[1] = true
                     subtitle = it
                     view.value?.setSubtitleTrack(it)
                 },
                 onAudio = {
+                    langDone[0] = true
                     audio = it
                     view.value?.setAudioTrack(it)
                 },

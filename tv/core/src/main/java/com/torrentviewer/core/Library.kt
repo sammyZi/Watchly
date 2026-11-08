@@ -75,10 +75,18 @@ object Backup {
     private val PROFILE_KEYS = listOf("torrent-history", "saved", "searches", "episodes", "intros", "aired-counts", GENRES_KEY)
     private const val SETTINGS = "settings"
 
-    fun export(now: Long = System.currentTimeMillis()): String {
+    /** What a phone can pick to send to a TV: a label, and the keys it covers. */
+    val GROUPS = linkedMapOf(
+        "Settings and addons" to setOf(SETTINGS),
+        "History and resume points" to setOf("torrent-history", "intros"),
+        "My List, searches and home genres" to setOf("saved", "searches", "episodes", "aired-counts", GENRES_KEY),
+    )
+
+    /** [only]: just those keys; null is everything. */
+    fun export(now: Long = System.currentTimeMillis(), only: Set<String>? = null): String {
         val data = JSONObject()
-        PROFILE_KEYS.forEach { k -> Kv.get(k)?.let { data.put(k, it) } }
-        Kv.global(SETTINGS)?.let { data.put(SETTINGS, it) }
+        PROFILE_KEYS.filter { only == null || it in only }.forEach { k -> Kv.get(k)?.let { data.put(k, it) } }
+        if (only == null || SETTINGS in only) Kv.global(SETTINGS)?.let { data.put(SETTINGS, it) }
         return JSONObject().put("app", "watchly").put("version", 1).put("at", now).put("data", data).toString()
     }
 
@@ -103,6 +111,8 @@ object Backup {
         History.load()
         SavedStore.load()
         SettingsStore.load()
+        // The addons live inside the settings JSON.
+        Addons.load()
         return pairs.size
     }
 }

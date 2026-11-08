@@ -74,6 +74,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.torrentviewer.core.Artwork
+import com.torrentviewer.core.Backup
 import com.torrentviewer.core.Avatar
 import com.torrentviewer.core.COLOURS
 import com.torrentviewer.core.History
@@ -260,6 +261,8 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
 
     /** The TV page asking for this phone's addons, from its QR, until the viewer says yes or no. */
     var sendTo by remember { mutableStateOf<String?>(null) }
+    /** The TV asked for the whole library and settings, not just the addons. */
+    var sendAll by remember { mutableStateOf(false) }
     /** A stremio:// link that wants to add an addon, until the viewer says yes or no. */
     var pendingAddon by remember { mutableStateOf<String?>(null) }
 
@@ -285,6 +288,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         }
         if (raw.startsWith("watchly://tv-addons", ignoreCase = true)) {
             sendTo = tvDropUrl(raw) ?: return@LaunchedEffect watch.fail("That isn't a Watchly TV on your home network.")
+            sendAll = uri.getQueryParameter("all") == "1"
             return@LaunchedEffect
         }
         if (!isTorrentSource(raw)) return@LaunchedEffect
@@ -434,28 +438,43 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
 
         // The TV asked for the addons: asked first, since their links can carry the viewer's keys.
         sendTo?.let { to ->
+            val all = sendAll
             val n = Addons.list.value.size
+            val tv = to.substringAfter("//").substringBefore(':')
+            // "" cancels, "*" is everything, "addons" the addon list alone; the rest are Backup.GROUPS' labels.
             Sheet(
-                title = "Copy your addons to the TV?",
-                options = listOf(
-                    Option(true, if (n == 0) "No addons on this phone yet" else "Send $n addon${if (n == 1) "" else "s"}", to.substringAfter("//").substringBefore(':')),
-                    Option(false, "Cancel"),
-                ),
+                title = if (all) "What should the TV copy?" else "Copy your addons to the TV?",
+                options = if (all) {
+                    Backup.GROUPS.keys.map { Option(it, it, "Replaces the TV's, for this profile") } +
+                        Option("*", "Everything", "All of the above") + Option("", "Cancel")
+                } else {
+                    listOf(
+                        Option("addons", if (n == 0) "No addons on this phone yet" else "Send $n addon${if (n == 1) "" else "s"}", tv),
+                        Option("", "Cancel"),
+                    )
+                },
                 selected = null,
-                onPick = { yes ->
+                onPick = { pick ->
                     sendTo = null
-                    if (yes && n > 0) AppScope.launch {
+                    sendAll = false
+                    val body = when {
+                        pick.isEmpty() || pick == "addons" && n == 0 -> null
+                        pick == "addons" -> Addons.linksJson()
+                        pick == "*" -> Backup.export()
+                        else -> Backup.export(only = Backup.GROUPS[pick])
+                    }
+                    if (body != null) AppScope.launch {
                         watch.notes.tryEmit("Sending to the TV…")
                         // The TV fetches each addon before it answers: give it time.
-                        runCatching { Net.postForm(to, mapOf("key" to Addons.linksJson()), 120_000) }
+                        runCatching { Net.postForm(to, mapOf("key" to body), 120_000) }
                             .onSuccess { page ->
                                 val said = Regex("<p class=note>(.*?)</p>").find(page)?.groupValues?.get(1)?.replace("&lt;", "<")?.replace("&gt;", ">")?.replace("&amp;", "&")
-                                watch.notes.tryEmit(said ?: "Sent $n addons to the TV")
+                                watch.notes.tryEmit(said ?: "Sent to the TV")
                             }
                             .onFailure { watch.notes.tryEmit("Couldn't reach the TV — is the phone on the same Wi-Fi?") }
                     }
                 },
-                onDismiss = { sendTo = null },
+                onDismiss = { sendTo = null; sendAll = false },
             )
         }
     }

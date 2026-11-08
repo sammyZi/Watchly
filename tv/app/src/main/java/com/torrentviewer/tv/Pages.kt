@@ -71,6 +71,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import com.composables.icons.lucide.R as L
 
@@ -427,8 +428,25 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
     fun say(note: String) = Services.watch.notes.tryEmit(note)
     androidx.activity.compose.BackHandler(page != null) { page = null }
     val scroll = rememberScrollState()
-    LaunchedEffect(page) { scroll.scrollTo(0) }
+    /** Where the list was scrolled to, and which row opened the page: coming back lands on that row, not the top. */
+    var listAt by remember { mutableStateOf(0) }
+    var opened by remember { mutableStateOf<String?>(null) }
+    /** "audio" or "subs" while that language list is up. */
+    var picking by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { androidx.compose.runtime.snapshotFlow { scroll.value }.collect { if (page == null) listAt = it } }
+    LaunchedEffect(page) {
+        if (page != null) {
+            opened = page
+            scroll.scrollTo(0)
+        } else if (listAt > 0) {
+            // The list is longer than the page just left: wait for it to be measured, or the scroll is cut short.
+            androidx.compose.runtime.snapshotFlow { scroll.maxValue }.first { it >= listAt }
+            scroll.scrollTo(listAt)
+        }
+    }
+    LaunchedEffect(picking) { if (picking == null) runCatching { first.requestFocus() } }
 
+    Box(Modifier.fillMaxSize()) {
     Column(
         Modifier.fillMaxSize()
             // In from the rail: a box on the left won the focus search and opened the keyboard.
@@ -475,9 +493,11 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
                         // A kids profile plays what it can browse to; where streams come from is the grown-ups' call.
                         if (Kids.on) null else Entry(L.drawable.lucide_ic_puzzle, "Addons", "Where streams and subtitles come from", "stremio debrid") { page = "Addons" },
                     ),
-                    listOf(
+                    listOfNotNull(
                         Entry(L.drawable.lucide_ic_link, "Integrations", "Simkl and MDBList", "tracking watched sync") { page = "Integrations" },
                         Entry(L.drawable.lucide_ic_key, "Services", "SubDL and TorBox keys", "subtitles api") { page = "Services" },
+                        // Overwrites the profile's library: a kids profile can't.
+                        if (Kids.on) null else Entry(L.drawable.lucide_ic_smartphone, "Copy from phone", "Settings, lists and history from Watchly on your phone", "qr scan transfer backup restore sync") { page = "Copy from phone" },
                     ),
                     listOf(
                         Entry(L.drawable.lucide_ic_refresh_cw, "Check for updates", "You have version ${BuildConfig.VERSION_NAME}", "new version upgrade") { Updates.checkNow(::say) },
@@ -490,6 +510,7 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
                 ),
                 query,
                 first,
+                opened,
             )
         } else {
             Row(Modifier.padding(bottom = 24.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -594,6 +615,27 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
                 Chip("Show the button", !settings.autoSkipIntro, onClick = { set(settings.copy(autoSkipIntro = false)) })
             }
         }
+
+        Section("Languages", "A matching track comes on by itself when a video opens; picking one yourself wins. Online subtitle search looks in the subtitle language.") {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Chip("Audio: " + if (settings.audioLang.isEmpty()) "file's default" else langName(settings.audioLang), settings.audioLang.isNotEmpty(), onClick = { picking = "audio" })
+                Chip("Subtitles: " + if (settings.subLang.isEmpty()) "off" else langName(settings.subLang), settings.subLang.isNotEmpty(), onClick = { picking = "subs" })
+            }
+        }
+
+        Section("Subtitle style", "Size, colour and a box behind the words. Media3 shows a change on the next line; VLC from the next video.") {
+            val style = settings.subtitles
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SUB_SIZES.keys.forEach { s -> Chip(s.replaceFirstChar(Char::uppercase), style.size == s, onClick = { set(settings.copy(subtitles = style.copy(size = s))) }) }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Chip("White", !style.yellow, onClick = { set(settings.copy(subtitles = style.copy(yellow = false))) })
+                    Chip("Yellow", style.yellow, onClick = { set(settings.copy(subtitles = style.copy(yellow = true))) })
+                    Chip("Box behind", style.box, onClick = { set(settings.copy(subtitles = style.copy(box = !style.box))) })
+                }
+            }
+        }
         }
 
         if (page == "Services") {
@@ -655,6 +697,21 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
 
         }
 
+        if (page == "Copy from phone") Section(
+            "Copy from phone",
+            "Brings this profile's history, resume points, lists, searches, addons and every setting from Watchly on your phone, replacing what is here. The SubDL and TorBox keys stay put — they are not sent.",
+        ) {
+            var note by remember { mutableStateOf<String?>(null) }
+            Column {
+                PhoneKey("backup", label = "Show QR code", fromApp = "Copy everything from Watchly on this phone", everything = true) { text ->
+                    runCatching { Backup.restore(text) }
+                        .fold({ "Copied from your phone ($it kinds of data). You can close this page." }, { it.message ?: "That didn't read." })
+                        .also { note = it }
+                }
+                note?.let { Text(it, Modifier.padding(top = 10.dp), style = Type.meta.copy(color = Ink.muted)) }
+            }
+        }
+
         if (page == "Appearance") Section("Genres on the home screen", "Leave all off to build the home screen from what you have watched.") {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.widthIn(max = 900.dp)) {
                 GENRES.forEach { g ->
@@ -666,6 +723,20 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
     }
+    picking?.let { which ->
+        val audio = which == "audio"
+        Sheet(
+            title = if (audio) "Audio language" else "Subtitle language",
+            options = listOf(Option("", if (audio) "The file's default" else "Off")) + LANGS.map { Option(it.code, it.name) },
+            selected = if (audio) settings.audioLang else settings.subLang,
+            onPick = {
+                set(if (audio) settings.copy(audioLang = it) else settings.copy(subLang = it))
+                picking = null
+            },
+            onDismiss = { picking = null },
+        )
+    }
+    }
     first.claim(page)
 }
 
@@ -676,11 +747,12 @@ private class Entry(@androidx.annotation.DrawableRes val icon: Int, val title: S
 
 /** The phone's settings list for the remote: cards of rows, run together into one by a search. [first] is its first row. */
 @Composable
-private fun SettingsList(groups: List<List<Entry>>, query: String, first: FocusRequester) {
+private fun SettingsList(groups: List<List<Entry>>, query: String, first: FocusRequester, opened: String?) {
     val q = query.trim()
     val shown = if (q.isEmpty()) groups else listOf(groups.flatten().filter { it.matches(q) }).filter { it.isNotEmpty() }
     if (shown.isEmpty()) Text("No settings match", Modifier.padding(start = 4.dp, bottom = 12.dp), style = Type.meta.copy(color = Ink.faint))
-    val top = shown.firstOrNull()?.firstOrNull()
+    // The row that opened the page just left takes the focus back; else the first.
+    val top = shown.flatten().let { all -> all.find { it.title == opened } ?: all.firstOrNull() }
     shown.forEach { group ->
         // Not clipped: that would cut off the focus ring.
         Column(Modifier.padding(bottom = 14.dp).widthIn(max = 760.dp).fillMaxWidth().background(Ink.surface, RoundedCornerShape(18.dp)).padding(6.dp)) {
@@ -829,7 +901,7 @@ private const val STREMIO_LATER = "stremio:later"
  * page's button that has the phone app send what it has instead.
  */
 @Composable
-private fun PhoneKey(what: String, several: Boolean = false, label: String = "Paste from phone", fromApp: String? = null, onKey: suspend (String) -> String) {
+private fun PhoneKey(what: String, several: Boolean = false, label: String = "Paste from phone", fromApp: String? = null, everything: Boolean = false, onKey: suspend (String) -> String) {
     var open by remember { mutableStateOf(false) }
     // One button that changes its label, not a button swapped for another: a focused button taken
     // away left focus nowhere, and the page sent it back to the top.
@@ -840,7 +912,7 @@ private fun PhoneKey(what: String, several: Boolean = false, label: String = "Pa
     var address by remember { mutableStateOf<String?>(null) }
     var tried by remember { mutableStateOf(false) }
     DisposableEffect(Unit) {
-        val drop = KeyDrop(what, fromApp) {
+        val drop = KeyDrop(what, fromApp, everything) {
             onKey(it).also { if (!several) open = false }
         }
         address = drop.open()

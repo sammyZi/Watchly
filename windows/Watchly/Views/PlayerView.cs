@@ -1710,7 +1710,7 @@ public sealed class PlayerView : UserControl, IDisposable
             // The viewer's subtitles addons; SubDL joins in once the viewer has given their key in Settings.
             var results = await Subtitles.Find(q, useImdb ? request.Imdb : null, at?.Season, at?.Episode,
                 at is not null || request.Kind == "tv" ? "tv" : request.Kind == "movie" ? "movie" : null,
-                request.Title);
+                request.Title, shell.Settings.SubLang);
             subResults = results.Take(25).ToList();
         }
         catch (Exception e)
@@ -2581,6 +2581,29 @@ public sealed class PlayerView : UserControl, IDisposable
         row.Children.Add(go);
         row.Children.Add(field);
         panel.Children.Add(row);
+
+        // The language to look in: kept for the next film, and a new pick looks again.
+        var langMenu = new ContextMenu();
+        foreach (var l in Lang.All)
+        {
+            var item = new MenuItem { Header = l.Name, IsChecked = l.Code == shell.Settings.SubLang };
+            var code = l.Code;
+            item.Click += (_, _) =>
+            {
+                shell.ChangeSettings(shell.Settings with { SubLang = code });
+                SearchSubs(subBox?.Text);
+            };
+            langMenu.Items.Add(item);
+        }
+        Button langButton = null!;
+        langButton = Controls.Ui.Button(
+            new StackPanel { Orientation = Orientation.Horizontal, Children = { WIcon("languages", 14, White(0xb0)), new TextBlock { Text = "Language: " + (Lang.All.FirstOrDefault(l => l.Code == shell.Settings.SubLang)?.Name ?? shell.Settings.SubLang), Foreground = White(0xb0), FontSize = 12, Margin = new Thickness(8, 0, 0, 0) } } },
+            () => { langMenu.PlacementTarget = langButton; langMenu.IsOpen = true; }, "Bare", "Subtitle language");
+        langButton.Padding = new Thickness(10, 7, 10, 7);
+        langButton.Tag = 8;
+        langButton.Margin = new Thickness(0, 0, 0, 4);
+        langButton.ContextMenu = langMenu;
+        panel.Children.Add(langButton);
 
         if (subResults.Count > 0)
         {

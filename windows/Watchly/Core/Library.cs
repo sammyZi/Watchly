@@ -302,6 +302,8 @@ public sealed record AppSettings
     public bool AutoSkipIntro { get; init; }
     /// <summary>Subtitle text: one of <see cref="SubSizes"/>' keys, as on the phone and TV.</summary>
     public string SubSize { get; init; } = "normal";
+    /// <summary>The language Find subtitles looks in: a <see cref="Lang"/> code.</summary>
+    public string SubLang { get; init; } = "EN";
     const string Key = "settings";
 
     /// <summary>libVLC's freetype-rel-fontsize per size — a fraction of the picture's height, so smaller is bigger.</summary>
