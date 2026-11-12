@@ -160,21 +160,41 @@ private const val ART_RETRY_MS = 2_500L
 /** How long a picture fades in. The TV sets 0: each fading card is a redraw per frame, a row at a time. */
 var ArtFadeMs = 300
 
+/**
+ * Metahub has a poster for nearly every title and a backdrop for far fewer, and most wide cards ask
+ * for the backdrop: one stands in for the other rather than leaving the card empty.
+ */
+internal fun otherArt(url: String?): String? = when {
+    url == null -> null
+    "images.metahub.space/background/" in url -> url.replace("/background/", "/poster/")
+    "images.metahub.space/poster/" in url -> url.replace("/poster/", "/background/")
+    else -> null
+}
+
+/** What to try for a picture, in order: the one asked for, the caller's [fallback], then [otherArt] of that. */
+internal fun artCandidates(url: String, fallback: String?): List<String> =
+    listOfNotNull(url, fallback, otherArt(fallback ?: url)).distinct()
+
 /** A network image over a placeholder tinted from the name. */
 @Composable
 /** [fill]: a placeholder under the picture — skipped where the picture covers it anyway and the fill is pure GPU cost. */
 fun Artwork(url: String?, name: String, modifier: Modifier = Modifier, scale: ContentScale = ContentScale.Crop, fill: Boolean = true, fallback: String? = null) {
     val hue = remember(name) { hueOf(name).toFloat() }
+    // Nothing would load: the card says what it is, as one with no picture to ask for does.
+    var dead by remember(url, fallback) { mutableStateOf(false) }
+    val named = url == null || (dead && fill)
     // The placeholder is a painter Coil draws only until the picture lands, not a fill
     // that stays painted underneath it forever after.
-    Box(modifier.then(if (url == null) Modifier.background(Color.hsv(hue, 0.45f, 0.28f)) else Modifier)) {
-        if (url != null) {
+    Box(modifier.then(if (named) Modifier.background(Color.hsv(hue, 0.45f, 0.28f)) else Modifier)) {
+        if (url != null && !dead) {
             val context = LocalContext.current
-            // Episode stills 404 for much of anime: then the title's own art.
-            var src by remember(url) { mutableStateOf(url) }
+            // Episode stills 404 for much of anime: then the title's own art, and then its other picture.
+            val candidates = remember(url, fallback) { artCandidates(url, fallback) }
+            var at by remember(url, fallback) { mutableStateOf(0) }
+            val src = candidates[at.coerceIn(0, candidates.lastIndex)]
             // A host that says slow down (429), or a connection that drops, used to leave the card blank
-            // for as long as it stayed on screen: nothing asks twice by itself. Asked again a little
-            // later, twice; a picture that simply isn't there (404) is not.
+            // for as long as it stayed on screen: nothing asks twice by itself. The last picture there
+            // is to try is asked for again a little later, twice; one that simply isn't there (404) is not.
             var tries by remember(src) { mutableStateOf(0) }
             var failed by remember(src) { mutableStateOf(false) }
             LaunchedEffect(failed, tries) {
@@ -191,8 +211,11 @@ fun Artwork(url: String?, name: String, modifier: Modifier = Modifier, scale: Co
                     model = remember(src) { ImageRequest.Builder(context).data(src).httpHeaders(if ("wikimedia.org" in src) WIKI_HEADERS else ART_HEADERS).crossfade(ArtFadeMs).build() },
                     onError = { error ->
                         val gone = (error.result.throwable as? coil3.network.HttpException)?.response?.code == 404
-                        if (fallback != null && src != fallback) src = fallback
-                        else if (!gone && tries < ART_RETRIES) failed = true
+                        when {
+                            at < candidates.lastIndex -> at++
+                            !gone && tries < ART_RETRIES -> failed = true
+                            else -> dead = true
+                        }
                     },
                     placeholder = if (fill) remember { ColorPainter(Ink.surface) } else null,
                     contentDescription = name,
@@ -200,7 +223,7 @@ fun Artwork(url: String?, name: String, modifier: Modifier = Modifier, scale: Co
                     modifier = Modifier.fillMaxSize(),
                 )
             }
-        } else {
+        } else if (named) {
             Text(
                 name,
                 Modifier.align(Alignment.BottomStart).padding(10.dp),

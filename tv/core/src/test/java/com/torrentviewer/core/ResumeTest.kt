@@ -100,6 +100,18 @@ class ResumeTest {
         assertEquals(true, readyToOpen(16, 8, 16, 16, resuming = false))
     }
 
+    @Test fun aMissingBackdropFallsBackToThePoster() {
+        val wide = "https://images.metahub.space/background/medium/tt0111161/img"
+        val tall = "https://images.metahub.space/poster/medium/tt0111161/img"
+        assertEquals(listOf(wide, tall), artCandidates(wide, null))
+        assertEquals(listOf(tall, wide), artCandidates(tall, null))
+        // A still, then the title's backdrop, then its poster; nothing twice.
+        assertEquals(listOf("https://x/still.jpg", wide, tall), artCandidates("https://x/still.jpg", wide))
+        assertEquals(listOf(wide, tall), artCandidates(wide, wide))
+        // Someone else's picture has no other to try.
+        assertEquals(listOf("https://x/a.jpg"), artCandidates("https://x/a.jpg", null))
+    }
+
     private fun blocks(vararg done: Int) = java.util.BitSet().apply { done.forEach { set(it) } }
 
     @Test fun aPieceStillArrivingReadsAsFarAsItsBlocksRun() {
