@@ -14,7 +14,13 @@ import java.util.TimeZone
  */
 data class Lang(val code: String, val name: String, val match: Regex)
 
-private fun lang(code: String, name: String, words: String) = Lang(code, name, Regex("\\b($words)\\b", RegexOption.IGNORE_CASE))
+/**
+ * A whole word: no letter, digit or underscore either side of it. Spelled out rather than `\b`,
+ * which on a desktop JVM since Java 19 only knows ASCII letters — "Српски" has no word boundary
+ * there at all, and the unit tests run on one. Android's own regex has always counted every script.
+ */
+private fun lang(code: String, name: String, words: String) =
+    Lang(code, name, Regex("(?<![\\p{L}\\p{N}_])($words)(?![\\p{L}\\p{N}_])", RegexOption.IGNORE_CASE))
 
 val LANGS = listOf(
     lang("EN", "English", "english|eng"),
