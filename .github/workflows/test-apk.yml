@@ -1,7 +1,7 @@
 name: Test APK
 
-# A debug build of the phone app for trying a testing/* branch on a device. Debug installs as
-# "Watchly Next" (com.torrentviewer.app.next), beside the released app rather than over it.
+# A release build of the phone app for trying a testing/* branch on a device: the same build
+# type and key as the Release workflow, so it installs over the released app in place.
 # Nothing is published: the APKs are a workflow artifact on the run's page.
 
 on:
@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   phone:
-    name: Phone (debug)
+    name: Phone (release)
     runs-on: ubuntu-latest
 
     steps:
@@ -35,18 +35,18 @@ jobs:
       - name: Accept Android SDK licences
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
 
-      - name: Build debug APKs
+      - name: Build release APKs
         working-directory: mobile
-        run: ./gradlew --no-daemon assembleDebug
+        run: ./gradlew --no-daemon -PuniversalApk assembleRelease
 
       - name: Name the APKs
         shell: bash
         run: |
           mkdir -p out
           sha=$(git rev-parse --short HEAD)
-          for apk in mobile/app/build/outputs/apk/debug/app-*-debug.apk; do
+          for apk in mobile/app/build/outputs/apk/release/app-*-release.apk; do
             [ -f "$apk" ] || continue
-            abi=$(basename "$apk" -debug.apk)
+            abi=$(basename "$apk" -release.apk)
             abi=${abi#app-}
             cp "$apk" "out/Watchly-phone-test-$sha-$abi.apk"
           done
