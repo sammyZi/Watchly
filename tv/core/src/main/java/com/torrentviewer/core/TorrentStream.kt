@@ -1135,7 +1135,14 @@ class TorrentStream(
         val index = live.filter { it >= tailPiece && !h.havePiece(it) }
         if (index.isNotEmpty() && index != lastIndexWait) log("index: player waiting on piece ${index.first()}")
         lastIndexWait = index
-        val targets = (index + open + if (waiting) emptyList() else closed).distinct().ifEmpty { preroll }
+        // Reading the index with nothing else open, the player comes back to the spot it just left:
+        // at a start that is the head, whose piece is only part-fetched when the player opens on its
+        // first blocks (SERVE_BLOCKS). Dropped like any other spot once the index wait passed
+        // STARVE_MS, that piece went to IGNORE half-done and the rest of it waited for the index —
+        // one wait after the other, under "Starting playback". A seek aim or another open reader
+        // is somewhere else to be, and the spots left then get nothing, as before.
+        val returning = index.isNotEmpty() && live.none { it < tailPiece }
+        val targets = (index + open + if (waiting && !returning) emptyList() else closed).distinct().ifEmpty { preroll }
         headPiece = targets.first()
 
         val status = h.status()
