@@ -119,8 +119,29 @@ object Tmdb {
     /** From the app's build; empty leaves this out. */
     var key = ""
 
-    private suspend fun get(path: String) =
-        Net.get("$API$path${if ('?' in path) '&' else '?'}api_key=$key", 15_000, quiet = true)
+    /**
+     * The same API under TMDB's other name. Some providers — several in India — don't resolve
+     * themoviedb.org at all, and every call simply never answered: no suggestions, cast or ratings.
+     */
+    private const val API_OTHER = "https://api.tmdb.org/3"
+    /** The first name didn't connect this run: the other is asked from then on. */
+    @Volatile private var other = false
+
+    private suspend fun get(path: String): String {
+        val query = "$path${if ('?' in path) '&' else '?'}api_key=$key"
+        if (!other) {
+            try {
+                // Short: when the name is blocked this is spent in full before the other is tried.
+                return Net.get(API + query, 6_000, quiet = true)
+            } catch (e: HttpException) {
+                // It answered. The other name is the same service and would say the same.
+                throw e
+            } catch (e: java.io.IOException) {
+                // Never connected: the other name.
+            }
+        }
+        return Net.get(API_OTHER + query, 15_000, quiet = true).also { other = true }
+    }
 
     /** This run's answers: a film's page is often opened twice, going back and forth. */
     private val titles = java.util.concurrent.ConcurrentHashMap<String, TmdbTitle>()

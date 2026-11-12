@@ -150,7 +150,12 @@ object Motion {
 fun Lc(@DrawableRes icon: Int, modifier: Modifier = Modifier, tint: Color = Ink.text, size: Dp = 20.dp) =
     Icon(painterResource(icon), null, modifier.size(size), tint = tint)
 
-private val ART_HEADERS = NetworkHeaders.Builder().set("User-Agent", "WatchlyTV/2").build()
+private val ART_HEADERS = NetworkHeaders.Builder().set("User-Agent", USER_AGENT).build()
+private val WIKI_HEADERS = NetworkHeaders.Builder().set("User-Agent", WIKI_AGENT).build()
+
+/** A picture that failed for a passing reason is asked for again this many times, a little later each time. */
+private const val ART_RETRIES = 2
+private const val ART_RETRY_MS = 2_500L
 
 /** How long a picture fades in. The TV sets 0: each fading card is a redraw per frame, a row at a time. */
 var ArtFadeMs = 300
@@ -167,15 +172,34 @@ fun Artwork(url: String?, name: String, modifier: Modifier = Modifier, scale: Co
             val context = LocalContext.current
             // Episode stills 404 for much of anime: then the title's own art.
             var src by remember(url) { mutableStateOf(url) }
-            AsyncImage(
-                // Wikimedia answers OkHttp's own User-Agent with 403: without this, no cast photo loads.
-                model = remember(src) { ImageRequest.Builder(context).data(src).httpHeaders(ART_HEADERS).crossfade(ArtFadeMs).build() },
-                onError = { if (fallback != null && src != fallback) src = fallback },
-                placeholder = if (fill) remember { ColorPainter(Ink.surface) } else null,
-                contentDescription = name,
-                contentScale = scale,
-                modifier = Modifier.fillMaxSize(),
-            )
+            // A host that says slow down (429), or a connection that drops, used to leave the card blank
+            // for as long as it stayed on screen: nothing asks twice by itself. Asked again a little
+            // later, twice; a picture that simply isn't there (404) is not.
+            var tries by remember(src) { mutableStateOf(0) }
+            var failed by remember(src) { mutableStateOf(false) }
+            LaunchedEffect(failed, tries) {
+                if (failed) {
+                    kotlinx.coroutines.delay(ART_RETRY_MS * (tries + 1))
+                    failed = false
+                    tries++
+                }
+            }
+            // Keyed: the same request again is no new request to the image loader.
+            androidx.compose.runtime.key(tries) {
+                AsyncImage(
+                    // Wikimedia answers OkHttp's own User-Agent with 403: without this, no cast photo loads.
+                    model = remember(src) { ImageRequest.Builder(context).data(src).httpHeaders(if ("wikimedia.org" in src) WIKI_HEADERS else ART_HEADERS).crossfade(ArtFadeMs).build() },
+                    onError = { error ->
+                        val gone = (error.result.throwable as? coil3.network.HttpException)?.response?.code == 404
+                        if (fallback != null && src != fallback) src = fallback
+                        else if (!gone && tries < ART_RETRIES) failed = true
+                    },
+                    placeholder = if (fill) remember { ColorPainter(Ink.surface) } else null,
+                    contentDescription = name,
+                    contentScale = scale,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         } else {
             Text(
                 name,

@@ -17,8 +17,20 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** Work that outlives a screen. */
 val AppScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-/** [body] is what the service said back — an OAuth error is in there, not in the status. */
-class HttpException(val code: Int, message: String, val body: String = "") : IOException(message)
+/**
+ * [body] is what the service said back — an OAuth error is in there, not in the status.
+ * [retryAfterMs] is how long it asked to be left alone, with a 429 that says.
+ */
+class HttpException(val code: Int, message: String, val body: String = "", val retryAfterMs: Long = 0) : IOException(message)
+
+const val USER_AGENT = "WatchlyTV/2"
+
+/**
+ * Who is asking, as Wikimedia's User-Agent policy wants it for Wikipedia and its pictures: a name, a
+ * version, and where to find the people behind it. A bare name is the kind it throttles first.
+ * Only sent there: every other service has been answering the plain one.
+ */
+const val WIKI_AGENT = "Watchly/2 (https://github.com/sammyZi/Watchly)"
 
 fun enc(s: String): String = URLEncoder.encode(s, "UTF-8").replace("+", "%20")
 
@@ -31,6 +43,11 @@ object Net {
     private val _online = MutableStateFlow(true)
     val online: StateFlow<Boolean> = _online
     private val probing = AtomicBoolean(false)
+
+    /** A service that says "too many requests" is asked again this many times, after a wait. */
+    private const val BUSY_RETRIES = 2
+    private const val BUSY_WAIT_MS = 800L
+    private const val BUSY_WAIT_MAX_MS = 5_000L
 
     suspend fun get(url: String, timeoutMs: Int = 15_000, quiet: Boolean = false, headers: Map<String, String> = emptyMap()): String =
         request(url, "GET", null, timeoutMs, quiet, headers = headers)
@@ -51,9 +68,30 @@ object Net {
         return request(url, "POST", body, timeoutMs, quiet, "multipart/form-data; boundary=$boundary", headers)
     }
 
+    /**
+     * A 429 used to be a failure like any other: the shelf, cast list or suggestion that drew it stayed
+     * empty until the app was restarted. Now it waits as long as the service asks (a few seconds at
+     * most) and asks again, twice.
+     */
     private suspend fun request(
         url: String, method: String, body: String?, timeoutMs: Int, quiet: Boolean,
         type: String = "application/json", headers: Map<String, String> = emptyMap(),
+    ): String {
+        var tries = 0
+        while (true) {
+            try {
+                return once(url, method, body, timeoutMs, quiet, type, headers)
+            } catch (e: HttpException) {
+                if (e.code != 429 || tries >= BUSY_RETRIES) throw e
+                tries++
+                delay(e.retryAfterMs.coerceIn(BUSY_WAIT_MS * tries, BUSY_WAIT_MAX_MS))
+            }
+        }
+    }
+
+    private suspend fun once(
+        url: String, method: String, body: String?, timeoutMs: Int, quiet: Boolean,
+        type: String, headers: Map<String, String>,
     ): String =
         withContext(Dispatchers.IO) {
             val conn = try {
@@ -61,7 +99,7 @@ object Net {
                     connectTimeout = timeoutMs
                     readTimeout = timeoutMs
                     requestMethod = method
-                    setRequestProperty("User-Agent", "WatchlyTV/2")
+                    setRequestProperty("User-Agent", USER_AGENT)
                     setRequestProperty("Accept", "application/json, text/xml, */*")
                     headers.forEach { (k, v) -> setRequestProperty(k, v) }
                     if (body != null) {
@@ -84,7 +122,9 @@ object Net {
                 _online.value = true
                 if (code !in 200..299) {
                     val said = runCatching { conn.errorStream?.bufferedReader()?.use { it.readText() } }.getOrNull().orEmpty()
-                    throw HttpException(code, "${url.substringBefore('?')} returned $code", said)
+                    // Seconds; the other form, a date, is rare enough to take the default wait.
+                    val wait = conn.getHeaderField("Retry-After")?.trim()?.toLongOrNull()?.times(1000) ?: 0L
+                    throw HttpException(code, "${url.substringBefore('?')} returned $code", said, wait)
                 }
                 conn.inputStream.bufferedReader().use { it.readText() }
             } finally {
