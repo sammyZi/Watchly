@@ -197,6 +197,17 @@ private const val NARROW_HOLD_MS = 10_000L
 
 private const val REMOVE_WAIT_MS = 4_000
 
+/**
+ * The index's deadline before the player opens, just behind the head's. Most Matroska files keep
+ * their cues at the end and the player reads them before the first picture, so the piece is on the
+ * way to it; the tail's usual 10s is far enough off that nothing hurries it until the player is
+ * already waiting. Calibration knob, not yet measured: a thin swarm may want the head alone.
+ */
+private const val PREROLL_TAIL_MS = 1_500
+
+/** How often to look for a torrent's metadata or handle while waiting on it. */
+private const val AWAIT_STEP_MS = 50L
+
 class TorrentException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 data class TorrentFile(
@@ -713,7 +724,7 @@ class TorrentStream(
             session.download(magnet, saveDir, TorrentFlags.SEQUENTIAL_DOWNLOAD)
         }
         val started = System.currentTimeMillis()
-        repeat(timeoutSec * 4) {
+        repeat((timeoutSec * 1000L / AWAIT_STEP_MS).toInt()) {
             val h = session.find(hash)
             if (h != null && h.isValid && h.status().hasMetadata()) {
                 val ti = runCatching { h.torrentFile() }.getOrNull()
@@ -726,7 +737,7 @@ class TorrentStream(
                     return ti
                 }
             }
-            Thread.sleep(250)
+            Thread.sleep(AWAIT_STEP_MS)
         }
         dropWarm(null)
         throw TorrentException("No peers answered within ${timeoutSec}s. The torrent may be dead, or the network is blocking BitTorrent.")
@@ -1019,10 +1030,10 @@ class TorrentStream(
         runCatching { h.torrentFile()?.files()?.numFiles() }.getOrNull() == expected
 
     private fun awaitHandle(ti: TorrentInfo): TorrentHandle? {
-        repeat(40) {
+        repeat((10_000L / AWAIT_STEP_MS).toInt()) {
             val h = session.find(ti.infoHash())
             if (h != null && h.isValid) return h
-            Thread.sleep(250)
+            Thread.sleep(AWAIT_STEP_MS)
         }
         return null
     }
@@ -1253,7 +1264,7 @@ class TorrentStream(
         val tailEnd = if (announcedReady) lastPiece else minOf(lastPiece, tailPiece + maxOf(0, (2L * 1024 * 1024 / pieceLen).toInt() - 1))
         for (p in tailPiece..tailEnd) {
             keep.add(p)
-            if (!h.havePiece(p) && deadlined.add(p)) h.setPieceDeadline(p, 10_000 + (p - tailPiece) * 300)
+            if (!h.havePiece(p) && deadlined.add(p)) h.setPieceDeadline(p, (if (announcedReady) 10_000 else PREROLL_TAIL_MS) + (p - tailPiece) * 300)
         }
         deadlined.removeAll { piece -> (piece !in keep).also { if (it) runCatching { h.resetPieceDeadline(piece) } } }
 
