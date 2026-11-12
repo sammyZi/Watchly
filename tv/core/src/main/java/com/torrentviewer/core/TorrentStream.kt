@@ -198,10 +198,11 @@ private const val NARROW_HOLD_MS = 10_000L
 private const val REMOVE_WAIT_MS = 4_000
 
 /**
- * The index's deadline before the player opens, just behind the head's. Most Matroska files keep
- * their cues at the end and the player reads them before the first picture, so the piece is on the
- * way to it; the tail's usual 10s is far enough off that nothing hurries it until the player is
- * already waiting. Calibration knob, not yet measured: a thin swarm may want the head alone.
+ * The deadline of the file's last piece before the player opens, just behind the head's. A Matroska
+ * file keeps its cues at the very end and the player reads them before its first picture, so at a
+ * start that piece is the next wait after the header — the one a resume already fetches in pre-roll
+ * (prerollTargets), where left until asked for it cost 10–12s. Calibration knob, not yet measured
+ * for a fresh start: a thin swarm may want the head alone.
  */
 private const val PREROLL_TAIL_MS = 1_500
 
@@ -1271,7 +1272,12 @@ class TorrentStream(
         val tailEnd = if (announcedReady) lastPiece else minOf(lastPiece, tailPiece + maxOf(0, (2L * 1024 * 1024 / pieceLen).toInt() - 1))
         for (p in tailPiece..tailEnd) {
             keep.add(p)
-            if (!h.havePiece(p) && deadlined.add(p)) h.setPieceDeadline(p, (if (announcedReady) 10_000 else PREROLL_TAIL_MS) + (p - tailPiece) * 300)
+            if (!h.havePiece(p) && deadlined.add(p)) h.setPieceDeadline(p, if (!announcedReady && p == lastPiece) PREROLL_TAIL_MS else 10_000 + (p - tailPiece) * 300)
+        }
+        // And the file's very last piece, when the 2MB above stops short of it: see PREROLL_TAIL_MS.
+        if (!announcedReady && lastPiece > tailEnd) {
+            keep.add(lastPiece)
+            if (!h.havePiece(lastPiece) && deadlined.add(lastPiece)) h.setPieceDeadline(lastPiece, PREROLL_TAIL_MS)
         }
         deadlined.removeAll { piece -> (piece !in keep).also { if (it) runCatching { h.resetPieceDeadline(piece) } } }
 
@@ -1490,7 +1496,8 @@ class TorrentStream(
         for (p in firstPiece..lastPiece) {
             if (p >= prios.size) break
             prios[p] = when {
-                p in tailPiece..tailEnd || zones.any { p in it } -> Priority.DEFAULT
+                // The last piece too, before the player opens: pump() gives it a deadline then.
+                p in tailPiece..tailEnd || p == lastPiece || zones.any { p in it } -> Priority.DEFAULT
                 spare.any { p in it } || behind.any { p in it } -> Priority.LOW
                 whole -> Priority.LOW
                 else -> Priority.IGNORE
