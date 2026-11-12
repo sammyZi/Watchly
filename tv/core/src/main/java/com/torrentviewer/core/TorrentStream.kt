@@ -26,6 +26,8 @@ import org.libtorrent4j.TorrentInfo
 import org.libtorrent4j.Vectors
 import org.libtorrent4j.alerts.Alert
 import org.libtorrent4j.alerts.AlertType
+import org.libtorrent4j.alerts.BlockFinishedAlert
+import org.libtorrent4j.alerts.HashFailedAlert
 import org.libtorrent4j.swig.add_torrent_params
 import org.libtorrent4j.swig.alert
 import org.libtorrent4j.swig.error_code
@@ -36,6 +38,7 @@ import org.libtorrent4j.swig.peer_info_vector
 import org.libtorrent4j.swig.settings_pack
 import java.io.File
 import java.net.URL
+import java.util.BitSet
 import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.ZipInputStream
 
@@ -58,6 +61,8 @@ private val ALERT_MASK = alert.error_notification
     .or_(alert.peer_notification)
     .or_(alert.port_mapping_notification)
     .or_(alert.dht_notification)
+    // One alert per 16KB block written: what lets a reader have a piece's blocks as they land.
+    .let { if (SERVE_BLOCKS) it.or_(alert.block_progress_notification) else it }
     .to_int()
 
 /** Attached to every torrent — many carry dead trackers or none. */
@@ -98,6 +103,19 @@ private fun tailBytesFor(size: Long) = (size / 200).coerceIn(2L * 1024 * 1024, 1
 
 /** Every container puts its header at byte 0. */
 private const val HEAD_BYTES = 2L * 1024 * 1024
+
+/**
+ * Hand a reader the blocks of a piece as they are written, not the piece once it is whole and
+ * hashed. A 4K remux has 8-16MB pieces: waiting for a whole one before the player saw a byte was
+ * most of a slow start, and the player wants a few hundred KB of header first, then the index at
+ * the far end. Nuvio's engine serves blocks this way. With it the player also opens on
+ * [HEAD_BYTES] of header rather than a whole first piece.
+ *
+ * The cost: a block is only checked as part of its piece, so a corrupt one can reach the player
+ * before the hash fails and it is fetched again — a glitch in the picture where there would have
+ * been a wait. Testing knob: false is the old whole-piece behaviour throughout.
+ */
+private const val SERVE_BLOCKS = true
 
 /** A .torrent describes the payload; past this it is the wrong file. */
 private const val MAX_TORRENT_BYTES = 16L * 1024 * 1024
@@ -298,6 +316,13 @@ class TorrentStream(
     private var announcedReady = false
     private var peerSaveTick = 0
     private val deadlined = mutableSetOf<Int>()
+    /**
+     * Blocks written to disk in pieces not yet whole: torrent (its handle's id) → piece → blocks.
+     * Filled by the alert thread and read by the server's; each BitSet is its own lock. Keyed by
+     * torrent so a block that lands before play() has its handle is not lost, and so nothing left
+     * from the torrent a roll removed is taken for the one it put back.
+     */
+    private val partial = ConcurrentHashMap<Long, ConcurrentHashMap<Int, BitSet>>()
     private var subtitleFiles = emptyList<String>()
     /** Video + matching sidecar subs — the only files whose pieces are wanted. */
     private var wantedFiles = intArrayOf()
@@ -534,8 +559,15 @@ class TorrentStream(
                 AlertType.PORTMAP,
                 AlertType.PORTMAP_ERROR,
                 AlertType.FILE_ERROR,
-                AlertType.HASH_FAILED,
                 AlertType.PERFORMANCE -> log("libtorrent: ${alert.message()}")
+                AlertType.BLOCK_FINISHED -> (alert as? BlockFinishedAlert)?.let { noteBlock(it) }
+                AlertType.HASH_FAILED -> {
+                    // Its blocks are thrown away and fetched again; they are not on disk to read.
+                    (alert as? HashFailedAlert)?.let { failed ->
+                        runCatching { partial[failed.handle().swig().id()]?.remove(failed.pieceIndex()) }
+                    }
+                    log("libtorrent: ${alert.message()}")
+                }
                 else -> Unit
             }
         }
@@ -922,6 +954,8 @@ class TorrentStream(
             log("play: reusing running torrent (${running.status().numPeers()} peer(s))")
             // Files wiped from under it: libtorrent still believes it has the pieces. A fresh
             // magnet has nothing on disk yet either, and a recheck would drop its warm peers.
+            // The blocks went with the files, whether or not a whole piece had.
+            if (!onDisk) runCatching { partial.remove(running.swig().id()) }
             if (!onDisk && running.status().totalDone() > 0) runCatching { running.forceRecheck() }
             running.prioritizeFiles(priorities)
             running
@@ -1048,6 +1082,9 @@ class TorrentStream(
         }
 
         if (ticks % 4 == 0 && rollCache(h, ti)) return
+
+        // A whole piece is read as a piece; its blocks need no remembering.
+        if (SERVE_BLOCKS && ticks % 20 == 0) runCatching { partial[h.swig().id()]?.entries?.removeIf { h.havePiece(it.key) } }
 
         // A seeded seek stands in for a reader that has not connected yet — not for the
         // ones already open, which are where the player is leaving from, nor for a reopened
@@ -1220,9 +1257,11 @@ class TorrentStream(
         }
         deadlined.removeAll { piece -> (piece !in keep).also { if (it) runCatching { h.resetPieceDeadline(piece) } } }
 
-        val headNeed = pieceLen
-        val headHave = contiguousFrom(h, ti, firstPiece)
-        val startHave = if (startPiece == firstPiece) headHave else contiguousFrom(h, ti, startPiece)
+        // Serving blocks, the player can have the header before its piece is whole, and has work of
+        // its own to be getting on with: it blocks on the socket for anything past what is here.
+        val headNeed = if (SERVE_BLOCKS) minOf(pieceLen, HEAD_BYTES) else pieceLen
+        val headHave = contiguousBytes(h, ti, firstPiece, ti.mapFile(fileIndex, 0, 1).start())
+        val startHave = if (startPiece == firstPiece) headHave else contiguousBytes(h, ti, startPiece, ti.mapFile(fileIndex, startOffset, 1).start())
         // Resuming the closing minutes leaves fewer pieces than the prepare window asks for.
         val startAvailable = maxOf(1, lastPiece - startPiece + 1).toLong() * pieceLen
         val startNeed = minOf(if (startPiece == firstPiece) maxOf(prepareBytes, headNeed) else prepareBytes, startAvailable)
@@ -1261,6 +1300,8 @@ class TorrentStream(
                 },
                 release = { id -> readers.remove(id)?.let { at -> lately[id] = at to System.currentTimeMillis() } },
                 lan = lan,
+                // Zero is "not here yet": the reader parks and asks again, where a throw would end its connection.
+                readable = { offset, want -> runCatching { readableRun(offset, want) }.getOrDefault(0) },
             )
             srv.start()
             server = srv
@@ -1321,6 +1362,8 @@ class TorrentStream(
             // Before the removal: the server's threads look pieces up through `info`, which would die with it.
             info = own
             rollHave = had.toSet()
+            // Pieces not yet whole do not survive the re-add: their blocks are fetched again.
+            partial.clear()
             runCatching { session.remove(h) }
             forgetMeta()
             var waited = 0
@@ -1357,6 +1400,8 @@ class TorrentStream(
 
             val priorities = Array(files.numFiles()) { Priority.IGNORE }
             wantedFiles.forEach { if (it in priorities.indices) priorities[it] = Priority.DEFAULT }
+            // Again, for a block the outgoing torrent reported after the first clear.
+            partial.clear()
             addKeeping(own, priorities, peers, kept)
             val next = awaitHandle(own) ?: throw IllegalStateException("torrent did not come back after re-adding")
             next.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
@@ -1455,6 +1500,67 @@ class TorrentStream(
             p++
         }
         return have
+    }
+
+    /**
+     * [contiguousFrom], carried on into the piece it stops at: the blocks of that piece already on
+     * disk. [into] is where the reader starts in piece [from], and only counts while that piece is
+     * the one still arriving. What a reader there would get before it had to wait.
+     */
+    private fun contiguousBytes(h: TorrentHandle, ti: TorrentInfo, from: Int, into: Int): Long {
+        val whole = contiguousFrom(h, ti, from)
+        if (!SERVE_BLOCKS) return whole
+        val next = from + (whole / ti.pieceLength().coerceAtLeast(1)).toInt()
+        if (next > lastPiece) return whole
+        val done = blocksOf(h, next) ?: return whole
+        val size = ti.pieceSize(next)
+        return whole + synchronized(done) { finishedRun(done, if (next == from) into else 0, size) }
+    }
+
+    /** A block of some torrent is on disk. On the alert thread, once per 16KB that arrives. */
+    private fun noteBlock(a: BlockFinishedAlert) {
+        val piece = a.pieceIndex()
+        val block = a.blockIndex()
+        if (piece < 0 || block < 0) return
+        val id = runCatching { a.handle().swig().id() }.getOrNull() ?: return
+        val done = partial.getOrPut(id) { ConcurrentHashMap() }.getOrPut(piece) { BitSet() }
+        synchronized(done) { done.set(block) }
+    }
+
+    /** The blocks of [piece] on disk, or null: none of it has landed, or it is whole and forgotten. */
+    private fun blocksOf(h: TorrentHandle, piece: Int): BitSet? = partial[h.swig().id()]?.get(piece)
+
+    /**
+     * How many bytes from [offset] of the file can be read in one run, [want] at most: whole
+     * pieces, and with [SERVE_BLOCKS] the finished blocks of the piece still arriving. The file is
+     * sparse, so a read past this is zeros. Called by the server's threads, once per read.
+     */
+    private fun readableRun(offset: Long, want: Int): Int {
+        val ti = info ?: return 0
+        if (fileIndex < 0 || want <= 0) return 0
+        // Mid-roll the torrent is out of the session: only the pieces the roll kept can be read.
+        val roll = rollHave
+        val h = handle
+        val stop = offset + want
+        var at = offset
+        while (at < stop) {
+            val spot = ti.mapFile(fileIndex, at, 1)
+            val piece = spot.piece()
+            val into = spot.start()
+            val size = ti.pieceSize(piece)
+            val left = size - into
+            if (left <= 0) break
+            if (roll?.contains(piece) ?: (h?.havePiece(piece) == true)) {
+                at += left
+                continue
+            }
+            if (!SERVE_BLOCKS || roll != null || h == null) break
+            val done = blocksOf(h, piece) ?: break
+            val run = synchronized(done) { finishedRun(done, into, size) }
+            at += run
+            if (run < left) break
+        }
+        return (minOf(at, stop) - offset).toInt()
     }
 
     private fun reportProgress(h: TorrentHandle, buffer: Int) {
@@ -1610,6 +1716,8 @@ class TorrentStream(
         }
 
         deadlined.clear()
+        // A torrent kept for the next play still has its part-pieces, and the blocks in them.
+        if (!keeping) partial.clear()
         readers.clear()
         lately.clear()
         blockingPiece = -1

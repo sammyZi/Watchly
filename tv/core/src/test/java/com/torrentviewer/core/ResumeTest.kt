@@ -99,4 +99,27 @@ class ResumeTest {
         assertEquals(false, readyToOpen(8, 8, 8, 16, resuming = false))
         assertEquals(true, readyToOpen(16, 8, 16, 16, resuming = false))
     }
+
+    private fun blocks(vararg done: Int) = java.util.BitSet().apply { done.forEach { set(it) } }
+
+    @Test fun aPieceStillArrivingReadsAsFarAsItsBlocksRun() {
+        val piece = 8 * BLOCK_BYTES
+        // Nothing of it yet, or not the block the reader is at.
+        assertEquals(0, finishedRun(blocks(), 0, piece))
+        assertEquals(0, finishedRun(blocks(1, 2), 0, piece))
+        // Blocks 0-2 are here and 3 is not: block 4 arriving early does not extend the run.
+        assertEquals(3 * BLOCK_BYTES, finishedRun(blocks(0, 1, 2, 4), 0, piece))
+        // From partway into a block, the rest of that block and the run after it.
+        assertEquals(3 * BLOCK_BYTES - 100, finishedRun(blocks(0, 1, 2, 4), 100, piece))
+        assertEquals(BLOCK_BYTES, finishedRun(blocks(0, 1, 2, 4), 4 * BLOCK_BYTES, piece))
+    }
+
+    @Test fun aRunOfBlocksEndsWithThePiece() {
+        // The last piece of a torrent is short, and so is its last block.
+        val piece = 2 * BLOCK_BYTES + 500
+        assertEquals(piece, finishedRun(blocks(0, 1, 2), 0, piece))
+        assertEquals(500, finishedRun(blocks(2), 2 * BLOCK_BYTES, piece))
+        assertEquals(0, finishedRun(blocks(0, 1, 2), piece, piece))
+        assertEquals(0, finishedRun(blocks(0), -1, piece))
+    }
 }
