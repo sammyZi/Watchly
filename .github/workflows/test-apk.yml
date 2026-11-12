@@ -1,0 +1,64 @@
+name: Test APK
+
+# A debug build of the phone app for trying a testing/* branch on a device. Debug installs as
+# "Watchly Next" (com.torrentviewer.app.next), beside the released app rather than over it.
+# Nothing is published: the APKs are a workflow artifact on the run's page.
+
+on:
+  push:
+    branches:
+      - "testing/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  phone:
+    name: Phone (debug)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Accept Android SDK licences
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+
+      - name: Build debug APKs
+        working-directory: mobile
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Name the APKs
+        shell: bash
+        run: |
+          mkdir -p out
+          sha=$(git rev-parse --short HEAD)
+          for apk in mobile/app/build/outputs/apk/debug/app-*-debug.apk; do
+            [ -f "$apk" ] || continue
+            abi=$(basename "$apk" -debug.apk)
+            abi=${abi#app-}
+            cp "$apk" "out/Watchly-phone-test-$sha-$abi.apk"
+          done
+          ls -lh out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: watchly-phone-test
+          path: out/*.apk
+          if-no-files-found: error
+
+      # After the upload: a failing test should not keep the APK from a device.
+      - name: Unit tests (core)
+        working-directory: tv
+        run: ./gradlew --no-daemon :core:testDebugUnitTest
