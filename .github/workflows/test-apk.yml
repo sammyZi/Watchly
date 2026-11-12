@@ -1,8 +1,9 @@
 name: Test APK
 
-# A release build of the phone app for trying a testing/* branch on a device: the same build
-# type and key as the Release workflow, so it installs over the released app in place.
-# Nothing is published: the APKs are a workflow artifact on the run's page.
+# Release builds of the phone and TV apps for trying a testing/* branch on a device: the same
+# build type and key as the Release workflow, so each installs over the released app in place.
+# Nothing is published: the APKs are workflow artifacts on the run's page, one per app and ABI
+# so a phone downloads only its own (arm64-v8a for nearly every phone; many TVs are armeabi-v7a).
 
 on:
   push:
@@ -18,9 +19,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  phone:
-    name: Phone (release)
+  android:
+    name: Android (${{ matrix.app }})
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: phone
+            dir: mobile
+          - app: tv
+            dir: tv
 
     steps:
       - uses: actions/checkout@v4
@@ -36,29 +46,36 @@ jobs:
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
 
       - name: Build release APKs
-        working-directory: mobile
-        run: ./gradlew --no-daemon -PuniversalApk assembleRelease
+        working-directory: ${{ matrix.dir }}
+        run: ./gradlew --no-daemon assembleRelease
 
       - name: Name the APKs
         shell: bash
         run: |
           mkdir -p out
           sha=$(git rev-parse --short HEAD)
-          for apk in mobile/app/build/outputs/apk/release/app-*-release.apk; do
+          for apk in ${{ matrix.dir }}/app/build/outputs/apk/release/app-*-release.apk; do
             [ -f "$apk" ] || continue
             abi=$(basename "$apk" -release.apk)
             abi=${abi#app-}
-            cp "$apk" "out/Watchly-phone-test-$sha-$abi.apk"
+            cp "$apk" "out/Watchly-${{ matrix.app }}-test-$sha-$abi.apk"
           done
           ls -lh out
 
       - uses: actions/upload-artifact@v4
         with:
-          name: watchly-phone-test
-          path: out/*.apk
+          name: watchly-${{ matrix.app }}-arm64-v8a
+          path: out/*-arm64-v8a.apk
           if-no-files-found: error
 
-      # After the upload: a failing test should not keep the APK from a device.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: watchly-${{ matrix.app }}-armeabi-v7a
+          path: out/*-armeabi-v7a.apk
+          if-no-files-found: error
+
+      # After the uploads: a failing test should not keep the APK from a device. Once, not per app.
       - name: Unit tests (core)
+        if: matrix.app == 'tv'
         working-directory: tv
         run: ./gradlew --no-daemon :core:testDebugUnitTest
