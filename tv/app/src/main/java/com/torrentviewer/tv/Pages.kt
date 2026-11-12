@@ -170,6 +170,8 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
     var recents by remember { mutableStateOf(Searches.load()) }
     val field = remember { FocusRequester() }
     field.claim()
+    /** On the first card or release in the results, when there are any. */
+    val firstResult = remember { FocusRequester() }
 
     LaunchedEffect(query, torrents) {
         val q = query.trim()
@@ -210,7 +212,10 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             Column {
                 Text("Search", Modifier.padding(bottom = 18.dp), style = Type.display)
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // Down from the search box is the first result: the box is wide, and the focus search
+                // took the poster under its middle.
+                val anyResult = if (torrents) !hits.isNullOrEmpty() else !results.isNullOrEmpty()
+                Row(Modifier.focusProperties { down = if (anyResult) firstResult else FocusRequester.Default }, verticalAlignment = Alignment.CenterVertically) {
                     Field(
                         query,
                         { query = it },
@@ -229,8 +234,9 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
                 }
                 if (recents.isNotEmpty() && results == null && hits == null) {
                     Text("Recent searches", Modifier.padding(top = 30.dp, bottom = 12.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        recents.forEach { r -> Chip(r, false, onClick = { query = r }, icon = L.drawable.lucide_ic_history) }
+                    val recentLead = remember { FocusRequester() }
+                    Row(Modifier.focusRow(recentLead), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        recents.forEachIndexed { i, r -> Chip(r, false, onClick = { query = r }, icon = L.drawable.lucide_ic_history, requester = recentLead.takeIf { i == 0 }) }
                         Chip("Clear", false, onClick = { recents = Searches.clear() })
                     }
                 }
@@ -244,7 +250,7 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
         }
         if (torrents) {
             items(hits.orEmpty(), key = { it.id }, span = { GridItemSpan(maxLineSpan) }) { hit ->
-                Source(hit) {
+                Source(hit, requester = firstResult.takeIf { hit.id == hits?.firstOrNull()?.id }) {
                     recents = Searches.remember(query)
                     watch.stream(hit, null)
                 }
@@ -254,7 +260,7 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
                 PosterCard(t, onClick = {
                     recents = Searches.remember(query)
                     onOpen(t)
-                }, sub = listOfNotNull(if (t.isSeries) "Series" else "Film", t.year?.take(4)).joinToString("  ·  "))
+                }, sub = listOfNotNull(if (t.isSeries) "Series" else "Film", t.year?.take(4)).joinToString("  ·  "), requester = firstResult.takeIf { t.imdb == results?.firstOrNull()?.imdb })
             }
         }
     }
@@ -579,22 +585,15 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             "Storage for one film",
             "How much of a film may sit on this TV at once. When it fills, what you've watched is let go to make room. Auto uses the free space, keeping a few GB spare.",
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                CACHE_CAPS.forEach { mb -> Chip(cacheCapLabel(mb), settings.cacheCapMb == mb, onClick = { set(settings.copy(cacheCapMb = mb)) }) }
-            }
+            Options(CACHE_CAPS, settings.cacheCapMb, { cacheCapLabel(it) }) { set(settings.copy(cacheCapMb = it)) }
         }
 
         Section("Buffer before playing", "Larger starts slower but is steadier on a weak swarm.") {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                listOf(1, 4, 8, 16).forEach { mb -> Chip("$mb MB", settings.prepareMb == mb, onClick = { set(settings.copy(prepareMb = mb)) }) }
-            }
+            Options(listOf(1, 4, 8, 16), settings.prepareMb, { "$it MB" }) { set(settings.copy(prepareMb = it)) }
         }
 
         Section("Extra trackers","Attach public trackers to bare magnet links so they resolve faster.") {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Chip("On", settings.addTrackers, onClick = { set(settings.copy(addTrackers = true)) })
-                Chip("Off", !settings.addTrackers, onClick = { set(settings.copy(addTrackers = false)) })
-            }
+            Options(listOf(true, false), settings.addTrackers, { if (it) "On" else "Off" }) { set(settings.copy(addTrackers = it)) }
         }
         }
 
@@ -603,22 +602,17 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             "Player",
             "Media3 keeps 4K smooth with subtitles on, and hands a file it can't play to VLC by itself. VLC from the start plays the most formats and full ASS styling, but a weak TV can drop frames each time a subtitle changes.",
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Chip("Media3", !settings.vlcPlayer, onClick = { set(settings.copy(vlcPlayer = false)) })
-                Chip("VLC", settings.vlcPlayer, onClick = { set(settings.copy(vlcPlayer = true)) })
-            }
+            Options(listOf(false, true), settings.vlcPlayer, { if (it) "VLC" else "Media3" }) { set(settings.copy(vlcPlayer = it)) }
         }
 
         Section("Skip intro", "Where an episode's intro is known, jump past it by itself instead of showing the Skip intro button. Once per episode — rewind to watch it.") {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Chip("Automatically", settings.autoSkipIntro, onClick = { set(settings.copy(autoSkipIntro = true)) })
-                Chip("Show the button", !settings.autoSkipIntro, onClick = { set(settings.copy(autoSkipIntro = false)) })
-            }
+            Options(listOf(true, false), settings.autoSkipIntro, { if (it) "Automatically" else "Show the button" }) { set(settings.copy(autoSkipIntro = it)) }
         }
 
         Section("Languages", "A matching track comes on by itself when a video opens; picking one yourself wins. Online subtitle search looks in the subtitle language.") {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Chip("Audio: " + if (settings.audioLang.isEmpty()) "file's default" else langName(settings.audioLang), settings.audioLang.isNotEmpty(), onClick = { picking = "audio" })
+            val langLead = remember { FocusRequester() }
+            Row(Modifier.focusRow(langLead), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Chip("Audio: " + if (settings.audioLang.isEmpty()) "file's default" else langName(settings.audioLang), settings.audioLang.isNotEmpty(), onClick = { picking = "audio" }, requester = langLead)
                 Chip("Subtitles: " + if (settings.subLang.isEmpty()) "off" else langName(settings.subLang), settings.subLang.isNotEmpty(), onClick = { picking = "subs" })
             }
         }
@@ -626,12 +620,11 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
         Section("Subtitle style", "Size, colour and a box behind the words. Media3 shows a change on the next line; VLC from the next video.") {
             val style = settings.subtitles
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SUB_SIZES.keys.forEach { s -> Chip(s.replaceFirstChar(Char::uppercase), style.size == s, onClick = { set(settings.copy(subtitles = style.copy(size = s))) }) }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Chip("White", !style.yellow, onClick = { set(settings.copy(subtitles = style.copy(yellow = false))) })
-                    Chip("Yellow", style.yellow, onClick = { set(settings.copy(subtitles = style.copy(yellow = true))) })
+                Options(SUB_SIZES.keys.toList(), style.size, { it.replaceFirstChar(Char::uppercase) }) { set(settings.copy(subtitles = style.copy(size = it))) }
+                val colourLead = remember { FocusRequester() }
+                Row(Modifier.focusRow(colourLead), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Chip("White", !style.yellow, onClick = { set(settings.copy(subtitles = style.copy(yellow = false))) }, requester = colourLead.takeIf { !style.yellow })
+                    Chip("Yellow", style.yellow, onClick = { set(settings.copy(subtitles = style.copy(yellow = true))) }, requester = colourLead.takeIf { style.yellow })
                     Chip("Box behind", style.box, onClick = { set(settings.copy(subtitles = style.copy(box = !style.box))) })
                 }
             }
@@ -1138,7 +1131,8 @@ private fun Picker(
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(if (managing) "Manage profiles" else "Who's watching?", style = Type.hero.copy(fontSize = 44.sp))
         Spacer(Modifier.height(44.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+        // Back up from the buttons under them: the profile the remote was on, not the one in the middle.
+        Row(if (profiles.isNotEmpty() || !managing) Modifier.focusRow(first) else Modifier, horizontalArrangement = Arrangement.spacedBy(28.dp)) {
             profiles.forEachIndexed { i, p -> Tile(p.name, { open(p) }, if (i == 0) first else null) { Avatar(p, 130.dp); if (managing || p.pin != null) Badge(if (managing) L.drawable.lucide_ic_pencil else L.drawable.lucide_ic_lock) } }
             if (!managing) Tile("Guest", onGuest, if (profiles.isEmpty()) first else null) { Avatar(GUEST, 130.dp) }
             if (!managing && profiles.size < 6) Tile("Add profile", onAdd) {
@@ -1225,9 +1219,11 @@ private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, Strin
                 }
                 if (failed) Text("Couldn't load that picture.", Modifier.padding(top = 8.dp), style = Type.meta.copy(color = Ink.danger))
                 Text("COLOUR", Modifier.padding(top = 20.dp, bottom = 10.dp), style = Type.overline)
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    COLOURS.forEach { c ->
-                        Focusable({ colour = c }, Modifier.size(42.dp), CircleShape, 1.15f) {
+                val colourLead = remember { FocusRequester() }
+                val colourAt = COLOURS.indexOf(colour).coerceAtLeast(0)
+                Row(Modifier.focusRow(colourLead), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    COLOURS.forEachIndexed { i, c ->
+                        Focusable({ colour = c }, Modifier.size(42.dp), CircleShape, 1.15f, requester = colourLead.takeIf { i == colourAt }) {
                             Box(Modifier.fillMaxSize().background(colorOf(c)), contentAlignment = Alignment.Center) {
                                 if (c == colour) Lc(L.drawable.lucide_ic_check, tint = Color.White, size = 20.dp)
                             }
@@ -1235,9 +1231,10 @@ private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, Strin
                     }
                 }
                 Text("KIDS", Modifier.padding(top = 20.dp, bottom = 10.dp), style = Type.overline)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Chip("Kids profile", kids, onClick = { kids = true }, icon = if (kids) L.drawable.lucide_ic_check else null)
-                    Chip("Everything", !kids, onClick = { kids = false })
+                val kidsLead = remember { FocusRequester() }
+                Row(Modifier.focusRow(kidsLead), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Chip("Kids profile", kids, onClick = { kids = true }, icon = if (kids) L.drawable.lucide_ic_check else null, requester = kidsLead.takeIf { kids })
+                    Chip("Everything", !kids, onClick = { kids = false }, requester = kidsLead.takeIf { !kids })
                 }
                 Text(
                     if (kids) "Family films and series only. No addons, stream search or links from other apps — give your own profile a PIN so it stays that way."

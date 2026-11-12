@@ -220,7 +220,8 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
                     if (title.cast.isNotEmpty()) People("Starring", title.cast.take(4).joinToString(", "))
                     if (title.directors.isNotEmpty()) Crew(if (title.isSeries) "Creators" else "Director", title.directors.take(2), tmdb?.directors.orEmpty(), onPerson.takeUnless { Kids.on })
                     title.awards?.let { People("Awards", it) }
-                    Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    // Back up from the seasons or the cast: the button the remote left, or Play — not whichever sits above.
+                    Row(Modifier.padding(top = 24.dp).focusRow(play), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                         if (!title.isSeries) {
                             // Never disabled: a disabled view cannot hold focus, and the remote would open elsewhere.
                             TvButton(
@@ -274,7 +275,16 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
                 item(key = "episodes") {
                     Column(Modifier.onFocusEnter { pin(1) }.padding(top = Safe.y)) {
                         Text("Episodes", Modifier.padding(start = Safe.x + 12.dp, bottom = 14.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
-                        LazyRow(contentPadding = PaddingValues(start = Safe.x + 12.dp, end = Safe.x), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        // Up from an episode, or down from Play, is the season on show — not the chip that
+                        // happens to sit over the card, which is how the remote came to read "Season 6" under
+                        // Season 2's episodes. The row opens at that season too: a resume in season 15 used to
+                        // open on Season 1.
+                        val seasonLead = remember { FocusRequester() }
+                        val seasonAt = (if (through) block else seasons.indexOf(season)).coerceAtLeast(0)
+                        val seasonRow = rememberLazyListState(seasonAt)
+                        // The season is settled a moment after the page opens; its chip has to be in the row to be landed on.
+                        LaunchedEffect(seasonAt) { if (seasonRow.layoutInfo.visibleItemsInfo.none { it.index == seasonAt }) seasonRow.scrollToItem(seasonAt) }
+                        LazyRow(Modifier.focusRestorer(seasonLead), state = seasonRow, contentPadding = PaddingValues(start = Safe.x + 12.dp, end = Safe.x), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             // Retire whatever search is out: it belongs to the season being left.
                             fun leave() {
                                 ticket++
@@ -283,9 +293,9 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
                                 episode = null
                             }
                             if (through) items(blocks.indices.toList()) { b ->
-                                Chip("${numbered[blocks[b].first().id]}–${numbered[blocks[b].last().id]}", b == block, onClick = { block = b; leave() })
-                            } else items(seasons) { s ->
-                                Chip("Season $s", s == season, onClick = { season = s; leave() })
+                                Chip("${numbered[blocks[b].first().id]}–${numbered[blocks[b].last().id]}", b == block, onClick = { block = b; leave() }, requester = seasonLead.takeIf { b == seasonAt })
+                            } else itemsIndexed(seasons) { i, s ->
+                                Chip("Season $s", s == season, onClick = { season = s; leave() }, requester = seasonLead.takeIf { i == seasonAt })
                             }
                         }
                         key(season, block) {
@@ -343,10 +353,8 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
                         style = Type.title.copy(fontWeight = FontWeight.Bold),
                     )
                     if (qualities.size > 1) {
-                        Row(Modifier.padding(bottom = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Chip("All", quality == null, onClick = { quality = null })
-                            qualities.forEach { q -> Chip(q, quality == q, onClick = { quality = q }) }
-                        }
+                        // Up from the releases, which are as wide as the page: the quality on show.
+                        Options(listOf<String?>(null) + qualities, quality, { it ?: "All" }, Modifier.padding(bottom = 14.dp)) { quality = it }
                     }
                     when {
                         busy && shown.isEmpty() -> Row(verticalAlignment = Alignment.CenterVertically) {

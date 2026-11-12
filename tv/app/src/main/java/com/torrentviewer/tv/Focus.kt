@@ -7,6 +7,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,6 +35,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -190,6 +192,26 @@ fun Chip(label: String, on: Boolean, onClick: () -> Unit, modifier: Modifier = M
                 Lc(trailing, tint = trailingTint ?: fg, size = 16.dp)
             }
         }
+    }
+}
+
+/**
+ * A row the remote comes into from above or below. Left to the focus search, that lands on whatever
+ * is nearest the middle of where it came from: from something wide — a list row, a text box, an
+ * episode card — a chip halfway along the row, and not the one in force. Instead the row gives
+ * focus back to where the remote last was in it, and the first time to [lead]: the choice in
+ * force, or the row's first. [lead] has to be on something in the row.
+ */
+fun Modifier.focusRow(lead: FocusRequester): Modifier = focusRestorer(lead).focusGroup()
+
+/** One of several, as a row of chips. The remote comes into the row on the one chosen. */
+@Composable
+fun <T> Options(values: List<T>, current: T, label: (T) -> String, modifier: Modifier = Modifier, onPick: (T) -> Unit) {
+    val lead = remember { FocusRequester() }
+    // Chosen, but not on offer (a value from a backup, say): the first.
+    val at = values.indexOf(current).coerceAtLeast(0)
+    Row(modifier.focusRow(lead), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        values.forEachIndexed { i, v -> Chip(label(v), v == current, onClick = { onPick(v) }, requester = lead.takeIf { i == at }) }
     }
 }
 

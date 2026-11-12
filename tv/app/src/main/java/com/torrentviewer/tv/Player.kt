@@ -1398,11 +1398,15 @@ private fun EpisodesPanel(title: Title, playing: Episode?, onPlay: (Episode) -> 
                 .padding(start = 20.dp, end = Safe.x, top = Safe.y, bottom = Safe.y),
         ) {
             Text("Episodes", Modifier.padding(bottom = 10.dp), style = Type.title.copy(color = Color.White, fontWeight = FontWeight.Bold))
-            if (seasons.size > 1) LazyRow(Modifier.focusRestorer().padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(seasons, key = { it }) { s ->
+            // Up from the list, whose rows are as wide as the panel: the season on show, not the chip over
+            // the row's middle. The row opens at that season.
+            val seasonLead = remember { FocusRequester() }
+            val seasonAt = seasons.indexOf(season).coerceAtLeast(0)
+            if (seasons.size > 1) LazyRow(Modifier.focusRestorer(seasonLead).padding(bottom = 12.dp), state = rememberLazyListState(seasonAt), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                itemsIndexed(seasons, key = { _, s -> s }) { i, s ->
                     // A green tick on a season watched through.
                     val done = seasonWatched(title.episodes, s, seen)
-                    Chip(if (s == 0) "Specials" else "Season $s", s == season, onClick = { season = s }, trailing = L.drawable.lucide_ic_check.takeIf { done }, trailingTint = Ink.good)
+                    Chip(if (s == 0) "Specials" else "Season $s", s == season, onClick = { season = s }, requester = seasonLead.takeIf { i == seasonAt }, trailing = L.drawable.lucide_ic_check.takeIf { done }, trailingTint = Ink.good)
                 }
             }
             key(season) {
