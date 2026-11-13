@@ -57,6 +57,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.graphicsLayer
@@ -260,16 +261,23 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     /** The page as one focus group that remembers its last card — where Right from the rail goes. */
     val page = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
-    // One focus ring for the pages, gliding from card to card; the rail, the player and the sheets keep their own.
-    val focusRing = rememberFocusRing()
     Box(Modifier.fillMaxSize()) {
         // One page at a time, and no fade: a page's alpha draws the whole screen offscreen for
         // every frame of it, which this TV's GPU can't do at speed, just as the page is busiest.
         val pageKey = top?.key ?: tab.name
-        androidx.compose.runtime.CompositionLocalProvider(LocalFocusRing provides focusRing) {
         key(pageKey) {
+        // One focus ring per page, gliding from card to card; the rail, the player and the sheets keep their own.
+        // Per page, not one for all: opening a film, Home's card let go of the ring just as Play took it,
+        // so it glided in from where that card was instead of appearing on Play.
+        val focusRing = rememberFocusRing()
+        androidx.compose.runtime.CompositionLocalProvider(LocalFocusRing provides focusRing) {
             Box(
                 Modifier.fillMaxSize()
+                    // The ring glides only where the remote moved it; see FocusRing.moved.
+                    .onPreviewKeyEvent { e ->
+                        if (e.type == KeyEventType.KeyDown && (e.key == Key.DirectionLeft || e.key == Key.DirectionRight || e.key == Key.DirectionUp || e.key == Key.DirectionDown)) focusRing?.moved()
+                        false
+                    }
                     // The pages only: the player counts a held arrow's repeats to seek faster.
                     .pacedArrows()
                     .focusRequester(page)
@@ -279,6 +287,19 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
                     .onPreviewKeyEvent { e ->
                         if (top != null || e.type != KeyEventType.KeyDown || e.key != Key.DirectionLeft) return@onPreviewKeyEvent false
                         if (!focusManager.moveFocus(FocusDirection.Left)) runCatching { rail.requestFocus() }
+                        true
+                    }
+                    // An arrow with nothing that way stops here. Passed on, the system looked for somewhere
+                    // else to put the focus: Down under the last source of a film came round to Play at the top.
+                    // After whatever has the focus has had the key — a text box moves its cursor with these.
+                    .onKeyEvent { e ->
+                        val way = when (e.key) {
+                            Key.DirectionUp -> FocusDirection.Up
+                            Key.DirectionDown -> FocusDirection.Down
+                            Key.DirectionRight -> FocusDirection.Right
+                            else -> return@onKeyEvent false
+                        }
+                        if (e.type == KeyEventType.KeyDown) focusManager.moveFocus(way)
                         true
                     },
             ) {
@@ -302,8 +323,8 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
                 }
             }
         }
-        }
         FocusRingLayer(focusRing)
+        }
         if (top == null) NavRail(tab, who!!, rail, page, onTab = { tab = it }, onProfile = { switching = true })
 
         if (watch.phase == Phase.INSPECTING) Opening(watch)

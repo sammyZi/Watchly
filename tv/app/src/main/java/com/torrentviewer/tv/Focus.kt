@@ -59,6 +59,7 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.toSize
+import kotlin.math.abs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -165,26 +166,57 @@ class FocusRing internal constructor(private val scope: CoroutineScope) {
     internal var origin = Offset.Zero
 
     private var owner: Any? = null
+    /** The size the ring is going to, as its owner last gave it. */
+    private var size = Size.Zero
     private var base = Offset.Zero
     private var leftAt = 0L
     private var moving: Job? = null
     private var fading: Job? = null
+    private var movedAt = 0L
+
+    /**
+     * An arrow on the remote: the change of focus that follows is the viewer's, and glides. Any other
+     * just appears where it lands — a page opening puts the focus on whatever is first and then on its
+     * own button, and the ring slid down the screen to Play each time a film was opened.
+     */
+    fun moved() {
+        movedAt = android.os.SystemClock.uptimeMillis()
+    }
 
     /** [token] has the focus and its outline, grown, is [at] in the window. Called as it takes focus and whenever it moves. */
     fun at(token: Any, at: Rect, outline: Shape) {
         val topLeft = at.topLeft - origin
         if (owner === token) {
-            // The same card, somewhere else: the page scrolled under the remote.
-            shift = topLeft - base
+            // Against [size], set as the card took the ring — not the box's own target, which the
+            // coroutine below only sets a moment later. Read too soon it was still the last card's,
+            // every card looked resized, and a ring that should have just appeared slid in from
+            // wherever it had last been: down the screen to Play, across it on the way back up.
+            if (abs(size.width - at.width) < 1f && abs(size.height - at.height) < 1f) {
+                // The same card, somewhere else: the page scrolled under the remote.
+                shift = topLeft - base
+                return
+            }
+            // The same card, another size: its label changed under the remote ("Finding sources…" to
+            // "Play"). Only the move was followed, so the ring kept the old width around the new button.
+            val target = Rect(topLeft, at.size)
+            size = at.size
+            base = topLeft
+            shift = Offset.Zero
+            moving?.cancel()
+            moving = scope.launch {
+                launch { alpha.animateTo(1f, tween(120)) }
+                box.snapTo(target)
+            }
             return
         }
         val now = android.os.SystemClock.uptimeMillis()
         // Straight from another card: glide. From nothing — a new page, a chip, the rail — it is just there.
-        val glide = (owner != null || now - leftAt < 150) && alpha.value > 0.3f
+        val glide = (owner != null || now - leftAt < 150) && alpha.value > 0.3f && now - movedAt < 500
         val from = box.value.translate(shift)
         val velocity = box.velocity
         val target = Rect(topLeft, at.size)
         owner = token
+        size = at.size
         base = topLeft
         shift = Offset.Zero
         shape = outline
