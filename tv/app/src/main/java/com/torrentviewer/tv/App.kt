@@ -260,10 +260,13 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     /** The page as one focus group that remembers its last card — where Right from the rail goes. */
     val page = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
+    // One focus ring for the pages, gliding from card to card; the rail, the player and the sheets keep their own.
+    val focusRing = rememberFocusRing()
     Box(Modifier.fillMaxSize()) {
         // One page at a time, and no fade: a page's alpha draws the whole screen offscreen for
         // every frame of it, which this TV's GPU can't do at speed, just as the page is busiest.
         val pageKey = top?.key ?: tab.name
+        androidx.compose.runtime.CompositionLocalProvider(LocalFocusRing provides focusRing) {
         key(pageKey) {
             Box(
                 Modifier.fillMaxSize()
@@ -299,6 +302,8 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
                 }
             }
         }
+        }
+        FocusRingLayer(focusRing)
         if (top == null) NavRail(tab, who!!, rail, page, onTab = { tab = it }, onProfile = { switching = true })
 
         if (watch.phase == Phase.INSPECTING) Opening(watch)

@@ -50,6 +50,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.LocalContext
@@ -259,7 +260,15 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit, onTop: (
         ) {
             // The row the remote is on sits at the top of the list, the one above scrolls
             // off: half a row of cards peeking under the synopsis looked broken.
-            fun pin(index: Int) = { scope.launch { state.list.animateScrollToItem(index) }; Unit }
+            // By the spring the rows scroll with, not animateScrollToItem's own curve: the focus ring
+            // rides this scroll, and with two different curves it bobbed between the rows.
+            fun pin(index: Int) = {
+                scope.launch {
+                    val row = state.list.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
+                    if (row != null) state.list.animateScrollBy(row.offset.toFloat(), FocusSpring) else state.list.animateScrollToItem(index)
+                }
+                Unit
+            }
             var at = 0
             if (resuming) item(key = "resume", contentType = "resume") {
                 Rail("Continue Watching", pin(0)) {
