@@ -590,7 +590,7 @@ private fun Player(watch: Watch) {
                             // Aim the engine at the resume point now the real runtime is known.
                             if (startAt > 0 && duration > 0) {
                                 val ratio = minOf(0.99, startAt / duration)
-                                scope.launch(Dispatchers.IO) { engine.setPosition(ratio) }
+                                scope.launch(Dispatchers.IO) { engine.aimStart(ratio) }
                             }
                         }
                     }

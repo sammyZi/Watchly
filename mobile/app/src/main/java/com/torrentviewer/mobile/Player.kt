@@ -891,7 +891,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                                 engine.noteStarted()
                                 // Aim the engine at the resume point now the real runtime is known. Not over a
                                 // measured start: running time is a poorer guess, and pulled pieces from behind the picture.
-                                if (startAt > 0 && duration > 0 && !watch.startIsMeasured()) scope.launch(Dispatchers.IO) { engine.setPosition(minOf(0.99, startAt / duration)) }
+                                if (startAt > 0 && duration > 0 && !watch.startIsMeasured()) scope.launch(Dispatchers.IO) { engine.aimStart(minOf(0.99, startAt / duration)) }
                             }
                         }
                         v.onTime = { ms ->

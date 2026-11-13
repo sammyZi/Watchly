@@ -348,6 +348,15 @@ class TorrentStream(
     /** Server connections already open when [SEEK_READER] was set; one past these replaces it. */
     @Volatile private var seekAfter = 0L
     @Volatile private var seekSetAt = 0L
+    /**
+     * The piece [SEEK_READER] stands at while it is the resume spot seeded when the player opened,
+     * or -1. Still a guess then, and still pre-roll: it keeps to the pre-roll's pieces until the
+     * player gets there. Given a reader's whole zone and first rank, a resume spent 22s on four
+     * header pieces while 75 pieces came in around piece 369 — and the player then went to 426.
+     */
+    @Volatile private var seedPiece = -1
+    /** The seed the last applyZone narrowed, or -1. */
+    private var zoneSeed = -1
 
     /** Readers that closed recently: connection id → (offset, closed at). */
     private val lately = ConcurrentHashMap<Long, Pair<Long, Long>>()
@@ -429,8 +438,20 @@ class TorrentStream(
         // Before the put: pump() must never see the new aim paired with the old count.
         seekAfter = server?.connections() ?: 0L
         seekSetAt = System.currentTimeMillis()
+        seedPiece = -1
         readers[SEEK_READER] = offset
         log("seek: aiming window at ${(ratio * 100).toInt()}% (byte $offset)")
+    }
+
+    /**
+     * [setPosition] for the resume point, once the film has loaded and its real runtime is known —
+     * unless the player is already reading past the header. ExoPlayer loads with the picture up at
+     * its spot, so nothing followed the aim: it led for [SEEK_AIM_MS], 75 pieces from the picture on
+     * one film, with the stuck-piece watchdog on a piece nobody read. Seen in 13 of 52 starts.
+     */
+    fun aimStart(ratio: Double) {
+        if (readers.any { it.key != SEEK_READER && it.value >= REOPEN_HEAD_BYTES && pieceAt(it.value) < tailPiece }) return
+        setPosition(ratio)
     }
 
     /** The player is blocked on a piece that has not arrived — a seek now would wait on it. */
@@ -933,6 +954,8 @@ class TorrentStream(
         zoneWidth = -1
         zoneRushedTail = false
         zoneWhole = false
+        zoneSeed = -1
+        seedPiece = -1
         lately.clear()
         blockingPiece = -1
         lastKickAt = 0L
@@ -1107,6 +1130,9 @@ class TorrentStream(
             val arrived = readers.entries.any { it.key > seekAfter && it.value >= REOPEN_HEAD_BYTES && pieceAt(it.value) < tailPiece }
             if (arrived || clock - seekSetAt > SEEK_AIM_MS) readers.remove(SEEK_READER)
         }
+        if (!readers.containsKey(SEEK_READER)) seedPiece = -1
+        // Not while a real reader is on that piece: a resume inside the head never counts as arrived.
+        val seed = seedPiece.takeIf { s -> s >= 0 && readers.none { it.key != SEEK_READER && pieceAt(it.value) == s } } ?: -1
 
         val pieceLen = ti.pieceLength().toLong().coerceAtLeast(1L)
         val prerollPieces = maxOf(1, Math.ceil(prepareBytes.toDouble() / pieceLen).toInt())
@@ -1211,7 +1237,9 @@ class TorrentStream(
         // A peer only doubles up on a block another holds once it has nothing else to ask for, so
         // with read-ahead on offer nobody ever did: 2MB took 25s after a seek, while the same piece
         // as the only one wanted at the start took 1-2s. The read-ahead is back on the next tick.
-        val focus = announcedReady && blocked >= 0 && clock - blockedFrom > LAST_BLOCKS_MS && blocksLeft(h, blocked) <= LAST_BLOCKS
+        // Never for the seed's piece: nobody is reading it yet, and the focus shut out the header pieces
+        // the player was blocked on.
+        val focus = announcedReady && blocked >= 0 && blocked != seed && clock - blockedFrom > LAST_BLOCKS_MS && blocksLeft(h, blocked) <= LAST_BLOCKS
         val aim = if (focus) listOf(blocked) else targets
 
         // `reach` is what the swarm is told to rush; `width` is what it may fetch at all.
@@ -1249,16 +1277,17 @@ class TorrentStream(
         val stale = zoneWidth != width ||
             zoneRushedTail != announcedReady ||
             zoneWhole != whole ||
+            zoneSeed != seed ||
             zoneStarts.size != aim.size ||
             aim.any { t -> zoneStarts.none { t >= it - back && t <= it + width / 2 } }
         val clobbered = !stale && zoneIgnored >= 0 &&
             runCatching { h.piecePriority(zoneIgnored) != Priority.IGNORE }.getOrDefault(false)
         if (clobbered) log("zone: priorities were rewritten (piece $zoneIgnored wanted again) — re-applying")
-        if (stale || clobbered) applyZone(h, aim, width, back, rushTail = announcedReady, whole = whole)
+        if (stale || clobbered) applyZone(h, aim, width, back, rushTail = announcedReady, whole = whole, seed = seed, seedWidth = prerollPieces - 1)
 
         val keep = mutableSetOf<Int>()
         aim.forEachIndexed { rank, target ->
-            val end = minOf(target + reach, lastPiece)
+            val end = minOf(target + if (target == seed) minOf(reach, prerollPieces - 1) else reach, lastPiece)
             for (p in target..end) {
                 keep.add(p)
                 if (h.havePiece(p) || !deadlined.add(p)) continue
@@ -1333,6 +1362,7 @@ class TorrentStream(
             if (resuming) {
                 seekAfter = 0L
                 seekSetAt = System.currentTimeMillis()
+                seedPiece = startPiece
                 readers[SEEK_READER] = startOffset
             }
             log("ready in ${(System.currentTimeMillis() - readyAt) / 1000}s at ${status.downloadRate() / 1024}kB/s -> ${srv.url}")
@@ -1443,6 +1473,7 @@ class TorrentStream(
             if (readers.isEmpty()) {
                 seekAfter = server?.connections() ?: 0L
                 seekSetAt = System.currentTimeMillis()
+                seedPiece = -1
                 readers[SEEK_READER] = at
             }
             server?.reopen()
@@ -1482,15 +1513,17 @@ class TorrentStream(
      * One zone per reader (DEFAULT), a band behind it and spare work past it (LOW),
      * the tail (DEFAULT), everything else in the file IGNORE.
      */
-    private fun applyZone(h: TorrentHandle, targets: List<Int>, width: Int, back: Int, rushTail: Boolean, whole: Boolean) {
+    private fun applyZone(h: TorrentHandle, targets: List<Int>, width: Int, back: Int, rushTail: Boolean, whole: Boolean, seed: Int = -1, seedWidth: Int = 0) {
         val prios = runCatching { h.piecePriorities() }.getOrNull() ?: return
         // A re-added magnet without its metadata drops every priority: try again next tick.
         if (prios.size <= lastPiece) return
-        val zones = targets.map { it..minOf(it + width, lastPiece) }
-        val behind = targets.mapNotNull { if (it > firstPiece) maxOf(firstPiece, it - back)..(it - 1) else null }
+        // The seed is a guess the player has not followed yet: its pre-roll pieces, nothing behind it. See seedPiece.
+        val widths = targets.map { if (it == seed) minOf(width, seedWidth) else width }
+        val zones = targets.mapIndexed { i, t -> t..minOf(t + widths[i], lastPiece) }
+        val behind = targets.mapNotNull { if (it > firstPiece && it != seed) maxOf(firstPiece, it - back)..(it - 1) else null }
         // Spare work keeps the wanted set from ever completing — a "finished" torrent drops its seeds.
         // At least one piece, so pre-roll's one-piece zones keep it too.
-        val spare = targets.map { (it + width + 1)..minOf(it + width + maxOf(1, width / 2), lastPiece) }
+        val spare = targets.mapIndexed { i, t -> (t + widths[i] + 1)..minOf(t + widths[i] + maxOf(1, widths[i] / 2), lastPiece) }
         val pieceLen = (info?.pieceLength() ?: 1).toLong().coerceAtLeast(1L)
         val tailEnd = if (rushTail) lastPiece else minOf(lastPiece, tailPiece + maxOf(0, (2L * 1024 * 1024 / pieceLen).toInt() - 1))
         for (p in firstPiece..lastPiece) {
@@ -1514,6 +1547,7 @@ class TorrentStream(
         zoneWidth = width
         zoneRushedTail = rushTail
         zoneWhole = whole
+        zoneSeed = seed
         log("zone: ${zones.joinToString(", ") { "${it.first}..${it.last}" }} (back $back, tail $tailPiece..$tailEnd)")
     }
 
