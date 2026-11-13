@@ -267,6 +267,8 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         key(pageKey) {
             Box(
                 Modifier.fillMaxSize()
+                    // The pages only: the player counts a held arrow's repeats to seek faster.
+                    .pacedArrows()
                     .focusRequester(page)
                     .focusRestorer()
                     .focusGroup()

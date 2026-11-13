@@ -45,6 +45,11 @@ import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -68,6 +73,27 @@ object Safe {
 /** The collapsed rail floats over the page; every page leaves this gutter for it. */
 val NAV_W = 72.dp
 val GUTTER = NAV_W + 40.dp
+
+/** A held arrow moves focus once in this long. Calibration knob: lower is faster through a long row, and more to draw each second. */
+private const val HELD_MOVE_MS = 90L
+
+/**
+ * A held arrow repeats about twenty times a second, and every repeat is a focus move: a card to grow,
+ * a row to scroll, the next card and its picture to make. A television's processor can't finish one
+ * before the next arrives, so they pile up and the row stutters along behind the remote. Paced to one
+ * move per [HELD_MOVE_MS], each is drawn through before the next. A press — not a hold — always goes.
+ */
+fun Modifier.pacedArrows(): Modifier = composed {
+    val last = remember { longArrayOf(0L) }
+    onPreviewKeyEvent { e ->
+        val k = e.key
+        if (e.type != KeyEventType.KeyDown || (k != Key.DirectionLeft && k != Key.DirectionRight && k != Key.DirectionUp && k != Key.DirectionDown)) return@onPreviewKeyEvent false
+        val native = e.nativeKeyEvent
+        if (native.repeatCount > 0 && native.eventTime - last[0] < HELD_MOVE_MS) return@onPreviewKeyEvent true
+        last[0] = native.eventTime
+        false
+    }
+}
 
 /** Runs when focus moves into this subtree from outside — not on every move within it. */
 fun Modifier.onFocusEnter(enter: () -> Unit): Modifier = composed {
