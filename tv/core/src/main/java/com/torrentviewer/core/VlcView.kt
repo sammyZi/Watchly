@@ -77,6 +77,8 @@ abstract class Video(context: Context) : FrameLayout(context) {
     abstract fun addSubtitleFiles(paths: List<String>, select: Boolean = false)
     /** Positive shows subtitles later. False when this backend cannot shift them that way. */
     open fun setSubtitleDelay(ms: Long): Boolean = ms == 0L
+    /** Hand the film's audio to [meter] (null stops), for automatic subtitle sync. False when this backend can't: libVLC plays it itself. */
+    open fun listenForSpeech(meter: SpeechMeter?): Boolean = false
     abstract fun stats(): Stats?
 }
 

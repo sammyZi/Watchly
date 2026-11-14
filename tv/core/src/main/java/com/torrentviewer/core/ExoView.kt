@@ -24,6 +24,9 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.audio.TeeAudioProcessor
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.extractor.DefaultExtractorsFactory
@@ -129,9 +132,46 @@ class ExoView(context: Context) : Video(context) {
     /** Media3 has no time events: the screen's clock is read four times a second. */
     private val tick = object : Runnable {
         override fun run() {
-            player?.let { onTime(it.currentPosition) }
+            player?.let {
+                knownMs = it.currentPosition
+                onTime(knownMs)
+            }
             postDelayed(this, 250)
         }
+    }
+
+    /** Where automatic subtitle sync listens, while it does: see [listenForSpeech]. */
+    @Volatile private var speech: SpeechMeter? = null
+    /** The film's position as last seen on the main thread: where a fresh run of audio samples begins. */
+    @Volatile private var knownMs = 0L
+
+    /** Every decoded sample on its way to the speaker, read and passed on untouched. Costs nothing while nobody listens. */
+    private val tee = TeeAudioProcessor(object : TeeAudioProcessor.AudioBufferSink {
+        override fun flush(sampleRateHz: Int, channelCount: Int, encoding: Int) {
+            speech?.restart(knownMs, sampleRateHz, channelCount, encoding == C.ENCODING_PCM_16BIT, encoding == C.ENCODING_PCM_FLOAT)
+        }
+
+        override fun handleBuffer(buffer: java.nio.ByteBuffer) {
+            speech?.feed(buffer)
+        }
+    })
+
+    /**
+     * Start or stop handing the film's audio to [meter]. Started, the player seeks — exactly — to
+     * where the picture is: samples are counted from a known spot in the film, and only a seek
+     * starts the audio afresh at one. It costs a moment's pause.
+     */
+    override fun listenForSpeech(meter: SpeechMeter?): Boolean {
+        speech = meter
+        val p = player ?: return false
+        if (meter != null) {
+            val at = p.currentPosition
+            knownMs = at
+            p.setSeekParameters(SeekParameters.EXACT)
+            p.seekTo(at)
+            p.setSeekParameters(SeekParameters.CLOSEST_SYNC)
+        }
+        return true
     }
 
     init {
@@ -167,6 +207,7 @@ class ExoView(context: Context) : Video(context) {
     override val aheadSeconds: Double get() = (player?.totalBufferedDuration ?: 0L) / 1000.0
 
     override fun seekTo(ms: Long) {
+        knownMs = ms
         player?.seekTo(ms)
     }
 
@@ -269,7 +310,15 @@ class ExoView(context: Context) : Video(context) {
     private fun build(): ExoPlayer {
         val extractors = DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true)
         // The TV's own decoders first; FFmpeg for the audio it has none for (DTS, TrueHD, …).
-        val renderers = DefaultRenderersFactory(context)
+        // The film's decoded audio passes through [tee] on its way out, for automatic subtitle sync.
+        val renderers = object : DefaultRenderersFactory(context) {
+            override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioOutputPlaybackParams: Boolean): AudioSink =
+                DefaultAudioSink.Builder(context)
+                    .setEnableFloatOutput(enableFloatOutput)
+                    .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
+                    .setAudioProcessors(arrayOf(tee))
+                    .build()
+        }
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setEnableDecoderFallback(true)
         val load = DefaultLoadControl.Builder()
@@ -294,6 +343,7 @@ class ExoView(context: Context) : Video(context) {
 
     private fun prepare() {
         val uri = source?.takeIf { it.isNotBlank() } ?: return
+        knownMs = startMs
         try {
             val p = player ?: build().also { player = it }
             // Read by every request the next item makes, so a link's headers go with it — and none with the next file.
@@ -422,6 +472,12 @@ class ExoView(context: Context) : Video(context) {
     }
 
     private val listener = object : Player.Listener {
+        // Where the film really is after a seek: CLOSEST_SYNC lands on the keyframe before the spot asked for.
+        override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+            knownMs = newPosition.positionMs
+            if (reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT) speech?.anchor(newPosition.positionMs)
+        }
+
         override fun onPlaybackStateChanged(state: Int) {
             val p = player ?: return
             when (state) {

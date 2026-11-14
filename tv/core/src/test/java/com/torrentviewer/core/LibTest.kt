@@ -524,9 +524,49 @@ class LibTest {
         // Already shifted by 2 s (lines show at 7 s and 64.5 s) and pressed again at 67 s: the delay is
         // worked out afresh against the line the press was nearest, not added to the old one.
         assertEquals(4_250L, SubtitleSync.match(starts, pressMs = 67_000, delayMs = 2_000)!!.delayMs)
+        // Tapped again and again for one line: the line already moved is not taken again, so the
+        // delay does not grow by the time between taps.
+        val first = SubtitleSync.match(starts, pressMs = 65_000, delayMs = 0)!!
+        val again = SubtitleSync.match(starts, pressMs = 65_400, delayMs = first.delayMs, anchored = first.lineMs)
+        assertTrue(again == null || again.lineMs != first.lineMs)
         // Pressed in the middle of nowhere: no line within reach.
         assertNull(SubtitleSync.match(starts, pressMs = 200_000, delayMs = 0))
         assertNull(SubtitleSync.match(emptyList(), 5_000, 0))
+    }
+
+    @Test fun subtitleAutoSync() {
+        // Two minutes of dialogue: lines of 1.5–3.5 s with gaps of 0.8–4 s, as a film has.
+        val rnd = java.util.Random(7)
+        val cues = ArrayList<LongRange>()
+        var t = 60_000L
+        while (t < 180_000) {
+            val len = 1_500L + rnd.nextInt(2_000)
+            cues += t..(t + len)
+            t += len + 800 + rnd.nextInt(3_200)
+        }
+        val startMs = 60_000L
+        val frames = 1_200 // 120 s
+        // The film speaks 1.5 s after the file says: the subtitles are early, and want +1.5 s.
+        val late = 1_500L
+        val speech = BooleanArray(frames) { i ->
+            val at = startMs + i * SubtitleSync.FRAME_MS - late
+            val spoken = cues.any { at in it }
+            // A fifth of the frames wrong either way: music, effects, a quiet word.
+            if (rnd.nextInt(5) == 0) !spoken else spoken
+        }
+        val found = SubtitleSync.align(speech, startMs, cues)!!
+        assertEquals(late, found.delayMs)
+        // And the other way: subtitles late by 2.3 s want -2.3 s.
+        val early = BooleanArray(frames) { i -> cues.any { (startMs + i * SubtitleSync.FRAME_MS + 2_300) in it } }
+        assertEquals(-2_300L, SubtitleSync.align(early, startMs, cues)!!.delayMs)
+        // Noise with no speech in it: not sure, so nothing is changed.
+        val noise = BooleanArray(frames) { rnd.nextBoolean() }
+        assertNull(SubtitleSync.align(noise, startMs, cues))
+        // Too few lines heard to tell.
+        assertNull(SubtitleSync.align(BooleanArray(50) { it % 2 == 0 }, startMs, cues))
+        // Speech is the louder frames, not near-silence.
+        val energy = FloatArray(100) { if (it % 2 == 0) -2f else -12f }
+        assertEquals(50, SpeechMeter.speechOf(energy).count { it })
     }
 
     @Test fun slowReasons() {
