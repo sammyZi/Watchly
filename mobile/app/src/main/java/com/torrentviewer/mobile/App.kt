@@ -249,12 +249,13 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         ) askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
-    // Once, the first time there is a series to be told about: the permission new-episode alerts need.
-    val watchedHistory by History.items.collectAsState()
-    LaunchedEffect(watchedHistory.any { it.kind == "tv" }) {
-        if (watchedHistory.none { it.kind == "tv" } || !SettingsStore.value.value.episodeAlerts) return@LaunchedEffect
-        if (Kv.global("asked-episode-alerts") != null || !EpisodeAlerts.needsPermission(context)) return@LaunchedEffect
-        Kv.setGlobal("asked-episode-alerts", "1")
+    // Once: the permission new-episode alerts need. They are on by default, and waiting for a series
+    // to turn up in the history left the setting saying On with Android never asked. Refused, the
+    // setting itself offers it again.
+    LaunchedEffect(Unit) {
+        if (!SettingsStore.value.value.episodeAlerts || !EpisodeAlerts.needsPermission(context)) return@LaunchedEffect
+        if (Kv.global("asked-episode-alerts-2") != null) return@LaunchedEffect
+        Kv.setGlobal("asked-episode-alerts-2", "1")
         askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 

@@ -579,7 +579,19 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
     fun set(next: Settings) = SettingsStore.save(next)
     // New-episode alerts: turned on, Android 13+ asks before a notification can show.
     val alertContext = LocalContext.current
-    val askAlerts = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    /** Whether Android lets a notification show; looked at again after each ask. */
+    var alertsBlocked by remember { mutableStateOf(EpisodeAlerts.needsPermission(alertContext)) }
+    val askAlerts = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        alertsBlocked = !granted
+        // Refused twice, Android stops showing the question: its own settings page is the way left.
+        if (!granted) runCatching {
+            alertContext.startActivity(
+                android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, alertContext.packageName)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+    }
     /** The page open, by its title; null is the list of them. */
     var page by rememberSaveable { mutableStateOf<String?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -595,6 +607,8 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
         if (page == null) {
             Heading("Settings")
             Field(query, { query = it }, "Search settings", Modifier.fillMaxWidth().padding(bottom = 12.dp), leading = L.drawable.lucide_ic_search)
+            // Up top, where it is seen: as one row among the settings nobody found it.
+            if (query.isBlank()) StatsBanner { page = "Your stats" }
             SettingsList(
                 listOfNotNull(
                     // Stays here until it is installed, "Not now" or not: the card is the one that goes away.
@@ -775,6 +789,11 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
                     set(settings.copy(episodeAlerts = false))
                     EpisodeAlerts.schedule(alertContext)
                 })
+            }
+            // On, but Android is not letting notifications through: say so, with the way to fix it.
+            if (settings.episodeAlerts && alertsBlocked) {
+                Text("Notifications are turned off for Watchly, so alerts can't show yet.", Modifier.padding(top = 10.dp, bottom = 8.dp), style = Type.meta.copy(color = Ink.warn))
+                Chip("Allow notifications", false, onClick = { askAlerts.launch(android.Manifest.permission.POST_NOTIFICATIONS) })
             }
         }
 

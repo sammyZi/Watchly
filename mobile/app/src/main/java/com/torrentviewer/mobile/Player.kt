@@ -104,6 +104,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -353,6 +354,8 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     val langDone = remember { booleanArrayOf(false, false) }
     /** Subtitle offset in ms; positive shows them later. */
     var subDelay by remember { mutableLongStateOf(0L) }
+    /** What "Sync to speech" last did, and whether it worked: shown in the subtitle panel. */
+    var syncNote by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     val cast = remember { castContext(context) }
     var castSession by remember { mutableStateOf(cast?.sessionManager?.currentCastSession?.takeIf { it.isConnected }) }
     var castPaused by remember { mutableStateOf(false) }
@@ -1063,9 +1066,10 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
             }, size = 48.dp)
         }
 
-        // A short word for anything that happened without the bar: "Added EN", "60%".
+        // A short word for anything that happened without the bar: "Added EN", "60%". Over the panels
+        // too: said from the subtitle panel, it came up behind it and was never read.
         val shownHud = hud
-        AnimatedVisibility(shownHud != null && !waiting, Modifier.align(Alignment.TopCenter).windowInsetsPadding(WindowInsets.safeDrawing).padding(top = 20.dp), enter = fadeIn() + slideInVertically { -it }, exit = fadeOut()) {
+        AnimatedVisibility(shownHud != null && !waiting, Modifier.zIndex(10f).align(Alignment.TopCenter).windowInsetsPadding(WindowInsets.safeDrawing).padding(top = 20.dp), enter = fadeIn() + slideInVertically { -it }, exit = fadeOut()) {
             val h = shownHud ?: return@AnimatedVisibility
             Row(Modifier.clip(CircleShape).background(Color.Black.copy(alpha = 0.78f)).padding(horizontal = 18.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
                 h.icon?.let {
@@ -1175,6 +1179,9 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                     view.value?.setAudioTrack(it)
                 },
                 onFind = ::findSubs,
+                // Only a subtitle file has lines to read; one built into the video is timed with − and +.
+                canSync = subtitle != null && (ready?.subtitleFiles.orEmpty().isNotEmpty() || external.isNotEmpty()),
+                syncNote = syncNote,
                 onSyncLine = {
                     // As a line begins: the subtitle file's nearest line is moved to this moment.
                     val pressMs = (at * 1000).toLong()
@@ -1184,17 +1191,18 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                             files.mapNotNull { f -> runCatching { com.torrentviewer.core.SubtitleSync.match(com.torrentviewer.core.SubtitleSync.starts(java.io.File(f).readText()), pressMs, subDelay) }.getOrNull() }
                                 .minByOrNull { it.distanceMs }
                         }
-                        when {
-                            files.isEmpty() -> say("No subtitle file to sync: this track is inside the video. Use the − and + buttons.", L.drawable.lucide_ic_captions)
-                            best == null -> say("No subtitle line near this moment. Press as someone starts speaking.", L.drawable.lucide_ic_captions)
-                            else -> {
-                                subDelay = best.delayMs
-                                if (view.value?.setSubtitleDelay(best.delayMs) == false) {
-                                    say("Switching to VLC to bring subtitles earlier", L.drawable.lucide_ic_captions)
-                                    tracks = null
-                                    langDone.fill(false)
-                                    vlc = true
-                                } else say("Subtitles synced: %+.1f s".format(best.delayMs / 1000.0), L.drawable.lucide_ic_captions)
+                        // Said in the panel itself, under the button that was pressed.
+                        if (best == null) {
+                            syncNote = "No line near that moment. Tap just as someone starts speaking." to false
+                        } else {
+                            subDelay = best.delayMs
+                            val seconds = "%.1f".format(kotlin.math.abs(best.delayMs) / 1000.0)
+                            syncNote = (if (best.delayMs >= 0) "Synced. Subtitles now show $seconds s later." else "Synced. Subtitles now show $seconds s earlier.") to true
+                            if (view.value?.setSubtitleDelay(best.delayMs) == false) {
+                                say("Switching to VLC to bring subtitles earlier", L.drawable.lucide_ic_captions)
+                                tracks = null
+                                langDone.fill(false)
+                                vlc = true
                             }
                         }
                     }
@@ -1755,6 +1763,8 @@ private fun TracksPanel(
     onSubtitle: (Int?) -> Unit,
     onAudio: (Int) -> Unit,
     onFind: () -> Unit,
+    canSync: Boolean,
+    syncNote: Pair<String, Boolean>?,
     onSyncLine: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -1779,13 +1789,37 @@ private fun TracksPanel(
                         Tap({ onDelay(delay + 100) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_plus, Modifier.padding(8.dp), tint = Color.White, size = 18.dp) }
                     }
                 }
-                // The quick way: press as someone starts to speak and the subtitle file lines up with it.
+                // The quick way: tap as someone starts to speak and the subtitle file lines up with it.
+                // A card of its own, with what happened said in it — not a message behind the panel.
                 item {
-                    Column(Modifier.padding(start = 14.dp, bottom = 10.dp)) {
-                        Tap(onSyncLine, shape = RoundedCornerShape(8.dp)) {
-                            Text("Sync to this line", Modifier.padding(horizontal = 14.dp, vertical = 9.dp), style = Type.label.copy(fontWeight = FontWeight.SemiBold))
+                    val good = Color(0xFF22C55E)
+                    val warn = Color(0xFFF59E0B)
+                    Row(
+                        Modifier.padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 10.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                            .background(Color.White.copy(alpha = 0.07f)).padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.size(36.dp).clip(CircleShape).background(Ink.accent.copy(alpha = if (canSync) 0.9f else 0.3f)), contentAlignment = Alignment.Center) {
+                            Lc(L.drawable.lucide_ic_audio_lines, tint = Color.White, size = 18.dp)
                         }
-                        Text("Press just as someone starts speaking.", Modifier.padding(top = 4.dp), style = Type.meta.copy(color = Ink.faint))
+                        Column(Modifier.padding(horizontal = 12.dp).weight(1f)) {
+                            Text("Sync to speech", style = Type.label.copy(fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = if (canSync) 1f else 0.5f)))
+                            when {
+                                !canSync -> Text("Works with a subtitle file. This one is built into the video: use − and + above.", style = Type.meta.copy(color = Color.White.copy(alpha = 0.55f)))
+                                syncNote != null -> Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Lc(if (syncNote.second) L.drawable.lucide_ic_circle_check else L.drawable.lucide_ic_info, tint = if (syncNote.second) good else warn, size = 14.dp)
+                                    Text("  " + syncNote.first, style = Type.meta.copy(color = if (syncNote.second) good else warn))
+                                }
+                                else -> Text("Tap the moment someone starts speaking.", style = Type.meta.copy(color = Color.White.copy(alpha = 0.55f)))
+                            }
+                        }
+                        if (canSync) Tap(onSyncLine, shape = CircleShape) { pressed ->
+                            Text(
+                                if (syncNote?.second == true) "Again" else "Sync",
+                                Modifier.background(if (pressed) Color.White.copy(alpha = 0.8f) else Color.White).padding(horizontal = 16.dp, vertical = 8.dp),
+                                style = Type.label.copy(color = Color.Black, fontWeight = FontWeight.Bold),
+                            )
+                        }
                     }
                 }
                 item {
