@@ -513,6 +513,22 @@ class LibTest {
         assertNull(NewEpisodes.latestAired(Title("tt8", "tv", "Soon", episodes = listOf(ep(1, 1, "2027-01-01"))), now))
     }
 
+    @Test fun subtitleSync() {
+        val srt = "1\n00:00:05,000 --> 00:00:07,000\nHello\n\n2\n00:01:02,500 --> 00:01:04,000\nBye\n"
+        assertEquals(listOf(5_000L, 62_500L), SubtitleSync.starts(srt))
+        assertEquals(listOf(62_500L), SubtitleSync.starts("WEBVTT\n\n01:02.500 --> 01:04.000\nHi"))
+        assertEquals(listOf(62_500L, 3_723_450L), SubtitleSync.starts("[Events]\nDialogue: 0,0:01:02.50,0:01:05.00,Default,,0,0,0,,Hi\nDialogue: 0,1:02:03.45,1:02:05.00,Default,,0,0,0,,Yo"))
+        val starts = SubtitleSync.starts(srt)
+        // The line says 62.5 s; pressed at 65 s, less a quarter second of reaction, it was heard at 64.75 s.
+        assertEquals(2_250L, SubtitleSync.match(starts, pressMs = 65_000, delayMs = 0)!!.delayMs)
+        // Already shifted by 2 s (lines show at 7 s and 64.5 s) and pressed again at 67 s: the delay is
+        // worked out afresh against the line the press was nearest, not added to the old one.
+        assertEquals(4_250L, SubtitleSync.match(starts, pressMs = 67_000, delayMs = 2_000)!!.delayMs)
+        // Pressed in the middle of nowhere: no line within reach.
+        assertNull(SubtitleSync.match(starts, pressMs = 200_000, delayMs = 0))
+        assertNull(SubtitleSync.match(emptyList(), 5_000, 0))
+    }
+
     @Test fun slowReasons() {
         val mb = 1_000_000
         // Not long enough to say, or nobody to blame yet.

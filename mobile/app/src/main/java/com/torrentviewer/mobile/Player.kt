@@ -1175,6 +1175,30 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                     view.value?.setAudioTrack(it)
                 },
                 onFind = ::findSubs,
+                onSyncLine = {
+                    // As a line begins: the subtitle file's nearest line is moved to this moment.
+                    val pressMs = (at * 1000).toLong()
+                    val files = ready?.subtitleFiles.orEmpty() + external.map { it.path }
+                    scope.launch {
+                        val best = withContext(Dispatchers.IO) {
+                            files.mapNotNull { f -> runCatching { com.torrentviewer.core.SubtitleSync.match(com.torrentviewer.core.SubtitleSync.starts(java.io.File(f).readText()), pressMs, subDelay) }.getOrNull() }
+                                .minByOrNull { it.distanceMs }
+                        }
+                        when {
+                            files.isEmpty() -> say("No subtitle file to sync: this track is inside the video. Use the − and + buttons.", L.drawable.lucide_ic_captions)
+                            best == null -> say("No subtitle line near this moment. Press as someone starts speaking.", L.drawable.lucide_ic_captions)
+                            else -> {
+                                subDelay = best.delayMs
+                                if (view.value?.setSubtitleDelay(best.delayMs) == false) {
+                                    say("Switching to VLC to bring subtitles earlier", L.drawable.lucide_ic_captions)
+                                    tracks = null
+                                    langDone.fill(false)
+                                    vlc = true
+                                } else say("Subtitles synced: %+.1f s".format(best.delayMs / 1000.0), L.drawable.lucide_ic_captions)
+                            }
+                        }
+                    }
+                },
                 onDismiss = { panel = null },
             )
             Panel.SPEED -> Sheet(
@@ -1731,6 +1755,7 @@ private fun TracksPanel(
     onSubtitle: (Int?) -> Unit,
     onAudio: (Int) -> Unit,
     onFind: () -> Unit,
+    onSyncLine: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     BackHandler(onBack = onDismiss)
@@ -1752,6 +1777,15 @@ private fun TracksPanel(
                             Text("%+.1f s".format(delay / 1000.0), Modifier.padding(horizontal = 10.dp, vertical = 6.dp), style = Type.label.copy(fontWeight = FontWeight.SemiBold, color = if (delay != 0L) Ink.accent else Color.White))
                         }
                         Tap({ onDelay(delay + 100) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_plus, Modifier.padding(8.dp), tint = Color.White, size = 18.dp) }
+                    }
+                }
+                // The quick way: press as someone starts to speak and the subtitle file lines up with it.
+                item {
+                    Column(Modifier.padding(start = 14.dp, bottom = 10.dp)) {
+                        Tap(onSyncLine, shape = RoundedCornerShape(8.dp)) {
+                            Text("Sync to this line", Modifier.padding(horizontal = 14.dp, vertical = 9.dp), style = Type.label.copy(fontWeight = FontWeight.SemiBold))
+                        }
+                        Text("Press just as someone starts speaking.", Modifier.padding(top = 4.dp), style = Type.meta.copy(color = Ink.faint))
                     }
                 }
                 item {
