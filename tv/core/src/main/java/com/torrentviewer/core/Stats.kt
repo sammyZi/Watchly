@@ -20,6 +20,12 @@ object WatchLog {
 
     data class Seen(val name: String, val kind: String)
 
+    /**
+     * The series, not the episode: an episode's entry in History is named "The Mentalist · S04E09",
+     * and the stats listed that as the title watched. Applied as it is read too, for what was logged so.
+     */
+    internal fun showName(label: String) = label.replace(Regex("""\s+·\s+S\d+:?E\d+.*$"""), "")
+
     /** [days]: date (yyyy-MM-dd) → imdb → seconds. */
     data class Log(val base: Double, val days: Map<String, Map<String, Double>>, val titles: Map<String, Seen>)
 
@@ -31,7 +37,7 @@ object WatchLog {
             d.keys().asSequence().associateWith { k -> d.getJSONObject(k).let { t -> t.keys().asSequence().associateWith { t.optDouble(it) } } }
         }.orEmpty()
         val titles = o.optJSONObject("titles")?.let { t ->
-            t.keys().asSequence().associateWith { k -> t.getJSONObject(k).let { Seen(it.optString("n"), it.optString("k", "movie")) } }
+            t.keys().asSequence().associateWith { k -> t.getJSONObject(k).let { Seen(showName(it.optString("n")), it.optString("k", "movie")) } }
         }.orEmpty()
         Log(o.optDouble("base", 0.0), days, titles)
     }.getOrNull() ?: Log(0.0, emptyMap(), emptyMap())
@@ -48,7 +54,8 @@ object WatchLog {
     @Synchronized
     fun add(item: Item, seconds: Double, now: Long = System.currentTimeMillis()) {
         if (seconds <= 0) return
-        val id = item.imdb ?: ("name:" + item.label)
+        val name = showName(item.label)
+        val id = item.imdb ?: ("name:$name")
         var log = read()
         if (log.days.isEmpty() && log.base == 0.0) {
             // The first: what History already knew is the best guess at what came before.
@@ -58,7 +65,7 @@ object WatchLog {
         val days = (log.days + (today to (log.days[today].orEmpty() + (id to ((log.days[today]?.get(id) ?: 0.0) + seconds)))))
             .toSortedMap().let { m -> m.keys.toList().let { k -> m.filterKeys { it in k.takeLast(KEEP_DAYS) } } }
         val kept = days.values.flatMap { it.keys }.toSet()
-        write(log.copy(days = days, titles = (log.titles + (id to Seen(item.label, item.kind ?: "movie"))).filterKeys { it in kept }))
+        write(log.copy(days = days, titles = (log.titles + (id to Seen(name, item.kind ?: "movie"))).filterKeys { it in kept }))
     }
 }
 

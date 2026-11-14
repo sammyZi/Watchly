@@ -62,6 +62,14 @@ data class Title(
     fun facts(): List<String> = listOfNotNull(year?.take(9), runtime?.let(::runtimeLabel)) + genres.take(3)
 }
 
+/**
+ * Cinemeta gives some series a runtime of "1 min". Shown, a title page read "2005–2010 · 1 min";
+ * worse, it is what a stream's bitrate is worked out from before the file's own length is known,
+ * and a 1 GB episode over 60 s is a film nobody's line could play. Under five minutes is not kept.
+ */
+internal fun plausibleRuntime(runtime: String): Boolean =
+    Regex("(\\d+)\\s*min", RegexOption.IGNORE_CASE).matchEntire(runtime.trim())?.groupValues?.get(1)?.toIntOrNull()?.let { it >= 5 } ?: true
+
 /** "107 min" as "1h 47m" from the hour up; anything else as it came. */
 fun runtimeLabel(runtime: String): String {
     val minutes = Regex("(\\d+)\\s*min", RegexOption.IGNORE_CASE).matchEntire(runtime.trim())?.groupValues?.get(1)?.toInt() ?: return runtime
@@ -417,7 +425,7 @@ fun toTitles(metas: JSONArray, kind: String, withEpisodes: Boolean = false, anyI
             awards = m.str("awards"),
             backdrop = m.str("background"),
             logo = m.str("logo"),
-            runtime = m.str("runtime"),
+            runtime = m.str("runtime")?.takeIf(::plausibleRuntime),
             trailer = trailerOf(m),
             episodes = if (!withEpisodes) emptyList() else toEpisodes(m.optJSONArray("videos")).ifEmpty {
                 // A type of an addon's own with no videos plays its own id, as one "episode".

@@ -570,6 +570,13 @@ class LibTest {
         assertEquals(3, s.streak)
         assertEquals(3, s.longestStreak)
         assertEquals(5, s.activeDays)
+        // A series is counted as itself, not as the episode its history entry is named for.
+        assertEquals("The Mentalist", WatchLog.showName("The Mentalist · S04E09"))
+        assertEquals("Dune · Part Two", WatchLog.showName("Dune · Part Two"))
+        // Cinemeta's "1 min" for a series is not a runtime; a real one is kept as it came.
+        assertFalse(plausibleRuntime("1 min"))
+        assertTrue(plausibleRuntime("43 min"))
+        assertTrue(plausibleRuntime("2h 10min"))
         assertEquals("3h 05m", WatchStats.hours(3 * h + 5 * 60))
         assertEquals("42m", WatchStats.hours(42 * 60.0))
     }
