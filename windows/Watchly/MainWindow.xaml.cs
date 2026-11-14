@@ -99,7 +99,7 @@ public partial class MainWindow : Window
     };
 
     readonly Dictionary<string, FrameworkElement> tabViews = new();
-    readonly Dictionary<string, (TextBlock Label, Icon Icon, Border Tick)> tabParts = new();
+    readonly Dictionary<string, (TextBlock Label, Icon Icon, Border Tick, Border Plate)> tabParts = new();
     string tab = "home";
 
     /// <summary>Who is watching. Null until someone is picked at launch.</summary>
@@ -312,13 +312,20 @@ public partial class MainWindow : Window
         {
             var glyph = new Icon { Kind = icon, Size = 22, HorizontalAlignment = HorizontalAlignment.Center };
             var text = new TextBlock { Text = label, FontSize = 11, Margin = new Thickness(0, 3, 0, 0), HorizontalAlignment = HorizontalAlignment.Center };
-            var tick = new Border { Width = 3, Height = 22, CornerRadius = new CornerRadius(2), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center };
+            // The tab you are on: a plate behind it and the red tick at its edge. Both are always
+            // there and only fade or grow (see ShowTab), so changing tab moves nothing else.
+            var tick = new Border { Width = 3, Height = 22, CornerRadius = new CornerRadius(2), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Opacity = 0, IsHitTestVisible = false };
             tick.SetResourceReference(Border.BackgroundProperty, "Accent");
+            var plate = new Border { CornerRadius = new CornerRadius(12), Opacity = 0, IsHitTestVisible = false };
+            plate.SetResourceReference(Border.BackgroundProperty, "TintLo");
             var button = new Button
             {
-                Style = (Style)FindResource("Bare"),
-                Height = 60,
-                Content = new Grid { Children = { tick, new StackPanel { Children = { glyph, text }, VerticalAlignment = VerticalAlignment.Center } } },
+                // Row: the same plate, fainter, under the pointer.
+                Style = (Style)FindResource("Row"),
+                Height = 58,
+                Margin = new Thickness(7, 1, 7, 1),
+                Tag = 12,
+                Content = new Grid { Children = { plate, tick, new StackPanel { Children = { glyph, text }, VerticalAlignment = VerticalAlignment.Center } } },
                 ToolTip = label,
             };
             // A tab is a fresh start, as on the phone: whatever pages were open over it close.
@@ -328,15 +335,19 @@ public partial class MainWindow : Window
                 ShowTab(key);
             };
             TabButtons.Children.Add(button);
-            tabParts[key] = (text, glyph, tick);
+            tabParts[key] = (text, glyph, tick, plate);
             if (key == "addons") addonsTab = button;
         }
     }
 
     Button? addonsTab;
+    /// <summary>The tab the rail marks, so the marks move only when it changes.</summary>
+    string? marked;
 
     public void ShowTab(string key)
     {
+        // Arriving somewhere new: the page rises into place. The tab already on screen is left alone.
+        var arriving = key != tab || !tabViews.ContainsKey(key);
         tab = key;
         if (!tabViews.TryGetValue(key, out var view))
         {
@@ -355,14 +366,20 @@ public partial class MainWindow : Window
         // A kids profile has no say in where streams come from.
         if (addonsTab is not null) addonsTab.Visibility = KidsMode.On ? Visibility.Collapsed : Visibility.Visible;
         foreach (var (k, v) in tabViews) v.Visibility = k == key ? Visibility.Visible : Visibility.Collapsed;
+        if (arriving) Motion.Enter(view, 12, 0, 220);
         foreach (var (k, parts) in tabParts)
         {
             var on = k == key;
             parts.Label.SetResourceReference(TextBlock.ForegroundProperty, on ? "Text" : "Faint");
             parts.Label.FontWeight = on ? FontWeights.Bold : FontWeights.Medium;
             parts.Icon.SetResourceReference(Controls.Icon.ForegroundProperty, on ? "Text" : "Faint");
-            parts.Tick.Visibility = on ? Visibility.Visible : Visibility.Hidden;
+            if (marked == key) continue;
+            // The tick shrinks out of the tab left and grows into the one chosen; the plate fades with it.
+            Motion.Fade(parts.Tick, on ? 1 : 0, on ? Motion.Normal : 100);
+            Motion.ScaleY(parts.Tick, on ? 1 : 0.2, on ? Motion.Normal : 100);
+            Motion.Fade(parts.Plate, on ? 1 : 0, on ? Motion.Fast : 100);
         }
+        marked = key;
     }
 
     // ── Layers over the tabs ────────────────────────────────────────────────
@@ -372,6 +389,9 @@ public partial class MainWindow : Window
         page.SetResourceReference(BackgroundProperty, "PageBg");
         Layers.Children.Add(page);
         ShowTopLayerOnly();
+        // Going deeper: the page comes up over where you were. It is opaque and the one below is
+        // hidden at once, so there is one page on screen throughout and nothing to show through.
+        Motion.Enter(page, 16);
     }
 
     public void CloseLayer(FrameworkElement page)
@@ -379,6 +399,9 @@ public partial class MainWindow : Window
         Layers.Children.Remove(page);
         (page as IDisposable)?.Dispose();
         ShowTopLayerOnly();
+        // Back: what was underneath is where it was left (layout and scroll kept), so it only fades up.
+        var under = Layers.Children.Count > 0 ? (FrameworkElement)Layers.Children[^1] : tabViews.GetValueOrDefault(tab);
+        if (under is not null) Motion.Enter(under, 0, 0, Motion.Fast);
     }
 
     /// <summary>
@@ -630,7 +653,9 @@ public partial class MainWindow : Window
     {
         opening = cts;
         BusyText.Text = text;
-        BusyCard.Visibility = cts is null ? Visibility.Collapsed : Visibility.Visible;
+        var show = cts is not null;
+        if (show && BusyCard.Visibility != Visibility.Visible) Motion.Enter(BusyCard, 12, 0, Motion.Fast);
+        BusyCard.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         OpeningChanged?.Invoke();
     }
 
@@ -1167,16 +1192,26 @@ public partial class MainWindow : Window
     // ── Feedback ────────────────────────────────────────────────────────────
 
     DispatcherTimer? toastTimer;
+    /// <summary>Which toast is up: one fading out must not take down the one that replaced it.</summary>
+    int toastTurn;
 
     public void Toast(string message, bool bad = false)
     {
+        var mine = ++toastTurn;
         ToastText.Text = message;
         ToastIcon.SetResourceReference(Controls.Icon.ForegroundProperty, bad ? "Danger" : "Accent");
+        // Up from the foot the first time; a second message while one is showing swaps the words in place.
+        if (ToastBar.Visibility != Visibility.Visible) Motion.Enter(ToastBar, 14, 0, Motion.Fast);
+        else Motion.Fade(ToastBar, 1, 80);
         ToastBar.Visibility = Visibility.Visible;
         toastTimer?.Stop();
-        toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(bad ? 5 : 3) };
-        toastTimer.Tick += (_, _) => { ToastBar.Visibility = Visibility.Collapsed; toastTimer.Stop(); };
-        toastTimer.Start();
+        var timer = toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(bad ? 5 : 3) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            Motion.Fade(ToastBar, 0, Motion.Fast, () => { if (mine == toastTurn) ToastBar.Visibility = Visibility.Collapsed; });
+        };
+        timer.Start();
     }
 
     Action? confirmAction;
@@ -1192,6 +1227,11 @@ public partial class MainWindow : Window
         ConfirmIcon.SetResourceReference(Controls.Icon.ForegroundProperty, destructive ? "Danger" : "Accent");
         ConfirmBadge.SetResourceReference(Border.BackgroundProperty, destructive ? "DangerSoft" : "AccentSoft");
         confirmAction = onConfirm;
+        if (ConfirmLayer.Visibility != Visibility.Visible)
+        {
+            Motion.Enter(ConfirmLayer, 0, 0, Motion.Fast);
+            Motion.Pop(ConfirmCard);
+        }
         ConfirmLayer.Visibility = Visibility.Visible;
     }
 

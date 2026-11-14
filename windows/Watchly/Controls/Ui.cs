@@ -4,12 +4,102 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 
 namespace Watchly.Controls;
+
+/// <summary>
+/// How things move, in one place. Fluent's steps (167ms fast, 250ms normal) and its entering curve,
+/// cubic-bezier(0, 0, 0, 1): quick off the mark, slow to rest. Only opacity and render transforms are
+/// ever animated, so nothing is measured or laid out again while it moves; a control's own hover and
+/// press states are in Theme/Styles.xaml and follow the same rule.
+/// </summary>
+public static class Motion
+{
+    public const double Fast = 167, Normal = 250;
+
+    static readonly KeySpline Out = Frozen(new KeySpline(0, 0, 0, 1));
+    static readonly IEasingFunction Ease = Frozen(new CubicEase { EasingMode = EasingMode.EaseOut });
+
+    static T Frozen<T>(T f) where T : Freezable { f.Freeze(); return f; }
+
+    static KeyTime At(double ms) => KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(ms));
+
+    /// <summary>
+    /// From one value to another on the entering curve. The wait is part of the animation, not a
+    /// BeginTime: until a BeginTime passes the element would show at its resting value, which is the flash.
+    /// </summary>
+    static DoubleAnimationUsingKeyFrames Glide(double from, double to, double ms, double delay)
+    {
+        var a = new DoubleAnimationUsingKeyFrames();
+        a.KeyFrames.Add(new DiscreteDoubleKeyFrame(from, At(0)));
+        if (delay > 0) a.KeyFrames.Add(new DiscreteDoubleKeyFrame(from, At(delay)));
+        a.KeyFrames.Add(new SplineDoubleKeyFrame(to, At(delay + ms), Out));
+        return a;
+    }
+
+    /// <summary>Opacity from wherever it is now to <paramref name="to"/>.</summary>
+    public static void Fade(UIElement e, double to, double ms = Fast, Action? done = null)
+    {
+        var a = new DoubleAnimation(to, TimeSpan.FromMilliseconds(ms)) { EasingFunction = Ease };
+        if (done is not null) a.Completed += (_, _) => done();
+        e.BeginAnimation(UIElement.OpacityProperty, a);
+    }
+
+    /// <summary>
+    /// Something arriving: it fades in while settling the last few pixels into place. A page, a card
+    /// over the page, a toast. An element that already carries a transform of its own only fades.
+    /// </summary>
+    public static void Enter(FrameworkElement e, double dy = 14, double dx = 0, double ms = Normal, double delay = 0)
+    {
+        e.BeginAnimation(UIElement.OpacityProperty, Glide(0, 1, ms, delay));
+        if (dx == 0 && dy == 0) return;
+        TranslateTransform move;
+        if (e.RenderTransform is TranslateTransform { IsFrozen: false } mine) move = mine;
+        else if (e.RenderTransform == Transform.Identity) e.RenderTransform = move = new TranslateTransform();
+        else return;
+        move.BeginAnimation(TranslateTransform.XProperty, dx == 0 ? null : Glide(dx, 0, ms, delay));
+        move.BeginAnimation(TranslateTransform.YProperty, dy == 0 ? null : Glide(dy, 0, ms, delay));
+    }
+
+    /// <summary>A dialog arriving: it grows the last few percent as it fades in.</summary>
+    public static void Pop(FrameworkElement e, double from = 0.96, double ms = Fast)
+    {
+        e.BeginAnimation(UIElement.OpacityProperty, Glide(0, 1, ms, 0));
+        if (e.RenderTransform is not ScaleTransform { IsFrozen: false } scale)
+        {
+            if (e.RenderTransform != Transform.Identity) return;
+            e.RenderTransformOrigin = new Point(0.5, 0.5);
+            e.RenderTransform = scale = new ScaleTransform();
+        }
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, Glide(from, 1, ms, 0));
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, Glide(from, 1, ms, 0));
+    }
+
+    /// <summary>A scale from wherever it is now, about the element's middle: the rail's tick growing in and out.</summary>
+    public static void ScaleY(FrameworkElement e, double to, double ms = Fast)
+    {
+        if (e.RenderTransform is not ScaleTransform { IsFrozen: false } scale)
+        {
+            e.RenderTransformOrigin = new Point(0.5, 0.5);
+            e.RenderTransform = scale = new ScaleTransform();
+        }
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(to, TimeSpan.FromMilliseconds(ms)) { EasingFunction = Ease });
+    }
+}
 
 /// <summary>Small builders for the pieces every screen repeats.</summary>
 public static class Ui
 {
+    /// <summary>The page's side padding, and the gap between a heading and what it heads.</summary>
+    public const double Gutter = 24;
+
+    /// <summary>
+    /// The room a row of picture cards leaves above and below them: a card under the pointer rises 4%
+    /// (the Lift style), and a shelf cut to the cards' own height would slice the top and foot off it.
+    /// </summary>
+    public const double LiftRoom = 6;
+
     static Style S(string key) => (Style)Application.Current.FindResource(key);
 
     public static TextBlock Text(string text, string style, string? brush = null, double? size = null, FontWeight? weight = null)
@@ -45,8 +135,13 @@ public static class Ui
         return b;
     }
 
-    public static Border Card(UIElement child, string background = "Surface", double radius = 10, Thickness? padding = null) =>
-        Brushed(new Border { Child = child, CornerRadius = new CornerRadius(radius), Padding = padding ?? new Thickness(12) }, background);
+    /// <summary>A raised surface: its colour, and a hairline round it that sets it off the page.</summary>
+    public static Border Card(UIElement child, string background = "Surface", double radius = 10, Thickness? padding = null)
+    {
+        var card = Brushed(new Border { Child = child, CornerRadius = new CornerRadius(radius), Padding = padding ?? new Thickness(12), BorderThickness = new Thickness(1) }, background);
+        card.SetResourceReference(Border.BorderBrushProperty, "Stroke");
+        return card;
+    }
 
     /// <summary>Round the ends fully, whatever height the border lays out at — see PillRadius.</summary>
     public static T Pill<T>(T border) where T : Border
@@ -126,10 +221,11 @@ public static class Ui
     }
 
     /// <summary>A shelf's heading (mobile Home.kt Rail): the name in bold, "See all ›" on the right.</summary>
-    public static FrameworkElement Head(string title, Action? seeAll, double sidePadding = 24)
+    public static FrameworkElement Head(string title, Action? seeAll, double sidePadding = Gutter)
     {
-        var row = new DockPanel { Margin = new Thickness(sidePadding, 0, sidePadding - 10, 8), LastChildFill = false };
-        var text = Text(title, "TitleText", "Text", 17, FontWeights.Bold);
+        // The row under it brings its own LiftRoom, so the heading sits as close to the posters as before.
+        var row = new DockPanel { Margin = new Thickness(sidePadding, 0, sidePadding - 10, 8 - LiftRoom), LastChildFill = false };
+        var text = Text(title, "TitleText", "Text", 18, FontWeights.Bold);
         text.VerticalAlignment = VerticalAlignment.Center;
         DockPanel.SetDock(text, Dock.Left);
         row.Children.Add(text);
@@ -139,7 +235,7 @@ public static class Ui
             {
                 Orientation = Orientation.Horizontal,
                 Children = { Text("See all", "Meta"), Glyph("chevron-right", 16, "Muted") },
-            }, seeAll);
+            }, seeAll, "Row");
             link.Padding = new Thickness(10, 6, 10, 6);
             link.Tag = 999;
             DockPanel.SetDock(link, Dock.Right);
@@ -152,7 +248,7 @@ public static class Ui
     /// One horizontal shelf, virtualised — a rail is fifty titles wide and only a
     /// handful are on screen. Arrows page it on hover; Shift+wheel scrolls it.
     /// </summary>
-    public static FrameworkElement Rail(IEnumerable items, string template, double height, double sidePadding = 24)
+    public static FrameworkElement Rail(IEnumerable items, string template, double height, double sidePadding = Gutter)
     {
         var list = new ItemsControl
         {
@@ -171,7 +267,10 @@ public static class Ui
         list.ItemsPanel = (ItemsPanelTemplate)Application.Current.FindResource("RailPanel");
         list.Template = (ControlTemplate)Application.Current.FindResource("RailTemplate");
         list.Padding = new Thickness(sidePadding, 0, sidePadding, 0);
-        list.Height = height;
+        // Room for the card under the pointer to rise into, as each card's own margin: that is inside
+        // the row, so the scroller's edge cannot cut it.
+        list.ItemContainerStyle = new Style(typeof(ContentPresenter)) { Setters = { new Setter(FrameworkElement.MarginProperty, new Thickness(0, LiftRoom, 0, LiftRoom)) } };
+        list.Height = height + LiftRoom * 2;
 
         var grid = new Grid();
         grid.Children.Add(list);
@@ -192,19 +291,27 @@ public static class Ui
             }, "Text", "SurfaceAlt", 40, 20);
             b.HorizontalAlignment = side;
             b.VerticalAlignment = VerticalAlignment.Top;
-            b.Margin = new Thickness(6, height * 0.32, 6, 0);
-            // Hidden until hover, and no shadow effect: an effect over a moving shelf is
-            // redrawn every frame of a scroll.
-            b.Visibility = Visibility.Hidden;
-            b.Opacity = 0.92;
+            b.Margin = new Thickness(6, LiftRoom + height * 0.32, 6, 0);
+            // Out of sight until the pointer is on the shelf, and no shadow effect: an effect over a
+            // moving shelf is redrawn every frame of a scroll.
+            b.Opacity = 0;
+            b.IsHitTestVisible = false;
             return b;
         }
         var left = Arrow("chevron-left", HorizontalAlignment.Left, sv2 => PageRail(sv2, -1));
         var right = Arrow("chevron-right", HorizontalAlignment.Right, sv2 => PageRail(sv2, 1));
         grid.Children.Add(left);
         grid.Children.Add(right);
-        grid.MouseEnter += (_, _) => left.Visibility = right.Visibility = Visibility.Visible;
-        grid.MouseLeave += (_, _) => left.Visibility = right.Visibility = Visibility.Hidden;
+        void Arrows(bool on)
+        {
+            foreach (var b in new[] { left, right })
+            {
+                b.IsHitTestVisible = on;
+                Motion.Fade(b, on ? 0.92 : 0, 140);
+            }
+        }
+        grid.MouseEnter += (_, _) => Arrows(true);
+        grid.MouseLeave += (_, _) => Arrows(false);
         grid.Background = Brushes.Transparent;
         return grid;
     }
@@ -417,8 +524,12 @@ public static class Ui
         dock.Children.Add(icon);
         dock.Children.Add(trailing);
         dock.Children.Add(input);
-        var box = Brushed(new Border { Height = height, CornerRadius = new CornerRadius(radius), Padding = new Thickness(14, 0, 12, 0), Child = dock, Cursor = Cursors.IBeam }, "TintLo");
+        var box = Brushed(new Border { Height = height, CornerRadius = new CornerRadius(radius), Padding = new Thickness(14, 0, 12, 0), Child = dock, Cursor = Cursors.IBeam, BorderThickness = new Thickness(1) }, "TintLo");
         box.MouseLeftButtonDown += (_, _) => input.Focus();
+        // The outline says where typing goes: a hairline at rest, brighter while the box has the keyboard.
+        box.SetResourceReference(Border.BorderBrushProperty, "Stroke");
+        input.GotKeyboardFocus += (_, _) => box.SetResourceReference(Border.BorderBrushProperty, "Faint");
+        input.LostKeyboardFocus += (_, _) => box.SetResourceReference(Border.BorderBrushProperty, "Stroke");
         return (box, input, trailing);
     }
 
@@ -547,7 +658,7 @@ public static class Ui
         {
             Margin = new Thickness(0, 6, 0, 6),
             Children = { new Grid { Width = 40, Height = 40, Children = { disc, glyph } }, words },
-        }, onClick);
+        }, onClick, "Row");
         b.Width = width;
         b.Tag = 8;
         return b;

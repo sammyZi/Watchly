@@ -26,15 +26,21 @@ public sealed class HomeView : UserControl
         new("Anime", "tv", Meta.AnimeGenre),
     };
 
-    /// <summary>A poster on Home's rows, and the gap between rows (mobile Home.kt).</summary>
-    const double CardHeight = 210, RowGap = 22;
+    /// <summary>
+    /// A poster on Home's rows, and the gap between rows (mobile Home.kt): 22 from one row's posters
+    /// to the next heading, of which each row keeps Ui.LiftRoom itself for the card under the pointer.
+    /// </summary>
+    const double CardHeight = 210, RowGap = 22 - Ui.LiftRoom;
 
     readonly MainWindow shell = MainWindow.Shell;
     readonly ScrollViewer scroll;
     readonly StackPanel page = new() { Margin = new Thickness(0, 0, 0, 32) };
     readonly Grid hero = new() { Height = 480 };
     /// <summary>The wordmark: a fade over the hero, a solid bar once the rows scroll under it.</summary>
-    readonly Border header = new() { VerticalAlignment = VerticalAlignment.Top, Padding = new Thickness(24, 14, 24, 14) };
+    // To transparent black: Colors.Transparent is transparent white, and the fade through it reads as a grey band.
+    readonly Border header = new() { VerticalAlignment = VerticalAlignment.Top, Padding = new Thickness(24, 14, 24, 14), Background = new LinearGradientBrush(Color.FromArgb(0x99, 0, 0, 0), Color.FromArgb(0, 0, 0, 0), 90), IsHitTestVisible = false };
+    /// <summary>The page's own colour behind the wordmark, faded in once the rows are under it.</summary>
+    readonly Border headerBar = new() { VerticalAlignment = VerticalAlignment.Top, Opacity = 0, IsHitTestVisible = false };
     readonly StackPanel personal = new();
     readonly StackPanel shelves = new();
     readonly Dictionary<string, List<Title>> loaded = new();
@@ -78,8 +84,10 @@ public sealed class HomeView : UserControl
         page.Children.Add(suggested);
         page.Children.Add(shelves);
         header.Child = Ui.Text("WATCHLY", "TitleText", "Accent", 20, FontWeights.Black);
-        Header();
-        Content = new Grid { Children = { scroll, header } };
+        headerBar.SetResourceReference(Border.BackgroundProperty, "PageBg");
+        // The bar is as tall as the wordmark's strip, whatever that lays out at.
+        header.SizeChanged += (_, e) => headerBar.Height = e.NewSize.Height;
+        Content = new Grid { Children = { scroll, headerBar, header } };
 
         foreach (var s in AllShelves())
             if (Meta.PeekCatalog(s.Kind, s.Genre) is { } ready) loaded[s.Key] = KidsMode.Only(ready);
@@ -107,11 +115,11 @@ public sealed class HomeView : UserControl
     void Header()
     {
         var scrolled = scroll.VerticalOffset > 240;
-        if (scrolled == solid && header.Background is not null) return;
+        if (scrolled == solid) return;
         solid = scrolled;
-        if (scrolled) header.SetResourceReference(Border.BackgroundProperty, "PageBg");
-        // To transparent black: Colors.Transparent is transparent white, and the fade through it reads as a grey band.
-        else header.Background = new LinearGradientBrush(Color.FromArgb(0x99, 0, 0, 0), Color.FromArgb(0, 0, 0, 0), 90);
+        // Solid, it also takes the clicks: a poster scrolled under the bar is out of sight, so out of reach.
+        headerBar.IsHitTestVisible = scrolled;
+        Motion.Fade(headerBar, scrolled ? 1 : 0);
     }
 
     static double HeroHeight(double page) => Math.Max(420, page * 0.82);
@@ -241,12 +249,7 @@ public sealed class HomeView : UserControl
         suggested.Children.Clear();
         void Row(string heading, Action? seeAll, FrameworkElement row) =>
             suggested.Children.Add(new StackPanel { Margin = new Thickness(0, RowGap, 0, 0), Children = { Ui.Head(heading, seeAll), row } });
-        ScrollViewer Strip(IEnumerable<UIElement> items)
-        {
-            var strip = OrderUi.Strip(items);
-            strip.Padding = new Thickness(24, 0, 24, 0);
-            return strip;
-        }
+        ScrollViewer Strip(IEnumerable<UIElement> items) => OrderUi.Strip(items, Ui.Gutter);
 
         var chosen = found.Picks.Where(p => !known.Contains(p.Title.Imdb)).Take(ForYouPicks).ToList();
         if (chosen.Count > 0) Row("Picked for you", null, Strip(chosen.Select(OrderUi.PickCard)));
@@ -321,8 +324,8 @@ public sealed class HomeView : UserControl
             Build();
             return;
         }
-        // Not a Loading grid: this shelf has its titles and only waits to be seen.
-        body.Content = new Grid { Height = CardHeight };
+        // Not a Loading grid: this shelf has its titles and only waits to be seen. The built row's height, so nothing jumps.
+        body.Content = new Grid { Height = CardHeight + Ui.LiftRoom * 2 };
         waiting[body] = Build;
     }
 
@@ -395,8 +398,7 @@ public sealed class HomeView : UserControl
                 var banner = OrderUi.Banner(o, seen, 330);
                 banner.Margin = new Thickness(0, 0, 10, 0);
                 return banner;
-            }));
-            strip.Padding = new Thickness(24, 0, 24, 0);
+            }), Ui.Gutter);
             personal.Children.Add(new StackPanel { Margin = new Thickness(0, RowGap, 0, 0), Children = { Ui.Head("Watch orders", shell.OpenOrders), strip } });
         }
     }
@@ -410,7 +412,8 @@ public sealed class HomeView : UserControl
     /// <summary>A row still waiting for its titles: grey posters where they will be.</summary>
     static FrameworkElement Placeholders()
     {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(24, 0, 0, 0), Height = CardHeight, Tag = Loading };
+        // As tall as the row that replaces it, room to rise included, so the page does not shift when it lands.
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(24, Ui.LiftRoom, 0, Ui.LiftRoom), Height = CardHeight, Tag = Loading };
         for (var i = 0; i < 8; i++)
             row.Children.Add(Ui.Brushed(new Border { Width = 140, Margin = new Thickness(0, 0, 10, 0), CornerRadius = new CornerRadius(6) }, "Surface"));
         return row;
@@ -496,11 +499,30 @@ public sealed class HomeView : UserControl
             heroTimer.Tick += (_, _) => { if (IsVisible) ShowHeroPage((heroPage + 1) % heroTitles.Count); };
             heroTimer.Start();
         }
+        // Every page's full entry now, not as each comes up: one landing part-way through a turn
+        // rebuilt the banner in the middle of its fade.
+        foreach (var t in titles) LoadHeroFull(t);
         ShowHeroPage(0);
     }
 
     /// <summary>The full entries of hero titles: a shelf row carries no logo or runtime.</summary>
     readonly Dictionary<string, Title> heroFull = new();
+    readonly HashSet<string> heroAsked = new();
+
+    void LoadHeroFull(Title title)
+    {
+        if (heroFull.ContainsKey(title.Imdb) || !heroAsked.Add(title.Imdb)) return;
+        _ = Meta.LoadTitle(title.Imdb, title.Kind).ContinueWith(t => Dispatcher.BeginInvoke(() =>
+        {
+            heroAsked.Remove(title.Imdb);
+            if (!t.IsCompletedSuccessfully || t.Result is not { } full) return;
+            heroFull[full.Imdb] = full;
+            if (heroTitles.ElementAtOrDefault(heroPage)?.Imdb == full.Imdb) ShowHeroPage(heroPage);
+        }), TaskScheduler.Default);
+    }
+
+    /// <summary>The art on show, kept under the next one while the two cross.</summary>
+    Grid? heroStage;
 
     void Turn(int to)
     {
@@ -511,6 +533,8 @@ public sealed class HomeView : UserControl
 
     void ShowHeroPage(int index)
     {
+        var leaving = heroStage;
+        heroStage = null;
         hero.Children.Clear();
         if (heroTitles.Count == 0)
         {
@@ -523,15 +547,7 @@ public sealed class HomeView : UserControl
         heroPage = index;
         var title = heroFull.GetValueOrDefault(heroTitles[index].Imdb) ?? heroTitles[index];
         hero.Tag = title.Imdb;
-        if (!heroFull.ContainsKey(title.Imdb))
-        {
-            _ = Meta.LoadTitle(title.Imdb, title.Kind).ContinueWith(t => Dispatcher.BeginInvoke(() =>
-            {
-                if (t.Result is not { } full) return;
-                heroFull[full.Imdb] = full;
-                if (heroTitles.ElementAtOrDefault(heroPage)?.Imdb == full.Imdb) ShowHeroPage(heroPage);
-            }), TaskScheduler.Default);
-        }
+        LoadHeroFull(title);
 
         // The TV's billboard, as the phone shows it held sideways: the backdrop on the right,
         // faded into the page at its left and foot, and the words down the left beside it.
@@ -542,7 +558,15 @@ public sealed class HomeView : UserControl
         // Clicking anywhere on the art opens the title, like the phone's full-page Pressable.
         art.MouseLeftButtonUp += (_, _) => shell.OpenTitle(title);
         var stage = new Grid { ColumnDefinitions = { new ColumnDefinition { Width = new GridLength(28, GridUnitType.Star) }, new ColumnDefinition { Width = new GridLength(72, GridUnitType.Star) } }, Children = { art } };
+        if (!again && leaving is not null)
+        {
+            // A turn crosses the two pictures; the banner used to drop to the bare page and fade up from it.
+            leaving.IsHitTestVisible = false;
+            hero.Children.Add(leaving);
+            Motion.Fade(leaving, 0, 450, () => hero.Children.Remove(leaving));
+        }
         hero.Children.Add(stage);
+        heroStage = stage;
         if (!again) art.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(450)));
 
         var mark = Ui.TitleMark(title, 88, 340, 34);
@@ -575,6 +599,8 @@ public sealed class HomeView : UserControl
             Children = { Ui.Action("Watch", "play", () => shell.OpenTitle(title), primary: true, width: 132), list },
         });
         hero.Children.Add(words);
+        // The words follow the picture in; a rebuild of the page already showing moves nothing.
+        if (!again) Motion.Enter(words, 10, 0, 320, 60);
 
         var dots = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 8) };
         for (var i = 0; i < heroTitles.Count; i++)

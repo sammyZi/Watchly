@@ -235,7 +235,11 @@ public sealed class LibraryView : UserControl
         head.Children.Add(remove);
         head.Children.Add(body);
 
-        var headButton = Ui.Button(head, () => shell.OpenItem(item));
+        // Padding out to the card's own edge, taken back as margin: the wash fills the card's top, and nothing moves.
+        var headButton = Ui.Button(head, () => shell.OpenItem(item), "Row");
+        headButton.Padding = new Thickness(6);
+        headButton.Margin = new Thickness(-6);
+        headButton.Tag = 8;
         headButton.ContextMenu = new ContextMenu
         {
             Items =
@@ -374,6 +378,8 @@ public sealed class LibraryView : UserControl
         dock.Children.Add(play);
         dock.Children.Add(dl);
         dock.Children.Add(body);
-        return Ui.Button(dock, () => shell.PlayFile(item, file.Index));
+        var row = Ui.Button(dock, () => shell.PlayFile(item, file.Index), "Row");
+        row.Tag = 8;
+        return row;
     }
 }

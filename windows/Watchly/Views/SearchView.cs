@@ -306,7 +306,11 @@ public sealed class SearchView : UserControl
             if (Query.Length > 0) recent = Searches.Remember(Query);
             // A torrent goes straight to its file list — someone who tapped a release wants to see what is in it.
             _ = shell.StreamHit(hit, new OpenOptions { TitleName = TitleText.SearchableName(hit.Name) });
-        });
+        }, "Row");
+        // The wash under the pointer reaches a little past the words, into the page's own padding.
+        row.Padding = new Thickness(10, 0, 10, 0);
+        row.Margin = new Thickness(-10, 0, -10, 0);
+        row.Tag = 8;
         ((Border)row.Content).SetResourceReference(Border.BorderBrushProperty, "Line");
         return row;
     }

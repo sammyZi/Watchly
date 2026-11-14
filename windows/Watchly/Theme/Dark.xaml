@@ -25,5 +25,7 @@
   <SolidColorBrush x:Key="Tint" Color="#1fffffff" />
   <SolidColorBrush x:Key="TintHi" Color="#38ffffff" />
   <SolidColorBrush x:Key="TintLo" Color="#14ffffff" />
+  <!-- The hairline round a card: enough to lift it off the page without a shadow. -->
+  <SolidColorBrush x:Key="Stroke" Color="#12ffffff" />
   <SolidColorBrush x:Key="Scrim" Color="#8c000000" />
 </ResourceDictionary>

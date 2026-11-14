@@ -476,7 +476,7 @@ public sealed class DetailView : UserControl, IDisposable
                 role.MaxHeight = 30;
                 column.Children.Add(role);
             }
-            var button = Ui.Button(column, () => { if (!KidsMode.On) shell.OpenPerson(person.Id, person.Name); });
+            var button = Ui.Button(column, () => { if (!KidsMode.On) shell.OpenPerson(person.Id, person.Name); }, "Lift");
             button.Margin = new Thickness(0, 0, 10, 0);
             button.VerticalAlignment = VerticalAlignment.Top;
             return (UIElement)button;
@@ -646,7 +646,7 @@ public sealed class DetailView : UserControl, IDisposable
             var open = packSeason == season;
             var words = Ui.Text(saving ? "Starting download…" : $"Download {name}", "Meta", open ? "Text" : "Muted", 13, FontWeights.SemiBold);
             words.Margin = new Thickness(8, 0, 6, 0);
-            var link = Ui.Button(new StackPanel { Orientation = Orientation.Horizontal, Children = { saving ? Ui.Spinner(16, "Muted") : Ui.Glyph("download", 16, "Muted"), words, Ui.Glyph(open ? "chevron-up" : "chevron-down", 14, "Faint") } }, SaveSeason);
+            var link = Ui.Button(new StackPanel { Orientation = Orientation.Horizontal, Children = { saving ? Ui.Spinner(16, "Muted") : Ui.Glyph("download", 16, "Muted"), words, Ui.Glyph(open ? "chevron-up" : "chevron-down", 14, "Faint") } }, SaveSeason, "Row");
             link.HorizontalAlignment = HorizontalAlignment.Left;
             link.Padding = new Thickness(4, 6, 6, 6);
             link.Margin = new Thickness(-4, 0, 0, 4);
@@ -732,7 +732,7 @@ public sealed class DetailView : UserControl, IDisposable
             FindReleases(debounce: true);
             Render();
             ScrollToSources();
-        });
+        }, "Row");
         row.Padding = new Thickness(8, 10, 8, 10);
         row.Margin = new Thickness(-8, 0, -8, 0);
         row.Tag = 8;
@@ -842,7 +842,8 @@ public sealed class DetailView : UserControl, IDisposable
         if (hit.IsTorrent && TorBox.IsCached(hit.Id)) lines.Children.Add(Ui.Text("Instant · TorBox", "Meta", "Good", 12, FontWeights.SemiBold));
         dock.Children.Add(lines);
 
-        var row = Ui.Button(Ui.Card(dock, "Surface", 8, new Thickness(14, 11, 8, 11)), () => Start(captured, false));
+        var row = Ui.Button(Ui.Card(dock, "Surface", 8, new Thickness(14, 11, 8, 11)), () => Start(captured, false), "Row");
+        row.Tag = 8;
         row.Margin = new Thickness(0, 0, 0, 8);
         return row;
     }
@@ -858,7 +859,7 @@ public sealed class DetailView : UserControl, IDisposable
             var mark = Ui.Glyph("external-link", 13, "Muted");
             mark.Margin = new Thickness(8, 0, 0, 0);
             mark.VerticalAlignment = VerticalAlignment.Center;
-            var link = Ui.Button(new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Children = { words, mark } }, () => Ui.Open(url), tooltip: url);
+            var link = Ui.Button(new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Children = { words, mark } }, () => Ui.Open(url), "Solid", url);
             link.Tag = 18; // half the height: round ends, not an oval
             link.Height = 36;
             link.Padding = new Thickness(16, 0, 14, 0);
@@ -1017,7 +1018,8 @@ public sealed class DetailView : UserControl, IDisposable
             meta.Margin = new Thickness(0, 2, 0, 0);
             dock.Children.Add(new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { name, meta } });
             var captured = hit;
-            var row = Ui.Button(Ui.Card(dock, "Surface", 8, new Thickness(14, 11, 8, 11)), () => DownloadPack(captured, which), tooltip: $"Download season {which} from this release");
+            var row = Ui.Button(Ui.Card(dock, "Surface", 8, new Thickness(14, 11, 8, 11)), () => DownloadPack(captured, which), "Row", $"Download season {which} from this release");
+            row.Tag = 8;
             row.Margin = new Thickness(0, 0, 0, 8);
             list.Children.Add(row);
         }

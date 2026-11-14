@@ -11,9 +11,11 @@
   </ItemsPanelTemplate>
   <ControlTemplate x:Key="RailTemplate" TargetType="ItemsControl">
     <!-- PanningMode: a finger on a touch screen swipes the row, as on the phone. -->
+    <!-- The side padding is the row's own margin, inside the scroller: posters run off to the
+         window's edge as the shelf moves instead of being cut at the padding. -->
     <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled" CanContentScroll="True"
-                  Padding="{TemplateBinding Padding}" Focusable="False" PanningMode="HorizontalFirst">
-      <ItemsPresenter />
+                  Focusable="False" PanningMode="HorizontalFirst">
+      <ItemsPresenter Margin="{TemplateBinding Padding}" />
     </ScrollViewer>
   </ControlTemplate>
 
@@ -55,7 +57,7 @@
 
   <!-- Home's rows (mobile Home.kt TitleRow): the poster alone, 2:3. -->
   <DataTemplate x:Key="RailCard" DataType="{x:Type core:Title}">
-    <Button Style="{StaticResource Bare}" Width="140" Height="210" Margin="0,0,10,0" VerticalAlignment="Top"
+    <Button Style="{StaticResource Lift}" Width="140" Height="210" Margin="0,0,10,0" VerticalAlignment="Top"
             Command="{x:Static local:Cmd.OpenTitle}" CommandParameter="{Binding}" ToolTip="{Binding Name}">
       <Grid>
         <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource Art}" />
@@ -66,7 +68,7 @@
 
   <!-- A poster with its name under it (mobile Ui.kt PosterCard) — search results, lists, whole shelves. -->
   <DataTemplate x:Key="PosterCard" DataType="{x:Type core:Title}">
-    <Button Style="{StaticResource Bare}" Width="140" Margin="0,0,10,0" VerticalAlignment="Top"
+    <Button Style="{StaticResource Lift}" Width="140" Margin="0,0,10,0" VerticalAlignment="Top"
             Command="{x:Static local:Cmd.OpenTitle}" CommandParameter="{Binding}" ToolTip="{Binding Name}">
       <StackPanel>
         <Grid Height="210">
@@ -89,7 +91,7 @@
   <!-- Continue Watching (mobile Ui.kt LandscapeCard): the art with name, where you stopped
        and how far, set white over a dark fade at its foot. -->
   <DataTemplate x:Key="ResumeCard" DataType="{x:Type v:ResumeTile}">
-    <Button Style="{StaticResource Bare}" Width="140" Height="210" Margin="0,0,10,0" VerticalAlignment="Top"
+    <Button Style="{StaticResource Lift}" Width="140" Height="210" Margin="0,0,10,0" VerticalAlignment="Top"
             Command="{x:Static local:Cmd.PlayResume}" CommandParameter="{Binding}" ToolTip="{Binding Title.Name}">
       <Grid>
         <ContentPresenter Content="{Binding Title}" ContentTemplate="{StaticResource Art}" />

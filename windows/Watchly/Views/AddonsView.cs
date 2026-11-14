@@ -174,7 +174,7 @@ public sealed class AddonsView : UserControl
         {
             Addons.Remove(a.Url);
             shell.Toast($"Uninstalled {a.Name}");
-        }, tooltip: $"Uninstall {a.Name}");
+        }, "Solid", $"Uninstall {a.Name}");
         ((FrameworkElement)uninstall.Content).HorizontalAlignment = HorizontalAlignment.Center;
         uninstall.HorizontalContentAlignment = HorizontalAlignment.Stretch;
         uninstall.Height = 46;

@@ -177,7 +177,10 @@ public partial class DownloadsView : UserControl
             {
                 if (!openShows.Remove(title)) openShows.Add(title);
                 RenderSaved();
-            });
+            }, "Row");
+            toggle.Padding = new Thickness(6);
+            toggle.Margin = new Thickness(-6);
+            toggle.Tag = 8;
 
             var stack = new StackPanel { Children = { toggle } };
             if (open)
@@ -234,12 +237,16 @@ public partial class DownloadsView : UserControl
                 Ui.Text(string.Join(" · ", new[] { nested ? null : ep, entry.Size > 0 ? Format.Bytes(entry.Size) : null, Format.Ago(entry.At) }.Where(s => s is not null)), "Meta"),
             },
         });
-        var button = Ui.Button(dock, () => shell.PlayLocal(entry.Path, Path.GetFileNameWithoutExtension(entry.Name)));
+        var button = Ui.Button(dock, () => shell.PlayLocal(entry.Path, Path.GetFileNameWithoutExtension(entry.Name)), "Row");
+        // Padding out toward the card's edge, taken back as margin: the wash has room, and nothing moves.
+        button.Padding = new Thickness(6);
+        button.Tag = 8;
         if (nested)
         {
-            button.Margin = new Thickness(0, 8, 0, 0);
+            button.Margin = new Thickness(-6, 2, -6, -6);
             return button;
         }
+        button.Margin = new Thickness(-6);
         var card = Ui.Card(button, "Surface", 10, new Thickness(12));
         card.Margin = new Thickness(0, 0, 12, 12);
         card.VerticalAlignment = VerticalAlignment.Top;

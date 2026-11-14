@@ -155,7 +155,7 @@ public sealed class ProfilesView : UserControl
         label.HorizontalAlignment = HorizontalAlignment.Center;
         label.TextTrimming = TextTrimming.CharacterEllipsis;
         label.Margin = new Thickness(0, 14, 0, 0);
-        var b = Ui.Button(new StackPanel { Width = 140, Children = { art, label } }, onClick, "Bare", name);
+        var b = Ui.Button(new StackPanel { Width = 140, Children = { art, label } }, onClick, "Lift", name);
         b.Margin = new Thickness(14, 0, 14, 0);
         b.MouseEnter += (_, _) => { label.SetResourceReference(TextBlock.ForegroundProperty, "Text"); label.FontWeight = FontWeights.Bold; };
         b.MouseLeave += (_, _) => { label.SetResourceReference(TextBlock.ForegroundProperty, "Faint"); label.FontWeight = FontWeights.Medium; };
@@ -207,7 +207,7 @@ public sealed class ProfilesView : UserControl
             swatches.Children.Clear();
             foreach (var c in Profiles.Colours)
             {
-                var swatch = Ui.Button(c == colour ? Ui.Glyph("check", 20, "OnAccent") : new Border(), () => { colour = c; Refresh(); }, "Bare", "Colour");
+                var swatch = Ui.Button(c == colour ? Ui.Glyph("check", 20, "OnAccent") : new Border(), () => { colour = c; Refresh(); }, "Solid", "Colour");
                 swatch.Width = swatch.Height = 42;
                 swatch.Tag = 21;
                 swatch.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(c));

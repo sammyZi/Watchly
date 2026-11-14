@@ -25,8 +25,8 @@
     <Border x:Name="TabDock" Width="76" Background="Transparent">
       <Grid>
         <!-- Who is watching, at the top of the rail as on the TV: click to switch. -->
-        <Button x:Name="ProfileButton" Style="{StaticResource Bare}" VerticalAlignment="Top" HorizontalAlignment="Center"
-                Margin="0,22,0,0" Click="OnProfileButton" Tag="8" />
+        <Button x:Name="ProfileButton" Style="{StaticResource Lift}" VerticalAlignment="Top" HorizontalAlignment="Center"
+                Margin="0,22,0,0" Click="OnProfileButton" />
         <StackPanel x:Name="TabButtons" VerticalAlignment="Center" Margin="0,0,0,40" />
       </Grid>
     </Border>
@@ -41,7 +41,7 @@
 
     <!-- A torrent being read — the swarm has to answer before anything can play. -->
     <Border x:Name="BusyCard" Grid.Column="1" Visibility="Collapsed" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,32"
-            CornerRadius="10" Background="{DynamicResource SurfaceAlt}" Padding="16,10">
+            CornerRadius="10" Background="{DynamicResource SurfaceAlt}" BorderBrush="{DynamicResource Stroke}" BorderThickness="1" Padding="16,10">
       <StackPanel Orientation="Horizontal">
         <ContentControl Style="{StaticResource Spinner}" Width="18" Height="18" />
         <TextBlock x:Name="BusyText" Text="Reading torrent…" Style="{StaticResource Label}" Margin="12,0,16,0" VerticalAlignment="Center" />
@@ -71,8 +71,8 @@
 
     <!-- src/components/ConfirmModal.tsx -->
     <Grid x:Name="ConfirmLayer" Grid.ColumnSpan="2" Visibility="Collapsed" Background="{DynamicResource Scrim}" MouseDown="OnConfirmBackdrop">
-      <Border Width="360" CornerRadius="12" Background="{DynamicResource Surface}" Padding="24" VerticalAlignment="Center" HorizontalAlignment="Center"
-              MouseDown="OnSwallow">
+      <Border x:Name="ConfirmCard" Width="360" CornerRadius="12" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Stroke}" BorderThickness="1"
+              Padding="24" VerticalAlignment="Center" HorizontalAlignment="Center" MouseDown="OnSwallow">
         <Border.Effect>
           <DropShadowEffect BlurRadius="24" ShadowDepth="8" Opacity="0.25" Color="#0b1020" />
         </Border.Effect>

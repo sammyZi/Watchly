@@ -46,7 +46,14 @@
     <Setter Property="Foreground" Value="{DynamicResource Faint}" />
   </Style>
 
-  <!-- A button that is only its content: hover lifts, press dims. -->
+  <!-- Motion, once: Fluent's fast (167ms) and normal (250ms) steps, always easing out, and only
+       ever on opacity and render transforms, so nothing lays out again while it moves. Every
+       template below changes state through the VisualStateManager, which eases between states
+       and puts a control built already checked or disabled straight into that state. -->
+  <CubicEase x:Key="EaseOut" EasingMode="EaseOut" />
+
+  <!-- A button that is only its content (a link, an icon, a line of text): it dims under the
+       pointer and further when pressed. Tag is the corner radius. -->
   <Style x:Key="Bare" TargetType="ButtonBase">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="{DynamicResource Text}" />
@@ -59,7 +66,31 @@
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="ButtonBase">
-          <Border x:Name="Box" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+          <Border x:Name="Box" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"
+                  BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+            <VisualStateManager.VisualStateGroups>
+              <VisualStateGroup x:Name="CommonStates">
+                <VisualStateGroup.Transitions>
+                  <VisualTransition GeneratedDuration="0:0:0.12" />
+                </VisualStateGroup.Transitions>
+                <VisualState x:Name="Normal" />
+                <VisualState x:Name="MouseOver">
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Box" Storyboard.TargetProperty="Opacity" To="0.8" Duration="0" />
+                  </Storyboard>
+                </VisualState>
+                <VisualState x:Name="Pressed">
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Box" Storyboard.TargetProperty="Opacity" To="0.55" Duration="0" />
+                  </Storyboard>
+                </VisualState>
+                <VisualState x:Name="Disabled">
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Box" Storyboard.TargetProperty="Opacity" To="0.4" Duration="0" />
+                  </Storyboard>
+                </VisualState>
+              </VisualStateGroup>
+            </VisualStateManager.VisualStateGroups>
             <Border.CornerRadius>
               <MultiBinding Converter="{StaticResource PillRadius}">
                 <Binding Path="Tag" RelativeSource="{RelativeSource TemplatedParent}" />
@@ -69,24 +100,174 @@
             <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                               VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
           </Border>
-          <ControlTemplate.Triggers>
-            <Trigger Property="IsMouseOver" Value="True">
-              <Setter TargetName="Box" Property="Opacity" Value="0.85" />
-            </Trigger>
-            <Trigger Property="IsPressed" Value="True">
-              <Setter TargetName="Box" Property="Opacity" Value="0.6" />
-            </Trigger>
-            <Trigger Property="IsEnabled" Value="False">
-              <Setter TargetName="Box" Property="Opacity" Value="0.4" />
-            </Trigger>
-          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- A button with a shape of its own (a pill, a disc, a chip): a light wash fades in over it
+       under the pointer, and it gives a little when pressed. -->
+  <Style x:Key="Solid" TargetType="ButtonBase" BasedOn="{StaticResource Bare}">
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ButtonBase">
+          <Grid x:Name="Root" RenderTransformOrigin="0.5,0.5">
+            <Grid.RenderTransform>
+              <ScaleTransform />
+            </Grid.RenderTransform>
+            <VisualStateManager.VisualStateGroups>
+              <VisualStateGroup x:Name="CommonStates">
+                <VisualStateGroup.Transitions>
+                  <VisualTransition GeneratedDuration="0:0:0.14" GeneratedEasingFunction="{StaticResource EaseOut}" />
+                </VisualStateGroup.Transitions>
+                <VisualState x:Name="Normal" />
+                <VisualState x:Name="MouseOver">
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Wash" Storyboard.TargetProperty="Opacity" To="1" Duration="0" />
+                  </Storyboard>
+                </VisualState>
+                <VisualState x:Name="Pressed">
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Wash" Storyboard.TargetProperty="Opacity" To="1" Duration="0" />
+                    <DoubleAnimation Storyboard.TargetName="Root" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" To="0.96" Duration="0" />
+                    <DoubleAnimation Storyboard.TargetName="Root" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)" To="0.96" Duration="0" />
+                  </Storyboard>
+                </VisualState>
+                <VisualState x:Name="Disabled">
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Root" Storyboard.TargetProperty="Opacity" To="0.4" Duration="0" />
+                  </Storyboard>
+                </VisualState>
+              </VisualStateGroup>
+            </VisualStateManager.VisualStateGroups>
+            <Border x:Name="Box" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"
+                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+              <Border.CornerRadius>
+                <MultiBinding Converter="{StaticResource PillRadius}">
+                  <Binding Path="Tag" RelativeSource="{RelativeSource TemplatedParent}" />
+                  <Binding Path="ActualHeight" RelativeSource="{RelativeSource Self}" />
+                </MultiBinding>
+              </Border.CornerRadius>
+              <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+            </Border>
+            <Border x:Name="Wash" Background="{DynamicResource TintLo}" Opacity="0" IsHitTestVisible="False">
+              <Border.CornerRadius>
+                <MultiBinding Converter="{StaticResource PillRadius}">
+                  <Binding Path="Tag" RelativeSource="{RelativeSource TemplatedParent}" />
+                  <Binding Path="ActualHeight" RelativeSource="{RelativeSource Self}" />
+                </MultiBinding>
+              </Border.CornerRadius>
+            </Border>
+          </Grid>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- A line of a list that opens something (a source, an episode, a setting): the same wash,
+       held a shade darker while pressed. It does not shrink: a row is too wide for that. -->
+  <Style x:Key="Row" TargetType="ButtonBase" BasedOn="{StaticResource Bare}">
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ButtonBase">
+          <Grid x:Name="Root">
+            <VisualStateManager.VisualStateGroups>
+              <VisualStateGroup x:Name="CommonStates">
+                <VisualStateGroup.Transitions>
+                  <VisualTransition GeneratedDuration="0:0:0.14" GeneratedEasingFunction="{StaticResource EaseOut}" />
+                </VisualStateGroup.Transitions>
+                <VisualState x:Name="Normal" />
+                <VisualState x:Name="MouseOver">
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Wash" Storyboard.TargetProperty="Opacity" To="1" Duration="0" />
+                  </Storyboard>
+                </VisualState>
+                <VisualState x:Name="Pressed">
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Wash" Storyboard.TargetProperty="Opacity" To="1" Duration="0" />
+                    <DoubleAnimation Storyboard.TargetName="Box" Storyboard.TargetProperty="Opacity" To="0.7" Duration="0" />
+                  </Storyboard>
+                </VisualState>
+                <VisualState x:Name="Disabled">
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Root" Storyboard.TargetProperty="Opacity" To="0.4" Duration="0" />
+                  </Storyboard>
+                </VisualState>
+              </VisualStateGroup>
+            </VisualStateManager.VisualStateGroups>
+            <Border x:Name="Box" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"
+                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+              <Border.CornerRadius>
+                <MultiBinding Converter="{StaticResource PillRadius}">
+                  <Binding Path="Tag" RelativeSource="{RelativeSource TemplatedParent}" />
+                  <Binding Path="ActualHeight" RelativeSource="{RelativeSource Self}" />
+                </MultiBinding>
+              </Border.CornerRadius>
+              <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+            </Border>
+            <Border x:Name="Wash" Background="{DynamicResource TintLo}" Opacity="0" IsHitTestVisible="False">
+              <Border.CornerRadius>
+                <MultiBinding Converter="{StaticResource PillRadius}">
+                  <Binding Path="Tag" RelativeSource="{RelativeSource TemplatedParent}" />
+                  <Binding Path="ActualHeight" RelativeSource="{RelativeSource Self}" />
+                </MultiBinding>
+              </Border.CornerRadius>
+            </Border>
+          </Grid>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- A card that is a picture (a poster, a banner, a face): it rises a little toward the
+       pointer. Whatever holds a row of these leaves it room (Ui.LiftRoom), so the edge of a
+       shelf never cuts the risen card. -->
+  <Style x:Key="Lift" TargetType="ButtonBase" BasedOn="{StaticResource Bare}">
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ButtonBase">
+          <Border x:Name="Box" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}" RenderTransformOrigin="0.5,0.5">
+            <Border.RenderTransform>
+              <ScaleTransform />
+            </Border.RenderTransform>
+            <VisualStateManager.VisualStateGroups>
+              <VisualStateGroup x:Name="CommonStates">
+                <VisualStateGroup.Transitions>
+                  <VisualTransition GeneratedDuration="0:0:0.18" GeneratedEasingFunction="{StaticResource EaseOut}" />
+                </VisualStateGroup.Transitions>
+                <VisualState x:Name="Normal" />
+                <VisualState x:Name="MouseOver">
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Box" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" To="1.04" Duration="0" />
+                    <DoubleAnimation Storyboard.TargetName="Box" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)" To="1.04" Duration="0" />
+                  </Storyboard>
+                </VisualState>
+                <VisualState x:Name="Pressed">
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Box" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" To="0.98" Duration="0" />
+                    <DoubleAnimation Storyboard.TargetName="Box" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)" To="0.98" Duration="0" />
+                    <DoubleAnimation Storyboard.TargetName="Box" Storyboard.TargetProperty="Opacity" To="0.85" Duration="0" />
+                  </Storyboard>
+                </VisualState>
+                <VisualState x:Name="Disabled">
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Box" Storyboard.TargetProperty="Opacity" To="0.4" Duration="0" />
+                  </Storyboard>
+                </VisualState>
+              </VisualStateGroup>
+            </VisualStateManager.VisualStateGroups>
+            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+          </Border>
         </ControlTemplate>
       </Setter.Value>
     </Setter>
   </Style>
 
   <!-- Round icon button: 40px circle. Tag is the corner radius. -->
-  <Style x:Key="Round" TargetType="Button" BasedOn="{StaticResource Bare}">
+  <Style x:Key="Round" TargetType="Button" BasedOn="{StaticResource Solid}">
     <Setter Property="Width" Value="40" />
     <Setter Property="Height" Value="40" />
     <Setter Property="Tag" Value="20" />
@@ -97,7 +278,7 @@
 
   <!-- The TV's buttons (mobile Ui.kt Button): 46 high, corners of 8, red for the main
        action, a translucent grey for the rest. -->
-  <Style x:Key="Pill" TargetType="Button" BasedOn="{StaticResource Bare}">
+  <Style x:Key="Pill" TargetType="Button" BasedOn="{StaticResource Solid}">
     <Setter Property="Height" Value="46" />
     <Setter Property="Tag" Value="8" />
     <Setter Property="Padding" Value="20,0" />
@@ -124,7 +305,7 @@
   </Style>
 
   <!-- Chips (mobile Ui.kt Chip): a pill of choices, red when on. A ToggleButton so IsChecked is "on". -->
-  <Style x:Key="Chip" TargetType="ToggleButton" BasedOn="{StaticResource Bare}">
+  <Style x:Key="Chip" TargetType="ToggleButton" BasedOn="{StaticResource Solid}">
     <Setter Property="Tag" Value="999" />
     <Setter Property="Height" Value="36" />
     <Setter Property="Padding" Value="16,0" />
@@ -149,7 +330,19 @@
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="Thumb">
-          <Border Background="{DynamicResource Line}" CornerRadius="4" />
+          <Grid Background="Transparent">
+            <Border Background="{DynamicResource Line}" CornerRadius="4" />
+            <!-- Brighter while the pointer is on it or dragging it. -->
+            <Border x:Name="Hot" Background="{DynamicResource Faint}" CornerRadius="4" Visibility="Collapsed" />
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Hot" Property="Visibility" Value="Visible" />
+            </Trigger>
+            <Trigger Property="IsDragging" Value="True">
+              <Setter TargetName="Hot" Property="Visibility" Value="Visible" />
+            </Trigger>
+          </ControlTemplate.Triggers>
         </ControlTemplate>
       </Setter.Value>
     </Setter>
@@ -223,17 +416,35 @@
     <Setter Property="Focusable" Value="False" />
     <Setter Property="Template">
       <Setter.Value>
+        <!-- The knob slides and the track fills, rather than both jumping. -->
         <ControlTemplate TargetType="CheckBox">
-          <Border x:Name="Track" Width="42" Height="24" CornerRadius="12" Background="{DynamicResource Line}">
-            <Ellipse x:Name="Knob" Width="18" Height="18" Fill="{DynamicResource Muted}" HorizontalAlignment="Left" Margin="3,0" />
-          </Border>
-          <ControlTemplate.Triggers>
-            <Trigger Property="IsChecked" Value="True">
-              <Setter TargetName="Track" Property="Background" Value="{DynamicResource Accent}" />
-              <Setter TargetName="Knob" Property="HorizontalAlignment" Value="Right" />
-              <Setter TargetName="Knob" Property="Fill" Value="#ffffff" />
-            </Trigger>
-          </ControlTemplate.Triggers>
+          <Grid Width="42" Height="24" Background="Transparent">
+            <VisualStateManager.VisualStateGroups>
+              <VisualStateGroup x:Name="CheckStates">
+                <VisualStateGroup.Transitions>
+                  <VisualTransition GeneratedDuration="0:0:0.16" GeneratedEasingFunction="{StaticResource EaseOut}" />
+                </VisualStateGroup.Transitions>
+                <VisualState x:Name="Unchecked" />
+                <VisualState x:Name="Indeterminate" />
+                <VisualState x:Name="Checked">
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="On" Storyboard.TargetProperty="Opacity" To="1" Duration="0" />
+                    <DoubleAnimation Storyboard.TargetName="KnobOn" Storyboard.TargetProperty="Opacity" To="1" Duration="0" />
+                    <DoubleAnimation Storyboard.TargetName="Knob" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)" To="18" Duration="0" />
+                  </Storyboard>
+                </VisualState>
+              </VisualStateGroup>
+            </VisualStateManager.VisualStateGroups>
+            <Border CornerRadius="12" Background="{DynamicResource Line}" />
+            <Border x:Name="On" CornerRadius="12" Background="{DynamicResource Accent}" Opacity="0" />
+            <Grid x:Name="Knob" Width="18" Height="18" HorizontalAlignment="Left" Margin="3,0">
+              <Grid.RenderTransform>
+                <TranslateTransform />
+              </Grid.RenderTransform>
+              <Ellipse Fill="{DynamicResource Muted}" />
+              <Ellipse x:Name="KnobOn" Fill="#ffffff" Opacity="0" />
+            </Grid>
+          </Grid>
         </ControlTemplate>
       </Setter.Value>
     </Setter>
@@ -262,8 +473,19 @@
     <Setter Property="Background" Value="{DynamicResource SurfaceAlt}" />
     <Setter Property="Foreground" Value="{DynamicResource Text}" />
     <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="Padding" Value="8,5" />
+    <Setter Property="Padding" Value="10,6" />
     <Setter Property="FontSize" Value="12" />
+    <Setter Property="HasDropShadow" Value="False" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ToolTip">
+          <Border Background="{TemplateBinding Background}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="6"
+                  Padding="{TemplateBinding Padding}">
+            <ContentPresenter TextElement.Foreground="{TemplateBinding Foreground}" />
+          </Border>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
   </Style>
 
   <!-- A menu as the app's own card: rounded, no icon gutter, long lists scroll. -->

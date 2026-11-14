@@ -25,7 +25,7 @@ public sealed class FilesView : UserControl
             {
                 Orientation = Orientation.Horizontal,
                 Children = { Ui.Glyph("download", 12, "Accent"), Ui.Text($"All {videos.Count}", "Meta", "Accent", 12, FontWeights.SemiBold) },
-            }, downloadAll, tooltip: "Download every video");
+            }, downloadAll, "Solid", "Download every video");
             ((StackPanel)all.Content).Children[1].SetValue(MarginProperty, new Thickness(5, 0, 0, 0));
             all.Tag = 999;
             all.Padding = new Thickness(10, 6, 10, 6);
@@ -117,7 +117,12 @@ public sealed class FilesView : UserControl
             return card;
         }
         card.SetResourceReference(Border.BackgroundProperty, "Surface");
-        return Ui.Button(card, () => (downloading ? download : play)(file));
+        // The gap under the card is the row's, not the card's: the wash under the pointer covers the card alone.
+        card.Margin = new Thickness(0);
+        var row = Ui.Button(card, () => (downloading ? download : play)(file), "Row");
+        row.Tag = 12;
+        row.Margin = new Thickness(0, 0, 0, 8);
+        return row;
     }
 
     static T Center<T>(T e) where T : FrameworkElement

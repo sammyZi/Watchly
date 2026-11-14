@@ -23,5 +23,6 @@
   <SolidColorBrush x:Key="Tint" Color="#1f141414" />
   <SolidColorBrush x:Key="TintHi" Color="#38141414" />
   <SolidColorBrush x:Key="TintLo" Color="#14141414" />
+  <SolidColorBrush x:Key="Stroke" Color="#14141414" />
   <SolidColorBrush x:Key="Scrim" Color="#8c000000" />
 </ResourceDictionary>

@@ -35,10 +35,14 @@ public static class OrderUi
     static readonly Brush SideFade = Fade(new Point(0, 0), new Point(1, 0), (0xF0, 0), (0xB8, 0.55), (0x40, 1));
     static readonly Brush PosterFade = Fade(new Point(0, 0), new Point(0, 1), (0, 0.55), (0xD9, 1));
 
-    /// <summary>A row the wheel passes through, dragged like a shelf.</summary>
-    public static ScrollViewer Strip(IEnumerable<UIElement> items)
+    /// <summary>
+    /// A row the wheel passes through, dragged like a shelf. <paramref name="side"/> is the page's
+    /// padding, as the row's own margin so cards run to the window's edge as it moves; above and
+    /// below is the room a card rises into under the pointer.
+    /// </summary>
+    public static ScrollViewer Strip(IEnumerable<UIElement> items, double side = 0)
     {
-        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(side, Ui.LiftRoom, side, Ui.LiftRoom) };
         foreach (var item in items) row.Children.Add(item);
         var strip = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = row };
         Ui.PassWheel(strip);
@@ -92,7 +96,7 @@ public static class OrderUi
             bar.Margin = new Thickness(Round, 0, Round, 0);
             box.Children.Add(bar);
         }
-        var button = Ui.Button(box, () => MainWindow.Shell.OpenOrder(order));
+        var button = Ui.Button(box, () => MainWindow.Shell.OpenOrder(order), "Lift");
         button.HorizontalContentAlignment = HorizontalAlignment.Stretch;
         return button;
     }
@@ -114,7 +118,7 @@ public static class OrderUi
             box.Children.Add(tick);
         }
         if (here) box.Children.Add(new Border { CornerRadius = new CornerRadius(Round), BorderBrush = Brushes.White, BorderThickness = new Thickness(2) });
-        var button = Ui.Button(box, onClick);
+        var button = Ui.Button(box, onClick, "Lift");
         button.Margin = new Thickness(0, 0, 10, 0);
         return button;
     }
@@ -147,7 +151,7 @@ public static class OrderUi
         line.MaxWidth = 210;
         why.Children.Add(line);
         box.Children.Add(new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(12), Children = { mark, why } });
-        var button = Ui.Button(box, () => MainWindow.Shell.OpenTitle(t), tooltip: t.Name);
+        var button = Ui.Button(box, () => MainWindow.Shell.OpenTitle(t), "Lift", t.Name);
         button.Margin = new Thickness(0, 0, 10, 0);
         return button;
     }
@@ -169,7 +173,7 @@ public static class OrderUi
         name.Margin = new Thickness(0, 6, 0, 0);
         var column = new StackPanel { Width = 140, Children = { Ui.Art(card.Poster, card.Title, 140, 210, 6), name } };
         if (card.Year is not null) column.Children.Add(Ui.Text(card.Year, "Meta", "Faint", 12));
-        var button = Ui.Button(column, () => Open(card), tooltip: card.Title);
+        var button = Ui.Button(column, () => Open(card), "Lift", card.Title);
         button.Margin = new Thickness(0, 0, 10, 0);
         button.VerticalAlignment = VerticalAlignment.Top;
         return button;
@@ -378,7 +382,7 @@ public sealed class WatchOrderView : UserControl, IDisposable
         }
         words.Children.Add(facts);
         box.Children.Add(words);
-        var button = Ui.Button(box, () => { if (title.Name.Length > 0) shell.OpenTitle(title); });
+        var button = Ui.Button(box, () => { if (title.Name.Length > 0) shell.OpenTitle(title); }, "Lift");
         button.HorizontalContentAlignment = HorizontalAlignment.Stretch;
         return button;
     }

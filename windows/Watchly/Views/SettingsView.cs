@@ -123,8 +123,15 @@ public sealed class SettingsView : UserControl
     {
         var icon = Ui.Brushed(new Border { Width = 38, Height = 38, CornerRadius = new CornerRadius(10), Child = Ui.Glyph(e.Icon, 18, e.Tint) }, "Tint");
         var words = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(14, 0, 0, 0), Children = { Ui.Text(e.Title, "Label", "Text", 15, FontWeights.SemiBold), Ui.Text(e.Hint, "Meta", "Faint", 13) } };
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(14, 9, 14, 9), Children = { icon, words } };
-        var b = Ui.Button(row, e.Open);
+        // A chevron at the far end: the line opens something, it is not a label.
+        var go = Ui.Glyph("chevron-right", 16, "Faint");
+        DockPanel.SetDock(icon, Dock.Left);
+        DockPanel.SetDock(go, Dock.Right);
+        var row = new DockPanel { Margin = new Thickness(8, 7, 8, 7), Children = { icon, go, words } };
+        var b = Ui.Button(row, e.Open, "Row");
+        // Inset from the card's edge and rounded, so the wash under the pointer stays inside the card's corners.
+        b.Margin = new Thickness(6, 2, 6, 2);
+        b.Tag = 12;
         b.HorizontalContentAlignment = HorizontalAlignment.Stretch;
         b.HorizontalAlignment = HorizontalAlignment.Stretch;
         return b;
@@ -333,6 +340,14 @@ public sealed class SettingsView : UserControl
                 },
                 "trash-2"));
         clearTorrents.IsEnabled = savedTorrents > 0;
+        // Each is a line that does something: the wash under the pointer, reaching a little past the words.
+        foreach (var line in new[] { clear, clearMeta, clearTorrents })
+        {
+            line.Style = (Style)FindResource("Row");
+            line.Padding = new Thickness(10, 0, 10, 0);
+            line.Margin = new Thickness(-10, 0, -10, 0);
+            line.Tag = 8;
+        }
         page.Children.Add(Group("Storage", new StackPanel
         {
             Children =
@@ -656,7 +671,16 @@ public sealed class SettingsView : UserControl
     static CheckBox Toggle(bool value, Action<bool> change)
     {
         var box = new CheckBox { Style = (Style)Application.Current.FindResource("Switch"), IsChecked = value };
-        box.Click += (_, _) => change(box.IsChecked == true);
+        // Saving a setting rebuilds this page, switch included. Wait for the knob to finish sliding
+        // first, or the new switch replaces it mid-way and the change is a jump.
+        box.Click += async (_, _) =>
+        {
+            var on = box.IsChecked == true;
+            box.IsHitTestVisible = false;
+            await Task.Delay(180);
+            change(on);
+            box.IsHitTestVisible = true;
+        };
         return box;
     }
 
