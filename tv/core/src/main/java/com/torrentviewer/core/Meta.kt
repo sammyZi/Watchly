@@ -440,7 +440,7 @@ private val photos = ConcurrentHashMap<String, String>()
 suspend fun castPhoto(name: String): String? {
     photos[name]?.let { return it.ifEmpty { null } }
     val found = runCatching {
-        photoFrom(JSONObject(Net.get("https://en.wikipedia.org/w/api.php?action=query&format=json&redirects=1&prop=pageimages%7Cdescription&pithumbsize=200&titles=${enc(name)}", quiet = true)))
+        photoFrom(JSONObject(Net.get("https://en.wikipedia.org/w/api.php?action=query&format=json&redirects=1&prop=pageimages%7Cdescription&pithumbsize=250&titles=${enc(name)}", quiet = true, headers = mapOf("User-Agent" to WIKI_AGENT))))
     }.getOrNull()
     photos[name] = found.orEmpty()
     return found

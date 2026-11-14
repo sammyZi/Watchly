@@ -150,33 +150,80 @@ object Motion {
 fun Lc(@DrawableRes icon: Int, modifier: Modifier = Modifier, tint: Color = Ink.text, size: Dp = 20.dp) =
     Icon(painterResource(icon), null, modifier.size(size), tint = tint)
 
-private val ART_HEADERS = NetworkHeaders.Builder().set("User-Agent", "WatchlyTV/2").build()
+private val ART_HEADERS = NetworkHeaders.Builder().set("User-Agent", USER_AGENT).build()
+private val WIKI_HEADERS = NetworkHeaders.Builder().set("User-Agent", WIKI_AGENT).build()
+
+/** A picture that failed for a passing reason is asked for again this many times, a little later each time. */
+private const val ART_RETRIES = 2
+private const val ART_RETRY_MS = 2_500L
 
 /** How long a picture fades in. The TV sets 0: each fading card is a redraw per frame, a row at a time. */
 var ArtFadeMs = 300
+
+/**
+ * Metahub has a poster for nearly every title and a backdrop for far fewer, and most wide cards ask
+ * for the backdrop: one stands in for the other rather than leaving the card empty.
+ */
+internal fun otherArt(url: String?): String? = when {
+    url == null -> null
+    "images.metahub.space/background/" in url -> url.replace("/background/", "/poster/")
+    "images.metahub.space/poster/" in url -> url.replace("/poster/", "/background/")
+    else -> null
+}
+
+/** What to try for a picture, in order: the one asked for, the caller's [fallback], then [otherArt] of that. */
+internal fun artCandidates(url: String, fallback: String?): List<String> =
+    listOfNotNull(url, fallback, otherArt(fallback ?: url)).distinct()
 
 /** A network image over a placeholder tinted from the name. */
 @Composable
 /** [fill]: a placeholder under the picture — skipped where the picture covers it anyway and the fill is pure GPU cost. */
 fun Artwork(url: String?, name: String, modifier: Modifier = Modifier, scale: ContentScale = ContentScale.Crop, fill: Boolean = true, fallback: String? = null) {
     val hue = remember(name) { hueOf(name).toFloat() }
+    // Nothing would load: the card says what it is, as one with no picture to ask for does.
+    var dead by remember(url, fallback) { mutableStateOf(false) }
+    val named = url == null || (dead && fill)
     // The placeholder is a painter Coil draws only until the picture lands, not a fill
     // that stays painted underneath it forever after.
-    Box(modifier.then(if (url == null) Modifier.background(Color.hsv(hue, 0.45f, 0.28f)) else Modifier)) {
-        if (url != null) {
+    Box(modifier.then(if (named) Modifier.background(Color.hsv(hue, 0.45f, 0.28f)) else Modifier)) {
+        if (url != null && !dead) {
             val context = LocalContext.current
-            // Episode stills 404 for much of anime: then the title's own art.
-            var src by remember(url) { mutableStateOf(url) }
-            AsyncImage(
-                // Wikimedia answers OkHttp's own User-Agent with 403: without this, no cast photo loads.
-                model = remember(src) { ImageRequest.Builder(context).data(src).httpHeaders(ART_HEADERS).crossfade(ArtFadeMs).build() },
-                onError = { if (fallback != null && src != fallback) src = fallback },
-                placeholder = if (fill) remember { ColorPainter(Ink.surface) } else null,
-                contentDescription = name,
-                contentScale = scale,
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else {
+            // Episode stills 404 for much of anime: then the title's own art, and then its other picture.
+            val candidates = remember(url, fallback) { artCandidates(url, fallback) }
+            var at by remember(url, fallback) { mutableStateOf(0) }
+            val src = candidates[at.coerceIn(0, candidates.lastIndex)]
+            // A host that says slow down (429), or a connection that drops, used to leave the card blank
+            // for as long as it stayed on screen: nothing asks twice by itself. The last picture there
+            // is to try is asked for again a little later, twice; one that simply isn't there (404) is not.
+            var tries by remember(src) { mutableStateOf(0) }
+            var failed by remember(src) { mutableStateOf(false) }
+            LaunchedEffect(failed, tries) {
+                if (failed) {
+                    kotlinx.coroutines.delay(ART_RETRY_MS * (tries + 1))
+                    failed = false
+                    tries++
+                }
+            }
+            // Keyed: the same request again is no new request to the image loader.
+            androidx.compose.runtime.key(tries) {
+                AsyncImage(
+                    // Wikimedia answers OkHttp's own User-Agent with 403: without this, no cast photo loads.
+                    model = remember(src) { ImageRequest.Builder(context).data(src).httpHeaders(if ("wikimedia.org" in src) WIKI_HEADERS else ART_HEADERS).crossfade(ArtFadeMs).build() },
+                    onError = { error ->
+                        val gone = (error.result.throwable as? coil3.network.HttpException)?.response?.code == 404
+                        when {
+                            at < candidates.lastIndex -> at++
+                            !gone && tries < ART_RETRIES -> failed = true
+                            else -> dead = true
+                        }
+                    },
+                    placeholder = if (fill) remember { ColorPainter(Ink.surface) } else null,
+                    contentDescription = name,
+                    contentScale = scale,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        } else if (named) {
             Text(
                 name,
                 Modifier.align(Alignment.BottomStart).padding(10.dp),

@@ -24,6 +24,9 @@ import kotlin.concurrent.thread
  * @param request   reports where reader `id` is now reading, so the torrent can
  *                  keep a window hot ahead of it
  * @param release   reader `id` is finished; stop fetching for it
+ * @param readable  how many bytes from this offset, up to the count asked for, are on disk in one
+ *                  run. Finer than [available], which answers for one byte: with it the torrent can
+ *                  hand over the blocks of a piece as they land, instead of the piece once whole.
  */
 class LocalFileServer(
   private val file: File,
@@ -33,6 +36,7 @@ class LocalFileServer(
   private val release: (Long) -> Unit,
   /** Reachable from the network, for a Cast receiver that fetches the video itself. */
   private val lan: Boolean = false,
+  private val readable: ((Long, Int) -> Int)? = null,
 ) {
   /**
    * Loopback unless [lan]: the television is the receiver and nothing else needs to reach
@@ -205,7 +209,9 @@ class LocalFileServer(
         // moment the reader catches the download.
         request(generationAtStart, position)
 
-        if (!available(position)) {
+        val limit = minOf(buffer.size.toLong(), end - position + 1).toInt()
+        val here = readable?.invoke(position, limit) ?: if (available(position)) limit else 0
+        if (here <= 0) {
           // Superseded and stalled — this reader is going nowhere; let go of its
           // window instead of competing with the connection that replaced it.
           if (generation.get() != generationAtStart) return
@@ -231,10 +237,11 @@ class LocalFileServer(
         }
 
         raf.seek(position)
-        var want = minOf(buffer.size.toLong(), end - position + 1).toInt()
+        var want = minOf(here, limit)
         // An unaligned read can run past this piece into one not yet downloaded —
         // the sparse file hands back zeros, and the demuxer sees a corrupt stream.
-        while (want > 1 && !available(position + want - 1)) want /= 2
+        // [readable] has already stopped the read at the first byte that is not here.
+        if (readable == null) while (want > 1 && !available(position + want - 1)) want /= 2
         val read = raf.read(buffer, 0, want)
         if (read <= 0) {
           Thread.sleep(40)

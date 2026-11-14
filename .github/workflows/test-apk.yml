@@ -1,0 +1,97 @@
+name: Test APK
+
+# Release builds of the phone and TV apps for trying a testing/* branch on a device: the same
+# build type and key as the Release workflow, so each installs over the released app in place.
+# Nothing is published: the APKs are workflow artifacts on the run's page, one per app and ABI
+# so a phone downloads only its own (arm64-v8a for nearly every phone; many TVs are armeabi-v7a).
+
+on:
+  push:
+    branches:
+      - "testing/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Android (${{ matrix.app }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: phone
+            dir: mobile
+          - app: tv
+            dir: tv
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Accept Android SDK licences
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+
+      # TMDB, SubDL, Simkl and MDBList keys from repository secrets, where they are set: a local build
+      # reads them from mobile/.env, which stays out of git, so without this step a build made here has
+      # no TMDB (suggestions, cast, age ratings, collections) and no SubDL. The TV build reads the same file.
+      - name: Keys from secrets
+        shell: bash
+        env:
+          TMDB_KEY: ${{ secrets.TMDB_KEY }}
+          SUBDL_KEY: ${{ secrets.SUBDL_KEY }}
+          SIMKL_CLIENT_ID: ${{ secrets.SIMKL_CLIENT_ID }}
+          MDBLIST_CLIENT_ID: ${{ secrets.MDBLIST_CLIENT_ID }}
+        run: |
+          for k in TMDB_KEY SUBDL_KEY SIMKL_CLIENT_ID MDBLIST_CLIENT_ID; do
+            v="${!k}"
+            if [ -n "$v" ]; then echo "$k=$v" >> mobile/.env; echo "$k: set"; else echo "$k: not set"; fi
+          done
+
+      - name: Build release APKs
+        working-directory: ${{ matrix.dir }}
+        run: ./gradlew --no-daemon assembleRelease
+
+      - name: Name the APKs
+        shell: bash
+        run: |
+          mkdir -p out
+          sha=$(git rev-parse --short HEAD)
+          for apk in ${{ matrix.dir }}/app/build/outputs/apk/release/app-*-release.apk; do
+            [ -f "$apk" ] || continue
+            abi=$(basename "$apk" -release.apk)
+            abi=${abi#app-}
+            cp "$apk" "out/Watchly-${{ matrix.app }}-test-$sha-$abi.apk"
+          done
+          ls -lh out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: watchly-${{ matrix.app }}-arm64-v8a
+          path: out/*-arm64-v8a.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: watchly-${{ matrix.app }}-armeabi-v7a
+          path: out/*-armeabi-v7a.apk
+          if-no-files-found: error
+
+      # After the uploads: a failing test should not keep the APK from a device. Once, not per app.
+      - name: Unit tests (core)
+        if: matrix.app == 'tv'
+        working-directory: tv
+        run: ./gradlew --no-daemon :core:testDebugUnitTest

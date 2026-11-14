@@ -640,6 +640,23 @@ internal fun prerollTargets(first: Int, start: Int, count: Int, last: Int): List
 internal fun readyToOpen(head: Long, headNeed: Long, start: Long, startNeed: Long, resuming: Boolean): Boolean =
     head >= headNeed && (resuming || start >= startNeed)
 
+/** A block: the unit a piece is asked for, sent and written in. */
+internal const val BLOCK_BYTES = 16 * 1024
+
+/**
+ * Bytes of a piece that can be read in one run from byte [from] of it: the blocks written to disk
+ * ([done], by block number), from the one holding that byte up to the first still missing. Blocks
+ * arrive out of order, so a later one being here says nothing of the ones before it, and the file
+ * is sparse: a read into a missing block is zeros, not a wait.
+ */
+internal fun finishedRun(done: java.util.BitSet, from: Int, pieceSize: Int, blockSize: Int = BLOCK_BYTES): Int {
+    if (blockSize <= 0 || from < 0 || from >= pieceSize) return 0
+    val first = from / blockSize
+    val end = done.nextClearBit(first)
+    if (end <= first) return 0
+    return (minOf(end.toLong() * blockSize, pieceSize.toLong()) - from).toInt()
+}
+
 /**
  * The width of a narrow fetch: the one in use ([held]) until [wanted] is more than a quarter off it.
  * Wanted follows the download rate, and each new width re-applies the zone, which clears every deadline:

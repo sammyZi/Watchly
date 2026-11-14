@@ -89,9 +89,10 @@ private fun TmdbCard.asTitle() = Title("", kind, title, year = year, poster = po
 
 /** The cast from TMDB: real photos, who each one plays, and OK through to what else they're in. */
 @Composable
-fun PeopleRail(people: List<CastMember>, onPerson: ((CastMember) -> Unit)?, modifier: Modifier = Modifier) {
+fun PeopleRail(people: List<CastMember>, onPerson: ((CastMember) -> Unit)?, modifier: Modifier = Modifier, heading: Boolean = true) {
     Column(modifier.fillMaxWidth()) {
-        Text("Cast", Modifier.padding(start = ORDER_LEFT, bottom = 12.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
+        // Under a tab that already says so, no heading.
+        if (heading) Text("Cast",Modifier.padding(start = ORDER_LEFT, bottom = 12.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
         CompositionLocalProvider(LocalBringIntoViewSpec provides rememberEdgeScroll(ORDER_ROW_LEAD)) {
             LazyRow(
                 Modifier.padding(start = ORDER_LEFT - ORDER_ROW_LEAD).focusRestorer(),
@@ -117,10 +118,10 @@ fun PeopleRail(people: List<CastMember>, onPerson: ((CastMember) -> Unit)?, modi
 
 /** "More like this", from TMDB's recommendations. */
 @Composable
-fun SimilarRail(cards: List<TmdbCard>, onOpen: (Title) -> Unit, modifier: Modifier = Modifier) {
+fun SimilarRail(cards: List<TmdbCard>, onOpen: (Title) -> Unit, modifier: Modifier = Modifier, heading: Boolean = true) {
     val open = rememberCardOpener(onOpen)
     Column(modifier.fillMaxWidth()) {
-        Text("More like this", Modifier.padding(start = ORDER_LEFT, bottom = 12.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
+        if (heading) Text("More like this",Modifier.padding(start = ORDER_LEFT, bottom = 12.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
         CompositionLocalProvider(LocalBringIntoViewSpec provides rememberEdgeScroll(ORDER_ROW_LEAD)) {
             LazyRow(
                 Modifier.padding(start = ORDER_LEFT - ORDER_ROW_LEAD).focusRestorer(),

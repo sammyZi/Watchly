@@ -54,8 +54,19 @@ import com.composables.icons.lucide.R as L
 /** The exact strings quality() returns, best first. */
 private val QUALITY_ORDER = listOf("4K", "1080p", "720p", "CAM")
 
+/** The tabs under a title's buttons, in the order they stand. */
+private enum class Section(val label: String) {
+    SOURCES("Sources"), EPISODES("Episodes"), FRANCHISE("Collection"), CAST("Cast"), SIMILAR("More like this")
+}
+
 /** Past forty it is D-pad scrolling nobody finishes. */
 private const val MAX_SOURCES = 40
+
+/**
+ * Sources shown before "Show all": the best few, right under Play. At the very bottom, under the
+ * franchise, the cast and what's like it, a new viewer never found them. Calibration knob.
+ */
+private const val FIRST_SOURCES = 5
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
@@ -122,6 +133,12 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
     val list = rememberLazyListState()
     val play = remember { FocusRequester() }
     val firstSource = remember { FocusRequester() }
+    /** Every source, not only the first few; again for each episode and quality. */
+    var allSources by remember(title.imdb, episode?.id, quality) { mutableStateOf(false) }
+    /** The first source past the few: where "Show all" leaves the remote. */
+    val nextSource = remember { FocusRequester() }
+    /** The tab on show, by its name; kept over a page a card on it opened. */
+    var section by rememberSaveable(title.imdb) { mutableStateOf("") }
     /** An episode was picked: its sources are what the remote wants next, past the rows above them. */
     var toSources by remember { mutableStateOf(false) }
     /** The rail a card on it opened another page from, kept over that page; back here, focus goes to it. */
@@ -159,6 +176,18 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
     /** What the big button plays: the episode being looked at, where the series was left, or the first of the season. */
     val upNext = episode ?: continueAt ?: episodes.firstOrNull()
 
+    // Open at the top, logo and buttons in view, with Play. Once for the page: as part of the head
+    // item it ran again each time the list brought that item back, and took the remote out of the
+    // sources and up to Play with it.
+    if (backTo == null) LaunchedEffect(title.imdb, upNext != null) {
+        for (attempt in 1..5) {
+            if (runCatching { play.requestFocus() }.isSuccess) break
+            kotlinx.coroutines.delay(32)
+        }
+        // After the focus, whatever it scrolled.
+        list.scrollToItem(0)
+    }
+
     /** Nothing found; with a language picked, that is the likely reason, so it says so. */
     fun noneFound(what: String) = when {
         !Addons.hasStreams -> Addons.NONE_YET
@@ -177,18 +206,36 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
 
         // Scroll only what would be off-screen: the TV default pivots focus to a third of
         // the way down, which pushed the logo off the top when the page opened.
-        CompositionLocalProvider(LocalBringIntoViewSpec provides MinimalScroll) {
+        // With the overscan's margin: a source at the foot of the list is not flush with the screen's edge.
+        CompositionLocalProvider(LocalBringIntoViewSpec provides rememberMinimalScroll(Safe.y)) {
         // The page moves a section at a time, as Netflix's does: the header in full at the
         // top, or the season row and its episodes in full. A free scroll left both cut in
         // half after going down to the episodes and back up.
         val hasEpisodes = title.isSeries && seasons.isNotEmpty()
-        // The franchise, the cast and what's like it, each its own section, above the sources:
-        // under as many as forty of those, nobody would reach them.
-        val extrasAt = if (hasEpisodes) 2 else 1
-        val castAt = extrasAt + (if (inOrder != null) 1 else 0)
-        val moreAt = castAt + (if (people.isNotEmpty()) 1 else 0)
-        val sourcesAt = moreAt + (if (similar.isNotEmpty()) 1 else 0)
+        // Under the buttons, one row of tabs and one section at a time, as the big streaming apps
+        // lay a title out: what to play first, then the franchise, the cast and what's like it.
+        // Stacked down the page, the sources were below three rails and a new viewer never got there.
+        val tabs = listOfNotNull(
+            if (title.isSeries) Section.EPISODES else Section.SOURCES,
+            Section.FRANCHISE.takeIf { inOrder != null },
+            Section.CAST.takeIf { people.isNotEmpty() },
+            Section.SIMILAR.takeIf { similar.isNotEmpty() },
+        )
+        val current = tabs.firstOrNull { it.name == section } ?: tabs.first()
+        val playing = current == Section.EPISODES || current == Section.SOURCES
+        val listed = if (playing) shown.take(if (allSources) MAX_SOURCES else FIRST_SOURCES) else emptyList()
+        val hidden = if (playing) minOf(shown.size, MAX_SOURCES) - listed.size else 0
+        val tabsAt = 1
+        val sourcesAt = tabsAt + 1 + (if (hasEpisodes && current == Section.EPISODES) 1 else 0)
         val topPad = with(LocalDensity.current) { (Safe.y + 72.dp).roundToPx() }
+        // "Show all" goes as the rest come in: the remote goes on to the first of them.
+        LaunchedEffect(allSources) {
+            if (!allSources) return@LaunchedEffect
+            for (attempt in 1..10) {
+                if (runCatching { nextSource.requestFocus() }.isSuccess) break
+                kotlinx.coroutines.delay(50)
+            }
+        }
         LaunchedEffect(toSources, shown.isNotEmpty()) {
             if (!toSources || shown.isEmpty()) return@LaunchedEffect
             list.scrollToItem(sourcesAt, topPad)
@@ -220,7 +267,8 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
                     if (title.cast.isNotEmpty()) People("Starring", title.cast.take(4).joinToString(", "))
                     if (title.directors.isNotEmpty()) Crew(if (title.isSeries) "Creators" else "Director", title.directors.take(2), tmdb?.directors.orEmpty(), onPerson.takeUnless { Kids.on })
                     title.awards?.let { People("Awards", it) }
-                    Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    // Back up from the seasons or the cast: the button the remote left, or Play — not whichever sits above.
+                    Row(Modifier.padding(top = 24.dp).focusRow(play), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                         if (!title.isSeries) {
                             // Never disabled: a disabled view cannot hold focus, and the remote would open elsewhere.
                             TvButton(
@@ -262,19 +310,36 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
                         )
                     }
                 }
-                if (backTo == null) {
-                    play.claim(title.imdb to (upNext != null))
-                    // Open at the top, logo and buttons in view, whatever focus scrolled.
-                    LaunchedEffect(title.imdb, upNext != null) { list.scrollToItem(0) }
+            }
+
+            item(key = "tabs") {
+                // Up from a section, or down from Play: the tab on show. Moving along the row changes it.
+                val lead = remember { FocusRequester() }
+                Row(
+                    // Not pinned on the way in: from Play the row is one step down, and sliding the whole
+                    // section to the top for it threw the page about. A rail or the episodes pin it, and
+                    // then the row is at the very top of the screen: Safe.y keeps it clear of the overscan.
+                    Modifier.padding(start = Safe.x - 4.dp, end = Safe.x, top = Safe.y).focusRow(lead),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    tabs.forEach { tab -> SectionTab(tab.label, tab == current, lead.takeIf { tab == current }) { section = tab.name } }
                 }
             }
 
-            if (hasEpisodes) {
+            if (hasEpisodes && current == Section.EPISODES) {
                 // Seasons and episodes are one section, so both are on screen together.
                 item(key = "episodes") {
-                    Column(Modifier.onFocusEnter { pin(1) }.padding(top = Safe.y)) {
-                        Text("Episodes", Modifier.padding(start = Safe.x + 12.dp, bottom = 14.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
-                        LazyRow(contentPadding = PaddingValues(start = Safe.x + 12.dp, end = Safe.x), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(Modifier.onFocusEnter { pin(tabsAt) }.padding(top = 14.dp)) {
+                        // Up from an episode, or down from Play, is the season on show — not the chip that
+                        // happens to sit over the card, which is how the remote came to read "Season 6" under
+                        // Season 2's episodes. The row opens at that season too: a resume in season 15 used to
+                        // open on Season 1.
+                        val seasonLead = remember { FocusRequester() }
+                        val seasonAt = (if (through) block else seasons.indexOf(season)).coerceAtLeast(0)
+                        val seasonRow = rememberLazyListState(seasonAt)
+                        // The season is settled a moment after the page opens; its chip has to be in the row to be landed on.
+                        LaunchedEffect(seasonAt) { if (seasonRow.layoutInfo.visibleItemsInfo.none { it.index == seasonAt }) seasonRow.scrollToItem(seasonAt) }
+                        LazyRow(Modifier.focusRestorer(seasonLead), state = seasonRow, contentPadding = PaddingValues(start = Safe.x + 12.dp, end = Safe.x), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             // Retire whatever search is out: it belongs to the season being left.
                             fun leave() {
                                 ticket++
@@ -283,9 +348,9 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
                                 episode = null
                             }
                             if (through) items(blocks.indices.toList()) { b ->
-                                Chip("${numbered[blocks[b].first().id]}–${numbered[blocks[b].last().id]}", b == block, onClick = { block = b; leave() })
-                            } else items(seasons) { s ->
-                                Chip("Season $s", s == season, onClick = { season = s; leave() })
+                                Chip("${numbered[blocks[b].first().id]}–${numbered[blocks[b].last().id]}", b == block, onClick = { block = b; leave() }, requester = seasonLead.takeIf { b == seasonAt })
+                            } else itemsIndexed(seasons) { i, s ->
+                                Chip("Season $s", s == season, onClick = { season = s; leave() }, requester = seasonLead.takeIf { i == seasonAt })
                             }
                         }
                         key(season, block) {
@@ -317,36 +382,25 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
                 }
             }
 
-            inOrder?.let { order ->
-                item(key = "franchise") {
-                    val here = remember { FocusRequester() }
-                    FranchiseRail(order, title.imdb, { leftFrom = "franchise"; onOrder(order) }, { leftFrom = "franchise"; onOpen(it) }, Modifier.focusRequester(here).onFocusEnter { pin(extrasAt) }.padding(top = 30.dp))
-                    if (backTo == "franchise") here.claim()
-                }
-            }
-            if (people.isNotEmpty()) item(key = "cast") {
-                val here = remember { FocusRequester() }
-                PeopleRail(people, onPerson.takeUnless { Kids.on }?.let { open -> { p: CastMember -> leftFrom = "cast"; open(p) } }, Modifier.focusRequester(here).onFocusEnter { pin(castAt) }.padding(top = 30.dp))
-                if (backTo == "cast") here.claim()
-            }
-            if (similar.isNotEmpty()) item(key = "similar") {
-                val here = remember { FocusRequester() }
-                SimilarRail(similar, { leftFrom = "similar"; onOpen(it) }, Modifier.focusRequester(here).onFocusEnter { pin(moreAt) }.padding(top = 30.dp))
-                if (backTo == "similar") here.claim()
-            }
-
-            item(key = "sources-head") {
-                Column(Modifier.onFocusEnter { pin(sourcesAt) }.padding(start = Safe.x + 12.dp, end = Safe.x, top = 34.dp)) {
-                    Text(
-                        episode?.let { "Sources for S${it.season}:E${it.episode}" } ?: "Sources",
+            // A film's sources sit under the tabs; an episode's, under the episodes, with their own heading.
+            val underEpisodes = hasEpisodes && current == Section.EPISODES
+            // An episode's sources take the screen, as the episodes above them did. A film's are a list
+            // straight under the tabs: the page moves a row at a time with the remote, no further.
+            val pinSources = if (underEpisodes) Modifier.onFocusEnter { pin(sourcesAt) } else Modifier
+            if (playing) item(key = "sources-head") {
+                Column(pinSources.padding(start = Safe.x + 12.dp, end = Safe.x, top = if (underEpisodes) 26.dp else 14.dp)) {
+                    if (title.isSeries) episode?.let {
+                        Text("Sources for S${it.season}:E${it.episode}", Modifier.padding(bottom = 4.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
+                    }
+                    // For whoever is here the first time: what this list is, and that Play already chose.
+                    if (!title.isSeries || episode != null) Text(
+                        "Play starts the best one. Or pick a version here — size, quality, language.",
                         Modifier.padding(bottom = 12.dp),
-                        style = Type.title.copy(fontWeight = FontWeight.Bold),
+                        style = Type.meta.copy(color = Ink.faint),
                     )
                     if (qualities.size > 1) {
-                        Row(Modifier.padding(bottom = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Chip("All", quality == null, onClick = { quality = null })
-                            qualities.forEach { q -> Chip(q, quality == q, onClick = { quality = q }) }
-                        }
+                        // Up from the releases, which are as wide as the page: the quality on show.
+                        Options(listOf<String?>(null) + qualities, quality, { it ?: "All" }, Modifier.padding(bottom = 14.dp)) { quality = it }
                     }
                     when {
                         busy && shown.isEmpty() -> Row(verticalAlignment = Alignment.CenterVertically) {
@@ -365,11 +419,42 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
                     }
                 }
             }
-            itemsIndexed(shown.take(MAX_SOURCES), key = { _, it -> "src-" + it.id }) { i, hit ->
+            itemsIndexed(listed, key = { _, it -> "src-" + it.id }) { i, hit ->
                 // Arriving from above, the list starts at its heading rather than half in view.
-                Source(hit, Modifier.then(if (i == 0) Modifier.onFocusEnter { pin(sourcesAt) } else Modifier).padding(start = Safe.x + 12.dp, end = Safe.x, bottom = 8.dp), runtimeSeconds(title.runtime), if (i == 0) firstSource else null) {
+                Source(
+                    hit,
+                    (if (i == 0) pinSources else Modifier).padding(start = Safe.x + 12.dp, end = Safe.x, bottom = 8.dp),
+                    runtimeSeconds(title.runtime),
+                    when (i) { 0 -> firstSource; FIRST_SOURCES -> nextSource; else -> null },
+                ) {
                     watch.stream(hit, title, episode?.let { episodeTag(it.season, it.episode) }, episode)
                 }
+            }
+            if (hidden > 0) item(key = "sources-more") {
+                TvButton(
+                    label = "Show all ${listed.size + hidden} sources",
+                    onClick = { allSources = true },
+                    modifier = Modifier.padding(start = Safe.x + 12.dp, top = 6.dp),
+                    icon = L.drawable.lucide_ic_chevron_down,
+                )
+            }
+
+            // The other tabs: one rail each, under the tab that names it.
+            val order = inOrder
+            if (current == Section.FRANCHISE && order != null) item(key = "franchise") {
+                val here = remember { FocusRequester() }
+                FranchiseRail(order, title.imdb, { leftFrom = "franchise"; onOrder(order) }, { leftFrom = "franchise"; onOpen(it) }, Modifier.focusRequester(here).onFocusEnter { pin(tabsAt) }.padding(top = 16.dp))
+                if (backTo == "franchise") here.claim()
+            }
+            if (current == Section.CAST) item(key = "cast") {
+                val here = remember { FocusRequester() }
+                PeopleRail(people, onPerson.takeUnless { Kids.on }?.let { open -> { p: CastMember -> leftFrom = "cast"; open(p) } }, Modifier.focusRequester(here).onFocusEnter { pin(tabsAt) }.padding(top = 16.dp), heading = false)
+                if (backTo == "cast") here.claim()
+            }
+            if (current == Section.SIMILAR) item(key = "similar") {
+                val here = remember { FocusRequester() }
+                SimilarRail(similar, { leftFrom = "similar"; onOpen(it) }, Modifier.focusRequester(here).onFocusEnter { pin(tabsAt) }.padding(top = 16.dp), heading = false)
+                if (backTo == "similar") here.claim()
             }
         }
         }
@@ -387,6 +472,27 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
                 },
                 onDismiss = { pickingLang = false },
             )
+        }
+    }
+}
+
+/**
+ * One tab of a title's sections. Landing on it shows its section, as tabs do on a television: there
+ * is nothing to press. The one on show keeps an underline once the remote has gone down into it.
+ */
+@Composable
+private fun SectionTab(label: String, on: Boolean, requester: FocusRequester?, onShow: () -> Unit) {
+    Focusable(onShow, Modifier, RoundedCornerShape(8.dp), 1.04f, ring = false, requester = requester, onFocus = onShow) { focused ->
+        Column(
+            Modifier.background(if (focused) Color.White else Color.Transparent).padding(start = 16.dp, end = 16.dp, top = 9.dp, bottom = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                label,
+                style = Type.label.copy(color = if (focused) Color.Black else if (on) Ink.text else Ink.muted, fontWeight = if (on || focused) FontWeight.Bold else FontWeight.Medium),
+                maxLines = 1,
+            )
+            Box(Modifier.padding(top = 5.dp).width(26.dp).height(3.dp).background(if (on && !focused) Ink.accent else Color.Transparent, RoundedCornerShape(2.dp)))
         }
     }
 }

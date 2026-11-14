@@ -1,6 +1,8 @@
 package com.torrentviewer.tv
 
 import com.torrentviewer.core.*
+import coil3.request.*
+import coil3.*
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -28,6 +30,9 @@ object Services {
         com.torrentviewer.core.Mdblist.clientId = BuildConfig.MDBLIST_CLIENT_ID
         com.torrentviewer.core.Tmdb.key = BuildConfig.TMDB_KEY
         com.torrentviewer.core.ArtFadeMs = 0
+        // Pictures are decoded two at a time, not four: a television has four slow cores, and a row
+        // coming on screen took all of them just as the page needed one to move and one to draw.
+        coil3.SingletonImageLoader.setSafe { coil3.ImageLoader.Builder(it).bitmapFactoryMaxParallelism(2).build() }
         engine = TorrentStream(context.applicationContext)
         watch = Watch(engine)
     }

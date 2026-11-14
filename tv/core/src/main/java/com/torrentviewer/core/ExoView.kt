@@ -39,6 +39,14 @@ private const val TAG = "ExoView"
 /** Subtitles' gap under them with the picture filling the screen, as a fraction of its height; Media3's own is 0.08. */
 private const val FILLED_SUBTITLE_PADDING = 0.03f
 
+/**
+ * How much film must be buffered before the first picture, and before the one after a seek. The
+ * viewer's buffer (3-6s) used to be asked for here too: at 10MB/s that is 30-60MB between the
+ * stream being ready and anything showing. It is still what a stall waits for, which is where
+ * it stops the next one. Calibration knob: lower shows sooner and stalls sooner on a thin swarm.
+ */
+private const val START_BUFFER_MS = 1000
+
 /** Sidecar subtitle types by extension; anything else waits for VLC. */
 internal fun subtitleMime(path: String): String? = when (path.substringAfterLast('.', "").lowercase()) {
     "srt" -> MimeTypes.APPLICATION_SUBRIP
@@ -265,7 +273,7 @@ class ExoView(context: Context) : Video(context) {
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setEnableDecoderFallback(true)
         val load = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(15_000, 30_000, cacheMs, cacheMs)
+            .setBufferDurationsMs(15_000, 30_000, minOf(cacheMs, START_BUFFER_MS), cacheMs)
             // ponytail: fixed 64 MB (~6 s of 4K) — the default 128 MB is a lot of heap on a weak TV; tune if 4K rebuffers.
             .setTargetBufferBytes(64 * 1024 * 1024)
             .build()

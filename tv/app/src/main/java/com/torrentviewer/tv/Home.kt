@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -49,6 +50,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.LocalContext
@@ -96,7 +98,14 @@ private val SHELVES = listOf(
 
 /** Survives opening a title, so coming back lands on the same row, same card. */
 class HomeState {
-    val list = LazyListState()
+    /**
+     * The rows either side of the ones on screen stay made: the row below is composed and its pictures
+     * asked for before Down gets to it, and the one just left is still there on the way back up. Left
+     * to the default, a row was built — a dozen cards and their art — in the frame it was moved to,
+     * which is the hitch on every Down.
+     */
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    val list = LazyListState(cacheWindow = LazyLayoutCacheWindow(ahead = ROWS_AHEAD, behind = ROWS_BEHIND))
     val rows = HashMap<String, LazyListState>()
     val loaded = mutableStateMapOf<String, List<Title>>()
     var hero by mutableStateOf<Title?>(null)
@@ -110,7 +119,9 @@ class HomeState {
     var picks by mutableStateOf<List<Shelf>>(emptyList())
     var forYou by mutableStateOf(ForYou())
 
-    fun row(key: String) = rows.getOrPut(key) { LazyListState() }
+    /** The same along a row: two cards past each edge are ready before the remote reaches them. */
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    fun row(key: String) = rows.getOrPut(key) { LazyListState(cacheWindow = LazyLayoutCacheWindow(ahead = CARD_W * 2, behind = CARD_W * 2)) }
 }
 
 private fun inProgress(item: Item): Boolean {
@@ -249,9 +260,17 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit, onTop: (
         ) {
             // The row the remote is on sits at the top of the list, the one above scrolls
             // off: half a row of cards peeking under the synopsis looked broken.
-            fun pin(index: Int) = { scope.launch { state.list.animateScrollToItem(index) }; Unit }
+            // By the spring the rows scroll with, not animateScrollToItem's own curve: the focus ring
+            // rides this scroll, and with two different curves it bobbed between the rows.
+            fun pin(index: Int) = {
+                scope.launch {
+                    val row = state.list.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
+                    if (row != null) state.list.animateScrollBy(row.offset.toFloat(), FocusSpring) else state.list.animateScrollToItem(index)
+                }
+                Unit
+            }
             var at = 0
-            if (resuming) item(key = "resume") {
+            if (resuming) item(key = "resume", contentType = "resume") {
                 Rail("Continue Watching", pin(0)) {
                     ResumeRow(state, resumable, fromStremio, firstKey != null, onResume = { item ->
                         releasesOf(history, item).let { all -> if (all.size > 1) releases = all else watch.resume(item) }
@@ -259,25 +278,25 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit, onTop: (
                 }
             }.also { at++ }
             val listAt = at
-            if (watchlist.isNotEmpty()) item(key = "list") {
+            if (watchlist.isNotEmpty()) item(key = "list", contentType = "shelf") {
                 Rail("My List", pin(listAt)) {
                     TitleRow(state, "list", watchlist, firstKey != null && !resuming, onFocus = aim, onOpen = onOpen)
                 }
             }.also { at++ }
             val ordersAt = at
-            if (!Kids.on) item(key = "orders") {
+            if (!Kids.on) item(key = "orders", contentType = "orders") {
                 // Nothing chosen: what they watch stands in.
                 Rail("Watch orders", pin(ordersAt)) { OrderRow(state, settings.genres.ifEmpty { state.picks.mapNotNull { it.genre } }, aim, onOrders, onOrder) }
             }.also { at++ }
             val picksAt = at
-            if (picks.isNotEmpty()) item(key = "picks") {
+            if (picks.isNotEmpty()) item(key = "picks", contentType = "shelf") {
                 Rail("Picked for you", pin(picksAt)) {
                     TitleRow(state, "picks", picks.map { it.title }, false, onFocus = aim, onOpen = onOpen, stamp = { why[it.imdb] })
                 }
             }.also { at++ }
             charts.forEach { (kind, heading, titles) ->
                 val here = at++
-                item(key = "chart:$kind") {
+                item(key = "chart:$kind", contentType = "chart") {
                     Rail(heading, pin(here)) {
                         if (titles.isEmpty()) Box(Modifier.height(CARD_H).fillMaxWidth()) { Placeholders() }
                         else ChartRow(state, "chart:$kind", titles, aim, onOpen, onAll = { onTop(kind) })
@@ -286,14 +305,15 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit, onTop: (
             }
             because.forEach { (name, titles) ->
                 val here = at++
-                item(key = "because:$name") {
+                item(key = "because:$name", contentType = "shelf") {
                     Rail("Because you watched $name", pin(here)) {
                         TitleRow(state, "because:$name", titles, false, onFocus = aim, onOpen = onOpen)
                     }
                 }
             }
             val shelvesAt = at
-            itemsIndexed(visible, key = { _, s -> s.key }) { i, shelf ->
+            // A row scrolled off hands what it was built from to the next of its kind coming on.
+            itemsIndexed(visible, key = { _, s -> s.key }, contentType = { _, _ -> "shelf" }) { i, shelf ->
                 val titles = rows[shelf.key].orEmpty()
                 Rail(shelf.title, pin(shelvesAt + i)) {
                     if (titles.isEmpty()) {
@@ -318,6 +338,10 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit, onTop: (
 
 val CARD_W = 210.dp
 val CARD_H = 118.dp
+
+/** A row with its heading and gap is about 170dp: a row and a half below what shows, one above. Calibration knob: more is more memory. */
+private val ROWS_AHEAD = 260.dp
+private val ROWS_BEHIND = 180.dp
 
 /** The viewer's latest titles that suggestions are drawn from, and how many of the best to show. */
 private const val FOR_YOU_SEEDS = 4
@@ -439,7 +463,7 @@ private fun TitleRow(state: HomeState, row: String, titles: List<Title>, claimFi
         contentPadding = PaddingValues(start = ROW_LEAD, end = Safe.x),
         horizontalArrangement = Arrangement.spacedBy(ROW_GAP),
     ) {
-        itemsIndexed(titles, key = { _, t -> t.imdb }) { i, t ->
+        itemsIndexed(titles, key = { _, t -> t.imdb }, contentType = { _, _ -> "card" }) { i, t ->
             val here = "$row/${t.imdb}"
             val requester = remember { FocusRequester() }
             val back = state.restore == here
@@ -504,8 +528,8 @@ private fun ChartRow(state: HomeState, row: String, titles: List<Title>, onFocus
         contentPadding = PaddingValues(start = ROW_LEAD, end = Safe.x),
         horizontalArrangement = Arrangement.spacedBy(ROW_GAP),
     ) {
-        item(key = "all") { SeeAll("See all", state, "$row/all", fallback, onAll) }
-        itemsIndexed(titles, key = { _, t -> t.imdb }) { i, t ->
+        item(key = "all", contentType = "all") { SeeAll("See all", state, "$row/all", fallback, onAll) }
+        itemsIndexed(titles, key = { _, t -> t.imdb }, contentType = { _, _ -> "card" }) { i, t ->
             val here = "$row/${t.imdb}"
             val requester = remember { FocusRequester() }
             Focusable(
