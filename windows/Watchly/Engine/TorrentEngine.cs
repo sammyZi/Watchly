@@ -696,7 +696,8 @@ public sealed class StreamSession : IAsyncDisposable
     }
 
     /// <param name="resuming">Starting part-way: the player seeks, and can't until it has read the index at the file's end.</param>
-    public static async Task<StreamSession> Start(Torrent torrent, int fileIndex, bool deleteFilesAfter, string? sourceUri = null, CancellationToken ct = default, bool resuming = false)
+    /// <param name="resumeRatio">How far through the film that is, 0–1, when its length is known: fetched before the player seeks there.</param>
+    public static async Task<StreamSession> Start(Torrent torrent, int fileIndex, bool deleteFilesAfter, string? sourceUri = null, CancellationToken ct = default, bool resuming = false, double resumeRatio = 0)
     {
         var engine = TorrentEngine.Instance;
         if (Pick.IsUnsafe(torrent.Files[fileIndex].Path))
@@ -728,7 +729,7 @@ public sealed class StreamSession : IAsyncDisposable
         // Our own torrent: fetch only the window around the playhead, never the whole film.
         // (Its picker was put in when it was added — MonoTorrent only swaps pickers while stopped.)
         var window = borrowed ? null : engine.WindowOf(manager);
-        window?.Watch(fileIndex, resuming);
+        window?.Watch(fileIndex, resuming, resumeRatio);
         engine.WindowOf(manager)?.ReadFrom(file);
         if (manager.State is TorrentState.Stopped or TorrentState.Paused or TorrentState.Error) await manager.StartAsync();
         if (!borrowed) _ = CreateSparseWhenDownloading(manager, file);
@@ -888,22 +889,40 @@ public sealed class WindowedRequester : IStreamingPieceRequester
     volatile int fileIndex = -1;
     long wantFrom = -1, wantTo = -1;
     volatile bool open;
-    (int File, int Reader, long From, long To, bool Open) applied = (-1, -1, -2, -2, false);
+    (int File, int Reader, long From, long To, bool Open, bool Starting) applied = (-1, -1, -2, -2, false, false);
 
     /// <summary>A stream starts on this file: limit it to the window from now on (no limit until then).</summary>
-    public void Watch(int file, bool resuming = false)
+    /// <param name="resumeRatio">Where a resume will seek to, 0–1 of the file, or 0 when that isn't known.</param>
+    public void Watch(int file, bool resuming = false, double resumeRatio = 0)
     {
         SetWindow(-1, -1);
         open = false;
-        keepEnd = resuming;
+        this.resuming = resuming;
+        Interlocked.Exchange(ref resumePpm, resuming ? (long)(Math.Clamp(resumeRatio, 0, 0.99) * 1_000_000) : 0);
+        Interlocked.Exchange(ref watchedAt, Environment.TickCount64);
         fileIndex = file;
     }
 
     /// <summary>
-    /// core prerollTargets: on a resume the file's last piece comes in alongside the rest. Left until
-    /// the player asked, on the phone that one piece alone cost 10–12 s before the seek could happen.
+    /// The start, as the Android engine does it (core prerollTargets, TorrentStream's pre-roll): until
+    /// the player is under way only what it needs to open is fetched — the head, the file's last piece
+    /// (a Matroska's index, an MP4's moov), and for a resume the spot it will seek to. The look-ahead
+    /// past the head took every request a peer had, so the last piece was only asked for once the
+    /// player was waiting on it: on the phone that piece alone cost 10–12 s before a seek could happen.
+    /// A new start ends this when the first piece is in; a resume, when the player leaves the head, or
+    /// after <see cref="StartMs"/> if it never does.
     /// </summary>
-    volatile bool keepEnd;
+    volatile bool resuming;
+    long resumePpm, watchedAt;
+    const long StartMs = 30_000;
+    /// <summary>The pieces kept at the resume spot. A guess by running time, so no more than the player needs to show a picture.</summary>
+    const int SpotPieces = 2;
+
+    bool Starting(ITorrentManagerFile f, int reader)
+    {
+        if (reader < f.StartPieceIndex || reader > f.StartPieceIndex + 1) return false;
+        return resuming ? Environment.TickCount64 - Interlocked.Read(ref watchedAt) < StartMs : !Have(f.StartPieceIndex);
+    }
 
     ITorrentManagerFile? reading;
 
@@ -940,7 +959,7 @@ public sealed class WindowedRequester : IStreamingPieceRequester
         inner.Initialise(torrentData, enqueuer, all);
         if (reading is not null && (inner.HighPriorityPieceIndex < reading.StartPieceIndex || inner.HighPriorityPieceIndex > reading.EndPieceIndex))
             inner.SeekToPosition(reading, 0);
-        applied = (-1, -1, -2, -2, false);
+        applied = (-1, -1, -2, -2, false, false);
         Apply();
     }
 
@@ -954,12 +973,20 @@ public sealed class WindowedRequester : IStreamingPieceRequester
     void Apply()
     {
         if (data is null || outside is null) return;
-        var now = (fileIndex, inner.HighPriorityPieceIndex, Interlocked.Read(ref wantFrom), Interlocked.Read(ref wantTo), open);
+        var watched = fileIndex;
+        var at = inner.HighPriorityPieceIndex;
+        var starting = !open && watched >= 0 && watched < data.Files.Count && Starting(data.Files[watched], at);
+        var now = (watched, at, Interlocked.Read(ref wantFrom), Interlocked.Read(ref wantTo), open, starting);
         // Open, the window moves as pieces finish, so it is worked out again (four times a second at most).
         if (now == applied && !(open && Environment.TickCount64 - openAt > 250)) return;
-        var (file, reader, from, to, isOpen) = now;
+        var (file, reader, from, to, isOpen, _) = now;
         if (file != applied.File)
             for (var i = 0; i < outside.Length; i++) outside[i] = false;
+        // In the log, so a slow start can be told from a narrow one that never opened.
+        if (starting && !(applied.Starting && file == applied.File))
+            Log.Stream("start: only the head, the last piece and the resume point until the player is under way");
+        else if (!starting && applied.Starting && file == applied.File)
+            Log.Stream($"start: look-ahead open {Environment.TickCount64 - Interlocked.Read(ref watchedAt)} ms after the stream began");
         applied = now;
         openAt = Environment.TickCount64;
         if (file < 0 || file >= data.Files.Count) return;
@@ -977,14 +1004,19 @@ public sealed class WindowedRequester : IStreamingPieceRequester
                 var i = f.StartPieceIndex + (start + n) % count;
                 var wanted = left > 0 && !Have(i);
                 if (wanted) left--;
-                outside[i] = !wanted && !(i >= reader && i <= reader + ReadAhead) && !(keepEnd && i == f.EndPieceIndex);
+                outside[i] = !wanted && !(i >= reader && i <= reader + ReadAhead) && i != f.EndPieceIndex;
             }
             return;
         }
         int PieceAt(long offset) => data.ByteOffsetToPieceIndex(f.OffsetInTorrent + Math.Clamp(offset, 0, Math.Max(0, f.Length - 1)));
         int spanFrom = to > 0 ? PieceAt(from) : int.MaxValue, spanTo = to > 0 ? PieceAt(to) : int.MinValue;
+        // Starting, one piece past the reader and no further: see Starting. The last piece and the
+        // resume spot stay wanted afterwards too, so one part-fetched is finished, not dropped.
+        var ahead = starting ? 1 : ReadAhead;
+        var ppm = Interlocked.Read(ref resumePpm);
+        var spot = ppm > 0 ? PieceAt(f.Length / 1_000_000 * ppm) : int.MinValue;
         for (var i = f.StartPieceIndex; i <= f.EndPieceIndex; i++)
-            outside[i] = !((i >= reader && i <= reader + ReadAhead) || (i >= spanFrom && i <= spanTo) || (keepEnd && i == f.EndPieceIndex));
+            outside[i] = !((i >= reader && i <= reader + ahead) || (i >= spanFrom && i <= spanTo) || i == f.EndPieceIndex || (i >= spot && i < spot + SpotPieces));
     }
 
     bool Have(int piece)

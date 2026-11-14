@@ -459,7 +459,11 @@ public sealed class PlayerView : UserControl, IDisposable
             }
             else
             {
-                session = await StreamSession.Start(request.Torrent!, request.FileIndex, shell.Settings.RemoveFilesAfterStop, request.HistoryUri, life.Token, request.ResumeAt > 0);
+                // How far through a resume is, by the length saved the last time this file played: the
+                // engine fetches that spot while the player is still reading the header and the index.
+                var length = shell.HistoryList.FirstOrDefault(h => h.Uri == request.HistoryUri)?.DurationOf(request.FileIndex) ?? 0;
+                var resumeRatio = request.ResumeAt > 0 && length > 0 ? request.ResumeAt / length : 0;
+                session = await StreamSession.Start(request.Torrent!, request.FileIndex, shell.Settings.RemoveFilesAfterStop, request.HistoryUri, life.Token, request.ResumeAt > 0, resumeRatio);
                 if (disposed) { await session.DisposeAsync(); return; }
                 session.WholeFile = shell.Settings.StreamWholeFile;
                 url = session.Url;
