@@ -401,6 +401,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
             syncNote = "Already in sync." to true
             return
         }
+        engine.note("player: subtitle ${if (auto) "auto-sync" else "tap sync"} set the delay to ${ms}ms (was ${subDelay}ms)")
         subDelay = ms
         val seconds = "%.1f".format(kotlin.math.abs(ms) / 1000.0)
         val what = if (ms >= 0) "$seconds s later" else "$seconds s earlier"
@@ -954,6 +955,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                         v.subtitleStyle = SettingsStore.value.value.subtitles
                         v.setSubtitleDelay(subDelay)
                         v.setScale(SCALES[scale].first)
+                        v.onNote = { engine.note("player: $it") }
                         if (!vlc) v.onUnsupported = { message ->
                             Log.w("Player", "Media3 gave up ($message), falling back to VLC")
                             watch.engine.note("player: Media3 gave up ($message), falling back to VLC")
@@ -1235,6 +1237,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                 subtitle = subtitle,
                 delay = subDelay,
                 onDelay = { ms ->
+                    engine.note("player: subtitle delay set to ${ms}ms")
                     subDelay = ms
                     // Media3 can only hold subtitles back; earlier is VLC's, picked up where the film is.
                     if (view.value?.setSubtitleDelay(ms) == false) {
@@ -1251,6 +1254,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                 onSubtitle = {
                     langDone[1] = true
                     subtitle = it
+                    engine.note("player: subtitle picked: ${it?.let { id -> tracks?.subtitles?.find { s -> s.id == id }?.name ?: "#$id" } ?: "off"} (${if (vlc) "VLC" else "Media3"}, delay ${subDelay}ms)")
                     view.value?.setSubtitleTrack(it)
                 },
                 onAudio = {
@@ -1857,72 +1861,58 @@ private fun TracksPanel(
             }
             Spacer(Modifier.width(32.dp))
             TrackColumn("Subtitles", Modifier.weight(1f)) {
-                // Out of sync: a tenth of a second a tap; the value resets it.
-                item {
-                    Row(Modifier.padding(start = 14.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Delay", Modifier.width(56.dp), style = Type.meta)
-                        Tap({ onDelay(delay - 100) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_minus, Modifier.padding(8.dp), tint = Color.White, size = 18.dp) }
-                        Tap({ onDelay(0) }, shape = RoundedCornerShape(6.dp)) {
-                            Text("%+.1f s".format(delay / 1000.0), Modifier.padding(horizontal = 10.dp, vertical = 6.dp), style = Type.label.copy(fontWeight = FontWeight.SemiBold, color = if (delay != 0L) Ink.accent else Color.White))
-                        }
-                        Tap({ onDelay(delay + 100) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_plus, Modifier.padding(8.dp), tint = Color.White, size = 18.dp) }
-                    }
-                }
-                // The quick way: tap as someone starts to speak and the subtitle file lines up with it.
-                // A card of its own, with what happened said in it — not a message behind the panel.
-                item {
-                    val good = Color(0xFF22C55E)
-                    val warn = Color(0xFFF59E0B)
-                    Row(
-                        Modifier.padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 10.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                            .background(Color.White.copy(alpha = 0.07f)).padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(Modifier.size(36.dp).clip(CircleShape).background(Ink.accent.copy(alpha = if (canSync) 0.9f else 0.3f)), contentAlignment = Alignment.Center) {
-                            Lc(L.drawable.lucide_ic_audio_lines, tint = Color.White, size = 18.dp)
-                        }
-                        Column(Modifier.padding(horizontal = 12.dp).weight(1f)) {
-                            Text("Sync subtitles", style = Type.label.copy(fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = if (canSync) 1f else 0.5f)))
-                            when {
-                                !canSync -> Text("Works with a subtitle file. This one is built into the video: use − and + above.", style = Type.meta.copy(color = Color.White.copy(alpha = 0.55f)))
-                                listening != null -> Text("Listening to the speech… ${listening.toInt()} s. Keep playing; it stops by itself.", style = Type.meta.copy(color = Color.White.copy(alpha = 0.75f)))
-                                syncNote != null -> Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.Top) {
-                                    Lc(if (syncNote.second) L.drawable.lucide_ic_circle_check else L.drawable.lucide_ic_info, Modifier.padding(top = 2.dp), tint = if (syncNote.second) good else warn, size = 14.dp)
-                                    Text("  " + syncNote.first, style = Type.meta.copy(color = if (syncNote.second) good else warn))
-                                }
-                                else -> Text("Listens to the film for a minute and lines the subtitles up with the speech.", style = Type.meta.copy(color = Color.White.copy(alpha = 0.55f)))
-                            }
-                        }
-                        if (canSync) Tap(if (listening != null) onCancelSync else onAutoSync, shape = CircleShape) { pressed ->
-                            Row(Modifier.background(if (pressed) Color.White.copy(alpha = 0.8f) else Color.White).padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                if (listening != null) com.torrentviewer.core.Spinner(size = 14.dp)
-                                Text(if (listening != null) " Stop" else "Auto-sync", style = Type.label.copy(color = Color.Black, fontWeight = FontWeight.Bold))
-                            }
-                        }
-                    }
-                }
-                // By ear: for VLC, a scene without talking, or a last nudge.
-                if (canSync) item {
-                    Row(Modifier.padding(start = 26.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Or by ear: ", style = Type.meta.copy(color = Color.White.copy(alpha = 0.55f)))
-                        Tap(onSyncLine, shape = RoundedCornerShape(6.dp)) {
-                            Text("tap here as someone starts speaking", Modifier.padding(vertical = 4.dp), style = Type.meta.copy(color = Color.White, fontWeight = FontWeight.SemiBold, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline))
-                        }
-                    }
-                }
-                item {
-                    Row(Modifier.padding(start = 14.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Size", Modifier.width(56.dp), style = Type.meta)
-                        Tap({ onSubSize(-1) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_a_arrow_down, Modifier.padding(8.dp), tint = Color.White, size = 18.dp) }
-                        Text(subSize.replaceFirstChar(Char::uppercase), Modifier.widthIn(min = 64.dp).padding(horizontal = 10.dp, vertical = 6.dp), style = Type.label.copy(fontWeight = FontWeight.SemiBold), textAlign = TextAlign.Center)
-                        Tap({ onSubSize(1) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_a_arrow_up, Modifier.padding(8.dp), tint = Color.White, size = 18.dp) }
-                    }
-                }
+                // The tracks first: under the timing tools they were off the bottom of a phone held sideways.
                 item { TrackRow("Off", subtitle == null) { onSubtitle(null) } }
                 itemsIndexed(tracks?.subtitles.orEmpty()) { _, t -> TrackRow(t.name, t.id == subtitle) { onSubtitle(t.id) } }
-                item {
-                    Spacer(Modifier.height(8.dp))
-                    TrackRow("Find subtitles online…", false, icon = L.drawable.lucide_ic_search, onClick = onFind)
+                item { TrackRow("Find subtitles online…", false, icon = L.drawable.lucide_ic_search, onClick = onFind) }
+                // Then the tools, a row each, only while a subtitle is on.
+                if (subtitle != null) {
+                    item { Spacer(Modifier.height(10.dp)) }
+                    // Timing: a tenth of a second a tap, the value resets it; Auto-sync and By ear beside it.
+                    item {
+                        Row(Modifier.padding(start = 14.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Timing", Modifier.width(56.dp), style = Type.meta)
+                            Tap({ onDelay(delay - 100) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_minus, Modifier.padding(8.dp), tint = Color.White, size = 18.dp) }
+                            Tap({ onDelay(0) }, shape = RoundedCornerShape(6.dp)) {
+                                Text("%+.1f s".format(delay / 1000.0), Modifier.padding(horizontal = 8.dp, vertical = 6.dp), style = Type.label.copy(fontWeight = FontWeight.SemiBold, color = if (delay != 0L) Ink.accent else Color.White))
+                            }
+                            Tap({ onDelay(delay + 100) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_plus, Modifier.padding(8.dp), tint = Color.White, size = 18.dp) }
+                            if (canSync) {
+                                Spacer(Modifier.width(10.dp))
+                                Tap(if (listening != null) onCancelSync else onAutoSync, shape = CircleShape) { pressed ->
+                                    Row(Modifier.background(Color.White.copy(alpha = if (pressed) 0.2f else 0.12f)).padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        if (listening != null) com.torrentviewer.core.Spinner(size = 13.dp, color = Color.White) else Lc(L.drawable.lucide_ic_audio_lines, tint = Color.White, size = 15.dp)
+                                        Text(if (listening != null) "  ${listening.toInt()} s · Stop" else "  Auto-sync", style = Type.meta.copy(color = Color.White, fontWeight = FontWeight.SemiBold))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // One quiet line: what sync is doing or did, and the by-ear way.
+                    item {
+                        val good = Color(0xFF22C55E)
+                        val warn = Color(0xFFF59E0B)
+                        val (line, colour) = when {
+                            !canSync -> "Built into the video: use − and +." to Color.White.copy(alpha = 0.5f)
+                            listening != null -> "Listening to the speech. Keep playing." to Color.White.copy(alpha = 0.6f)
+                            syncNote != null -> syncNote.first to (if (syncNote.second) good else warn)
+                            else -> null to Color.Unspecified
+                        }
+                        Row(Modifier.padding(start = 70.dp, end = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            line?.let { Text(it, Modifier.weight(1f, fill = false), style = Type.meta.copy(color = colour), maxLines = 2) }
+                            if (canSync && listening == null) Tap(onSyncLine, shape = RoundedCornerShape(6.dp)) {
+                                Text(if (line == null) "Or tap here when someone speaks" else "  ·  Tap when someone speaks", Modifier.padding(vertical = 4.dp), style = Type.meta.copy(color = Color.White.copy(alpha = 0.75f), textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline), maxLines = 1)
+                            }
+                        }
+                    }
+                    item {
+                        Row(Modifier.padding(start = 14.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Size", Modifier.width(56.dp), style = Type.meta)
+                            Tap({ onSubSize(-1) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_a_arrow_down, Modifier.padding(8.dp), tint = Color.White, size = 18.dp) }
+                            Text(subSize.replaceFirstChar(Char::uppercase), Modifier.widthIn(min = 64.dp).padding(horizontal = 10.dp, vertical = 6.dp), style = Type.label.copy(fontWeight = FontWeight.SemiBold), textAlign = TextAlign.Center)
+                            Tap({ onSubSize(1) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_a_arrow_up, Modifier.padding(8.dp), tint = Color.White, size = 18.dp) }
+                        }
+                    }
                 }
             }
         }

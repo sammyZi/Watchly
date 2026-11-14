@@ -52,6 +52,8 @@ abstract class Video(context: Context) : FrameLayout(context) {
     var onUnsupported: (String) -> Unit = { onFailed(it) }
     var onTracks: (Tracks) -> Unit = {}
     var onPlaying: (Boolean) -> Unit = {}
+    /** A line for the engine log: what the player did with the subtitles, which logcat on some phones never shows. */
+    var onNote: (String) -> Unit = {}
     /** Subtitle text; null is the player's own default. Set before [open] — libVLC reads it only when it starts. */
     open var subtitleStyle: SubtitleStyle? = null
     /** What a link's server wants with each request (an addon's `proxyHeaders`). Set before [open]. */

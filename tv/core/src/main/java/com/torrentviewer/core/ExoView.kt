@@ -76,6 +76,8 @@ class ExoView(context: Context) : Video(context) {
     private var cacheMs = 3000
 
     private var subDelayMs = 0L
+    /** Lines logged since the tracks last changed: see onCues. */
+    private var cuesSeen = 0
 
     /**
      * Media3 has no subtitle offset, but the cues pass through here: later is holding each
@@ -525,10 +527,15 @@ class ExoView(context: Context) : Video(context) {
             }
             applyTracks(tracks)
             sendTracks(tracks)
+            val text = playable(tracks, C.TRACK_TYPE_TEXT)
+            onNote("subtitles: ${text.size} track(s) [${text.joinToString { (g, i) -> g.getFormat(i).label ?: g.getFormat(i).language ?: "?" }}], on: ${selected(tracks, C.TRACK_TYPE_TEXT)}, wanted: $wantedText, sidecars ${attached.size}/${subtitleFiles.size}, delay ${subDelayMs}ms")
+            cuesSeen = 0
         }
 
         override fun onCues(cueGroup: CueGroup) {
             val cues = cueGroup.cues
+            // The first few lines after a change, in the log: whether any text reaches the screen at all.
+            if (cues.isNotEmpty() && cuesSeen++ < 3) onNote("subtitles: line at ${knownMs / 1000}s shown ${if (subDelayMs > 0) "${subDelayMs}ms late" else "now"}: \"${cues.joinToString(" / ") { it.text?.toString().orEmpty() }.take(40)}\"")
             if (subDelayMs > 0) subtitleView.postDelayed({ subtitleView.setCues(cues) }, subDelayMs) else subtitleView.setCues(cues)
         }
 
