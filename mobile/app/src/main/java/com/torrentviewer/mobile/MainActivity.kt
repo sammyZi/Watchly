@@ -51,6 +51,7 @@ object Services {
         AppScope.launch(Dispatchers.IO) { engine.warmUp() }
         watch = Watch(engine)
         Downloads.init(context)
+        EpisodeAlerts.schedule(context.applicationContext)
     }
 }
 

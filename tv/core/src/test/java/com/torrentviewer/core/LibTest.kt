@@ -508,6 +508,9 @@ class LibTest {
         assertEquals(2, base["tt9"])
         val (later, _) = NewEpisodes.compare(listOf(show), mapOf("tt9" to 1), now)
         assertEquals(1, later.single().count)
+        // The newest to have aired: not the one listed ahead of its date, nor a special.
+        assertEquals(2, NewEpisodes.latestAired(show, now)?.episode)
+        assertNull(NewEpisodes.latestAired(Title("tt8", "tv", "Soon", episodes = listOf(ep(1, 1, "2027-01-01"))), now))
     }
 
     @Test fun localVideos() {

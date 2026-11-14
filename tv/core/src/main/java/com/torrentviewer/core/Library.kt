@@ -1,5 +1,6 @@
 package com.torrentviewer.core
 
+import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -160,12 +161,61 @@ object NewEpisodes {
         return fresh to next
     }
 
-    private fun read(): Map<String, Int> = runCatching {
-        val o = JSONObject(Kv.get(KEY) ?: "{}")
+    private fun parse(text: String?): Map<String, Int> = runCatching {
+        val o = JSONObject(text ?: "{}")
         o.keys().asSequence().associateWith { o.optInt(it) }
     }.getOrDefault(emptyMap())
 
+    private fun read(): Map<String, Int> = parse(Kv.get(KEY))
+
     private fun write(counts: Map<String, Int>) = Kv.set(KEY, JSONObject(counts).toString())
+
+    /** The newest episode that has aired, by date and then number; null when none has. */
+    fun latestAired(t: Title, now: Long = System.currentTimeMillis()): Episode? {
+        val fmt = day()
+        return t.episodes
+            .filter { e -> e.season > 0 && e.released?.take(10)?.let { runCatching { fmt.parse(it)?.time }.getOrNull() }?.let { it <= now } == true }
+            .maxWithOrNull(compareBy({ it.released?.take(10) }, { it.season }, { it.episode }))
+    }
+
+    /** A notification: [episode] is the newest of [count] out since the viewer was last told. */
+    data class Alert(val profile: String, val title: Title, val episode: Episode, val count: Int)
+
+    private const val ALERTED = "alerted-counts"
+
+    /**
+     * What to tell each profile about: its followed series with episodes out since it was last
+     * told, against a baseline of its own (the in-app row on Home has another, moved when a page is
+     * opened). A show met for the first time only sets its baseline, so turning alerts on never
+     * floods. Read-only on the profiles' own data except that baseline.
+     */
+    suspend fun alerts(): List<Alert> {
+        val out = mutableListOf<Alert>()
+        for (profile in Profiles.list.value.filter { !it.isGuest && !it.kids }) {
+            val shows = followed(profile.id)
+            if (shows.isEmpty()) continue
+            val titles = shows.take(MAX_SHOWS).mapNotNull { Meta.title(it, "tv") }
+            val known = parse(Kv.getFor(profile.id, ALERTED))
+            val (fresh, next) = compare(titles, known)
+            for (f in fresh) latestAired(f.title)?.let { out += Alert(profile.id, f.title, it, f.count) }
+            // Told, so the baseline moves for those too.
+            val told = next + fresh.associate { it.title.imdb to airedCount(it.title) }
+            if (told != known) Kv.setFor(profile.id, ALERTED, JSONObject(told).toString())
+        }
+        return out
+    }
+
+    /** Series the profile has watched or saved, newest first. */
+    private fun followed(profile: String): List<String> {
+        val watched = runCatching {
+            JSONArray(Kv.getFor(profile, "torrent-history") ?: "[]").objects()
+                .filter { it.optString("kind") == "tv" }.sortedByDescending { it.optLong("at") }.mapNotNull { it.str("imdb") }
+        }.getOrDefault(emptyList())
+        val saved = runCatching {
+            JSONArray(Kv.getFor(profile, "saved") ?: "[]").objects().filter { it.optString("kind") == "tv" }.mapNotNull { it.str("imdb") }
+        }.getOrDefault(emptyList())
+        return (watched + saved).filter { it.startsWith("tt") }.distinct()
+    }
 
     suspend fun fresh(imdbs: List<String>): List<Fresh> {
         val ids = imdbs.distinct().take(MAX_SHOWS)

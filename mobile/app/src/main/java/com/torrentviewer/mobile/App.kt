@@ -249,6 +249,15 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         ) askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
+    // Once, the first time there is a series to be told about: the permission new-episode alerts need.
+    val watchedHistory by History.items.collectAsState()
+    LaunchedEffect(watchedHistory.any { it.kind == "tv" }) {
+        if (watchedHistory.none { it.kind == "tv" } || !SettingsStore.value.value.episodeAlerts) return@LaunchedEffect
+        if (Kv.global("asked-episode-alerts") != null || !EpisodeAlerts.needsPermission(context)) return@LaunchedEffect
+        Kv.setGlobal("asked-episode-alerts", "1")
+        askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
     // Engine failures would otherwise be invisible: the player just goes away.
     LaunchedEffect(Unit) { watch.engine.errors.collect { watch.fail(it) } }
     // An addon's YouTube or outside link: whichever app takes it.

@@ -577,6 +577,9 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
         if (torbox.isNotEmpty()) torboxAccount = runCatching { TorBox.account() }.getOrElse { "Not working: ${it.message}" }
     }
     fun set(next: Settings) = SettingsStore.save(next)
+    // New-episode alerts: turned on, Android 13+ asks before a notification can show.
+    val alertContext = LocalContext.current
+    val askAlerts = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
     /** The page open, by its title; null is the list of them. */
     var page by rememberSaveable { mutableStateOf<String?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -757,6 +760,20 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Chip("Automatically", settings.autoSkipIntro, onClick = { set(settings.copy(autoSkipIntro = true)) })
                 Chip("Show the button", !settings.autoSkipIntro, onClick = { set(settings.copy(autoSkipIntro = false)) })
+            }
+        }
+
+        Section("New episode alerts", "A notification when a series you watch or have in My List has a new episode out. Checked twice a day.") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Chip("On", settings.episodeAlerts, onClick = {
+                    set(settings.copy(episodeAlerts = true))
+                    EpisodeAlerts.schedule(alertContext)
+                    if (EpisodeAlerts.needsPermission(alertContext)) askAlerts.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                })
+                Chip("Off", !settings.episodeAlerts, onClick = {
+                    set(settings.copy(episodeAlerts = false))
+                    EpisodeAlerts.schedule(alertContext)
+                })
             }
         }
 

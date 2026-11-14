@@ -73,6 +73,17 @@ object Kv {
         prefs.edit().apply { if (value == null) remove(k) else putString(k, value) }.apply()
     }
 
+    /**
+     * Another profile's key, read or written without switching to it: a background check runs
+     * while the viewer may be using the app, and switching the profile under them would corrupt
+     * what they are doing. [id] is the profile's id, "" for the first. Never for the guest.
+     */
+    fun getFor(id: String, key: String): String? = prefs.getString(if (id.isNotEmpty()) "$key@$id" else key, null)
+
+    fun setFor(id: String, key: String, value: String) {
+        prefs.edit().putString(if (id.isNotEmpty()) "$key@$id" else key, value).apply()
+    }
+
     /** Shared across profiles — the profile list itself, settings, caches. */
     fun global(key: String): String? = prefs.getString(key, null)
 
@@ -158,6 +169,8 @@ data class Settings(
     val themeMode: String = "system",
     /** Jump past an episode's intro by itself, rather than offer the button. */
     val autoSkipIntro: Boolean = false,
+    /** A notification when a followed series has a new episode out — the phone's. */
+    val episodeAlerts: Boolean = true,
 )
 
 /** Subtitle text; [size] is one of [SUB_SIZES]' keys. The Expo build's names and values. */
@@ -220,6 +233,7 @@ object SettingsStore {
         wholeFile = o.optBoolean("streamWholeFile", false),
         themeMode = o.optString("themeMode").takeIf { it == "light" || it == "dark" } ?: "system",
         autoSkipIntro = o.optBoolean("autoSkipIntro", false),
+        episodeAlerts = o.optBoolean("episodeAlerts", true),
     )
 
     /** Over what is stored, not instead of it: the TV and the phone each keep fields the other never reads. */
@@ -230,7 +244,7 @@ object SettingsStore {
             .put("cacheMb", next.cacheCapMb).put("vlcPlayer", next.vlcPlayer)
             .put("subLang", next.subLang).put("audioLang", next.audioLang)
             .put("subSize", next.subtitles.size).put("subColor", if (next.subtitles.yellow) "yellow" else "white").put("subBackground", next.subtitles.box)
-            .put("playbackRate", next.playbackRate.toDouble()).put("playerScale", next.playerScale).put("streamWholeFile", next.wholeFile).put("themeMode", next.themeMode).put("autoSkipIntro", next.autoSkipIntro)
+            .put("playbackRate", next.playbackRate.toDouble()).put("playerScale", next.playerScale).put("streamWholeFile", next.wholeFile).put("themeMode", next.themeMode).put("autoSkipIntro", next.autoSkipIntro).put("episodeAlerts", next.episodeAlerts)
         Kv.setGlobal("settings", o.toString())
         Kv.set(GENRES_KEY, JSONArray(next.genres).toString())
     }
