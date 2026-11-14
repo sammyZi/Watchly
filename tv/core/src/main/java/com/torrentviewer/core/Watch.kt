@@ -471,8 +471,18 @@ class Watch(val engine: TorrentStream) {
 
     val playingFile: TorrentFile? get() = meta?.files?.find { it.index == playingIndex }
 
+    /** The last spot saved in this play, for crediting what was watched since: see [WatchLog]. */
+    private var creditedPlay = -1
+    private var creditedAt = 0.0
+
     fun savePosition(seconds: Double) {
         val at = item ?: return
+        // What the picture has moved on since the last save — a pause credits nothing, and a jump
+        // (a seek, or the first save of a resume) is not watching, so only a step of up to 30 s counts.
+        val step = seconds - creditedAt
+        if (creditedPlay == playId && step > 0 && step <= 30) WatchLog.add(at, step)
+        creditedPlay = playId
+        creditedAt = seconds
         val duration = History.find(at.uri)?.durations?.get(playingIndex) ?: 0.0
         // Nothing on disk to measure when it streams from a link.
         History.setPosition(at.uri, playingIndex, seconds, if (via != null || source == null) -1.0 else playheadRatio(engine.readRatio(), aheadSeconds, duration))

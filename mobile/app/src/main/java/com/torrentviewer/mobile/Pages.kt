@@ -610,6 +610,7 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
                         Entry(L.drawable.lucide_ic_users, "Switch profile", "Change to a different profile", onClick = onSwitchProfile),
                     ),
                     listOf(
+                        Entry(L.drawable.lucide_ic_trophy, "Your stats", "Hours watched, favourites and streaks", "year recap history time") { page = "Your stats" },
                         Entry(L.drawable.lucide_ic_palette, "Appearance", "Theme and home screen genres", "light dark") { page = "Appearance" },
                     ),
                     listOf(
@@ -924,6 +925,8 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
         }
+
+        if (page == "Your stats") StatsPage()
 
         if (page == "Backup") Panel {
         Section("Your library", "History, resume points, lists, settings, searches and intro marks as one file. Downloads are not in it — they are files on this phone.") {

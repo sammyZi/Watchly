@@ -513,6 +513,37 @@ class LibTest {
         assertNull(NewEpisodes.latestAired(Title("tt8", "tv", "Soon", episodes = listOf(ep(1, 1, "2027-01-01"))), now))
     }
 
+    @Test fun watchStats() {
+        val fmt = java.text.SimpleDateFormat("yyyy-MM-dd")
+        val now = fmt.parse("2026-11-14")!!.time + 12 * 3600_000L
+        val h = 3600.0
+        val log = WatchLog.Log(
+            base = 10 * h,
+            days = mapOf(
+                "2025-12-31" to mapOf("tt1" to 5 * h),
+                "2026-03-02" to mapOf("tt1" to 2 * h, "tt2" to 1 * h),
+                "2026-11-12" to mapOf("tt2" to 1 * h),
+                "2026-11-13" to mapOf("tt2" to 2 * h),
+                "2026-11-14" to mapOf("tt3" to 0.5 * h),
+            ),
+            titles = mapOf("tt1" to WatchLog.Seen("A", "tv"), "tt2" to WatchLog.Seen("B", "movie"), "tt3" to WatchLog.Seen("C", "movie")),
+        )
+        val s = WatchStats.of(log, now)
+        assertEquals(10 + 5 + 3 + 1 + 2 + 0.5, s.allTime / h, 1e-9)
+        // Last year's evening is not this year's.
+        assertEquals(6.5, s.thisYear / h, 1e-9)
+        assertEquals(3.5, s.thisMonth / h, 1e-9)
+        assertEquals("B", s.top.first().first)
+        assertEquals(1, s.shows)
+        assertEquals(2, s.films)
+        // 12th, 13th and 14th in a row, ending today.
+        assertEquals(3, s.streak)
+        assertEquals(3, s.longestStreak)
+        assertEquals(5, s.activeDays)
+        assertEquals("3h 05m", WatchStats.hours(3 * h + 5 * 60))
+        assertEquals("42m", WatchStats.hours(42 * 60.0))
+    }
+
     @Test fun localVideos() {
         assertTrue(isLocalVideo("/storage/emulated/0/Movies/Watchly/Show/a.mkv"))
         assertTrue(isLocalVideo("file:///storage/x.MP4"))
