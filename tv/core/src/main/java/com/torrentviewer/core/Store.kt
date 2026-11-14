@@ -711,24 +711,6 @@ internal fun stalledPeers(peers: List<PeerLoad>, connected: Int): List<String> {
         .distinct()
 }
 
-/**
- * Why a start or a stall is taking its time, said so a viewer can act on it — or null when it is
- * just not long yet. [waitedMs] is how long the piece the player waits on has been waited for
- * (0 when none), [blocksLeft] what is missing of it, [needBps] what the film takes to play (0 if
- * unknown) against [rate] what the swarm gives. In order of what can be done about it.
- */
-internal fun slowReason(peers: Int, rate: Int, needBps: Double, waitedMs: Long, blocksLeft: Int, lastBlocks: Int = 8): String? {
-    if (peers <= 0 || waitedMs < 2_000) return null
-    return when {
-        rate <= 0 && waitedMs >= 5_000 -> "Connected to $peers peers, but none has sent anything yet. It often picks up in a few seconds."
-        needBps > 0 && rate > 0 && rate < needBps * 0.9 ->
-            "This release needs about ${speed(needBps.toInt())} and the swarm is giving ${speed(rate)}, so it may keep pausing. A smaller release would play smoother."
-        blocksLeft in 0..lastBlocks -> "Waiting on the last part of one piece, held by a slow peer. Others have been asked for it."
-        peers < 10 -> "Only $peers peers are connected, so it fills slowly. A release with more seeds would help."
-        else -> null
-    }
-}
-
 /** A seek lands on the keyframe before the spot, and those can be seconds apart. */
 private const val KEYFRAME_SECONDS = 5.0
 

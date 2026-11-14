@@ -236,8 +236,6 @@ data class Progress(
     val peers: Int,
     val dhtNodes: Int,
     val state: String,
-    /** In plain words, why this is slow right now, or null when nothing is: see [slowReason]. */
-    val why: String? = null,
 )
 
 /** [lanUrl]: the stream addressed for a Cast receiver, when the engine serves the network. */
@@ -366,8 +364,6 @@ class TorrentStream(
     /** Readers that closed recently: connection id → (offset, closed at). */
     private val lately = ConcurrentHashMap<Long, Pair<Long, Long>>()
 
-    /** What the playing film takes per second, when known: for [slowReason]. */
-    @Volatile private var bitrateBps = 0.0
     private var blockingPiece = -1
     private var blockingSince = 0L
     /** Unlike blockingSince, not reset by the stuck-piece kick. */
@@ -964,7 +960,6 @@ class TorrentStream(
         if (gen != playGen) return
 
         val perSecond = options.bitrate.takeIf { it > 0 }?.toLong() ?: 0L
-        bitrateBps = perSecond.toDouble()
         // Only what the viewer asked for in Settings: the player opens the moment it has a header
         // to read, and buffers as it goes. Contiguous from the start, so two pieces at most.
         prepareBytes = (options.prepareMb.toLong() * 1024 * 1024).coerceAtMost(ti.pieceLength().toLong() * 2)
@@ -1679,11 +1674,6 @@ class TorrentStream(
             peers = status.numPeers(),
             dhtNodes = session.stats().dhtNodes().toInt(),
             state = status.state().name,
-            why = runCatching {
-                val clock = System.currentTimeMillis()
-                val waited = if (blockingPiece >= 0) clock - blockedFrom else 0L
-                slowReason(status.numPeers(), status.downloadRate(), bitrateBps, waited, if (blockingPiece >= 0) blocksLeft(h, blockingPiece) else Int.MAX_VALUE, LAST_BLOCKS)
-            }.getOrNull(),
         )
     }
 

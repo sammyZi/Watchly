@@ -1055,11 +1055,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         AnimatedVisibility(spinning && scrub == null, Modifier.align(Alignment.Center), enter = fadeIn(tween(300, 400)), exit = fadeOut()) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Spinner(size = if (pip) 32.dp else 56.dp)
-                if (!pip) progressState.value?.let {
-                    Text("${speed(it.speed)}  ·  ${it.peers} peers", Modifier.padding(top = 12.dp), style = Type.meta.copy(color = Color.White))
-                    // Why, in words, once it has gone on a while.
-                    it.why?.let { why -> Text(why, Modifier.padding(top = 6.dp, start = 32.dp, end = 32.dp), style = Type.meta.copy(color = Color.White.copy(alpha = 0.7f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)) }
-                }
+                if (!pip) progressState.value?.let { Text("${speed(it.speed)}  ·  ${it.peers} peers", Modifier.padding(top = 12.dp), style = Type.meta.copy(color = Color.White)) }
             }
         }
 
@@ -1730,7 +1726,6 @@ private fun Loading(title: Title?, episode: Episode?, file: TorrentFile?, starti
                             style = Type.label.copy(color = Ink.muted, fontSize = 14.sp),
                         )
                     }
-                    progress?.why?.let { Text(it, Modifier.padding(top = 8.dp), style = Type.meta.copy(color = Ink.faint)) }
                 }
                 Box(Modifier.size(96.dp), contentAlignment = Alignment.Center) {
                     val red = Ink.accent
