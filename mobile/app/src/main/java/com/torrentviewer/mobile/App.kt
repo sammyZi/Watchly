@@ -413,6 +413,9 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         }
 
         UpdateCard(watch, Modifier.align(Alignment.TopCenter).statusBarsPadding())
+        // The one ask for a star: on Home, never over a film, and not beside an update.
+        val updating by com.torrentviewer.core.Updates.release.collectAsState()
+        if (tab == Tab.HOME && watch.phase == Phase.IDLE && updating == null) StarCard(Modifier.align(Alignment.TopCenter).statusBarsPadding())
 
         if (watch.phase == Phase.INSPECTING) Opening(watch)
 

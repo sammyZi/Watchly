@@ -642,6 +642,12 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
                         Entry(L.drawable.lucide_ic_refresh_cw, "Check for updates", "You have version ${BuildConfig.VERSION_NAME}", "new version upgrade") { Updates.checkNow { watch.notes.tryEmit(it) } },
                     ),
                     listOf(
+                        Entry(L.drawable.lucide_ic_star, "Star on GitHub", "Free and open source — a star helps others find it", "review rate support github like") {
+                            StarPrompt.starred()
+                            openUrl(alertContext, REPO_URL)
+                        },
+                    ),
+                    listOf(
                         Entry(L.drawable.lucide_ic_scale, "Legal notice", "Watchly is a media player only", "disclaimer copyright dmca") { page = "Legal notice" },
                         Entry(L.drawable.lucide_ic_shield, "Privacy policy", "What stays here and what is sent", "data") { page = "Privacy policy" },
                         Entry(L.drawable.lucide_ic_file_text, "Terms and conditions", "The rules for using Watchly", "agreement licence") { page = "Terms and conditions" },
