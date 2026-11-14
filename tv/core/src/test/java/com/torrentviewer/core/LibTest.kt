@@ -513,6 +513,20 @@ class LibTest {
         assertNull(NewEpisodes.latestAired(Title("tt8", "tv", "Soon", episodes = listOf(ep(1, 1, "2027-01-01"))), now))
     }
 
+    @Test fun slowReasons() {
+        val mb = 1_000_000
+        // Not long enough to say, or nobody to blame yet.
+        assertNull(slowReason(peers = 30, rate = mb, needBps = 0.0, waitedMs = 1_500, blocksLeft = 3))
+        assertNull(slowReason(peers = 0, rate = 0, needBps = 0.0, waitedMs = 9_000, blocksLeft = 0))
+        assertTrue(slowReason(30, 0, 0.0, 6_000, Int.MAX_VALUE)!!.contains("none has sent"))
+        // A swarm slower than the film needs says so, with both numbers.
+        assertTrue(slowReason(60, 2 * mb, 8.3e6, 3_000, Int.MAX_VALUE)!!.let { "8.3 MB/s" in it && "2.0 MB/s" in it })
+        assertTrue(slowReason(60, 5 * mb, 3e6, 3_000, 2)!!.contains("last part"))
+        assertTrue(slowReason(6, 5 * mb, 3e6, 3_000, Int.MAX_VALUE)!!.contains("Only 6 peers"))
+        // A healthy swarm, just waiting a moment on a whole piece: nothing to say.
+        assertNull(slowReason(60, 5 * mb, 3e6, 3_000, 40))
+    }
+
     @Test fun watchStats() {
         val fmt = java.text.SimpleDateFormat("yyyy-MM-dd")
         val now = fmt.parse("2026-11-14")!!.time + 12 * 3600_000L
