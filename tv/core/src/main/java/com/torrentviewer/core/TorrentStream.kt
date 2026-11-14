@@ -117,6 +117,9 @@ private const val HEAD_BYTES = 2L * 1024 * 1024
  */
 private const val SERVE_BLOCKS = true
 
+/** How much of the next episode's start [TorrentStream.prefetch] brings: a header and the first frames' worth. */
+private const val PREFETCH_HEAD_BYTES = 8L * 1024 * 1024
+
 /** A .torrent describes the payload; past this it is the wrong file. */
 private const val MAX_TORRENT_BYTES = 16L * 1024 * 1024
 
@@ -456,6 +459,42 @@ class TorrentStream(
     fun aimStart(ratio: Double) {
         if (readers.any { it.key != SEEK_READER && it.value >= REOPEN_HEAD_BYTES && pieceAt(it.value) < tailPiece }) return
         setPosition(ratio)
+    }
+
+    /** Pieces of another file of this torrent kept coming at LOW behind the one playing: see [prefetch]. */
+    @Volatile private var prefetchPieces = IntArray(0)
+
+    /**
+     * The next episode of a season pack, coming while this one plays: its first [PREFETCH_HEAD_BYTES]
+     * and its tail (the index) at LOW, behind everything the player is waiting for, so only bandwidth
+     * the swarm has to spare goes to it. The next press of Next then starts from pieces already on
+     * disk instead of a cold file: the header and index wait were most of a start. Gone with the next
+     * play(), which wants one file and no other.
+     */
+    fun prefetch(index: Int) {
+        val ti = info ?: return
+        if (handle == null || index == fileIndex) return
+        val files = ti.files()
+        if (index < 0 || index >= files.numFiles()) return
+        val size = files.fileSize(index)
+        val pieceLen = ti.pieceLength().toLong().coerceAtLeast(1L)
+        if (size <= 0) return
+        val first = ti.mapFile(index, 0, 1).piece()
+        val last = ti.mapFile(index, size - 1, 1).piece()
+        val head = ((PREFETCH_HEAD_BYTES + pieceLen - 1) / pieceLen).toInt()
+        val tail = ((tailBytesFor(size) + pieceLen - 1) / pieceLen).toInt()
+        prefetchPieces = ((first..minOf(last, first + head - 1)) + (maxOf(first, last - tail + 1)..last)).distinct().toIntArray()
+        // Put in with the next zone, which is where the priorities are written.
+        zoneWidth = -1
+        log("prefetch: next file's first ${prefetchPieces.size} pieces (${files.fileName(index)})")
+    }
+
+    /**
+     * A magnet's file list fetched now, while something else plays, so opening it later reads it from
+     * disk (and its peers are already found) rather than asking the swarm. Blocking: off the main thread.
+     */
+    fun warmMeta(uri: String) {
+        runCatching { inspect(uri, 20) }.onFailure { log("warm: $uri — ${it.message}") }
     }
 
     /** The player is blocked on a piece that has not arrived — a seek now would wait on it. */
@@ -948,6 +987,7 @@ class TorrentStream(
             readaheadBytes = maxOf(ti.pieceLength().toLong() * 4, cacheCapBytes / 2)
         }
         lastRollTick = -1000
+        prefetchPieces = IntArray(0)
         info = ti
         infoHashHex = ti.infoHash().toHex()
         fileIndex = index
@@ -1541,6 +1581,8 @@ class TorrentStream(
                 else -> Priority.IGNORE
             }
         }
+        // The next episode's head and index, behind everything else: see prefetch.
+        for (p in prefetchPieces) if (p in prios.indices && p !in firstPiece..lastPiece) prios[p] = Priority.LOW
         runCatching { h.prioritizePieces(prios) }
         zoneIgnored = (firstPiece..lastPiece).firstOrNull { prios[it] == Priority.IGNORE } ?: -1
         // A rewrite can bring sequential back with it, and then in-order requests

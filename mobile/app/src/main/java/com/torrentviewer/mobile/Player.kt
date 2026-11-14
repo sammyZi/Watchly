@@ -726,6 +726,11 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     val offerNext by remember(next, onlineNext, stopAfter) {
         derivedStateOf { (next != null || onlineNext != null) && !noNext && !stopAfter && loaded && duration > 0 && duration - at <= UP_NEXT_SECONDS }
     }
+    // Well before the end — 70% through, or ten minutes left — the next episode is made ready.
+    val nearEnd by remember { derivedStateOf { loaded && duration > 0 && (at / duration >= 0.7 || duration - at <= 600) } }
+    LaunchedEffect(nearEnd, next, onlineNext) {
+        if (nearEnd && !noNext && (next != null || onlineNext != null)) watch.warmNext(next, onlineNext)
+    }
     LaunchedEffect(offerNext) {
         if (!offerNext) return@LaunchedEffect
         snapshotFlow { duration - at }.first { it <= 0.5 }

@@ -446,6 +446,9 @@ private fun Player(watch: Watch) {
     }
 
     // Derived, so the 4-a-second clock only recomposes what shows it.
+    // Well before the end — 70% through, or ten minutes left — the next episode's start is fetched behind this one.
+    val nearEnd by remember { derivedStateOf { loaded && duration > 0 && (at / duration >= 0.7 || duration - at <= 600) } }
+    LaunchedEffect(nearEnd, next) { if (nearEnd && !noNext && next != null) watch.warmNext(next, null) }
     val offerNext by remember { derivedStateOf { next != null && !noNext && loaded && duration > 0 && duration - at <= UP_NEXT_SECONDS } }
     LaunchedEffect(offerNext) {
         if (!offerNext) return@LaunchedEffect

@@ -471,6 +471,30 @@ class Watch(val engine: TorrentStream) {
 
     val playingFile: TorrentFile? get() = meta?.files?.find { it.index == playingIndex }
 
+    private var warmedPlay = -1
+
+    /**
+     * Called as an episode nears its end: gets the next one ready, once per play. In this torrent
+     * ([file], the next in a pack) its start is fetched behind the playing one ([TorrentStream.prefetch]).
+     * Not in it ([online], the show's next episode), its sources are searched now — the search keeps its
+     * answer, so Next uses it at once — and the best torrent's file list is fetched ([TorrentStream.warmMeta]),
+     * so it opens from disk with its peers found. The data itself waits: the engine streams one torrent.
+     */
+    fun warmNext(file: TorrentFile?, online: Episode?) {
+        if (warmedPlay == playId || phase != Phase.PLAYING) return
+        warmedPlay = playId
+        if (file != null) {
+            AppScope.launch(Dispatchers.IO) { engine.prefetch(file.index) }
+            return
+        }
+        val ep = online ?: return
+        val t = title ?: return
+        AppScope.launch(Dispatchers.IO) {
+            val hit = runCatching { searchEpisode(t, ep.season, ep.episode) }.getOrNull()?.firstOrNull() ?: return@launch
+            if (!hit.direct && !hit.external && playId == warmedPlay) engine.warmMeta(hit.uri)
+        }
+    }
+
     /** The last spot saved in this play, for crediting what was watched since: see [WatchLog]. */
     private var creditedPlay = -1
     private var creditedAt = 0.0
