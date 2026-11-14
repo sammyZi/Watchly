@@ -46,7 +46,7 @@ torrent case only.
     │  HTTP range requests to 127.0.0.1:<port>/<token>
     ▼
  LocalFileServer                                   LocalFileServer.kt
-    │  blocks a read until its piece is on disk; reports each reader's byte offset
+    │  blocks a read until its bytes are on disk; reports each reader's byte offset
     ▼
  TorrentStream — one libtorrent session            TorrentStream.kt
     │  a poll loop (every 200 ms before the first frame, 500 ms after):
@@ -59,6 +59,19 @@ The player never gets a file path. A partly downloaded file read directly hands
 back zeros where pieces are missing, and the demuxer sees corruption. Over HTTP a
 read for a missing piece simply waits, and every range request tells the engine
 where the player is reading.
+
+**Blocks as they land** (`SERVE_BLOCKS`). A piece is 2–16 MB, and a release with
+8–16 MB pieces used to hand the player nothing until its first piece was whole and
+hashed: most of a slow start. The engine now listens for libtorrent's
+`block_finished` alerts (one per 16 KB block written, `noteBlock`) and keeps which
+blocks of each unfinished piece are on disk. `LocalFileServer` asks `readableRun`
+how many bytes from an offset can be read in one run — whole pieces, then the
+finished blocks of the piece still arriving, up to the first block missing — and
+serves exactly that, so the player gets a header while its piece is still coming
+in. The price: a block is only checked as part of its piece, so a corrupt one can
+reach the player before the hash fails and it is fetched again. A glitch in the
+picture where there would have been a wait. `SERVE_BLOCKS = false` is the old
+whole-piece behaviour throughout.
 
 ### The session
 
@@ -104,16 +117,21 @@ where the player is reading.
 
 5. **Pre-roll.** Only what the first frame needs, each its own one-piece zone, in
    the order the player will ask (`prerollTargets`): the file's first piece (the
-   container header); on a resume its last piece, since a seek can't happen until
-   the player has read the index at the very end (left for later, that one piece
-   cost 10–12 s); then the prepare window at the resume point. The first ~2 MB of
-   the tail (Matroska Cues, an MP4 `moov` at the end) is asked for at a distant
-   deadline.
+   container header); the file's last piece, since the player reads the index at
+   the very end before its first picture and a seek can't happen until it has
+   (left until the player asked, that one piece cost 10–12 s); on a resume, then the
+   prepare window at the resume point. At a new start the last piece gets a
+   deadline of 1.5 s, just behind the head's (`PREROLL_TAIL_MS`); the rest of the
+   first ~2 MB of the tail (Matroska Cues, an MP4 `moov` at the end) is asked for at
+   a distant 10 s. Waiting for a torrent's metadata or handle is polled every 50 ms
+   (`AWAIT_STEP_MS`).
 6. **Ready** (`readyToOpen`). The player has work of its own before the first
-   picture, so it opens as soon as it can start on that. A new start waits for the
-   head piece and the prepare window; a resume waits for the head piece alone, and
-   a seek aim at the resume point keeps that spot coming while the player reads the
-   header and index. If the player gets there first, the server blocks it.
+   picture, so it opens as soon as it can start on that. Served as blocks land, the
+   header is `HEAD_BYTES` (2 MB) of finished blocks, or the first piece if that is
+   smaller: not a whole piece. A new start also waits for the prepare window; a
+   resume waits for the head alone, and a seek aim at the resume point keeps that
+   spot coming while the player reads the header and index. If the player gets
+   there first, the server blocks it.
 
 ---
 
@@ -124,7 +142,11 @@ its copy loop. Each tick turns readers into **targets**:
 
 - A reader in the **tail** is the player reading the container index, not
   playback. While that piece is missing it comes first: the player can't seek, or
-  show anything, without it. Once the piece is here it no longer counts.
+  show anything, without it. Once the piece is here it no longer counts. With
+  nothing else open, the player comes back to the spot it just left, which at a
+  start is the head, still part-fetched when it opened on its first blocks: that
+  spot is kept while the index is awaited, not dropped like any other after 2 s,
+  or the head and the index would be two waits in a row.
 - Otherwise the **newest** connection leads: after a seek it is where the picture
   waits.
 - A reader that closed **lingers 10 s** — players hop between two spots in one file.
@@ -132,6 +154,13 @@ its copy loop. Each tick turns readers into **targets**:
 - `setPosition(ratio)` plants a **seek aim** before the player reconnects, so a
   resume an hour in does not fetch the head first. It is dropped once a new
   connection reads past the header (16 MB), or after 30 s.
+- The aim planted when the player opens on a resume is only a **guess** — the
+  saved byte position, or a time over a running time — and the player may well seek
+  elsewhere (a resume guessed piece 369 and went to 426). Until a reader is on that
+  piece it keeps to its pre-roll pieces: no read-ahead, nothing behind it, and no
+  focus on its last blocks (`seedPiece`), so the header the player is actually
+  waiting on is not shut out. On a phone it had a whole zone and first rank: 22 s on
+  four header pieces while 75 came in around the guess.
 
 ### Piece priorities (`applyZone`)
 
@@ -255,9 +284,9 @@ phone is FUSE, which refuses to punch holes (`EOPNOTSUPP`).
   stream. Either way the path carries a random token.
 - **Ranges**: `200`, `206 Partial Content` and `416`, so the player can read the
   tail for its index and seek by reopening at an offset.
-- **Blocking reads**: a read for a missing piece waits in 40 ms steps. A read is
-  never allowed to run past the last available byte — an unaligned read across a
-  piece boundary would hand back zeros from the sparse file.
+- **Blocking reads**: a read for bytes not yet on disk waits in 40 ms steps. A read
+  is never allowed to run past the last available byte (`readable`, section 1) — an
+  unaligned read across a piece boundary would hand back zeros from the sparse file.
 - **Superseded readers**: a connection waiting on a piece when a newer one has
   opened is going nowhere (the player seeked away) and lets go; a hung-up client
   is noticed every 500 ms.
@@ -284,6 +313,12 @@ phone is FUSE, which refuses to punch holes (`EOPNOTSUPP`).
 - With no byte position, as for a spot carried over from Stremio, `resumeRatio`
   works it out from the time and the running time, falling back on the title's own
   runtime: at 0 an 86 GB resume aimed at the start for its first 35 s.
+- Once the film has loaded and its real running time is known, the players aim the
+  engine at the resume point again (`aimStart`; the phone only for a spot not
+  measured in bytes) — unless a reader is already past the header. Media3 loads with the picture
+  up at its spot, so nothing followed that aim: it led for 30 s, 75 pieces from the
+  picture on one film, with the stuck-piece watchdog on a piece nobody read (13 of
+  52 starts in one phone's log).
 
 ---
 
@@ -291,8 +326,11 @@ phone is FUSE, which refuses to punch holes (`EOPNOTSUPP`).
 
 - **Media3** by default, with the Jellyfin FFmpeg extension for the audio formats
   phones and TVs do not decode themselves (AC3, E-AC3, DTS). It buffers 15–30 s
-  ahead. A file Media3 cannot play reports `onUnsupported`, and the screen falls
-  back to libVLC at the same position.
+  ahead. The first picture, and the one after a seek, shows on 1 s of buffer
+  (`START_BUFFER_MS`) rather than the viewer's 3–6 s: at 10 MB/s that was 30–60 MB
+  between the stream being ready and anything showing. The viewer's buffer still
+  applies after a stall. A file Media3 cannot play reports `onUnsupported`, and the
+  screen falls back to libVLC at the same position.
 - **libVLC** on request, or as that fallback: the widest format support and full
   ASS styling. Its network cache is 3 s, or 6 s above 4 MB/s.
 
@@ -333,9 +371,21 @@ The Windows app streams with MonoTorrent and libVLC (`windows/Watchly/Engine/`):
   ~500 KB/s from a swarm that gave qBittorrent 3.8 MB/s.
 - **`WindowedRequester`** wraps it so only a window is fetched — 5 s behind the
   playhead to 5 minutes ahead, moved on the player's tick — and nothing else of
-  the film. On a resume the file's last piece comes in alongside, as on Android.
-  "Whole file" lifts the window, 64 pieces at a time; so does a download of the
-  same torrent.
+  the film. "Whole file" lifts the window, 64 pieces at a time; so does a download
+  of the same torrent.
+- **The start** follows Android's pre-roll (section 2). Until the player is under
+  way only the first two pieces, the file's last piece (the index) and, on a resume,
+  two pieces at the spot it will seek to are fetched: past the head the read-ahead
+  took every request a peer had, so the last piece was only asked for once the player
+  was waiting on it. A new start opens the read-ahead when its first piece is in; a
+  resume, when the player leaves the head or after 30 s (`StartMs`). The spot is
+  worked out from the length saved the last time the file played, and skipped when
+  there is none. The last piece and the spot stay wanted afterwards, so one
+  part-fetched is finished, not dropped. The log says when the narrow start begins
+  and when it opens.
+- **What it can't match.** MonoTorrent's stream only serves whole pieces, so
+  Android's blocks-as-they-land (section 1) has no counterpart here, and the resume
+  guess never outranks the player's real reader, as there is no seeded reader.
 - There is no cap to roll: the stream's files are deleted when the player closes.
 - Streams come from the viewer's addons here too (`Core/Addons.cs`). A `url`
   stream plays straight in libVLC (`PlayLink` in `MainWindow.xaml.cs`), never
@@ -360,9 +410,14 @@ The Windows app streams with MonoTorrent and libVLC (`windows/Watchly/Engine/`):
 | `MAX_DROPPED_AT_ONCE` / `MIN_PEERS_KEPT` | 4 / 40 | |
 | `ROLL_HEAD_BYTES` | 8 MB | `Holes.kt` |
 | `READER_LINGER_MS` / `SEEK_AIM_MS` / `REOPEN_HEAD_BYTES` | 10 s / 30 s / 16 MB | |
+| `HEAD_BYTES` | 2 MB of header before the player opens (blocks served as they land) | |
+| `PREROLL_TAIL_MS` | 1.5 s: the last piece's deadline before the player opens | |
+| `AWAIT_STEP_MS` | 50 ms: how often a wait for metadata or a handle looks | |
+| `START_BUFFER_MS` | 1 s of film before the first picture | `ExoView.kt` |
 | `FREE_SPACE_MIN` | 512 MB (rolls under 3×) | |
 | tail fetched | file size / 200, between 2 and 16 MB | `tailBytesFor` |
 | `CACHE_CAPS` | Auto (free space less 1.5 GB), 2, 4, 8, 16 GB; Auto by default | `Store.kt` |
 | `TORBOX_STALL_MS` | 45 s without the picture moving: TorBox gives way to the swarm | `Watch.kt` |
 | `AIM_SECONDS` / `SEEK_CHECK_MS` | 30 s / 2.5 s | the players' `Player.kt` |
 | `WindowSeconds` / `BehindSeconds` | 5 min / 5 s | `windows/…/TorrentEngine.cs` |
+| `StartMs` / `SpotPieces` | 30 s a resume may stay narrow / 2 pieces kept at the resume spot | |
