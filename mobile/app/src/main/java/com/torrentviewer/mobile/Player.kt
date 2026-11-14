@@ -356,9 +356,6 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     var subDelay by remember { mutableLongStateOf(0L) }
     /** What subtitle sync last did, and whether it worked: shown in the subtitle panel. */
     var syncNote by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
-    /** Automatic sync at work: seconds of the film heard so far; null when it is not listening. */
-    var syncHeard by remember { mutableStateOf<Double?>(null) }
-    var syncJob by remember { mutableStateOf<Job?>(null) }
     /** The line a tap last moved, never moved again by the next tap: see SubtitleSync.match. */
     var syncedLine by remember { mutableStateOf<Long?>(null) }
     val cast = remember { castContext(context) }
@@ -396,75 +393,22 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     fun subtitleFilesNow(): List<String> = ready?.subtitleFiles.orEmpty() + external.map { it.path }
 
     /** Put a sync's delay in, and say what it did in the panel and over the picture. */
-    fun applySync(ms: Long, auto: Boolean) {
+    fun applySync(ms: Long) {
         if (kotlin.math.abs(ms - subDelay) < 150) {
             syncNote = "Already in sync." to true
             return
         }
-        engine.note("player: subtitle ${if (auto) "auto-sync" else "tap sync"} set the delay to ${ms}ms (was ${subDelay}ms)")
+        engine.note("player: subtitle tap sync set the delay to ${ms}ms (was ${subDelay}ms)")
         subDelay = ms
         val seconds = "%.1f".format(kotlin.math.abs(ms) / 1000.0)
         val what = if (ms >= 0) "$seconds s later" else "$seconds s earlier"
-        syncNote = (if (auto) "Synced automatically. Subtitles now show $what." else "Synced. Subtitles now show $what.") to true
+        syncNote = "Synced. Subtitles now show $what." to true
         say("Subtitles synced: $what", L.drawable.lucide_ic_circle_check)
         if (view.value?.setSubtitleDelay(ms) == false) {
             say("Switching to VLC to bring subtitles earlier", L.drawable.lucide_ic_captions)
             tracks = null
             langDone.fill(false)
             vlc = true
-        }
-    }
-
-    /**
-     * Listen to the film for a while and line the subtitle file up with its speech, then stop —
-     * SubtitleSync.align. Tried every few seconds once 30 s are heard, and given up at 150 s; while
-     * paused it waits, as there is nothing to hear. The film keeps playing throughout.
-     */
-    fun autoSync() {
-        val v = view.value ?: return
-        val files = subtitleFilesNow()
-        syncJob?.cancel()
-        val meter = com.torrentviewer.core.SpeechMeter()
-        if (!v.listenForSpeech(meter)) {
-            syncNote = "Automatic sync needs the standard player. On VLC, sync by ear below." to false
-            return
-        }
-        syncedLine = null
-        syncNote = null
-        syncHeard = 0.0
-        syncJob = scope.launch {
-            try {
-                val sets = withContext(Dispatchers.IO) {
-                    files.mapNotNull { f -> runCatching { com.torrentviewer.core.SubtitleSync.cues(java.io.File(f).readText()) }.getOrNull()?.takeIf { it.isNotEmpty() } }
-                }
-                if (sets.isEmpty()) {
-                    syncNote = "This subtitle file has no timed lines to match." to false
-                    return@launch
-                }
-                while (true) {
-                    delay(2_000)
-                    syncHeard = meter.seconds
-                    if (meter.unreadable) {
-                        syncNote = "Can't hear this film's audio: it goes straight to the speaker. Sync by ear below instead." to false
-                        break
-                    }
-                    if (meter.seconds >= 30) {
-                        val (start, speech) = meter.speech()
-                        val best = withContext(Dispatchers.Default) { sets.mapNotNull { com.torrentviewer.core.SubtitleSync.align(speech, start, it) }.maxByOrNull { it.confidence } }
-                        if (best != null) {
-                            applySync(best.delayMs, auto = true)
-                            break
-                        }
-                    }
-                    if (meter.seconds >= 150) {
-                        syncNote = "Couldn't match the subtitles to the speech here (music or quiet?). Try again in a scene with talking, or sync by ear below." to false
-                        break
-                    }
-                }
-            } finally {
-                v.listenForSpeech(null)
-                syncHeard = null
-            }
         }
     }
 
@@ -1262,9 +1206,6 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                 // Only a subtitle file has lines to read; one built into the video is timed with − and +.
                 canSync = subtitle != null && (ready?.subtitleFiles.orEmpty().isNotEmpty() || external.isNotEmpty()),
                 syncNote = syncNote,
-                listening = syncHeard,
-                onAutoSync = ::autoSync,
-                onCancelSync = { syncJob?.cancel() },
                 onSyncLine = {
                     // As a line begins: the subtitle file's nearest line is moved to this moment.
                     val pressMs = (at * 1000).toLong()
@@ -1279,7 +1220,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                             syncNote = "No other line near that moment. Tap just as someone starts speaking." to false
                         } else {
                             syncedLine = best.lineMs
-                            applySync(best.delayMs, auto = false)
+                            applySync(best.delayMs)
                         }
                     }
                 },
@@ -1840,9 +1781,6 @@ private fun TracksPanel(
     onFind: () -> Unit,
     canSync: Boolean,
     syncNote: Pair<String, Boolean>?,
-    listening: Double?,
-    onAutoSync: () -> Unit,
-    onCancelSync: () -> Unit,
     onSyncLine: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -1863,7 +1801,7 @@ private fun TracksPanel(
                 // Then the tools, a row each, only while a subtitle is on.
                 if (subtitle != null) {
                     item { Spacer(Modifier.height(10.dp)) }
-                    // Timing: a tenth of a second a tap, the value resets it; Auto-sync and By ear beside it.
+                    // Timing: a tenth of a second a tap, the value resets it.
                     item {
                         Row(Modifier.padding(start = 14.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("Timing", Modifier.width(56.dp), style = Type.meta)
@@ -1872,30 +1810,20 @@ private fun TracksPanel(
                                 Text("%+.1f s".format(delay / 1000.0), Modifier.padding(horizontal = 8.dp, vertical = 6.dp), style = Type.label.copy(fontWeight = FontWeight.SemiBold, color = if (delay != 0L) Ink.accent else Color.White))
                             }
                             Tap({ onDelay(delay + 100) }, shape = CircleShape) { Lc(L.drawable.lucide_ic_plus, Modifier.padding(8.dp), tint = Color.White, size = 18.dp) }
-                            if (canSync) {
-                                Spacer(Modifier.width(10.dp))
-                                Tap(if (listening != null) onCancelSync else onAutoSync, shape = CircleShape) { pressed ->
-                                    Row(Modifier.background(Color.White.copy(alpha = if (pressed) 0.2f else 0.12f)).padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        if (listening != null) com.torrentviewer.core.Spinner(size = 13.dp, color = Color.White) else Lc(L.drawable.lucide_ic_audio_lines, tint = Color.White, size = 15.dp)
-                                        Text(if (listening != null) "  ${listening.toInt()} s · Stop" else "  Auto-sync", style = Type.meta.copy(color = Color.White, fontWeight = FontWeight.SemiBold))
-                                    }
-                                }
-                            }
                         }
                     }
-                    // One quiet line: what sync is doing or did, and the by-ear way.
+                    // One quiet line: what the last tap did, and the by-ear way.
                     item {
                         val good = Color(0xFF22C55E)
                         val warn = Color(0xFFF59E0B)
                         val (line, colour) = when {
                             !canSync -> "Built into the video: use − and +." to Color.White.copy(alpha = 0.5f)
-                            listening != null -> "Listening to the speech. Keep playing." to Color.White.copy(alpha = 0.6f)
                             syncNote != null -> syncNote.first to (if (syncNote.second) good else warn)
                             else -> null to Color.Unspecified
                         }
                         Row(Modifier.padding(start = 70.dp, end = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             line?.let { Text(it, Modifier.weight(1f, fill = false), style = Type.meta.copy(color = colour), maxLines = 2) }
-                            if (canSync && listening == null) Tap(onSyncLine, shape = RoundedCornerShape(6.dp)) {
+                            if (canSync) Tap(onSyncLine, shape = RoundedCornerShape(6.dp)) {
                                 Text(if (line == null) "Or tap here when someone speaks" else "  ·  Tap when someone speaks", Modifier.padding(vertical = 4.dp), style = Type.meta.copy(color = Color.White.copy(alpha = 0.75f), textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline), maxLines = 1)
                             }
                         }
