@@ -120,11 +120,22 @@ whole-piece behaviour throughout.
    container header); the file's last piece, since the player reads the index at
    the very end before its first picture and a seek can't happen until it has
    (left until the player asked, that one piece cost 10–12 s); on a resume, then the
-   prepare window at the resume point. At a new start the last piece gets a
-   deadline of 1.5 s, just behind the head's (`PREROLL_TAIL_MS`); the rest of the
-   first ~2 MB of the tail (Matroska Cues, an MP4 `moov` at the end) is asked for at
-   a distant 10 s. Waiting for a torrent's metadata or handle is polled every 50 ms
-   (`AWAIT_STEP_MS`).
+   prepare window at the resume point. The index gets a deadline of 1.5 s, just
+   behind the head's (`PREROLL_TAIL_MS`). Waiting for a torrent's metadata or
+   handle is polled every 50 ms (`AWAIT_STEP_MS`).
+
+   **Where the index is.** Until something says otherwise it is the file's last
+   2 MB (`INDEX_BYTES`): a Matroska file's cues. It used to be the last piece
+   alone, and with pieces of 1 MB or less the index began a piece or two before
+   it: 11 of 60 starts in one phone's log waited 2–15 s on a piece nobody had
+   asked for. An MP4 says where its index is. As soon as the file's first blocks
+   are on disk, `sniff` reads its box headers (`mp4Index`):
+   - `moov` up front, as YTS makes them: 2–4 MB the player reads whole before
+     anything else, most of it past the header the pre-roll fetched. Each piece of
+     it was then a wait of its own after the player opened (one film with 512 KB
+     pieces: nine, 24 s). All of it is now pre-roll (`headWant`, at most
+     `MOOV_MAX`), the player opens when it is in, and the tail is never rushed.
+   - `moov` after the media: the pre-roll fetches from exactly where it starts.
 6. **Ready** (`readyToOpen`). The player has work of its own before the first
    picture, so it opens as soon as it can start on that. Served as blocks land, the
    header is `HEAD_BYTES` (2 MB) of finished blocks, or the first piece if that is
@@ -169,7 +180,7 @@ its copy loop. Each tick turns readers into **targets**:
 | each target … + readahead | DEFAULT |
 | 32 MB behind each target (a short rewind lands on data already paid for) | LOW |
 | half a zone of spare past each target (a "finished" torrent drops its seeds) | LOW |
-| the tail (first 2 MB during pre-roll, all of it after) | DEFAULT |
+| the tail (the index during pre-roll, all of it after; none for an MP4 with its index up front) | DEFAULT |
 | everything else in the file | IGNORE — or LOW in whole-file mode |
 
 Zones are re-aimed with hysteresis (a rewind inside the band already covered is
@@ -193,7 +204,7 @@ the responses go from gentle to blunt:
 
 | after | condition | response |
 |---|---|---|
-| 1.5 s, then every 1.5 s | every block is done or out with a peer (5 s if blocks are still unasked) | **re-ask**: re-arm that piece alone with `TOP_PRIORITY` and deadline 0, so its blocks go to faster peers too |
+| 1.5 s, then every 1.5 s | every block is done or out with a peer (5 s if blocks are still unasked) | **re-ask**: that piece alone gets `TOP_PRIORITY` and its deadline moved ahead of every other (`KICK_AHEAD_MS` before the start). libtorrent hands out requests in deadline order, and "now", as it used to be, came after every other overdue piece: one start sat on a piece with 167 blocks free and none asked for, at 3.8 MB/s. Moved, not reset and set again: libtorrent asks its fastest peers for a stalled deadline piece's blocks once it has waited as long as a piece usually takes (`request_time_critical_pieces`), by the entry's own clock, and a reset every 1.5 s started that clock over |
 | 1.5 s | 8 blocks or fewer to go | **focus**: that piece is the only one wanted, so idle peers double up on its blocks. 2 MB took 25 s after a seek with read-ahead on offer, and 1–2 s as the only piece wanted. The read-ahead comes back on the next tick |
 | 2 s | blocks still unasked | **narrow**: fetch only the rushed pieces (at least 2) for the next 10 s, as a thin swarm spread over the read-ahead starves the one the player needs. Not while every block is out: narrowing can't speed those up, and an 86 GB remux fell from 14 MB/s to 2 MB/s each time |
 | 5 s, then at most every 5 s | 8 blocks or fewer to go | **drop stalled peers** (`stalledPeers`): up to 4, slowest first, of those holding requests and sending under a quarter of the swarm's typical peer (and under 32 KB/s), never below 40 connected. Disconnecting is the only way to get a block back; an IP filter does it, for 2 minutes |
@@ -411,7 +422,8 @@ The Windows app streams with MonoTorrent and libVLC (`windows/Watchly/Engine/`):
 | `ROLL_HEAD_BYTES` | 8 MB | `Holes.kt` |
 | `READER_LINGER_MS` / `SEEK_AIM_MS` / `REOPEN_HEAD_BYTES` | 10 s / 30 s / 16 MB | |
 | `HEAD_BYTES` | 2 MB of header before the player opens (blocks served as they land) | |
-| `PREROLL_TAIL_MS` | 1.5 s: the last piece's deadline before the player opens | |
+| `PREROLL_TAIL_MS` | 1.5 s: the index's deadline before the player opens | |
+| `INDEX_BYTES` / `MOOV_MAX` | 2 MB of the file's end taken for the index when nothing says where it is / 8 MB at most of an MP4's index up front | |
 | `AWAIT_STEP_MS` | 50 ms: how often a wait for metadata or a handle looks | |
 | `START_BUFFER_MS` | 1 s of film before the first picture | `ExoView.kt` |
 | `FREE_SPACE_MIN` | 512 MB (rolls under 3×) | |

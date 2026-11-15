@@ -636,14 +636,37 @@ fun seasonWatched(episodes: List<Episode>, season: Int, seen: Map<Ep, Double>, t
 }
 
 /**
- * What is fetched before the player gets the URL, in the order it will ask: the header, then for a
- * resume the file's last piece, then the resume point. A seek can't happen until the player has
- * read the index at the very end: left until after the start, that piece alone cost 10–12s, one
- * wait after another, where fetched here it comes in alongside the others.
+ * What is fetched before the player gets the URL, in the order it will ask: the header ([head]
+ * pieces of it), then for a resume the file's last piece, then the resume point. A seek can't happen
+ * until the player has read the index at the very end: left until after the start, that piece alone
+ * cost 10–12s, one wait after another, where fetched here it comes in alongside the others.
+ * Not when the [index] is known to be in the header.
  */
-internal fun prerollTargets(first: Int, start: Int, count: Int, last: Int): List<Int> =
-    (listOf(first) + (if (start != first) listOf(last) else emptyList()) + (start until start + count))
+internal fun prerollTargets(first: Int, start: Int, count: Int, last: Int, head: Int = 1, index: Boolean = true): List<Int> =
+    ((first until first + head) + (if (start != first && index) listOf(last) else emptyList()) + (start until start + count))
         .filter { it <= last }.distinct()
+
+/**
+ * Where an MP4 keeps its index (the moov box), from the file's first bytes: 0 until its end when it
+ * is up front, its start until the file's end when it follows the media. Null when [head] is not an
+ * MP4, or stops short of saying. The player can do nothing until it has read all of it, so knowing
+ * where it is at the first block is what lets the pre-roll fetch that and not a guess.
+ */
+internal fun mp4Index(head: ByteArray, fileSize: Long): LongRange? {
+    fun u32(o: Int) = (0..3).fold(0L) { v, i -> (v shl 8) or (head[o + i].toLong() and 0xFF) }
+    var at = 0L
+    while (at + 16 <= head.size) {
+        val o = at.toInt()
+        val type = String(head, o + 4, 4, Charsets.ISO_8859_1)
+        // 1 is a 64-bit size after the type; 0 is "to the end of the file".
+        val size = when (val s = u32(o)) { 1L -> (u32(o + 8) shl 32) or u32(o + 12); 0L -> fileSize - at; else -> s }
+        if ((at == 0L && type != "ftyp") || size < 8 || at + size > fileSize) return null
+        if (type == "moov") return 0L until at + size
+        if (type == "mdat") return if (at + size < fileSize) (at + size) until fileSize else null
+        at += size
+    }
+    return null
+}
 
 /**
  * When the player can open. It has work of its own before the first picture (the header, the index,

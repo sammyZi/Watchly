@@ -201,13 +201,34 @@ private const val NARROW_HOLD_MS = 10_000L
 private const val REMOVE_WAIT_MS = 4_000
 
 /**
- * The deadline of the file's last piece before the player opens, just behind the head's. A Matroska
+ * The deadline of the file's index before the player opens, just behind the head's. A Matroska
  * file keeps its cues at the very end and the player reads them before its first picture, so at a
  * start that piece is the next wait after the header — the one a resume already fetches in pre-roll
  * (prerollTargets), where left until asked for it cost 10–12s. Calibration knob, not yet measured
  * for a fresh start: a thin swarm may want the head alone.
  */
 private const val PREROLL_TAIL_MS = 1_500
+
+/**
+ * The end of the file fetched before the player opens, when nothing says where the index starts: a
+ * Matroska file's cues sit in its last megabyte or two. It used to be the last piece alone, and with
+ * pieces of 1MB or less the index began a piece or two before it — 11 of 60 starts in one phone's
+ * log then waited 2–15s on a piece nobody had asked for. An MP4 says where its index is ([mp4Index]).
+ */
+private const val INDEX_BYTES = 2L * 1024 * 1024
+
+/** The most of an MP4's up-front index the pre-roll goes after; past this it is not an index. */
+private const val MOOV_MAX = 8L * 1024 * 1024
+
+/** As much of the file's start as [mp4Index] is shown: the box after ftyp is within it. */
+private const val SNIFF_BYTES = 64 * 1024
+
+/**
+ * A re-asked piece's deadline is this long before the stream started, and a millisecond earlier
+ * with each re-ask: ahead of every deadline the zone set, all of which are after the start, and of
+ * every piece re-asked before it. libtorrent only compares deadlines, so one in the past is fine.
+ */
+private const val KICK_AHEAD_MS = 60_000L
 
 /** How often to look for a torrent's metadata or handle while waiting on it. */
 private const val AWAIT_STEP_MS = 50L
@@ -289,6 +310,15 @@ class TorrentStream(
     private var startOffset = 0L
     private var headPiece = 0
     private var tailPiece = 0
+    /**
+     * Where the index at the file's end starts, as far as is known: the pre-roll fetches from here on.
+     * Past [lastPiece] when the index is known to be up front, and then the tail is never rushed.
+     */
+    private var indexPiece = 0
+    /** Bytes of the file's start the player needs before it can do anything, when more than the header: an MP4's index up front. */
+    private var headWant = 0L
+    /** Bytes of the head [sniff] last looked at; [SNIFF_BYTES] once it is done. */
+    private var sniffedBytes = 0
     private var ticks = 0
     private var readyAt = 0L
     private var lastDataAt = 0L
@@ -375,6 +405,8 @@ class TorrentStream(
     /** The index pieces last logged as holding up the player. */
     private var lastIndexWait = emptyList<Int>()
     private var lastKickAt = 0L
+    /** Re-asks this stream: see [KICK_AHEAD_MS]. */
+    private var kicks = 0L
     /** When peers were last dropped: a hanging piece gets one drop per [STALLED_AFTER_MS], not one per re-ask. */
     private var lastDropAt = 0L
     /** The fetch stays narrow until then; see [NARROW_HOLD_MS]. */
@@ -999,6 +1031,7 @@ class TorrentStream(
         lately.clear()
         blockingPiece = -1
         lastKickAt = 0L
+        kicks = 0L
         lastDropAt = 0L
         narrowUntil = 0L
         narrowWidth = 0
@@ -1054,6 +1087,9 @@ class TorrentStream(
         firstPiece = ti.mapFile(index, 0, 1).piece()
         lastPiece = ti.mapFile(index, maxOf(0, size - 1), 1).piece()
         tailPiece = maxOf(firstPiece, ti.mapFile(index, maxOf(0, size - tailBytesFor(size)), 1).piece())
+        indexPiece = maxOf(tailPiece, ti.mapFile(index, maxOf(0, size - INDEX_BYTES), 1).piece())
+        headWant = 0L
+        sniffedBytes = 0
         val startAt = (size * options.startRatio.coerceIn(0.0, 0.99)).toLong()
         startPiece = ti.mapFile(index, startAt, 1).piece()
         startOffset = startAt
@@ -1176,11 +1212,14 @@ class TorrentStream(
 
         val pieceLen = ti.pieceLength().toLong().coerceAtLeast(1L)
         val prerollPieces = maxOf(1, Math.ceil(prepareBytes.toDouble() / pieceLen).toInt())
+        if (!announcedReady && sniffedBytes < SNIFF_BYTES) runCatching { sniff(ti) }
         // Before the player attaches: exactly the pieces isReady counts — the head piece and
         // the prepare window from the resume point — each its own one-piece zone. Zones of
         // `reach + 1` pieces per target plus spare fetched 9 pieces (72MB) for 3 needed on
         // the phone; with 8MB pieces and ~50 peers that spread kept piece 0 unfinished for 70s.
-        val preroll = prerollTargets(firstPiece, startPiece, prerollPieces, lastPiece)
+        // An MP4's index up front is head too: the player reads all of it before anything else.
+        val headPieces = if (headWant > 0) pieceAt(headWant - 1) - firstPiece + 1 else 1
+        val preroll = prerollTargets(firstPiece, startPiece, prerollPieces, lastPiece, headPieces, index = indexPiece <= lastPiece)
 
         // A reader parked in the tail is the player reading the container index, not
         // playback. Lingering closed readers only add zones, never lead. The newest
@@ -1244,9 +1283,16 @@ class TorrentStream(
         ) {
             lastKickAt = clock
             log("stuck: piece $blocked for ${(clock - blockingSince) / 1000}s (${pieceState(h, blocked)}) — re-asking for it")
-            runCatching { h.resetPieceDeadline(blocked) }
+            // Its deadline moved, not reset and set again: libtorrent re-requests a stalled deadline
+            // piece's blocks from its fastest peers once the piece has waited as long as a piece
+            // usually takes (request_time_critical_pieces), counted from the entry's own clock. A
+            // reset every 1.5s started that clock over each time, so it never got there.
+            // Moved to before every other deadline, not to now: libtorrent hands out requests in
+            // deadline order, and every other piece's deadline had already passed, so "now" put the
+            // piece the player waits on last. Seen: piece 1480 with 167 blocks free and none asked
+            // for, at 3.8MB/s; before the player opened, the head sent behind the index and the spot.
             runCatching { h.piecePriority(blocked, Priority.TOP_PRIORITY) }
-            runCatching { h.setPieceDeadline(blocked, 0) }
+            runCatching { h.setPieceDeadline(blocked, (readyAt - KICK_AHEAD_MS - ++kicks - clock).toInt()) }
             deadlined.add(blocked)
             blockingSince = clock
             if (clock - blockedFrom > STALLED_AFTER_MS && clock - lastDropAt > STALLED_AFTER_MS) {
@@ -1337,22 +1383,17 @@ class TorrentStream(
                 h.setPieceDeadline(p, if (announcedReady) rank * 3000 + (p - target) * 300 else rank * 300)
             }
         }
-        // During pre-roll only the first ~2MB of the index; after, the whole tail at a distant deadline.
-        val tailEnd = if (announcedReady) lastPiece else minOf(lastPiece, tailPiece + maxOf(0, (2L * 1024 * 1024 / pieceLen).toInt() - 1))
-        for (p in tailPiece..tailEnd) {
+        // Before the player opens, the index alone, just behind the head (PREROLL_TAIL_MS); after, the
+        // whole tail at a distant deadline.
+        for (p in tailFrom(announcedReady)..lastPiece) {
             keep.add(p)
-            if (!h.havePiece(p) && deadlined.add(p)) h.setPieceDeadline(p, if (!announcedReady && p == lastPiece) PREROLL_TAIL_MS else 10_000 + (p - tailPiece) * 300)
-        }
-        // And the file's very last piece, when the 2MB above stops short of it: see PREROLL_TAIL_MS.
-        if (!announcedReady && lastPiece > tailEnd) {
-            keep.add(lastPiece)
-            if (!h.havePiece(lastPiece) && deadlined.add(lastPiece)) h.setPieceDeadline(lastPiece, PREROLL_TAIL_MS)
+            if (!h.havePiece(p) && deadlined.add(p)) h.setPieceDeadline(p, if (announcedReady) 10_000 + (p - tailPiece) * 300 else PREROLL_TAIL_MS)
         }
         deadlined.removeAll { piece -> (piece !in keep).also { if (it) runCatching { h.resetPieceDeadline(piece) } } }
 
         // Serving blocks, the player can have the header before its piece is whole, and has work of
         // its own to be getting on with: it blocks on the socket for anything past what is here.
-        val headNeed = if (SERVE_BLOCKS) minOf(pieceLen, HEAD_BYTES) else pieceLen
+        val headNeed = maxOf(if (SERVE_BLOCKS) minOf(pieceLen, HEAD_BYTES) else pieceLen, headWant)
         val headHave = contiguousBytes(h, ti, firstPiece, ti.mapFile(fileIndex, 0, 1).start())
         val startHave = if (startPiece == firstPiece) headHave else contiguousBytes(h, ti, startPiece, ti.mapFile(fileIndex, startOffset, 1).start())
         // Resuming the closing minutes leaves fewer pieces than the prepare window asks for.
@@ -1564,13 +1605,11 @@ class TorrentStream(
         // Spare work keeps the wanted set from ever completing — a "finished" torrent drops its seeds.
         // At least one piece, so pre-roll's one-piece zones keep it too.
         val spare = targets.mapIndexed { i, t -> (t + widths[i] + 1)..minOf(t + widths[i] + maxOf(1, widths[i] / 2), lastPiece) }
-        val pieceLen = (info?.pieceLength() ?: 1).toLong().coerceAtLeast(1L)
-        val tailEnd = if (rushTail) lastPiece else minOf(lastPiece, tailPiece + maxOf(0, (2L * 1024 * 1024 / pieceLen).toInt() - 1))
+        val tail = tailFrom(rushTail)
         for (p in firstPiece..lastPiece) {
             if (p >= prios.size) break
             prios[p] = when {
-                // The last piece too, before the player opens: pump() gives it a deadline then.
-                p in tailPiece..tailEnd || p == lastPiece || zones.any { p in it } -> Priority.DEFAULT
+                p >= tail || zones.any { p in it } -> Priority.DEFAULT
                 spare.any { p in it } || behind.any { p in it } -> Priority.LOW
                 whole -> Priority.LOW
                 else -> Priority.IGNORE
@@ -1590,7 +1629,43 @@ class TorrentStream(
         zoneRushedTail = rushTail
         zoneWhole = whole
         zoneSeed = seed
-        log("zone: ${zones.joinToString(", ") { "${it.first}..${it.last}" }} (back $back, tail $tailPiece..$tailEnd)")
+        log("zone: ${zones.joinToString(", ") { "${it.first}..${it.last}" }} (back $back, tail ${if (tail > lastPiece) "none" else "$tail..$lastPiece"})")
+    }
+
+    /**
+     * The first piece of the tail wanted for its own sake: the index before the player opens, the
+     * whole tail after — and none of it, ever, when the index is known to be up front.
+     */
+    private fun tailFrom(open: Boolean) = if (open && indexPiece <= lastPiece) tailPiece else indexPiece
+
+    /**
+     * Once the file's first blocks are on disk: is it an MP4, and where is its index ([mp4Index])?
+     * Up front, as YTS makes them, it is 2–4MB the player reads whole before anything else — past the
+     * header the pre-roll fetched, so each piece of it was a wait of its own after the player opened
+     * (Parasite, 512KB pieces: nine of them, 24s). Now it is all pre-roll, and the tail is left alone.
+     * At the end, the pre-roll fetches from exactly where it starts: Obsession waited 15s on the
+     * piece before the last. Anything else, a Matroska file, keeps the guess ([INDEX_BYTES]).
+     */
+    // ponytail: MP4 only. A Matroska SeekHead gives its cues' position the same way; parse it if the guess keeps missing.
+    private fun sniff(ti: TorrentInfo) {
+        val size = ti.files().fileSize(fileIndex)
+        val can = readableRun(0L, minOf(SNIFF_BYTES.toLong(), size).toInt())
+        if (can < 16 || can <= sniffedBytes) return
+        val head = ByteArray(can)
+        java.io.RandomAccessFile(File(saveDir, ti.files().filePath(fileIndex)), "r").use { it.readFully(head) }
+        sniffedBytes = can
+        val moov = mp4Index(head, size) ?: return
+        sniffedBytes = SNIFF_BYTES
+        if (moov.first == 0L) {
+            headWant = minOf(moov.last + 1, MOOV_MAX)
+            indexPiece = lastPiece + 1
+            log("index: up front, ${(moov.last + 1) / 1024}KB — fetched with the header")
+        } else {
+            indexPiece = maxOf(tailPiece, pieceAt(moov.first))
+            log("index: at the end, from piece $indexPiece of $lastPiece")
+        }
+        // The pieces wanted have changed: the next applyZone puts that into the priorities.
+        zoneWidth = -1
     }
 
     private fun contiguousFrom(h: TorrentHandle, ti: TorrentInfo, from: Int): Long {

@@ -17,6 +17,33 @@ class ResumeTest {
         assertEquals(listOf(0, 1352, 1351), prerollTargets(0, 1351, 3, 1352))
     }
 
+    @Test fun anIndexUpFrontIsFetchedWithTheHeader() {
+        // Parasite, 512KB pieces: the player read nine of them before its first picture, one wait each.
+        assertEquals(listOf(0, 1, 2, 3, 4, 5, 6), prerollTargets(0, 0, 2, 4236, head = 7))
+        // A resume has no index to fetch at the far end.
+        assertEquals(listOf(0, 1, 369), prerollTargets(0, 369, 1, 1024, head = 2, index = false))
+    }
+
+    private fun box(type: String, size: Int) = java.nio.ByteBuffer.allocate(8).putInt(size).put(type.toByteArray()).array()
+
+    @Test fun anMp4SaysWhereItsIndexIs() {
+        val ftyp = box("ftyp", 32) + ByteArray(24)
+        // Up front, as YTS makes them: all of it, before the player can do anything.
+        assertEquals(0L until 3_000_032L, mp4Index(ftyp + box("moov", 3_000_000) + ByteArray(64), 2_000_000_000))
+        // After the media: from where the media ends.
+        assertEquals(1_000_040L until 1_004_000L, mp4Index(ftyp + box("free", 8) + box("mdat", 1_000_000) + ByteArray(64), 1_004_000))
+        // A film past 4GB has its media's size in 64 bits.
+        val big = java.nio.ByteBuffer.allocate(8).putLong(5_000_000_000).array()
+        assertEquals(5_000_000_032L until 5_000_004_000L, mp4Index(ftyp + box("mdat", 1) + big + ByteArray(16), 5_000_004_000))
+    }
+
+    @Test fun whatIsNotAnMp4SaysNothing() {
+        // Matroska; bytes that stop before the second box; a size that runs past the file.
+        assertEquals(null, mp4Index(byteArrayOf(0x1A, 0x45, 0xDF.toByte(), 0xA3.toByte()) + ByteArray(60), 1_000_000))
+        assertEquals(null, mp4Index(box("ftyp", 32) + ByteArray(24), 1_000_000))
+        assertEquals(null, mp4Index(box("ftyp", 32) + ByteArray(24) + box("moov", 3_000_000) + ByteArray(64), 1_000_000))
+    }
+
     @Test fun savedSpotIsBehindWhatThePlayerRead() {
         // 30s read ahead of a 1,500s episode, and the keyframe margin.
         assertEquals(0.5 - 35.0 / 1500, playheadRatio(0.5, 30.0, 1500.0), 1e-9)
