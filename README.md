@@ -2,7 +2,7 @@
 
 <p align="center">
   <b>One player for your phone, TV and PC.</b><br>
-  Your addons, your account, your friends — all in step.
+  Bring your own sources — Stremio-compatible addons, a debrid service, or your own media server — and your Stremio account comes along.
 </p>
 
 <p align="center">
