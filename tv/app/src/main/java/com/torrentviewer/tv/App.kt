@@ -204,6 +204,32 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         switching = false
     }
 
+    // Back from the TV's home screen, another app or the screensaver: asked again, as at a launch, since
+    // whoever has the remote now may not be whoever left. A resumed activity kept the last profile, so
+    // only a cold start asked. Not over a film on screen: that is somebody coming back to it.
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    androidx.compose.runtime.DisposableEffect(lifecycle) {
+        var away = false
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> away = true
+                androidx.lifecycle.Lifecycle.Event.ON_START -> if (away) {
+                    away = false
+                    if (who != null && watch.phase != Phase.PLAYING) {
+                        // The last profile's pages go with it: a kids profile must not land on a grown-up's title.
+                        stops = emptyList()
+                        tab = Tab.HOME
+                        switching = false
+                        who = null
+                    }
+                }
+                else -> Unit
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+
     // Engine failures would otherwise be invisible: the player just goes away.
     LaunchedEffect(Unit) { watch.engine.errors.collect { watch.fail(it) } }
     // An addon's YouTube or outside link: whichever app on the TV takes it.
