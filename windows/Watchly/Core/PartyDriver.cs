@@ -15,6 +15,8 @@ public interface IPartyPlayer
     /// <summary>The speed the film runs at: the leader's is the room's.</summary>
     float PartyRate { get; }
     string? PartyFile { get; }
+    /// <summary>The film's imdb id: a guest on a copy of their own is followed by it, not the file name.</summary>
+    string? PartyImdb { get; }
     PartyMedia? PartyShare();
     void PartyPause(bool on);
     /// <summary>The player's own speed, for steering, leaving the viewer's choice alone.</summary>
@@ -317,7 +319,9 @@ public sealed class PartyDriver
 
     void OnState(PartyState s)
     {
-        if (s.Media.File != p.PartyFile || !p.PartyLoaded) return;
+        // The leader's file — or, on a copy of one's own, the same film.
+        var same = s.Media.File == p.PartyFile || (Room is { OwnSource: true } && s.Media.Imdb is not null && s.Media.Imdb == p.PartyImdb);
+        if (!same || !p.PartyLoaded) return;
         var before = LeaderState;
         LeaderState = s;
         var who = s.By.Length > 0 ? s.By : "The leader";

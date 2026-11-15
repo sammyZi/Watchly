@@ -124,6 +124,12 @@ private fun JoinAsDetail(room: Room, s: PartyState, title: Title?, people: List<
                 Spacer(Modifier.height(16.dp))
                 // Where Resume and Start over are on the Detail page.
                 Button("Join the party", { room.accepted = true }, Modifier.fillMaxWidth(), icon = L.drawable.lucide_ic_users, primary = true)
+                // The leader's torrent may be slow here, or too big: any release of the same film keeps in step.
+                if (title != null) Button("Pick my own source", {
+                    room.ownSource = true
+                    room.accepted = true
+                    ownSourceFor = title
+                }, Modifier.fillMaxWidth().padding(top = 8.dp), icon = L.drawable.lucide_ic_list_video)
                 Button("Not now", { Party.leave() }, Modifier.fillMaxWidth().padding(top = 8.dp), icon = L.drawable.lucide_ic_x)
 
                 title?.plot?.let { plot ->
@@ -205,6 +211,9 @@ fun RejoinBar(last: com.torrentviewer.core.LastParty, top: Boolean) {
  * has got to — and one big Join. Nothing plays until Join; Not now (or Back) leaves the room. Any web
  * page could hand the app a party link, so what it would play is always shown first.
  */
+/** A guest's "Pick my own source": the film whose page App opens next, then clears. */
+var ownSourceFor by mutableStateOf<Title?>(null)
+
 @Composable
 fun JoinPartyScreen(room: Room) {
     BackHandler { Party.leave() }

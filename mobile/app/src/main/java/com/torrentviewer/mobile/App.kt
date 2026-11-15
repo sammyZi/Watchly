@@ -327,7 +327,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     // Any page can hand over a party link: what it would play is shown first, on its own screen (App's
     // JoinPartyScreen), and nothing opens until the viewer says yes.
     val room = Party.room
-    LaunchedEffect(room, room?.accepted) {
+    LaunchedEffect(room, room?.accepted, room?.ownSource) {
         if (room == null || room.leader) return@LaunchedEffect
         var opened: String? = null
         launch {
@@ -336,7 +336,8 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
             }
         }
         room.states.collect { s ->
-            if (!room.accepted) return@collect
+            // A guest on a copy of their own picks it on the film's page (below), not here.
+            if (!room.accepted || room.ownSource) return@collect
             if (s.media.file == opened) return@collect
             opened = s.media.file
             watch.openParty(s)
@@ -393,6 +394,8 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     BackHandler(pages.isEmpty() && tab != Tab.HOME) { tab = Tab.HOME }
 
     val openTitle: (Title) -> Unit = { pages.add(Page.Detail(it)) }
+    // A party guest picking their own copy: the film's page, its sources there to choose from.
+    LaunchedEffect(ownSourceFor) { ownSourceFor?.let { openTitle(it); ownSourceFor = null } }
     val openOrder: (com.torrentviewer.core.WatchOrder) -> Unit = { pages.add(Page.WatchOrder(it)) }
     val body: @Composable () -> Unit = {
         val top = pages.lastOrNull()

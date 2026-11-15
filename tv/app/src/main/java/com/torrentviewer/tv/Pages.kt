@@ -661,9 +661,12 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             if (inParty != null) "You're in a party now. Leave it from the party button in the player."
             else "Someone sent you a watch party link? Scan the code with your phone and paste the link there. The TV asks before it plays anything.",
         ) {
-            if (inParty == null) PhoneKey("watch party link", label = "Paste the link from your phone") { link ->
-                if (Party.join(link) == null) "That isn't a whole watch party link — copy all of it." else "Joining — look at the TV."
-            } else TvButton("Leave the party", { Party.leave() }, Modifier.padding(top = 12.dp), icon = L.drawable.lucide_ic_log_out)
+            // A Column: the section's own Box laid the button over the QR it opens.
+            Column {
+                if (inParty == null) PhoneKey("watch party link", label = "Paste the link from your phone") { link ->
+                    if (Party.join(link) == null) "That isn't a whole watch party link — copy all of it." else "Joining — look at the TV."
+                } else TvButton("Leave the party", { Party.leave() }, Modifier.padding(top = 12.dp), icon = L.drawable.lucide_ic_log_out)
+            }
         }
 
         Section("Your name", "What the others see. Left blank, it is the profile's name, ${me.name}.") {

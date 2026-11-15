@@ -125,7 +125,7 @@ object Party {
     fun leave(ended: Boolean = false) {
         room?.let {
             log(if (it.leader) "ended the party" else if (ended) "the leader ended the party" else "left the party")
-            if (it.accepted) last = LastParty(it.id, it.keyHex, it.leader, ended, it.lastTold?.media)
+            if (it.accepted) last = LastParty(it.id, it.keyHex, it.leader, ended, it.lastTold?.media, it.ownSource)
         }
         room?.close()
         room = null
@@ -137,7 +137,7 @@ object Party {
     fun rejoin() {
         val l = last ?: return
         last = null
-        enter(Room(l.id, hex(l.key), l.leader).also { it.accepted = true })
+        enter(Room(l.id, hex(l.key), l.leader).also { it.accepted = true; it.ownSource = l.own })
         // A leader's film, open again — the room with nothing on was why Reopen seemed to do nothing.
         if (l.leader) l.media?.let(reopen)
     }
@@ -169,7 +169,7 @@ object Party {
  * A party left, to rejoin: [leader] if this one led it, [ended] if its leader ended it, and [media] what
  * a leader was playing — Reopen opens the room and that film again, or it would be a room with nothing on.
  */
-data class LastParty(val id: String, val key: String, val leader: Boolean, val ended: Boolean, val media: PartyMedia? = null)
+data class LastParty(val id: String, val key: String, val leader: Boolean, val ended: Boolean, val media: PartyMedia? = null, val own: Boolean = false)
 
 class Room internal constructor(val id: String, private val key: ByteArray, val leader: Boolean) {
     val link get() = "${Party.server.trimEnd('/')}/j/$id#${hex(key)}"
@@ -181,6 +181,12 @@ class Room internal constructor(val id: String, private val key: ByteArray, val 
         private set
     /** A guest who has seen what the party plays and said yes; until then nothing opens. A leader's own party is accepted. */
     var accepted by mutableStateOf(leader)
+    /**
+     * A guest playing a copy of their own (another release of the same film, picked from its sources)
+     * rather than the leader's torrent: nothing of the leader's opens, and the film is followed by its
+     * imdb id instead of the file name. ponytail: one id for a whole series — the guest picks the episode.
+     */
+    var ownSource by mutableStateOf(false)
     /** Guests: the leader's player, the last one replayed to whoever starts listening. */
     val states = MutableSharedFlow<PartyState>(replay = 1, extraBufferCapacity = 8)
     /** Leader: a guest wanting something. */

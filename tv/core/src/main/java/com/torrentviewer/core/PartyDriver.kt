@@ -286,7 +286,9 @@ class PartyDriver(private val watch: Watch) {
             // What was replayed is from before the film opened here: ask for where things are now.
             room.hello()
             room.states.collect { s ->
-                if (s.media.file != p?.fileName) return@collect
+                // The leader's file — or, on a copy of one's own, the same film.
+                val same = s.media.file == p?.fileName || (room.ownSource && s.media.imdb != null && s.media.imdb == watch.item?.imdb)
+                if (!same) return@collect
                 val before = leaderState
                 leaderState = s
                 val who = s.by.ifBlank { "The leader" }

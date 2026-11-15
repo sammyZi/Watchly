@@ -38,6 +38,7 @@ public sealed partial class PlayerView
     bool IPartyPlayer.PartySeeking => (DateTime.UtcNow - seekAt).TotalMilliseconds < 1500;
     float IPartyPlayer.PartyRate => (float)rate;
     string? IPartyPlayer.PartyFile => SharedFile();
+    string? IPartyPlayer.PartyImdb => request.Imdb;
 
     long SafeTime()
     {

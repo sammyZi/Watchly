@@ -19,17 +19,32 @@ public sealed class JoinPartyView : Grid
 {
     readonly Room room;
     readonly Action join;
+    readonly Action own;
     readonly Action cancel;
     readonly DispatcherTimer tick = new() { Interval = TimeSpan.FromSeconds(1) };
     readonly DateTime opened = DateTime.UtcNow;
-    readonly TextBlock status = Text("", 14, Brushes.White, FontWeights.SemiBold);
+    readonly TextBlock status = Ui.Text("", "Meta", "Muted", 13);
     PartyState? state;
     bool waitedLong;
+    /// <summary>The film's full record — logo, facts, plot — once Cinemeta answers for the leader's imdb id.</summary>
+    Title? title;
+    string? titleFor;
 
-    public JoinPartyView(Room room, Action join, Action cancel)
+    async void LoadTitle(string? imdb, string? kind)
+    {
+        if (imdb is not { Length: > 0 } || imdb == titleFor) return;
+        titleFor = imdb;
+        var t = await Meta.LoadTitle(imdb, kind ?? "movie");
+        if (t is null || titleFor != imdb) return;
+        title = t;
+        Render();
+    }
+
+    public JoinPartyView(Room room, Action join, Action own, Action cancel)
     {
         this.room = room;
         this.join = join;
+        this.own = own;
         this.cancel = cancel;
         Background = Brushes.Black;
         Focusable = true;
@@ -71,6 +86,12 @@ public sealed class JoinPartyView : Grid
         Children.Clear();
         var s = state;
         var imdb = s?.Media.Imdb;
+        if (s is not null)
+        {
+            AsDetail(s, imdb);
+            return;
+        }
+        Background = Brushes.Black;
         // The film's backdrop behind it all, blurred and darkened, as the player's loading screen has it.
         if (imdb is { Length: > 0 } && ImageUrl.Load($"https://images.metahub.space/background/medium/{imdb}/img", 1280) is { } backdrop)
             Children.Add(new Grid
@@ -115,66 +136,134 @@ public sealed class JoinPartyView : Grid
             return;
         }
 
-        var poster = imdb is { Length: > 0 } ? $"https://images.metahub.space/poster/medium/{imdb}/img" : s.Media.Poster;
-        var art = Controls.Ui.Art(poster, s.Media.Title, 170, 255, 12);
-        art.Margin = new Thickness(0, 24, 0, 0);
-        art.HorizontalAlignment = HorizontalAlignment.Center;
-        art.Effect = new DropShadowEffect { BlurRadius = 30, ShadowDepth = 6, Opacity = 0.6 };
-        body.Children.Add(art);
-        body.Children.Add(Centered(Text(s.Media.Title, 28, Brushes.White, FontWeights.Bold), 22));
+    }
 
-        UpdateStatus();
-        var dot = new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), Background = s.Playing ? new SolidColorBrush(Color.FromRgb(0x30, 0xd1, 0x58)) : White(0x80), VerticalAlignment = VerticalAlignment.Center };
-        body.Children.Add(Centered(new Border
+    /// <summary>
+    /// Once the leader has said what is on: the film's own Detail page (DetailView's layout — the backdrop on the
+    /// right, the logo, facts and actions down the left) with Join where Play would be.
+    /// </summary>
+    void AsDetail(PartyState s, string? imdb)
+    {
+        SetResourceReference(BackgroundProperty, "Bg");
+        LoadTitle(imdb, s.Media.Kind);
+
+        // The backdrop stays put on the right, faded into the page, as DetailView's does.
+        var stage = new Grid
         {
-            CornerRadius = new CornerRadius(16), Background = White(0x1a), Padding = new Thickness(14, 7, 14, 7),
-            Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { dot, Pad(Detach(status), 8) } },
-        }, 14));
+            ColumnDefinitions = { new ColumnDefinition { Width = new GridLength(30, GridUnitType.Star) }, new ColumnDefinition { Width = new GridLength(70, GridUnitType.Star) } },
+            RowDefinitions = { new RowDefinition { Height = new GridLength(90, GridUnitType.Star) }, new RowDefinition { Height = new GridLength(10, GridUnitType.Star) } },
+        };
+        var wide = new Border();
+        var wideUrl = title?.Wide ?? (imdb is { Length: > 0 } ? $"https://images.metahub.space/background/medium/{imdb}/img" : null);
+        if (wideUrl is not null && ImageUrl.Load(wideUrl, 1920) is { } image)
+            wide.Background = new ImageBrush(image) { Stretch = Stretch.UniformToFill, AlignmentY = AlignmentY.Top };
+        var art = Ui.FadedArt(wide);
+        Grid.SetColumn(art, 1);
+        stage.Children.Add(art);
+        Children.Add(stage);
 
-        // Who leads, and who is there.
+        var head = new StackPanel { Width = 460, HorizontalAlignment = HorizontalAlignment.Left };
+        head.Children.Add(new Border
+        {
+            CornerRadius = new CornerRadius(14), Background = new SolidColorBrush(Color.FromArgb(0xe0, 0xe5, 0x09, 0x14)), Padding = new Thickness(12, 5, 12, 5),
+            HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 14),
+            Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { new Controls.Icon { Kind = "users", Size = 13, Foreground = Brushes.White }, Text("  WATCH PARTY", 11, Brushes.White, FontWeights.Bold) } },
+        });
+        if (title is not null)
+        {
+            head.Children.Add(Ui.TitleMark(title, 80, 320));
+            var facts = Ui.Facts(title);
+            facts.Margin = new Thickness(0, 12, 0, 0);
+            head.Children.Add(facts);
+        }
+        else
+        {
+            var name = Ui.Text(s.Media.Title, "TitleText", "Text", 34, FontWeights.Bold);
+            name.TextWrapping = TextWrapping.Wrap;
+            head.Children.Add(name);
+        }
+
+        // Who invited you, where the film has got to, and who else is there.
         var people = room.Members.Values.OrderByDescending(m => m.Leader).ThenBy(m => m.Name, StringComparer.OrdinalIgnoreCase).ToList();
         var host = s.By.Length > 0 ? s.By : people.FirstOrDefault(m => m.Leader)?.Name ?? "The host";
         var others = people.Where(m => !m.Leader && !m.Me).ToList();
-        var faces = new Canvas { Height = 28, Width = 28 + 18 * Math.Max(0, Math.Min(4, others.Count) - 1) };
-        for (var i = 0; i < Math.Min(4, others.Count); i++)
-        {
-            var face = PlayerView.NameDot(others[i].Name, 28);
-            Canvas.SetLeft(face, 18 * i);
-            faces.Children.Add(face);
-        }
         var count = Math.Max(room.People, people.Count);
-        var who = others.Count == 0 ? "You'd be the first to join"
-            : $"{string.Join(", ", others.Take(2).Select(o => o.Name))}{(others.Count > 2 ? $" and {others.Count - 2} more" : "")} · {count} watching";
+        UpdateStatus();
+        var dot = new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), Background = s.Playing ? new SolidColorBrush(Color.FromRgb(0x30, 0xd1, 0x58)) : new SolidColorBrush(Color.FromRgb(0x8a, 0x8a, 0x8a)), VerticalAlignment = VerticalAlignment.Center };
+        var invited = Ui.Text($"{host} invited you to a watch party", "Body", "Text", 14, FontWeights.SemiBold);
+        invited.TextTrimming = TextTrimming.CharacterEllipsis;
         var hostRow = new DockPanel();
-        var crown = Text("★", 18, new SolidColorBrush(Color.FromRgb(0xf5, 0xc5, 0x42)), FontWeights.Bold);
-        crown.VerticalAlignment = VerticalAlignment.Center;
-        DockPanel.SetDock(crown, Dock.Right);
-        hostRow.Children.Add(crown);
-        hostRow.Children.Add(new StackPanel
+        var face = PlayerView.NameDot(host, 40);
+        DockPanel.SetDock(face, Dock.Left);
+        hostRow.Children.Add(face);
+        hostRow.Children.Add(Pad(new StackPanel
         {
-            Orientation = Orientation.Horizontal,
-            Children = { PlayerView.NameDot(host, 40), Pad(new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { Text(host, 15, Brushes.White, FontWeights.Bold), Text("invited you to watch together", 12, White(0xa6)) } }, 12) },
-        });
-        body.Children.Add(new Border
+            VerticalAlignment = VerticalAlignment.Center,
+            Children = { invited, new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 0), Children = { dot, Pad(Detach(status), 8) } } },
+        }, 12));
+        var card = new StackPanel { Children = { hostRow } };
+        if (others.Count > 0)
         {
-            CornerRadius = new CornerRadius(16), Background = White(0x14), Padding = new Thickness(16), Margin = new Thickness(0, 26, 0, 0),
-            Child = new StackPanel
+            var faces = new Canvas { Height = 26, Width = 26 + 16 * (Math.Min(4, others.Count) - 1) };
+            for (var i = 0; i < Math.Min(4, others.Count); i++)
             {
-                Children =
-                {
-                    hostRow,
-                    new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 14, 0, 0), Children = { faces, Pad(Text(who, 12, White(0xcc)), 10) } },
-                },
-            },
-        });
+                var f = PlayerView.NameDot(others[i].Name, 26);
+                Canvas.SetLeft(f, 16 * i);
+                faces.Children.Add(f);
+            }
+            var who = $"{string.Join(", ", others.Take(2).Select(o => o.Name))}{(others.Count > 2 ? $" and {others.Count - 2} more" : "")} · {count} watching";
+            card.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 0), Children = { faces, Pad(Ui.Text(who, "Meta", "Muted", 12), 10) } });
+        }
+        var cardBox = new Border { CornerRadius = new CornerRadius(14), Padding = new Thickness(14), Margin = new Thickness(0, 18, 0, 16), Child = card };
+        cardBox.SetResourceReference(Border.BackgroundProperty, "Tint");
+        head.Children.Add(cardBox);
 
-        var joinButton = Pill("▶  Join the party", join, true);
-        joinButton.HorizontalAlignment = HorizontalAlignment.Stretch;
-        joinButton.Margin = new Thickness(0, 26, 0, 0);
-        body.Children.Add(joinButton);
-        body.Children.Add(Centered(Pill("Not now", cancel, false), 10));
-        body.Children.Add(Centered(Text("🔒 The film streams on this PC. Only play, pause and the spot are shared — encrypted, no account.", 11, White(0x80)), 18));
-        Children.Add(new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = new Border { Padding = new Thickness(24), Child = body } });
+        // Where Play and Resume are on the Detail page.
+        head.Children.Add(Ui.Action("Join the party", "users", join, primary: true));
+        // The leader's torrent may be slow here, or too big: any release of the same film keeps in step.
+        if (imdb is { Length: > 0 })
+        {
+            var mine = Ui.Action("Pick my own source", "list", own);
+            mine.Margin = new Thickness(0, 8, 0, 0);
+            head.Children.Add(mine);
+        }
+        var notNow = Ui.Action("Not now", "x", cancel);
+        notNow.Margin = new Thickness(0, 8, 0, 0);
+        head.Children.Add(notNow);
+
+        if (title?.Plot is { } plot)
+        {
+            var words = Ui.Text(plot, "Body", "Text");
+            words.Opacity = 0.85;
+            words.MaxHeight = 88;
+            words.TextTrimming = TextTrimming.WordEllipsis;
+            words.TextWrapping = TextWrapping.Wrap;
+            words.Margin = new Thickness(0, 14, 0, 0);
+            head.Children.Add(words);
+        }
+        if (title is { Directors.Count: > 0 })
+        {
+            var crew = Ui.Text((title.Kind == "tv" ? "Creators: " : "Director: ") + string.Join(", ", title.Directors.Take(2)), "Meta", "Faint", 13);
+            crew.Margin = new Thickness(0, 8, 0, 0);
+            head.Children.Add(crew);
+        }
+        var note = Ui.Text("🔒  The film streams on this PC. Only play, pause and the spot are shared — encrypted, no account.", "Meta", "Faint", 12);
+        note.TextWrapping = TextWrapping.Wrap;
+        note.Margin = new Thickness(0, 16, 0, 0);
+        head.Children.Add(note);
+
+        var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = new StackPanel { HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(32, 72, 32, 40), Children = { head } } };
+        Ui.SmoothWheel(scroll);
+        Children.Add(scroll);
+
+        // DetailView's Back: round, dark, over the art — here it is Not now.
+        var back = Ui.Round("arrow-left", cancel, "Text", "Tint", 40, 20, "Not now (Esc)");
+        ((Controls.Icon)back.Content).Foreground = Brushes.White;
+        back.Background = new SolidColorBrush(Color.FromArgb(0x80, 0, 0, 0));
+        back.HorizontalAlignment = HorizontalAlignment.Left;
+        back.VerticalAlignment = VerticalAlignment.Top;
+        back.Margin = new Thickness(20, 16, 0, 0);
+        Children.Add(back);
     }
 
     static FrameworkElement Pill(string label, Action onClick, bool primary)

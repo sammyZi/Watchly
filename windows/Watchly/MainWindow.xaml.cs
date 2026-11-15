@@ -737,7 +737,7 @@ public partial class MainWindow : Window
         followed.Ended += OnPartyEnded;
         if (joinedFollowed) return;
         // Its own screen at once, saying it's connecting, rather than nothing until the host answers.
-        joinView = new Views.JoinPartyView(followed, JoinNow, () => Party.Leave());
+        joinView = new Views.JoinPartyView(followed, JoinNow, JoinOwn, () => Party.Leave());
         Grid.SetColumnSpan(joinView, 2);
         Panel.SetZIndex(joinView, 150);
         Root.Children.Add(joinView);
@@ -759,6 +759,20 @@ public partial class MainWindow : Window
         r.Accepted = true;
         CloseJoin();
         OpenParty(s);
+    }
+
+    /// <summary>
+    /// "Pick my own source": in, but on a release of the guest's choosing — the film's page, its sources there to
+    /// pick from. The leader's torrent may be slow here, or too big; any copy of the same film keeps in step.
+    /// </summary>
+    async void JoinOwn()
+    {
+        if (followed is not { LastState: { Media.Imdb: { } imdb } s } r) return;
+        joinedFollowed = true;
+        r.OwnSource = true;
+        r.Accepted = true;
+        CloseJoin();
+        if (await Meta.LoadTitle(imdb, s.Media.Kind ?? "movie") is { } title) OpenTitle(title);
     }
 
     void OnPartyEnded() => Party.Leave(ended: true);
@@ -811,7 +825,8 @@ public partial class MainWindow : Window
             joinView?.Update(s);
             return;
         }
-        if (s.Media.File == openedFile) return;
+        // A guest on a copy of their own picks it on the film's page, not here.
+        if (r.OwnSource || s.Media.File == openedFile) return;
         OpenParty(r.LastState ?? s);
     }
 

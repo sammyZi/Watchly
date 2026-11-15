@@ -281,7 +281,14 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     // and again when the leader moves on to the next episode or another film.
     val room = Party.room
     var joinOffer by remember { mutableStateOf<PartyState?>(null) }
-    LaunchedEffect(room, room?.accepted) {
+    // A guest's "Pick my own source": the film's page, its sources there to choose from.
+    var ownFor by remember { mutableStateOf<com.torrentviewer.core.PartyMedia?>(null) }
+    LaunchedEffect(ownFor) {
+        val m = ownFor ?: return@LaunchedEffect
+        com.torrentviewer.core.Meta.title(m.imdb ?: return@LaunchedEffect, m.kind ?: "movie")?.let(openTitle)
+        ownFor = null
+    }
+    LaunchedEffect(room, room?.accepted, room?.ownSource) {
         if (room == null || room.leader) return@LaunchedEffect
         var opened: String? = null
         launch {
@@ -296,7 +303,8 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
                 joinOffer = s
                 return@collect
             }
-            if (s.media.file == opened) return@collect
+            // A guest on a copy of their own picks it on the film's page, not here.
+            if (room.ownSource || s.media.file == opened) return@collect
             opened = s.media.file
             watch.openParty(s)
         }
@@ -403,14 +411,24 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
             }
             Sheet(
                 title = "Join ${s.by.ifBlank { "this" }}'s watch party?",
-                options = listOf(
-                    Option(true, "Join and watch ${s.media.title}", "${maxOf(r.people, r.members.size)} watching · ${if (s.playing) "playing" else "paused"} at ${clock(s.pos)}"),
-                    Option(false, "Not now"),
+                options = listOfNotNull(
+                    Option(0, "Join and watch ${s.media.title}", "${maxOf(r.people, r.members.size)} watching · ${if (s.playing) "playing" else "paused"} at ${clock(s.pos)}"),
+                    // The leader's torrent may be slow here: any release of the same film keeps in step.
+                    if (s.media.imdb != null) Option(1, "Pick my own source", "Another release of ${s.media.title}, kept in step") else null,
+                    Option(2, "Not now"),
                 ),
                 selected = null,
-                onPick = { yes ->
+                onPick = { pick ->
                     joinOffer = null
-                    if (yes) r.accepted = true else Party.leave()
+                    when (pick) {
+                        0 -> r.accepted = true
+                        1 -> {
+                            r.ownSource = true
+                            r.accepted = true
+                            ownFor = s.media
+                        }
+                        else -> Party.leave()
+                    }
                 },
                 onDismiss = {
                     joinOffer = null

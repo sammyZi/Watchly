@@ -28,7 +28,7 @@ public sealed record PartyAsk(string From, string What, double Pos);
 public sealed record PartyMember(string Id, string Name, bool Leader, string Status, DateTime Seen, bool Me = false);
 
 /// <summary>A party left, to rejoin: Leader if this PC led it, Ended if its leader ended it.</summary>
-public sealed record LastParty(string Id, string Key, bool Leader, bool Ended, PartyMedia? Media = null);
+public sealed record LastParty(string Id, string Key, bool Leader, bool Ended, PartyMedia? Media = null, bool Own = false);
 
 /// <summary>A line in the party's chat; From null is the room's own ("Sam joined").</summary>
 public sealed record ChatLine(string? From, string Text, DateTime At, bool Mine = false);
@@ -100,7 +100,7 @@ public static class Party
         if (Room is { } r)
         {
             Log.Info("party", r.Leader ? "ended the party" : ended ? "the leader ended the party" : "left the party");
-            if (r.Accepted) Last = new LastParty(r.Id, r.KeyHex, r.Leader, ended, r.LastTold?.Media);
+            if (r.Accepted) Last = new LastParty(r.Id, r.KeyHex, r.Leader, ended, r.LastTold?.Media, r.OwnSource);
         }
         Room?.Close();
         Room = null;
@@ -119,7 +119,7 @@ public static class Party
     public static void Rejoin()
     {
         if (Last is not { } l) return;
-        var r = new Room(l.Id, Convert.FromHexString(l.Key), l.Leader) { Accepted = true };
+        var r = new Room(l.Id, Convert.FromHexString(l.Key), l.Leader) { Accepted = true, OwnSource = l.Own };
         Enter(r);
         // A leader's film, open again: a room with nothing on was why Reopen seemed to do nothing.
         if (l.Leader && l.Media is { } m) Reopen(m);
@@ -243,6 +243,11 @@ public sealed class Room
     internal string KeyHex => Party.Hex(key);
     /// <summary>A guest who has seen what the party plays and said yes (or is rejoining); a leader's own party is accepted.</summary>
     public bool Accepted { get; set; }
+    /// <summary>
+    /// A guest playing a copy of their own (another release of the same film, picked from its sources) rather than
+    /// the leader's torrent: nothing of the leader's opens, and the film is followed by its imdb id. The phone's rule.
+    /// </summary>
+    public bool OwnSource { get; set; }
     public int People { get; private set; } = 1;
     public bool Connected { get; private set; }
     public Dictionary<string, PartyMember> Members { get; } = new();
