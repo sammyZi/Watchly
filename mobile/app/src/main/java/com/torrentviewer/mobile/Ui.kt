@@ -332,8 +332,11 @@ fun Field(
     onSubmit: () -> Unit = {},
     leading: Int? = null,
     trailing: @Composable () -> Unit = {},
+    /** The keyboard's action key; search unless the box says otherwise. Done also puts the keyboard away. */
+    action: ImeAction = if (digits) ImeAction.Done else ImeAction.Search,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
     val ring by animateColorAsState(if (focused) Ink.text.copy(alpha = 0.7f) else Color.Transparent, Motion.effects(), label = "ring")
     Row(
         modifier.height(50.dp).clip(RoundedCornerShape(8.dp)).background(Ink.text.copy(alpha = if (focused) 0.12f else 0.07f)).border(1.5.dp, ring, RoundedCornerShape(8.dp)).padding(horizontal = 14.dp),
@@ -354,8 +357,11 @@ fun Field(
                 textStyle = Type.label.copy(fontSize = 16.sp, letterSpacing = if (secret) 8.sp else 0.sp, textAlign = align),
                 cursorBrush = SolidColor(Ink.accent),
                 visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
-                keyboardOptions = KeyboardOptions(keyboardType = if (digits) KeyboardType.NumberPassword else KeyboardType.Text, imeAction = if (digits) ImeAction.Done else ImeAction.Search),
-                keyboardActions = KeyboardActions(onAny = { onSubmit() }),
+                keyboardOptions = KeyboardOptions(keyboardType = if (digits) KeyboardType.NumberPassword else KeyboardType.Text, imeAction = action),
+                keyboardActions = KeyboardActions(onAny = {
+                    onSubmit()
+                    if (action == ImeAction.Done) focus.clearFocus()
+                }),
                 modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused },
             )
         }

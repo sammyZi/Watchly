@@ -81,6 +81,8 @@ import com.torrentviewer.core.History
 import com.torrentviewer.core.Ink
 import com.torrentviewer.core.grain
 import com.torrentviewer.core.Item
+import com.torrentviewer.core.Party
+import com.torrentviewer.core.openParty
 import com.torrentviewer.core.Kv
 import com.torrentviewer.core.Lc
 import com.torrentviewer.core.Phase
@@ -154,6 +156,7 @@ private val OWNER = Profile("", "Me", COLOURS[0])
 private fun open(profile: Profile) {
     // Before anything is read: every store call below goes through this profile.
     Kv.useProfile(profile.id, profile.isGuest)
+    com.torrentviewer.core.Party.profileName = profile.name
     com.torrentviewer.core.SettingsStore.load()
     History.load()
     SavedStore.load()
@@ -197,6 +200,10 @@ fun App(watch: Watch, incoming: MutableState<Uri?>) {
     MaterialTheme(colorScheme = scheme) {
         Box(Modifier.fillMaxSize().background(Ink.bg).grain()) {
             Shell(watch, incoming)
+            // An invite opened: its own screen, over everything, until Join or Not now.
+            Party.room?.takeIf { !it.leader && !it.accepted }?.let { JoinPartyScreen(it) }
+            // Left one — by Back, Leave, or its leader ending it: the way back in, until taken or dismissed.
+            Party.last?.takeIf { Party.room == null && Party.enabled }?.let { RejoinBar(it, top = watch.phase == Phase.PLAYING) }
             Toast(watch)
         }
     }
@@ -301,11 +308,39 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
             sendAll = uri.getQueryParameter("all") == "1"
             return@LaunchedEffect
         }
+        if (raw.startsWith("watchly://party", ignoreCase = true)) {
+            if (!Party.available) return@LaunchedEffect watch.fail("This build of Watchly has no watch party.")
+            if (!Party.enabled) return@LaunchedEffect watch.fail("Watch party is turned off — turn it on in Settings → Watch party.")
+            Party.join(raw) ?: return@LaunchedEffect watch.fail("That watch party link is incomplete.")
+            watch.notes.tryEmit("Joining the watch party…")
+            return@LaunchedEffect
+        }
         if (!isTorrentSource(raw)) return@LaunchedEffect
         val path = runCatching { withContext(Dispatchers.IO) { watch.engine.importSource(raw) } }
             .getOrElse { return@LaunchedEffect watch.fail(it.message ?: "Couldn't read that file.") }
         val item = History.put(Item(path, titleOf(raw), System.currentTimeMillis()))
         watch.resume(item)
+    }
+
+    // A guest opens whatever the party's leader is playing — at the start, and again when the leader
+    // moves on to the next episode or another film. The player keeps the two in step from there.
+    // Any page can hand over a party link: what it would play is shown first, on its own screen (App's
+    // JoinPartyScreen), and nothing opens until the viewer says yes.
+    val room = Party.room
+    LaunchedEffect(room, room?.accepted) {
+        if (room == null || room.leader) return@LaunchedEffect
+        var opened: String? = null
+        launch {
+            room.ended.collect {
+                Party.leave(ended = true)
+            }
+        }
+        room.states.collect { s ->
+            if (!room.accepted) return@collect
+            if (s.media.file == opened) return@collect
+            opened = s.media.file
+            watch.openParty(s)
+        }
     }
 
     // Before anything else, for everyone, whatever they already have here, and again whenever the
@@ -322,6 +357,8 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     // After the terms: nothing is asked of GitHub until they are accepted.
     val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
     LaunchedEffect(Unit) { com.torrentviewer.core.Updates.check(appContext, BuildConfig.VERSION_NAME, "Watchly-phone-", BuildConfig.DEBUG) }
+    // Subtitles from OpenSubtitles out of the box, through Stremio's addon.
+    LaunchedEffect(Unit) { Addons.seedSubtitles() }
 
     // The tour, once, on a fresh install: anyone with a library or a profile already knows the app.
     var toured by remember { mutableStateOf(Kv.global(TOURED) != null || Profiles.list.value.isNotEmpty() || History.items.value.isNotEmpty()) }

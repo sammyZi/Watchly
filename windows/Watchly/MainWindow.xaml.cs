@@ -114,6 +114,16 @@ public partial class MainWindow : Window
         InitializeComponent();
         BuildTabBar();
         waitingToOpen = openOnStart;
+        // A watch party shows this PC by Settings' party name, else the profile's.
+        Party.Me = () => Settings.PartyName.Trim() is { Length: > 0 } name ? name : Who?.Name ?? "Someone";
+        Party.Changed += FollowParty;
+        // A leader's Reopen puts its film back on, unless one is playing already.
+        Party.Reopen = m =>
+        {
+            if (PlayerHost.Visibility == Visibility.Visible) return;
+            torrentMode = "stream";
+            _ = OpenUri(m.Uri, new OpenOptions { Auto = "best", FileName = m.File, Imdb = m.Imdb, Kind = m.Kind, Poster = m.Poster, TitleName = m.Title });
+        };
         // Nothing starts, and nothing is asked of any service, until the terms are accepted.
         var agreed = !AgreementView.Needed;
         if (agreed) Begin();
@@ -679,6 +689,14 @@ public partial class MainWindow : Window
     {
         // A magnet is anything at all: a kids profile plays only what it can browse to.
         if (KidsMode.On) { Toast("A kids profile can't open torrents or addons from other apps.", true); return; }
+        if (source.StartsWith("watchly://party", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!Party.Enabled) { Toast("This build of Watchly has no watch party.", true); return; }
+            if (!Settings.PartyOn) { Toast("Watch party is turned off — turn it on in Settings → Watch party.", true); return; }
+            if (Party.Join(source) is null) { Toast("That watch party link is incomplete.", true); return; }
+            Toast("Joining the watch party…");
+            return;
+        }
         if (source.StartsWith("stremio://", StringComparison.OrdinalIgnoreCase))
         {
             // Asked first: any web page can send one of these links, and an addon decides what the app is offered to play.
@@ -688,6 +706,122 @@ public partial class MainWindow : Window
         }
         torrentMode = null;
         _ = OpenUri(source, new OpenOptions());
+    }
+
+    /// <summary>The party being followed, and whether the viewer has said yes to it yet.</summary>
+    Room? followed;
+    bool joinedFollowed;
+    string? openedFile;
+
+    /// <summary>
+    /// A guest opens whatever the leader plays — once the viewer has said yes, having seen what it is (any
+    /// page can hand over a party link) — and again when the leader moves on to the next episode or film.
+    /// </summary>
+    void FollowParty()
+    {
+        ShowRejoin();
+        var r = Party.Room;
+        if (ReferenceEquals(r, followed)) return;
+        if (followed is { } old)
+        {
+            old.State -= OnPartyState;
+            old.Ended -= OnPartyEnded;
+        }
+        followed = r is { Leader: false } ? r : null;
+        // Rejoining: said yes once already, so straight back in, no preview.
+        joinedFollowed = followed?.Accepted == true;
+        openedFile = null;
+        CloseJoin();
+        if (followed is null) return;
+        followed.State += OnPartyState;
+        followed.Ended += OnPartyEnded;
+        if (joinedFollowed) return;
+        // Its own screen at once, saying it's connecting, rather than nothing until the host answers.
+        joinView = new Views.JoinPartyView(followed, JoinNow, () => Party.Leave());
+        Grid.SetColumnSpan(joinView, 2);
+        Panel.SetZIndex(joinView, 150);
+        Root.Children.Add(joinView);
+    }
+
+    Views.JoinPartyView? joinView;
+
+    void CloseJoin()
+    {
+        if (joinView is null) return;
+        Root.Children.Remove(joinView);
+        joinView = null;
+    }
+
+    void JoinNow()
+    {
+        if (followed is not { LastState: { } s } r) return;
+        joinedFollowed = true;
+        r.Accepted = true;
+        CloseJoin();
+        OpenParty(s);
+    }
+
+    void OnPartyEnded() => Party.Leave(ended: true);
+
+    Border? rejoinBar;
+
+    /// <summary>
+    /// After a party is left — Back out of the film, Leave, or its leader ending it — a card at the foot of the
+    /// window with the way back in, until taken or dismissed. The phone's and TV's Rejoin.
+    /// </summary>
+    void ShowRejoin()
+    {
+        if (rejoinBar is not null) Root.Children.Remove(rejoinBar);
+        rejoinBar = null;
+        if (Party.Last is not { } last || Party.Room is not null || !Settings.PartyOn) return;
+        var title = last.Leader ? "You ended your watch party" : last.Ended ? "The watch party has ended" : "You left the watch party";
+        var hint = last.Leader ? "Reopen it — everyone's link still works" : "Rejoin to watch together again";
+        TextBlock Words(string t, double size, byte alpha, FontWeight weight) => new() { Text = t, FontSize = size, FontWeight = weight, Foreground = new SolidColorBrush(Color.FromArgb(alpha, 255, 255, 255)) };
+        var go = Controls.Ui.Button(new Border
+        {
+            CornerRadius = new CornerRadius(10), Padding = new Thickness(16, 8, 16, 8), Background = new SolidColorBrush(Color.FromRgb(0xe5, 0x09, 0x14)),
+            Child = Words(last.Leader ? "Reopen" : "Rejoin", 13, 255, FontWeights.Bold),
+        }, Party.Rejoin, "Bare", last.Leader ? "Reopen the party" : "Rejoin the party");
+        var forget = Controls.Ui.Button(new Border { Padding = new Thickness(10, 8, 6, 8), Child = Words("✕", 14, 0xb0, FontWeights.Normal) }, Party.Forget, "Bare", "Dismiss");
+        var row = new DockPanel();
+        DockPanel.SetDock(forget, Dock.Right);
+        DockPanel.SetDock(go, Dock.Right);
+        row.Children.Add(forget);
+        row.Children.Add(go);
+        row.Children.Add(new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 14, 0), Children = { Words(title, 14, 255, FontWeights.SemiBold), Words(hint, 12, 0xa6, FontWeights.Normal) } });
+        rejoinBar = new Border
+        {
+            CornerRadius = new CornerRadius(14), Padding = new Thickness(16, 8, 8, 8), MinWidth = 420,
+            Background = new SolidColorBrush(Color.FromArgb(0xf2, 0x1a, 0x1a, 0x1e)),
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 28),
+            Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 20, ShadowDepth = 4, Opacity = 0.5 },
+            Child = row,
+        };
+        Grid.SetColumnSpan(rejoinBar, 2);
+        Panel.SetZIndex(rejoinBar, 160);
+        Root.Children.Add(rejoinBar);
+    }
+
+    void OnPartyState(PartyState s)
+    {
+        if (followed is not { } r) return;
+        if (!joinedFollowed)
+        {
+            // Not yet said yes: the join screen shows what it is, live.
+            joinView?.Update(s);
+            return;
+        }
+        if (s.Media.File == openedFile) return;
+        OpenParty(r.LastState ?? s);
+    }
+
+    void OpenParty(PartyState s)
+    {
+        openedFile = s.Media.File;
+        // A party streams, always: null here asked "Stream or Download?" as a magnet from outside does.
+        torrentMode = "stream";
+        // Auto: the file by the leader's name, with no list to pick from (a name is only read when Auto is set).
+        _ = OpenUri(s.Media.Uri, new OpenOptions { Auto = "best", FileName = s.Media.File, Imdb = s.Media.Imdb, Kind = s.Media.Kind, Poster = s.Media.Poster, TitleName = s.Media.Title, KeepProgress = true });
     }
 
     /// <summary>Which site an addon link is for: not the path, which can carry the viewer's keys.</summary>
@@ -1215,9 +1349,12 @@ public partial class MainWindow : Window
     }
 
     Action? confirmAction;
+    /// <summary>Run when the box is turned down — Cancel or a click beside it — not when it is said yes to.</summary>
+    Action? confirmCancel;
 
-    public void Confirm(string title, string? message, string confirmLabel, Action onConfirm, string icon = "trash-2", bool destructive = true)
+    public void Confirm(string title, string? message, string confirmLabel, Action onConfirm, string icon = "trash-2", bool destructive = true, Action? onCancel = null)
     {
+        confirmCancel = onCancel;
         ConfirmTitle.Text = title;
         ConfirmMessage.Text = message ?? "";
         ConfirmMessage.Visibility = string.IsNullOrEmpty(message) ? Visibility.Collapsed : Visibility.Visible;
@@ -1239,6 +1376,7 @@ public partial class MainWindow : Window
     {
         ConfirmLayer.Visibility = Visibility.Collapsed;
         confirmAction = null;
+        confirmCancel = null;
     }
 
     void OnConfirmOk(object sender, RoutedEventArgs e)
@@ -1248,8 +1386,15 @@ public partial class MainWindow : Window
         action?.Invoke();
     }
 
-    void OnConfirmCancel(object sender, RoutedEventArgs e) => CloseConfirm();
-    void OnConfirmBackdrop(object sender, MouseButtonEventArgs e) => CloseConfirm();
+    void TurnDown()
+    {
+        var cancel = confirmCancel;
+        CloseConfirm();
+        cancel?.Invoke();
+    }
+
+    void OnConfirmCancel(object sender, RoutedEventArgs e) => TurnDown();
+    void OnConfirmBackdrop(object sender, MouseButtonEventArgs e) => TurnDown();
     void OnSwallow(object sender, MouseButtonEventArgs e) => e.Handled = true;
 
     public void AskClearHistory() => Confirm(

@@ -1,0 +1,17 @@
+# Deploy: cd party && npx wrangler deploy — then put the URL it prints in mobile/.env as PARTY_URL.
+name = "watchly-party"
+main = "worker.js"
+compatibility_date = "2025-06-01"
+
+# Off, as set in the Cloudflare dashboard: kept here so a deploy doesn't turn logging back on.
+[observability]
+enabled = false
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+# SQLite-backed: the kind of Durable Object the Workers free plan has.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]

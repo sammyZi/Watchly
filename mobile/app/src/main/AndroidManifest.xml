@@ -57,6 +57,13 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="watchly" android:host="tv-addons" />
             </intent-filter>
+            <!-- A watch party invite, handed on by the relay's /j/ page. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="watchly" android:host="party" />
+            </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

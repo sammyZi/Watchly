@@ -158,6 +158,18 @@ import com.torrentviewer.core.Type
 import com.torrentviewer.core.Video
 import com.torrentviewer.core.VlcView
 import com.torrentviewer.core.Watch
+import com.torrentviewer.core.Party
+import com.torrentviewer.core.PartyAsk
+import com.torrentviewer.core.PartyDriver
+import com.torrentviewer.core.PartyPlayer
+import com.torrentviewer.core.Floater
+import com.torrentviewer.core.partyMedia
+import com.torrentviewer.core.PARTY_REACTIONS
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.unit.Dp
 import com.torrentviewer.core.bytes
 import com.torrentviewer.core.clock
 import com.torrentviewer.core.episodeTag
@@ -224,7 +236,7 @@ private const val SEEK_CHECK_MS = 2500L
 /** A seek that has not landed: the player goes on reporting the old time until it does. */
 private class Seeking(val target: Double, val from: Double, val since: Long, val connections: Long)
 
-private enum class Panel { TRACKS, SPEED, ASPECT, FIND, LANG, MORE, EPISODES }
+private enum class Panel { TRACKS, SPEED, ASPECT, FIND, LANG, MORE, EPISODES, PARTY }
 
 private data class Flash(val seconds: Int, val id: Long)
 
@@ -379,6 +391,12 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     var intro by remember { mutableStateOf(show?.let(Intros::get)) }
     val pip = Pip.active
     val waiting = ready == null || !loaded
+    /** The watch party this phone is in, if any, and its side of this player — shared with the TV. */
+    val room = Party.room
+    val wp = remember { PartyDriver(watch) }
+    val guest = wp.guest
+    /** Playing, but no new time for a while: starved, even where the player doesn't say buffering. */
+    var stalled by remember { mutableStateOf(false) }
 
     fun show() {
         controls = true
@@ -414,14 +432,20 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
 
     fun togglePause() {
         val v = view.value ?: return
+        // In a party, Play and Pause may be the party's: asked, or "go on without them".
+        if (wp.onTogglePause()) {
+            show()
+            return
+        }
         v.setPaused(!v.isPaused)
         paused = v.isPaused
         show()
     }
 
-    /** Out of the player — and off the TV, whose stream stops with us. */
+    /** Out of the player — and off the TV, whose stream stops with us, and out of the party (ended, for its leader). */
     fun leave() {
         if (castSession != null) runCatching { cast?.sessionManager?.endCurrentSession(true) }
+        Party.leave()
         watch.exit()
     }
 
@@ -445,7 +469,8 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     }
 
     fun goNext() {
-        if (advanced) return
+        // A guest goes on when the leader does.
+        if (advanced || guest) return
         val sibling = next
         if (sibling != null) {
             advanced = true
@@ -480,7 +505,10 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
 
     val seeking = remember { mutableStateOf<Seeking?>(null) }
     val seekCheck = remember { mutableStateOf<Job?>(null) }
-    fun seekTo(seconds: Double) {
+
+    /** [party]: a jump the watch party decided on — any other a guest is asked about first. */
+    fun seekTo(seconds: Double, party: Boolean = false) {
+        if (!party && wp.onSeek(seconds)) return
         val target = seconds.coerceIn(0.0, if (duration > 0) duration - 1 else seconds)
         val v = view.value ?: return
         val from = at
@@ -494,6 +522,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         seeking.value = s
         if (reopen) v.reload(ms) else v.seekTo(ms)
         mediaCard()
+        wp.tell()
         seekCheck.value?.cancel()
         if (reopen) return
         // It can starve just after the check; if the seek has gone nowhere, reopen then.
@@ -574,6 +603,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     DisposableEffect(local) {
         val remote = object : MediaCard.Remote {
             override fun play() {
+                if (wp.onRemotePlay()) return
                 view.value?.setPaused(false)
                 paused = false
             }
@@ -598,6 +628,69 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     }
     LaunchedEffect(local, title) {
         if (local) MediaCard.artwork(title?.poster ?: watch.item?.poster)
+    }
+
+    /* ------------------------------------------------------------ watch party */
+
+    // The party's side of this player, the same code as the TV's: core/PartyDriver.
+    val partyPlayer = remember {
+        // The player's own state by other names: inside the object, `paused` or `say` would be the object's.
+        val pausedNow = { paused }
+        val loadedNow = { loaded }
+        val boostingNow = { boosting }
+        val rateNow = { rate }
+        val seekingNow = { seeking.value != null }
+        val starvedNow = { buffering || (stalled && !paused) }
+        val pause = { on: Boolean ->
+            view.value?.setPaused(on)
+            paused = on
+        }
+        val show = { r: Float -> rate = r }
+        val tell = { text: String, icon: Int? -> say(text, icon) }
+        object : PartyPlayer {
+            override fun time() = (view.value?.time ?: 0L) / 1000.0
+            override val spot get() = at
+            override val paused get() = pausedNow()
+            override val loaded get() = loadedNow()
+            override val starved get() = starvedNow()
+            override val seeking get() = seekingNow()
+            override val boosting get() = boostingNow()
+            // Holding for 2× counts: the room goes at the speed the leader's film really runs at.
+            override val rate get() = if (boostingNow()) HOLD_RATE else rateNow()
+            override val fileName get() = file?.name
+            override fun setPaused(on: Boolean) = pause(on)
+            override fun steerRate(r: Float) {
+                view.value?.setRate(r)
+            }
+            override fun showRate(r: Float) = show(r)
+            override fun jump(seconds: Double) = seekTo(seconds, party = true)
+            override fun say(text: String, icon: Int?) = tell(text, icon)
+            override fun savePosition() {
+                if (at > 0) watch.savePosition(at)
+            }
+        }
+    }
+    wp.Effects(partyPlayer, panel == Panel.PARTY)
+
+    fun invite(r: com.torrentviewer.core.Room) {
+        val what = title?.title ?: watch.item?.label ?: "a film"
+        val send = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+            .putExtra(android.content.Intent.EXTRA_TEXT, "Watch $what with me on Watchly: ${r.link}")
+        runCatching { context.startActivity(android.content.Intent.createChooser(send, "Invite to the watch party")) }
+    }
+
+    fun partyButton() {
+        val r = room
+        if (r != null) {
+            panel = Panel.PARTY
+            return
+        }
+        if (watch.partyMedia() == null) {
+            watch.notes.tryEmit("Only a torrent can be watched together — this one is a file or a plain link.")
+            return
+        }
+        invite(Party.host())
+        panel = Panel.PARTY
     }
 
     /* ------------------------------------------------------------ effects */
@@ -689,6 +782,9 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                 paused = true
                 if (at > 0) watch.savePosition(at)
             }
+            // Back from another app — sharing a party's invite, say — paused: the controls up, not a black
+            // picture that looked like nothing was there, where Back (to get somewhere) ended the party.
+            if (event == Lifecycle.Event.ON_START && loaded && paused) show()
         }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
@@ -713,7 +809,6 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         }
     }
     // Restarted by every new time; only an absence of them fires it.
-    var stalled by remember { mutableStateOf(false) }
     LaunchedEffect(ready, paused) {
         stalled = false
         if (ready == null || paused) return@LaunchedEffect
@@ -769,7 +864,8 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     var autoSkipped by remember(intro) { mutableStateOf(false) }
     LaunchedEffect(skipIntro) {
         val i = intro ?: return@LaunchedEffect
-        if (!skipIntro || autoSkipped || !SettingsStore.value.value.autoSkipIntro) return@LaunchedEffect
+        // A guest's would only ask the leader, whose own skip brings everyone along.
+        if (!skipIntro || autoSkipped || guest || !SettingsStore.value.value.autoSkipIntro) return@LaunchedEffect
         autoSkipped = true
         seekTo(i.end)
         say("Skipped intro", L.drawable.lucide_ic_chevrons_right)
@@ -838,8 +934,10 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
             val x0 = down.position.x
             val y0 = down.position.y
             // What this press turns out to be: a tap, a hold, a side drag, or nothing.
-            // Holding for 2× only with the controls down, so a held button never speeds the film up.
-            val kind = withTimeoutOrNull(if (paused || locked || controls) Long.MAX_VALUE else HOLD_MS) {
+            // Holding for 2× only with the controls down, so a held button never speeds the film up;
+            // never for a party guest, whose speed is the leader's.
+            val partyGuest = Party.room?.leader == false
+            val kind = withTimeoutOrNull(if (paused || locked || controls || partyGuest) Long.MAX_VALUE else HOLD_MS) {
                 while (true) {
                     val c = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: return@withTimeoutOrNull "up"
                     // A button over the picture took this one.
@@ -1016,6 +1114,9 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                     TopBar(
                         title, episode, file, progressState.value, duration, { at }, rate, info,
                         canCast = cast != null,
+                        party = room?.let { maxOf(it.people, it.members.size) } ?: 0,
+                        unread = room?.unread ?: 0,
+                        onParty = if (Party.enabled) ::partyButton else null,
                         onBack = ::leave,
                         onStats = { info = !info },
                         onLock = {
@@ -1099,6 +1200,126 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(h.text, style = Type.label.copy(fontWeight = FontWeight.SemiBold))
+            }
+        }
+
+        // The party held for someone loading, on every screen in it; the leader can go on without them.
+        val heldFor = wp.heldFor
+        if (heldFor.isNotEmpty() && wp.ask == null) {
+            val others = heldFor - wp.me
+            Row(
+                Modifier.zIndex(11f).align(Alignment.TopCenter).windowInsetsPadding(WindowInsets.safeDrawing).padding(top = 64.dp)
+                    .clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.85f)).padding(start = 16.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Spinner(size = 18.dp)
+                Text(
+                    when {
+                        others.isEmpty() -> "  Everyone is waiting while yours loads"
+                        wp.me in heldFor -> "  Waiting for you and ${others.joinToString()}"
+                        else -> "  Waiting for ${others.joinToString()} to load"
+                    },
+                    Modifier.padding(vertical = 9.dp),
+                    style = Type.label.copy(color = Color.White, fontWeight = FontWeight.SemiBold),
+                )
+                Spacer(Modifier.width(10.dp))
+                if (room?.leader == true) Tap(wp::goOnWithout, shape = RoundedCornerShape(8.dp)) {
+                    Text("Go on", Modifier.background(Ink.accent).padding(horizontal = 14.dp, vertical = 9.dp), style = Type.label.copy(color = Color.White, fontWeight = FontWeight.Bold))
+                }
+            }
+        }
+
+        // Guest: whose pause or jump this is.
+        wp.choice?.let { c ->
+            val jumpTo = c.seekTo
+            Column(
+                Modifier.zIndex(12f).align(Alignment.Center).clip(RoundedCornerShape(14.dp)).background(Color(0xF2101012)).padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(if (jumpTo != null) "Jump to ${clock(jumpTo)}" else "Pause", style = Type.title.copy(color = Color.White, fontWeight = FontWeight.Bold))
+                val verb = if (jumpTo != null) "jump" else "pause"
+                Text(
+                    if (wp.leaderState?.asks == false) "Only the leader can $verb the party — or $verb just for you, and catch up after."
+                    else "Just for you, or ask the leader to $verb for everyone?",
+                    Modifier.padding(top = 4.dp, bottom = 14.dp).widthIn(max = 300.dp),
+                    style = Type.meta.copy(color = Color.White.copy(alpha = 0.7f)),
+                    textAlign = TextAlign.Center,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Tap(wp::justMe, shape = RoundedCornerShape(10.dp)) {
+                        Row(Modifier.background(Color.White.copy(alpha = 0.12f)).padding(horizontal = 16.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Lc(L.drawable.lucide_ic_user, tint = Color.White, size = 18.dp)
+                            Text("  Just me", style = Type.label.copy(color = Color.White, fontWeight = FontWeight.SemiBold))
+                        }
+                    }
+                    if (wp.leaderState?.asks != false) Tap(wp::everyone, shape = RoundedCornerShape(10.dp)) {
+                        Row(Modifier.background(Ink.accent).padding(horizontal = 16.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Lc(L.drawable.lucide_ic_users, tint = Color.White, size = 18.dp)
+                            Text("  Everyone", style = Type.label.copy(color = Color.White, fontWeight = FontWeight.Bold))
+                        }
+                    }
+                }
+            }
+        }
+
+        // Guest on its own: the way back to the party, always in reach.
+        if (guest && wp.detached && !locked) Row(
+            Modifier.zIndex(11f).align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.safeDrawing).padding(bottom = if (controls) 132.dp else 22.dp)
+                .clip(CircleShape).background(Color.Black.copy(alpha = 0.8f)).padding(start = 16.dp, end = 5.dp, top = 5.dp, bottom = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Lc(L.drawable.lucide_ic_user, tint = Color(0xFF7AA7FF), size = 16.dp)
+            Text("  On your own", style = Type.meta.copy(color = Color.White))
+            Spacer(Modifier.width(10.dp))
+            Tap(wp::catchUp, shape = CircleShape) {
+                Text("Catch up", Modifier.background(Ink.accent).padding(horizontal = 14.dp, vertical = 8.dp), style = Type.label.copy(color = Color.White, fontWeight = FontWeight.Bold))
+            }
+        }
+
+        // Leader: a guest asking to pause, play or jump.
+        wp.ask?.let { a ->
+            val what = when (a.what) {
+                "pause" -> "pause"
+                "play" -> "play"
+                else -> "jump to ${clock(a.pos)}"
+            }
+            Row(
+                Modifier.zIndex(11f).align(Alignment.TopCenter).windowInsetsPadding(WindowInsets.safeDrawing).padding(top = 64.dp)
+                    .clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.85f)).padding(start = 18.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Lc(L.drawable.lucide_ic_users, tint = Ink.accent, size = 18.dp)
+                Text("  ${a.from} asks to $what", style = Type.label.copy(color = Color.White, fontWeight = FontWeight.SemiBold))
+                Spacer(Modifier.width(10.dp))
+                Tap({ wp.ask = null }, shape = RoundedCornerShape(8.dp)) {
+                    Text("No", Modifier.padding(horizontal = 12.dp, vertical = 9.dp), style = Type.label.copy(color = Color.White.copy(alpha = 0.7f)))
+                }
+                Tap({ wp.ask = null; wp.allow(a) }, shape = RoundedCornerShape(8.dp)) {
+                    Text("Allow", Modifier.background(Ink.accent).padding(horizontal = 14.dp, vertical = 9.dp), style = Type.label.copy(color = Color.White, fontWeight = FontWeight.Bold))
+                }
+            }
+        }
+
+        // Reactions, rising and fading over the picture.
+        wp.floating.forEach { f -> key(f.id) { FloatingReaction(f) { wp.floating.remove(f) } } }
+
+        // A chat line from someone, bottom left, while the panel is shut; a tap opens the panel.
+        val peek = wp.chatPeek
+        AnimatedVisibility(
+            peek != null && panel == null && !locked,
+            Modifier.align(Alignment.BottomStart).windowInsetsPadding(WindowInsets.safeDrawing).padding(start = 16.dp, bottom = if (controls) 130.dp else 24.dp),
+            enter = fadeIn() + slideInHorizontally { -it / 3 },
+            exit = fadeOut(),
+        ) {
+            val p = peek ?: return@AnimatedVisibility
+            Tap({ wp.chatPeek = null; panel = Panel.PARTY }, shape = RoundedCornerShape(12.dp)) {
+                Row(Modifier.widthIn(max = 320.dp).background(Color.Black.copy(alpha = 0.78f)).padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                    p.from?.let { NameDot(it, 24.dp) }
+                    Column(Modifier.padding(start = 10.dp)) {
+                        p.from?.let { Text(it, style = Type.meta.copy(color = Color.White.copy(alpha = 0.7f), fontWeight = FontWeight.Bold)) }
+                        Text(p.text, style = Type.label.copy(color = Color.White), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                }
             }
         }
         if (boosting) {
@@ -1231,10 +1452,14 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                 options = RATES.map { Option(it, rateLabel(it), if (it == 1f) "Normal" else null) },
                 selected = rate,
                 onPick = {
+                    panel = null
+                    if (guest) {
+                        say("The leader sets the speed in a watch party", L.drawable.lucide_ic_users)
+                        return@Sheet
+                    }
                     rate = it
                     view.value?.setRate(it)
                     SettingsStore.save(SettingsStore.value.value.copy(playbackRate = it))
-                    panel = null
                 },
                 onDismiss = { panel = null },
             )
@@ -1328,7 +1553,217 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                 onDismiss = { panel = Panel.FIND },
             )
             Panel.EPISODES -> title?.let { EpisodesPanel(it, episode, ::playEpisode) { panel = null } }
+            Panel.PARTY -> room?.let { r ->
+                PartyPanel(
+                    r,
+                    heldFor = wp.heldFor,
+                    onInvite = { invite(r) },
+                    onGoOn = wp::goOnWithout,
+                    onLeave = {
+                        panel = null
+                        Party.leave()
+                    },
+                    onDismiss = { panel = null },
+                )
+            } ?: run { panel = null }
             null -> Unit
+        }
+    }
+}
+
+/**
+ * The watch party down the right of the picture, as the episode list sits: who is here and what each
+ * player is doing, who the film is held for, reactions, and the chat. The picture stays in view.
+ */
+@Composable
+private fun PartyPanel(
+    room: com.torrentviewer.core.Room,
+    heldFor: List<String>,
+    onInvite: () -> Unit,
+    onGoOn: () -> Unit,
+    onLeave: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    BackHandler(onBack = onDismiss)
+    var draft by remember { mutableStateOf("") }
+    val people = room.members.values.sortedWith(compareByDescending<com.torrentviewer.core.Member> { it.leader }.thenByDescending { it.me }.thenBy { it.name.lowercase() })
+    val list = rememberLazyListState()
+    LaunchedEffect(room.chat.size) {
+        room.unread = 0
+        if (room.chat.isNotEmpty()) list.animateScrollToItem(room.chat.lastIndex)
+    }
+    fun send() {
+        room.say(draft)
+        draft = ""
+    }
+    var tab by remember { mutableStateOf("chat") }
+    val settings by SettingsStore.value.collectAsState()
+    // Turned, the keyboard takes most of the screen: then only the conversation and the box stay.
+    val typing = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
+    val faint = Color.White.copy(alpha = 0.55f)
+    Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)).pointerInput(Unit) { awaitEachGesture { awaitFirstDown().consume(); onDismiss() } })
+        Column(
+            Modifier.align(Alignment.CenterEnd).fillMaxHeight().widthIn(max = 460.dp).fillMaxWidth(0.9f)
+                .background(Color(0xF2101012)).pointerInput(Unit) { awaitEachGesture { awaitFirstDown().consume() } }
+                .windowInsetsPadding(WindowInsets.safeDrawing).imePadding().padding(start = 14.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+        ) {
+            if (!typing) {
+                // One line: what this is, how many, and its three actions as icons.
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(if (room.leader) "Your watch party" else "Watch party", style = Type.label.copy(color = Color.White, fontWeight = FontWeight.Bold))
+                        Text(
+                            if (room.connected) "${people.size.coerceAtLeast(room.people)} watching · encrypted" else "Reconnecting…",
+                            style = Type.meta.copy(color = if (room.connected) faint else Ink.warn, fontSize = 12.sp),
+                        )
+                    }
+                    PanelIcon(L.drawable.lucide_ic_user_plus, "Invite", onInvite)
+                    PanelIcon(L.drawable.lucide_ic_log_out, if (room.leader) "End party" else "Leave", onLeave)
+                    PanelIcon(L.drawable.lucide_ic_x, "Close", onDismiss)
+                }
+
+                if (heldFor.isNotEmpty()) Row(
+                    Modifier.padding(top = 6.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Ink.warn.copy(alpha = 0.16f)).padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Spinner(size = 14.dp, color = Ink.warn)
+                    Text("  Waiting for ${heldFor.joinToString()}", Modifier.weight(1f).padding(vertical = 6.dp), style = Type.meta.copy(color = Color.White), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (room.leader) Tap(onGoOn, shape = RoundedCornerShape(8.dp)) {
+                        Text("Go on", Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = Type.label.copy(color = Ink.warn, fontWeight = FontWeight.Bold))
+                    }
+                }
+
+                // Chat and People each get the whole height, rather than sharing it.
+                Row(Modifier.padding(top = 8.dp, bottom = 6.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.07f)).padding(3.dp)) {
+                    listOf("chat" to "Chat", "people" to "People · ${people.size.coerceAtLeast(room.people)}").forEach { (key, label) ->
+                        val on = tab == key
+                        Tap({ tab = key }, Modifier.weight(1f), RoundedCornerShape(8.dp)) {
+                            Text(
+                                label,
+                                Modifier.fillMaxWidth().background(if (on) Color.White.copy(alpha = 0.16f) else Color.Transparent).padding(vertical = 7.dp),
+                                style = Type.meta.copy(color = if (on) Color.White else faint, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium),
+                                textAlign = TextAlign.Center,
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (tab == "people" && !typing) {
+                Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    people.forEach { m -> PersonRow(m) }
+                    if (people.size <= 1) Text("No one else yet — tap the invite button above.", style = Type.meta.copy(color = faint))
+                    Text("ON THE PICTURE", Modifier.padding(top = 8.dp), style = Type.overline.copy(color = faint))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Chip("Chat messages", settings.partyShowChat, onClick = { SettingsStore.save(settings.copy(partyShowChat = !settings.partyShowChat)) }, compact = true)
+                        Chip("Reactions", settings.partyShowReactions, onClick = { SettingsStore.save(settings.copy(partyShowReactions = !settings.partyShowReactions)) }, compact = true)
+                    }
+                }
+            } else {
+                LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (room.chat.isEmpty()) item {
+                        Column(Modifier.fillMaxWidth().padding(top = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Lc(L.drawable.lucide_ic_message_circle, tint = faint, size = 28.dp)
+                            Text("Say hello", Modifier.padding(top = 8.dp), style = Type.label.copy(color = Color.White, fontWeight = FontWeight.SemiBold))
+                            Text("Only the people in this party see it, and it's gone when the party ends.", Modifier.padding(top = 2.dp), style = Type.meta.copy(color = faint), textAlign = TextAlign.Center)
+                        }
+                    }
+                    items(room.chat) { ChatRow(it) }
+                }
+                if (!typing) Row(Modifier.padding(top = 4.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    PARTY_REACTIONS.forEach { e ->
+                        Tap({ room.react(e) }, Modifier.semantics { contentDescription = "React $e" }, CircleShape) {
+                            Text(e, Modifier.padding(5.dp), fontSize = 20.sp)
+                        }
+                    }
+                }
+                Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Field(draft, { draft = it.take(com.torrentviewer.core.Party.CHAT_MAX) }, "Message", Modifier.weight(1f), onSubmit = ::send, action = androidx.compose.ui.text.input.ImeAction.Send)
+                    Tap(::send, Modifier.padding(start = 4.dp).semantics { contentDescription = "Send" }, CircleShape) {
+                        Box(Modifier.size(44.dp).background(if (draft.isBlank()) Color.White.copy(alpha = 0.1f) else Ink.accent), contentAlignment = Alignment.Center) {
+                            Lc(L.drawable.lucide_ic_send_horizontal, tint = Color.White, size = 20.dp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PanelIcon(@DrawableRes icon: Int, label: String, onClick: () -> Unit) {
+    Tap(onClick, Modifier.semantics { contentDescription = label }, CircleShape) { Lc(icon, Modifier.padding(9.dp), tint = Color.White, size = 20.dp) }
+}
+
+@Composable
+private fun PersonRow(m: com.torrentviewer.core.Member) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        NameDot(m.name, 32.dp)
+        Column(Modifier.padding(start = 10.dp).weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(m.name + if (m.me) " (you)" else "", style = Type.label.copy(color = Color.White, fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (m.leader) Lc(L.drawable.lucide_ic_crown, Modifier.padding(start = 6.dp), tint = Color(0xFFF5C542), size = 14.dp)
+            }
+            val (word, colour) = when (m.status) {
+                "watching" -> "Watching" to Ink.good
+                "paused" -> "Paused" to Color.White.copy(alpha = 0.55f)
+                "loading" -> "Loading…" to Ink.warn
+                "behind" -> "Watching on their own" to Color(0xFF7AA7FF)
+                else -> "Opening the film…" to Color.White.copy(alpha = 0.55f)
+            }
+            Text(word, style = Type.meta.copy(color = colour))
+        }
+    }
+}
+
+@Composable
+private fun ChatRow(line: com.torrentviewer.core.ChatLine) {
+    val from = line.from
+    if (from == null) {
+        Text(line.text, Modifier.fillMaxWidth(), style = Type.meta.copy(color = Color.White.copy(alpha = 0.5f)), textAlign = TextAlign.Center)
+        return
+    }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (line.mine) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.Top) {
+        if (!line.mine) NameDot(from, 24.dp)
+        Column(
+            Modifier.padding(start = if (line.mine) 40.dp else 8.dp, end = if (line.mine) 0.dp else 40.dp).clip(RoundedCornerShape(12.dp))
+                .background(if (line.mine) Ink.accent.copy(alpha = 0.85f) else Color.White.copy(alpha = 0.1f)).padding(horizontal = 11.dp, vertical = 7.dp),
+        ) {
+            if (!line.mine) Text(from, style = Type.meta.copy(color = Color.White.copy(alpha = 0.65f), fontWeight = FontWeight.Bold))
+            Text(line.text, style = Type.label.copy(color = Color.White))
+        }
+    }
+}
+
+/** A round initial in a colour of its own per name, so the same person looks the same on every phone. */
+@Composable
+internal fun NameDot(name: String, size: Dp) {
+    val hues = listOf(0xFFE5484D, 0xFF3E63DD, 0xFF30A46C, 0xFFF76B15, 0xFF8E4EC6, 0xFF12A594, 0xFFD6409F, 0xFFFFB224)
+    val c = Color(hues[(name.hashCode() and Int.MAX_VALUE) % hues.size])
+    Box(Modifier.size(size).clip(CircleShape).background(c), contentAlignment = Alignment.Center) {
+        Text(name.trim().take(1).uppercase(), style = Type.label.copy(color = Color.White, fontWeight = FontWeight.Bold, fontSize = (size.value * 0.45f).sp))
+    }
+}
+
+/** One reaction rising up the picture and fading, with who sent it under it. */
+@Composable
+private fun FloatingReaction(f: Floater, onDone: () -> Unit) {
+    val rise = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        rise.animateTo(1f, tween(2600))
+        onDone()
+    }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val w = constraints.maxWidth
+        val h = constraints.maxHeight
+        Column(
+            Modifier.offset { androidx.compose.ui.unit.IntOffset((w * f.x).toInt(), (h * (0.8f - 0.55f * rise.value)).toInt()) }
+                .graphicsLayer { alpha = 1f - rise.value * rise.value },
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(f.emoji, fontSize = 34.sp)
+            Text(f.from, style = Type.meta.copy(color = Color.White, fontSize = 11.sp))
         }
     }
 }
@@ -1417,6 +1852,11 @@ private fun TopBar(
     rate: Float,
     info: Boolean,
     canCast: Boolean,
+    /** How many are in the watch party, 0 outside one. */
+    party: Int,
+    /** Chat lines not yet seen: a dot on the party button. */
+    unread: Int,
+    onParty: (() -> Unit)?,
     onBack: () -> Unit,
     onStats: () -> Unit,
     onLock: () -> Unit,
@@ -1436,6 +1876,15 @@ private fun TopBar(
                 Spacer(Modifier.width(10.dp))
                 Lc(L.drawable.lucide_ic_users, tint = Ink.muted, size = 13.dp)
                 Text(" ${it.peers}", style = Type.meta.copy(color = Color.White))
+            }
+        }
+        if (onParty != null) Tap(onParty, Modifier.semantics { contentDescription = "Watch party" }, CircleShape) {
+            Row(Modifier.padding(9.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box {
+                    Lc(L.drawable.lucide_ic_users, tint = if (party > 0) Ink.accent else Color.White, size = 22.dp)
+                    if (unread > 0) Box(Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-3).dp).size(8.dp).clip(CircleShape).background(Ink.accent))
+                }
+                if (party > 0) Text(" $party", style = Type.label.copy(color = Color.White, fontWeight = FontWeight.Bold))
             }
         }
         if (canCast) AndroidView(factory = ::castButton, modifier = Modifier.size(42.dp))

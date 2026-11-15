@@ -496,6 +496,7 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
                     listOfNotNull(
                         Entry(L.drawable.lucide_ic_radio, "Streaming", "Storage, buffer and trackers", "cache magnet") { page = "Streaming" },
                         Entry(L.drawable.lucide_ic_play, "Playback", "Player and skip intro", "vlc media3") { page = "Playback" },
+                        if (Party.available && !Kids.on) Entry(L.drawable.lucide_ic_popcorn, "Watch party", "Join one, and how yours runs", "together friends group sync invite") { page = "Watch party" } else null,
                         // A kids profile plays what it can browse to; where streams come from is the grown-ups' call.
                         if (Kids.on) null else Entry(L.drawable.lucide_ic_puzzle, "Addons", "Where streams and subtitles come from", "stremio debrid") { page = "Addons" },
                     ),
@@ -628,6 +629,66 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
                     Chip("Box behind", style.box, onClick = { set(settings.copy(subtitles = style.copy(box = !style.box))) })
                 }
             }
+        }
+        }
+
+        if (page == "Watch party") {
+        val inParty = Party.room
+        Section("Watch party", "Off, the player has no party button and links from your phone are turned away. Turning it off leaves any party you're in.") {
+            Options(listOf(true, false), settings.partyOn, { if (it) "On" else "Off" }) {
+                set(settings.copy(partyOn = it))
+                if (!it) {
+                    Party.leave()
+                    Party.last = null
+                }
+            }
+        }
+        if (settings.partyOn) {
+        // Left one — by Back, Leave, or its leader ending it: the way back in.
+        Party.last?.takeIf { inParty == null }?.let { last ->
+            Section(
+                if (last.leader) "You ended your watch party" else if (last.ended) "The watch party has ended" else "You left the watch party",
+                if (last.leader) "Reopen it — the link everyone has still works." else "Rejoin to watch together again.",
+            ) {
+                Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    TvButton(if (last.leader) "Reopen the party" else "Rejoin the party", { Party.rejoin() }, icon = L.drawable.lucide_ic_users, primary = true)
+                    TvButton("Forget it", { Party.last = null })
+                }
+            }
+        }
+        Section(
+            "Join a watch party",
+            if (inParty != null) "You're in a party now. Leave it from the party button in the player."
+            else "Someone sent you a watch party link? Scan the code with your phone and paste the link there. The TV asks before it plays anything.",
+        ) {
+            if (inParty == null) PhoneKey("watch party link", label = "Paste the link from your phone") { link ->
+                if (Party.join(link) == null) "That isn't a whole watch party link — copy all of it." else "Joining — look at the TV."
+            } else TvButton("Leave the party", { Party.leave() }, Modifier.padding(top = 12.dp), icon = L.drawable.lucide_ic_log_out)
+        }
+
+        Section("Your name", "What the others see. Left blank, it is the profile's name, ${me.name}.") {
+            Field(settings.partyName, { set(settings.copy(partyName = it.take(PARTY_NAME_MAX))) }, me.name, Modifier.widthIn(max = 420.dp).fillMaxWidth())
+        }
+
+        Section("Guests' requests", "When you lead a party and a guest asks to pause, play or jump.") {
+            Options(PARTY_ASKS, settings.partyAsks, { mapOf("ask" to "Ask me", "allow" to "Allow at once", "off" to "Ignore")[it].orEmpty() }) { set(settings.copy(partyAsks = it)) }
+        }
+
+        Section("Wait for slow connections", "When you lead, the film pauses for anyone whose stream stops to load, for this long at most.") {
+            Options(PARTY_WAITS, settings.partyWaitSec, { if (it == 0) "Don't wait" else if (it < 60) "$it s" else "${it / 60} min" }) { set(settings.copy(partyWaitSec = it)) }
+        }
+
+        Section("On the picture", "Chat messages and reactions over the film while the party panel is shut.") {
+            val pictureLead = remember { FocusRequester() }
+            Row(Modifier.focusRow(pictureLead), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Chip("Chat messages", settings.partyShowChat, onClick = { set(settings.copy(partyShowChat = !settings.partyShowChat)) }, requester = pictureLead)
+                Chip("Reactions", settings.partyShowReactions, onClick = { set(settings.copy(partyShowReactions = !settings.partyShowReactions)) })
+            }
+        }
+
+        Section("Smooth catch-up", "As a guest, a small gap to the leader closes by playing up to 8% faster or slower. Off, the player jumps instead.") {
+            Options(listOf(true, false), settings.partySmooth, { if (it) "On" else "Off" }) { set(settings.copy(partySmooth = it)) }
+        }
         }
         }
 
@@ -932,7 +993,7 @@ private fun PhoneKey(what: String, several: Boolean = false, label: String = "Pa
 
 /** [text] as a QR code: black squares on white, with the one-module quiet zone a camera needs. */
 @Composable
-private fun Qr(text: String, size: androidx.compose.ui.unit.Dp) {
+fun Qr(text: String, size: androidx.compose.ui.unit.Dp) {
     val matrix = remember(text) {
         com.google.zxing.qrcode.QRCodeWriter().encode(text, com.google.zxing.BarcodeFormat.QR_CODE, 0, 0, mapOf(com.google.zxing.EncodeHintType.MARGIN to 1))
     }

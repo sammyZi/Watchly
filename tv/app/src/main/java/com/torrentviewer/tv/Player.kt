@@ -180,7 +180,7 @@ private fun delta(seconds: Double): String {
 
 private enum class Band { SLIDER, TRANSPORT }
 
-private enum class Panel { TRACKS, SPEED, ASPECT, FIND, LANG, EPISODES }
+private enum class Panel { TRACKS, SPEED, ASPECT, FIND, LANG, EPISODES, PARTY }
 
 @Composable
 fun PlayerScreen(watch: Watch) {
@@ -284,14 +284,22 @@ private fun Player(watch: Watch) {
         hide()
     }
 
+    /** The watch party this TV is in, if any, and its side of this player — the phone's code: core/PartyDriver. */
+    val room = Party.room
+    val wp = remember { PartyDriver(watch) }
+    val guest = wp.guest
+
     fun togglePause() {
         val v = view.value ?: return
+        // In a party, Play and Pause may be the party's: asked, or "go on without them".
+        if (wp.onTogglePause()) return
         v.setPaused(!v.isPaused)
         paused = v.isPaused
     }
 
     fun goNext() {
-        if (next == null || advanced) return
+        // A guest goes on when the leader does.
+        if (next == null || advanced || guest) return
         advanced = true
         watch.playSibling(next)
     }
@@ -319,7 +327,9 @@ private fun Player(watch: Watch) {
 
     val seeking = remember { mutableStateOf<Seeking?>(null) }
     val seekCheck = remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-    fun seekTo(seconds: Double) {
+    /** [party]: a jump the watch party decided on — any other a guest is asked about first. */
+    fun seekTo(seconds: Double, party: Boolean = false) {
+        if (!party && wp.onSeek(seconds)) return
         val target = seconds.coerceIn(0.0, if (duration > 0) duration - 1 else seconds)
         val v = view.value ?: return
         val from = at
@@ -335,6 +345,7 @@ private fun Player(watch: Watch) {
         val s = Seeking(target, from, System.currentTimeMillis(), engine.connections())
         seeking.value = s
         if (reopen) v.reload(ms) else v.seekTo(ms)
+        wp.tell()
         seekCheck.value?.cancel()
         if (reopen) return
         // It can starve just after the check; if the seek has gone nowhere, reopen then.
@@ -429,6 +440,44 @@ private fun Player(watch: Watch) {
             stalled = true
         }
     }
+    // The party's side of this player, the phone's own code: core/PartyDriver.
+    val partyPlayer = remember {
+        // The player's own state by other names: inside the object, `paused` or `rate` would be the object's.
+        val pausedNow = { paused }
+        val loadedNow = { loaded }
+        val rateNow = { rate }
+        val seekingNow = { seeking.value != null }
+        val starvedNow = { buffering || (stalled && !paused) }
+        val pause = { on: Boolean ->
+            view.value?.setPaused(on)
+            paused = on
+        }
+        val showRate = { r: Float -> rate = r }
+        val tell = { text: String -> say(text) }
+        object : PartyPlayer {
+            override fun time() = (view.value?.time ?: 0L) / 1000.0
+            override val spot get() = at
+            override val paused get() = pausedNow()
+            override val loaded get() = loadedNow()
+            override val starved get() = starvedNow()
+            override val seeking get() = seekingNow()
+            override val boosting get() = false
+            override val rate get() = rateNow()
+            override val fileName get() = file?.name
+            override fun setPaused(on: Boolean) = pause(on)
+            override fun steerRate(r: Float) {
+                view.value?.setRate(r)
+            }
+            override fun showRate(r: Float) = showRate(r)
+            override fun jump(seconds: Double) = seekTo(seconds, party = true)
+            override fun say(text: String, icon: Int?) = tell(text)
+            override fun savePosition() {
+                if (at > 0) watch.savePosition(at)
+            }
+        }
+    }
+    wp.Effects(partyPlayer, panel == Panel.PARTY)
+
     // Saved every few seconds, so a power cut still remembers the spot.
     LaunchedEffect(loaded) {
         while (loaded) {
@@ -473,7 +522,8 @@ private fun Player(watch: Watch) {
     // Once per intro: scrubbing back into it to watch it is not undone.
     var autoSkipped by remember(intro) { mutableStateOf(false) }
     LaunchedEffect(skipIntro) {
-        if (!skipIntro || autoSkipped || !SettingsStore.value.value.autoSkipIntro) return@LaunchedEffect
+        // A guest's would only be asked about; the leader's own skip brings everyone along.
+        if (!skipIntro || autoSkipped || guest || !SettingsStore.value.value.autoSkipIntro) return@LaunchedEffect
         autoSkipped = true
         skipPastIntro()
         say("Skipped intro")
@@ -503,7 +553,11 @@ private fun Player(watch: Watch) {
             }
             controls -> hide()
             info -> info = false
-            else -> watch.exit()
+            // Out of the film is out of the party — ended, for its leader.
+            else -> {
+                Party.leave()
+                watch.exit()
+            }
         }
     }
 
@@ -517,7 +571,8 @@ private fun Player(watch: Watch) {
                 if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 val code = e.nativeKeyEvent.keyCode
                 val repeat = e.nativeKeyEvent.repeatCount
-                if (panel != null || offerNext) return@onPreviewKeyEvent false
+                // A party card up takes the remote: its buttons, not the film.
+                if (panel != null || offerNext || wp.ask != null || wp.choice != null) return@onPreviewKeyEvent false
                 when (code) {
                     KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.KEYCODE_SPACE -> {
                         togglePause()
@@ -706,6 +761,7 @@ private fun Player(watch: Watch) {
                         ) {
                             val toTransport = { band = Band.TRANSPORT }
                             Control(if (paused) L.drawable.lucide_ic_play else L.drawable.lucide_ic_pause, if (paused) "Play" else "Pause", requester = playButton, big = true, onFocus = toTransport) { togglePause() }
+                            if (guest && wp.detached) Control(L.drawable.lucide_ic_users, "Catch up with the party", on = true, onFocus = toTransport) { wp.catchUp() }
                             Control(L.drawable.lucide_ic_rotate_ccw, "Back $SKIP s", badge = "$SKIP", onFocus = toTransport) {
                                 seekTo(at - SKIP)
                                 flashSeek(-SKIP)
@@ -718,6 +774,28 @@ private fun Player(watch: Watch) {
                             next?.let { Control(L.drawable.lucide_ic_skip_forward, "Next episode", onFocus = toTransport) { goNext() } }
                             if (title?.episodes.orEmpty().isNotEmpty()) Control(L.drawable.lucide_ic_list, "Episodes", onFocus = toTransport) { panel = Panel.EPISODES }
                             Spacer(Modifier.weight(1f))
+                            if (Party.enabled && !Kids.on) Control(
+                                L.drawable.lucide_ic_users,
+                                when {
+                                    room != null -> "Watch party · ${maxOf(room.people, room.members.size)}" + if (room.unread > 0) " · new messages" else ""
+                                    Party.last != null -> "Rejoin the watch party"
+                                    else -> "Watch party"
+                                },
+                                on = room != null,
+                                onFocus = toTransport,
+                            ) {
+                                if (room == null && Party.last != null) {
+                                    // The party just left, back again: a guest straight in, a leader's same room reopened.
+                                    Party.rejoin()
+                                    panel = Panel.PARTY
+                                } else if (room == null) {
+                                    if (watch.partyMedia() == null) watch.notes.tryEmit("Only a torrent can be watched together — this one is a file or a plain link.")
+                                    else {
+                                        Party.host()
+                                        panel = Panel.PARTY
+                                    }
+                                } else panel = Panel.PARTY
+                            }
                             Control(L.drawable.lucide_ic_captions, "Audio & subtitles", on = subtitle != null, onFocus = toTransport) { panel = Panel.TRACKS }
                             Control(L.drawable.lucide_ic_gauge, "Speed ${rateLabel(rate)}", on = rate != 1f, onFocus = toTransport) { panel = Panel.SPEED }
                             Control(L.drawable.lucide_ic_ratio, SCALES[scale].second, on = scale != 0, onFocus = toTransport) { panel = Panel.ASPECT }
@@ -824,9 +902,13 @@ private fun Player(watch: Watch) {
                 options = RATES.map { Option(it, rateLabel(it), if (it == 1f) "Normal" else null) },
                 selected = rate,
                 onPick = {
+                    panel = null
+                    if (!wp.canPickSpeed) {
+                        say("The leader sets the speed in a watch party")
+                        return@Sheet
+                    }
                     rate = it
                     view.value?.setRate(it)
-                    panel = null
                 },
                 onDismiss = ::closePanel,
             )
@@ -879,14 +961,266 @@ private fun Player(watch: Watch) {
                 onDismiss = { panel = Panel.FIND },
             )
             Panel.EPISODES -> title?.let { EpisodesPanel(it, episode, ::playEpisode, ::closePanel) }
+            Panel.PARTY -> room?.let { r ->
+                PartyPanel(r, wp.heldFor, onGoOn = wp::goOnWithout, onLeave = {
+                    closePanel()
+                    Party.leave()
+                }, onDismiss = ::closePanel)
+            } ?: run { panel = null }
             null -> Unit
         }
+
+        if (panel == null) PartyCards(wp, root)
     }
 
     root.claim()
 }
 
 private fun rateLabel(r: Float) = "${r.toString().removeSuffix(".0")}×"
+
+/* ----------------------------------------------------------- watch party */
+
+/**
+ * The party over the picture: who it waits for, a guest's "just me or everyone?", a guest's ask for
+ * the leader, the way back for a guest on its own, reactions rising, a chat line. The two cards take
+ * the remote while up — Back says no — and hand focus back to the picture ([root]) when they go.
+ */
+@Composable
+private fun androidx.compose.foundation.layout.BoxScope.PartyCards(wp: PartyDriver, root: FocusRequester) {
+    val faint = Color.White.copy(alpha = 0.7f)
+    val heldFor = wp.heldFor
+    if (heldFor.isNotEmpty() && wp.ask == null && wp.choice == null) {
+        val others = heldFor - wp.me
+        Row(
+            Modifier.align(Alignment.TopCenter).padding(top = Safe.y + 56.dp).clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.85f)).padding(horizontal = 18.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Spinner(size = 20.dp)
+            Text(
+                when {
+                    others.isEmpty() -> "  Everyone is waiting while yours loads"
+                    wp.me in heldFor -> "  Waiting for you and ${others.joinToString()}"
+                    else -> "  Waiting for ${others.joinToString()} to load" + if (wp.leader) " — press Play to go on" else ""
+                },
+                style = Type.label.copy(color = Color.White, fontWeight = FontWeight.SemiBold),
+            )
+        }
+    }
+
+    wp.choice?.let { c ->
+        BackHandler { wp.choice = null }
+        val first = remember { FocusRequester() }
+        DisposableEffect(Unit) { onDispose { runCatching { root.requestFocus() } } }
+        val to = c.seekTo
+        val verb = if (to != null) "jump" else "pause"
+        Column(
+            Modifier.align(Alignment.Center).clip(RoundedCornerShape(16.dp)).background(Color(0xF2101012)).padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(if (to != null) "Jump to ${clock(to)}" else "Pause", style = Type.title.copy(color = Color.White, fontWeight = FontWeight.Bold))
+            Text(
+                if (wp.leaderState?.asks == false) "Only the leader can $verb the party — or $verb just for you, and catch up after."
+                else "Just for you, or ask the leader to $verb for everyone?",
+                Modifier.padding(top = 6.dp, bottom = 18.dp).widthIn(max = 420.dp),
+                style = Type.meta.copy(color = faint),
+                textAlign = TextAlign.Center,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                TvButton("Just me", wp::justMe, icon = L.drawable.lucide_ic_user, requester = first)
+                if (wp.leaderState?.asks != false) TvButton("Everyone", wp::everyone, icon = L.drawable.lucide_ic_users, primary = true)
+            }
+        }
+        first.claim()
+    }
+
+    wp.ask?.let { a ->
+        BackHandler { wp.ask = null }
+        val allow = remember { FocusRequester() }
+        DisposableEffect(Unit) { onDispose { runCatching { root.requestFocus() } } }
+        val what = when (a.what) {
+            "pause" -> "pause"
+            "play" -> "play"
+            else -> "jump to ${clock(a.pos)}"
+        }
+        Row(
+            Modifier.align(Alignment.TopCenter).padding(top = Safe.y + 56.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xF2101012)).padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Lc(L.drawable.lucide_ic_users, tint = Ink.accent, size = 22.dp)
+            Text("  ${a.from} asks to $what", style = Type.label.copy(color = Color.White, fontWeight = FontWeight.SemiBold))
+            Spacer(Modifier.width(18.dp))
+            TvButton("No", { wp.ask = null })
+            Spacer(Modifier.width(10.dp))
+            TvButton("Allow", {
+                wp.ask = null
+                wp.allow(a)
+            }, primary = true, requester = allow)
+        }
+        allow.claim()
+    }
+
+    if (wp.guest && wp.detached) Row(
+        Modifier.align(Alignment.BottomCenter).padding(bottom = Safe.y).clip(CircleShape).background(Color.Black.copy(alpha = 0.8f)).padding(horizontal = 18.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Lc(L.drawable.lucide_ic_user, tint = Color(0xFF7AA7FF), size = 18.dp)
+        Text("  On your own — Catch up is on the bar", style = Type.meta.copy(color = Color.White))
+    }
+
+    wp.floating.forEach { f -> key(f.id) { TvFloatingReaction(f) { wp.floating.remove(f) } } }
+
+    val peek = wp.chatPeek
+    AnimatedVisibility(peek != null, Modifier.align(Alignment.BottomStart).padding(start = Safe.x, bottom = Safe.y + 40.dp), enter = fadeIn() + slideInHorizontally { -it / 3 }, exit = fadeOut()) {
+        val p = peek ?: return@AnimatedVisibility
+        Row(Modifier.widthIn(max = 460.dp).clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.8f)).padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            p.from?.let { TvNameDot(it, 30.dp) }
+            Column(Modifier.padding(start = 12.dp)) {
+                p.from?.let { Text(it, style = Type.meta.copy(color = faint, fontWeight = FontWeight.Bold)) }
+                Text(p.text, style = Type.label.copy(color = Color.White), maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/**
+ * The party down the right of the picture, as the episode list sits: a QR anyone's phone can join by,
+ * who is here and what each is doing, reactions, and the chat — typed with the TV's keyboard.
+ */
+@Composable
+private fun PartyPanel(room: Room, heldFor: List<String>, onGoOn: () -> Unit, onLeave: () -> Unit, onDismiss: () -> Unit) {
+    BackHandler(onBack = onDismiss)
+    val first = remember { FocusRequester() }
+    var draft by remember { mutableStateOf("") }
+    val settings by SettingsStore.value.collectAsState()
+    val faint = Color.White.copy(alpha = 0.55f)
+    val people = room.members.values.sortedWith(compareByDescending<Member> { it.leader }.thenByDescending { it.me }.thenBy { it.name.lowercase() })
+    val list = rememberLazyListState()
+    LaunchedEffect(room.chat.size) {
+        room.unread = 0
+        if (room.chat.isNotEmpty()) list.animateScrollToItem(room.chat.lastIndex)
+    }
+    fun send() {
+        room.say(draft)
+        draft = ""
+    }
+    Box(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(800.dp).background(Color.Black.copy(alpha = 0.94f))
+                .padding(start = 24.dp, end = Safe.x, top = Safe.y, bottom = Safe.y),
+        ) {
+            Column(Modifier.width(260.dp)) {
+                Text(if (room.leader) "Your watch party" else "Watch party", style = Type.title.copy(color = Color.White, fontWeight = FontWeight.Bold))
+                Text(
+                    if (room.connected) "${maxOf(people.size, room.people)} watching · encrypted" else "Reconnecting…",
+                    Modifier.padding(bottom = 14.dp),
+                    style = Type.meta.copy(color = if (room.connected) faint else Ink.warn),
+                )
+                Qr(room.link, 200.dp)
+                Text("Scan with a phone to join — it opens Watchly.", Modifier.padding(top = 8.dp, bottom = 16.dp), style = Type.meta.copy(color = faint))
+                if (heldFor.isNotEmpty()) {
+                    Text("Waiting for ${heldFor.joinToString()}", Modifier.padding(bottom = 8.dp), style = Type.meta.copy(color = Ink.warn))
+                    if (room.leader) TvButton("Go on without them", onGoOn, Modifier.padding(bottom = 10.dp))
+                }
+                TvButton(if (room.leader) "End party" else "Leave", onLeave, icon = L.drawable.lucide_ic_log_out)
+            }
+            Column(Modifier.padding(start = 28.dp).weight(1f)) {
+                Text("PEOPLE", Modifier.padding(bottom = 8.dp), style = Type.overline.copy(color = faint))
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    people.take(6).forEach { m -> TvPersonRow(m) }
+                    if (people.size > 6) Text("and ${people.size - 6} more", style = Type.meta.copy(color = faint))
+                    if (people.size <= 1) Text("No one else yet — scan the code to invite.", style = Type.meta.copy(color = faint))
+                }
+                Row(Modifier.padding(top = 14.dp).focusRow(first), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    PARTY_REACTIONS.forEachIndexed { i, e ->
+                        Focusable({ room.react(e) }, shape = CircleShape, requester = first.takeIf { i == 0 }) {
+                            Text(e, Modifier.padding(8.dp), fontSize = 26.sp)
+                        }
+                    }
+                }
+                Text("CHAT", Modifier.padding(top = 14.dp, bottom = 8.dp), style = Type.overline.copy(color = faint))
+                LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (room.chat.isEmpty()) item { Text("Say hello. Only the people in this party see it.", style = Type.meta.copy(color = faint)) }
+                    itemsIndexed(room.chat) { _, line -> TvChatRow(line) }
+                }
+                Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Field(draft, { draft = it.take(Party.CHAT_MAX) }, "Message", Modifier.weight(1f), onSubmit = ::send)
+                    Spacer(Modifier.width(10.dp))
+                    TvButton("Send", ::send, icon = L.drawable.lucide_ic_send_horizontal)
+                }
+                Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("On the picture", style = Type.meta.copy(color = faint))
+                    Chip("Chat", settings.partyShowChat, onClick = { SettingsStore.save(settings.copy(partyShowChat = !settings.partyShowChat)) })
+                    Chip("Reactions", settings.partyShowReactions, onClick = { SettingsStore.save(settings.copy(partyShowReactions = !settings.partyShowReactions)) })
+                }
+            }
+        }
+    }
+    first.claim()
+}
+
+@Composable
+private fun TvPersonRow(m: Member) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        TvNameDot(m.name, 30.dp)
+        Text(m.name + if (m.me) " (you)" else "", Modifier.padding(start = 10.dp), style = Type.label.copy(color = Color.White, fontWeight = FontWeight.SemiBold), maxLines = 1)
+        if (m.leader) Lc(L.drawable.lucide_ic_crown, Modifier.padding(start = 6.dp), tint = Color(0xFFF5C542), size = 15.dp)
+        val (word, colour) = when (m.status) {
+            "watching" -> "Watching" to Ink.good
+            "paused" -> "Paused" to Color.White.copy(alpha = 0.55f)
+            "loading" -> "Loading…" to Ink.warn
+            "behind" -> "On their own" to Color(0xFF7AA7FF)
+            else -> "Opening…" to Color.White.copy(alpha = 0.55f)
+        }
+        Text("  ·  $word", style = Type.meta.copy(color = colour))
+    }
+}
+
+@Composable
+private fun TvChatRow(line: ChatLine) {
+    val from = line.from
+    if (from == null) {
+        Text(line.text, style = Type.meta.copy(color = Color.White.copy(alpha = 0.5f)))
+        return
+    }
+    Row(verticalAlignment = Alignment.Top) {
+        TvNameDot(from, 26.dp)
+        Column(Modifier.padding(start = 10.dp)) {
+            Text(if (line.mine) "You" else from, style = Type.meta.copy(color = Color.White.copy(alpha = 0.65f), fontWeight = FontWeight.Bold))
+            Text(line.text, style = Type.label.copy(color = Color.White))
+        }
+    }
+}
+
+/** A round initial in a colour of its own per name — the phone's, so the same person looks the same on both. */
+@Composable
+private fun TvNameDot(name: String, size: androidx.compose.ui.unit.Dp) {
+    val hues = listOf(0xFFE5484D, 0xFF3E63DD, 0xFF30A46C, 0xFFF76B15, 0xFF8E4EC6, 0xFF12A594, 0xFFD6409F, 0xFFFFB224)
+    Box(Modifier.size(size).clip(CircleShape).background(Color(hues[(name.hashCode() and Int.MAX_VALUE) % hues.size])), contentAlignment = Alignment.Center) {
+        Text(name.trim().take(1).uppercase(), style = Type.label.copy(color = Color.White, fontWeight = FontWeight.Bold, fontSize = (size.value * 0.45f).sp))
+    }
+}
+
+/** One reaction rising up the picture and fading, with who sent it under it. */
+@Composable
+private fun TvFloatingReaction(f: Floater, onDone: () -> Unit) {
+    val rise = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(Unit) {
+        rise.animateTo(1f, tween(2600))
+        onDone()
+    }
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+        val w = constraints.maxWidth
+        val h = constraints.maxHeight
+        Column(
+            Modifier.offset { androidx.compose.ui.unit.IntOffset((w * f.x).toInt(), (h * (0.8f - 0.55f * rise.value)).toInt()) }
+                .graphicsLayer { alpha = 1f - rise.value * rise.value },
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(f.emoji, fontSize = 40.sp)
+            Text(f.from, style = Type.meta.copy(color = Color.White, fontSize = 13.sp))
+        }
+    }
+}
 
 /* ---------------------------------------------------------------- pieces */
 

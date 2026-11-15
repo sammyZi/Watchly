@@ -286,7 +286,7 @@ class Watch(val engine: TorrentStream) {
     }
 
     /** Continue watching: the stored file list goes straight to the engine. */
-    fun resume(picked: Item) = AppScope.launch {
+    fun resume(picked: Item, want: String? = null) = AppScope.launch {
         if (isLocalVideo(picked.uri)) {
             playFile(picked.uri, picked.label, poster = picked.poster)
             return@launch
@@ -302,7 +302,8 @@ class Watch(val engine: TorrentStream) {
             if (hash != null && !Addons.stillServes(target.uri, target.addon)) return@launch fromPeers(target, hash)
             return@launch playLink(target, target.torrentName ?: target.label, target.files?.firstOrNull()?.size ?: 0)
         }
-        val known = target.lastFileIndex
+        // [want]: a watch party's file, by name — the leader's numbering may be TorBox's, not ours.
+        val known = if (want != null) target.files?.find { it.name == want }?.index else target.lastFileIndex
         if (known != null && !target.files.isNullOrEmpty() && target.torrentName != null) {
             ++gen
             source = uriOf(target.uri)
@@ -317,7 +318,7 @@ class Watch(val engine: TorrentStream) {
             return@launch
         }
         val found = inspect(target) ?: return@launch
-        val index = known ?: pickFile(found.files)
+        val index = want?.let { n -> found.files.find { it.name == n }?.index } ?: known ?: pickFile(found.files)
         if (index == null) {
             phase = Phase.IDLE
             choose = target to found

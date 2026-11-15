@@ -65,7 +65,7 @@ static class VlcLibrary
 /// are ours, drawn over the video, because no engine ships an overlay that knows
 /// about swarm stats or piece-level buffering.
 /// </summary>
-public sealed class PlayerView : UserControl, IDisposable
+public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
 {
     const int SkipSeconds = 10;
     const double ControlsScale = 1.25;
@@ -125,8 +125,8 @@ public sealed class PlayerView : UserControl, IDisposable
     bool searchingSubs;
     /// <summary>Everything that is not in the bottom row — the phone's More sheet.</summary>
     bool more;
-    bool SheetOpen => picking || searchingSubs || more || episodesOpen;
-    void CloseSheets() => picking = searchingSubs = more = episodesOpen = false;
+    bool SheetOpen => picking || searchingSubs || more || episodesOpen || partyOpen;
+    void CloseSheets() => picking = searchingSubs = more = episodesOpen = partyOpen = false;
     /// <summary>The show this is an episode of, once its episode list is in, and the season on show in the list.</summary>
     Core.Title? series;
     int? seriesSeason;
@@ -228,6 +228,8 @@ public sealed class PlayerView : UserControl, IDisposable
         Background = Brushes.Black;
         Focusable = true;
 
+        party = new PartyDriver(this, () => shell.Settings);
+        party.Floats += Float;
         player = NewPlayer();
         video.MediaPlayer = player;
         infoPanel = new(BuildInfoPanel);
@@ -242,6 +244,8 @@ public sealed class PlayerView : UserControl, IDisposable
         // small. One scale keeps text, icons and buttons in proportion.
         chrome.LayoutTransform = new ScaleTransform(ControlsScale, ControlsScale);
         overlay.Children.Add(chrome);
+        // Over the controls and never rebuilt with them, so a reaction rises on through a redraw.
+        overlay.Children.Add(floatLayer);
         overlay.MouseMove += OnOverlayMouseMove;
         overlay.MouseLeave += OnOverlayMouseLeave;
         overlay.MouseLeftButtonDown += OnPictureDown;
@@ -649,6 +653,7 @@ public sealed class PlayerView : UserControl, IDisposable
     void OnTick()
     {
         if (disposed) return;
+        party.Tick();
         if (session is not null)
         {
             stats = session.Progress;
@@ -672,7 +677,8 @@ public sealed class PlayerView : UserControl, IDisposable
             Render();
         }
 
-        if (intro is { } skipping && !autoSkipped && shell.Settings.AutoSkipIntro && duration > 0 && IsPlayingSafe && skipping.Covers(current / 1000.0))
+        // A guest's skip would only be asked about: the leader's own brings everyone along.
+        if (intro is { } skipping && !autoSkipped && !party.Guest && shell.Settings.AutoSkipIntro && duration > 0 && IsPlayingSafe && skipping.Covers(current / 1000.0))
         {
             autoSkipped = true;
             SeekTo((long)(skipping.End * 1000));
@@ -721,7 +727,7 @@ public sealed class PlayerView : UserControl, IDisposable
         picking, more, searchingSubs, hud, UpNextVisible, SkipIntroVisible,
         failure, failureFatal, scaleIdx, rate, fullscreen, pip, showInfo,
         userMuted, tracksVersion,
-        stats != null, subLoading, subResults.Count);
+        stats != null, subLoading, subResults.Count, partyOpen, party.Signature);
 
     /// <summary>
     /// Bumped by libVLC's own track events (added, removed, selected), so a track change still
@@ -811,6 +817,8 @@ public sealed class PlayerView : UserControl, IDisposable
         // "End of stream" over a torrent can mean the connection dropped twenty
         // minutes into a three-hour film. Only the real end counts as the end.
         var nearEnd = duration > 0 && current >= duration - 10_000;
+        // A guest goes on when the leader does.
+        if (nearEnd && party.Guest) return;
         if (nearEnd && request.Next is not null && !dismissedNext)
         {
             PlayNext();
@@ -936,7 +944,7 @@ public sealed class PlayerView : UserControl, IDisposable
 
     void PlayNext()
     {
-        if (request.Next is not { } next) return;
+        if (request.Next is not { } next || party.Guest) return;
         Leave(next.Go);
     }
 
@@ -1198,6 +1206,7 @@ public sealed class PlayerView : UserControl, IDisposable
 
     void AdjustSpeed(int direction)
     {
+        if (!party.CanPickSpeed) { ShowHud("The leader sets the speed in a watch party", 2200); return; }
         var currentIdx = Array.IndexOf(Rates, rate);
         if (currentIdx < 0) currentIdx = 1;
         var nextIdx = Math.Clamp(currentIdx + direction, 0, Rates.Length - 1);
@@ -1226,6 +1235,8 @@ public sealed class PlayerView : UserControl, IDisposable
     void TogglePlay()
     {
         if (!started || disposed) return;
+        // In a party, Play and Pause may be the party's: asked, or "go on without them".
+        if (party.OnTogglePause()) { Render(); return; }
         // No muting around pause: libVLC's mute is Windows' mute for this app's audio session,
         // which Windows remembers — pause, close, and every later launch started silent.
         if (IsPlayingSafe) player.SetPause(true);
@@ -1234,9 +1245,11 @@ public sealed class PlayerView : UserControl, IDisposable
         Render();
     }
 
-    void SeekTo(long ms)
+    /// <summary><paramref name="fromParty"/>: a jump the watch party decided on — any other a guest is asked about first.</summary>
+    void SeekTo(long ms, bool fromParty = false)
     {
         if (duration <= 0) return;
+        if (!fromParty && party.OnSeek(ms / 1000.0)) return;
         var to = Math.Clamp(ms, 0, duration - 1000);
         seekAt = DateTime.UtcNow;
         current = to;
@@ -1244,6 +1257,7 @@ public sealed class PlayerView : UserControl, IDisposable
         lastMovedAt = seekAt.AddMilliseconds(1200);
         player.Time = to;
         UpdateClock();
+        party.Tell();
     }
 
     void Skip(int seconds)
@@ -2089,6 +2103,7 @@ public sealed class PlayerView : UserControl, IDisposable
             var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 4, 0, 0) };
             actions.Children.Add(Action("fast-forward", $"Speed ({rate}x)", rate != 1, () =>
             {
+                if (!party.CanPickSpeed) { ShowHud("The leader sets the speed in a watch party", 2200); return; }
                 rate = Rates[(Array.IndexOf(Rates, rate) + 1) % Rates.Length];
                 player.SetRate((float)rate);
                 shell.ChangeSettings(shell.Settings with { PlaybackRate = rate });
@@ -2111,6 +2126,7 @@ public sealed class PlayerView : UserControl, IDisposable
                 Render();
             }));
             if (request.Next is not null) actions.Children.Add(Action("skip-forward", "Next Episode", false, PlayNext));
+            if (Party.Enabled && shell.Settings.PartyOn && !KidsMode.On) actions.Children.Add(Action("users", PartyLabel, partyOpen || Party.Room is not null, OpenParty));
             actions.Children.Add(Action("more-horizontal", "More", more, () =>
             {
                 var open = !more;
@@ -2130,6 +2146,8 @@ public sealed class PlayerView : UserControl, IDisposable
         if (more) chrome.Children.Add(MoreSheet());
         if (episodesOpen && series is not null) chrome.Children.Add(EpisodeSheet());
         if (searchingSubs) chrome.Children.Add(SearchSheet());
+        if (partyOpen && Party.Room is not null) chrome.Children.Add(PartySheet());
+        else partyOpen = false;
         if (PauseCard)
         {
             pauseCardAt ??= DateTime.UtcNow;
@@ -2171,6 +2189,7 @@ public sealed class PlayerView : UserControl, IDisposable
 
         if (SkipIntroVisible) chrome.Children.Add(SkipIntroButton());
         if (UpNextVisible) chrome.Children.Add(UpNextCard());
+        PartyCards();
         RenderFailure();
     }
 
@@ -2716,6 +2735,8 @@ public sealed class PlayerView : UserControl, IDisposable
     public void RequestExit()
     {
         if (disposed) return;
+        // Out of the film is out of the party — ended, for its leader.
+        Party.Leave();
         _ = Close();
         Exited?.Invoke();
     }
@@ -2759,6 +2780,7 @@ public sealed class PlayerView : UserControl, IDisposable
     {
         if (disposed) return;
         disposed = true;
+        try { party.Dispose(); } catch { }
         try { System.Windows.Interop.ComponentDispatcher.ThreadFilterMessage -= OnThreadMessage; } catch { }
         try
         {

@@ -1,0 +1,2 @@
+# Wrangler's local cache: holds the Cloudflare account it deployed with.
+.wrangler/

@@ -50,7 +50,8 @@ public partial class App : Application
         };
 
         // A magnet, a .torrent, or an addon site's Install link (the installer registers stremio://).
-        var incoming = e.Args.FirstOrDefault(a => TitleText.IsTorrentSource(a) || a.StartsWith("stremio://", StringComparison.OrdinalIgnoreCase));
+        // And a watch party invite (watchly://party/…, the installer registers watchly://).
+        var incoming = e.Args.FirstOrDefault(Opens);
         // A Watchly already open takes it: a second one would fight it for the torrent ports.
         single = new Mutex(true, Pipe, out var first);
         if (!first && incoming is not null && Forward(incoming))
@@ -71,6 +72,11 @@ public partial class App : Application
         };
         window.Show();
     }
+
+    /// <summary>What Watchly opens from outside: a magnet or .torrent, an addon's stremio:// link, a watch party invite.</summary>
+    static bool Opens(string a) => TitleText.IsTorrentSource(a)
+        || a.StartsWith("stremio://", StringComparison.OrdinalIgnoreCase)
+        || a.StartsWith("watchly://party", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>One per Windows account: the pipe's name, and the mutex that says a Watchly is open.</summary>
     static readonly string Pipe = $"Watchly-{Environment.UserName}";
@@ -108,7 +114,7 @@ public partial class App : Application
                 using var reader = new StreamReader(server);
                 var link = (await reader.ReadToEndAsync()).Trim();
                 // Only what the command line could have brought: nothing else is acted on.
-                if (link.Length > 0 && link.Length < 8192 && (TitleText.IsTorrentSource(link) || link.StartsWith("stremio://", StringComparison.OrdinalIgnoreCase)))
+                if (link.Length > 0 && link.Length < 8192 && Opens(link))
                     _ = window.Dispatcher.BeginInvoke(() => window.Incoming(link));
             }
             catch (Exception e)

@@ -632,6 +632,9 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
                         Entry(L.drawable.lucide_ic_play, "Playback", "Player, languages and subtitles", "vlc media3 skip intro audio") { page = "Playback" },
                         Entry(L.drawable.lucide_ic_download, "Downloads", "Network, order and storage", "wi-fi sd card battery") { page = "Downloads" },
                     ),
+                    if (com.torrentviewer.core.Party.available) listOf(
+                        Entry(L.drawable.lucide_ic_popcorn, "Watch party", "Your name, guests' requests and waiting", "together friends group sync invite") { page = "Watch party" },
+                    ) else null,
                     listOf(
                         Entry(L.drawable.lucide_ic_link, "Integrations", "Simkl and MDBList", "tracking watched sync") { page = "Integrations" },
                         Entry(L.drawable.lucide_ic_key, "Services", "SubDL and TorBox keys", "subtitles api") { page = "Services" },
@@ -820,6 +823,61 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
                 Chip("Yellow", style.yellow, onClick = { set(settings.copy(subtitles = style.copy(yellow = true))) })
                 Chip("Box behind", style.box, onClick = { set(settings.copy(subtitles = style.copy(box = !style.box))) })
             }
+        }
+        }
+
+        if (page == "Watch party") Panel {
+        Text(
+            "Start one with the people button at the top of the player, and send the link. Everyone streams the film on their own device; only play, pause and the spot are shared, encrypted, with no account.",
+            Modifier.padding(bottom = 18.dp),
+            style = Type.meta.copy(color = Ink.faint),
+        )
+
+        Section("Watch party", "Off, the player has no party button and invite links are turned away. Turning it off leaves any party you're in.") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Chip("On", settings.partyOn, onClick = { set(settings.copy(partyOn = true)) })
+                Chip("Off", !settings.partyOn, onClick = {
+                    set(settings.copy(partyOn = false))
+                    com.torrentviewer.core.Party.leave()
+                    com.torrentviewer.core.Party.last = null
+                })
+            }
+        }
+        if (settings.partyOn) {
+
+        Section("Your name", "What the others see when you join or ask for something. Left blank, it is the profile's name, ${me.name}.") {
+            Field(settings.partyName, { set(settings.copy(partyName = it.take(com.torrentviewer.core.PARTY_NAME_MAX))) }, me.name, Modifier.fillMaxWidth(), action = androidx.compose.ui.text.input.ImeAction.Done)
+        }
+
+        Section("Guests' requests", "When you lead a party and a guest asks to pause, play or jump. Ignored, their buttons tell them only you control it.") {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("ask" to "Ask me", "allow" to "Allow at once", "off" to "Ignore").forEach { (v, label) ->
+                    Chip(label, settings.partyAsks == v, onClick = { set(settings.copy(partyAsks = v)) })
+                }
+            }
+        }
+
+        Section("Wait for slow connections", "When you lead, the film pauses for anyone whose stream stops to load and plays on when they are through — for this long at most. Go on, on the banner, stops waiting at any time.") {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                com.torrentviewer.core.PARTY_WAITS.forEach { s ->
+                    Chip(if (s == 0) "Don't wait" else if (s < 60) "$s s" else "${s / 60} min", settings.partyWaitSec == s, onClick = { set(settings.copy(partyWaitSec = s)) })
+                }
+            }
+        }
+
+        Section("On the picture", "What shows over the film while the party panel is shut. Off, chat still collects in the panel — a dot on the party button says there is something new.") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Chip("Chat messages", settings.partyShowChat, onClick = { set(settings.copy(partyShowChat = !settings.partyShowChat)) })
+                Chip("Reactions", settings.partyShowReactions, onClick = { set(settings.copy(partyShowReactions = !settings.partyShowReactions)) })
+            }
+        }
+
+        Section("Smooth catch-up", "As a guest, a small gap to the leader closes by playing up to 8% faster or slower, which you won't hear. Off, the player jumps to the leader instead.") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Chip("On", settings.partySmooth, onClick = { set(settings.copy(partySmooth = true)) })
+                Chip("Off", !settings.partySmooth, onClick = { set(settings.copy(partySmooth = false)) })
+            }
+        }
         }
         }
 

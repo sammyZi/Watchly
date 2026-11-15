@@ -61,8 +61,11 @@
     <SimklClientId>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(SubdlEnv)')), 'SIMKL_CLIENT_ID=(\S+)').Groups[1].Value)</SimklClientId>
     <MdblistClientId>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(SubdlEnv)')), 'MDBLIST_CLIENT_ID=(\S+)').Groups[1].Value)</MdblistClientId>
     <TmdbKey>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(SubdlEnv)')), 'TMDB_KEY=(\S+)').Groups[1].Value)</TmdbKey>
+    <!-- The watch party relay (party/, a Cloudflare Worker); blank hides the feature. -->
+    <PartyUrl>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(SubdlEnv)')), 'PARTY_URL=(\S+)').Groups[1].Value)</PartyUrl>
   </PropertyGroup>
   <ItemGroup>
+    <AssemblyMetadata Include="PartyUrl" Value="$(PartyUrl)" />
     <AssemblyMetadata Include="SubdlKey" Value="$(SubdlKey)" />
     <AssemblyMetadata Include="SimklClientId" Value="$(SimklClientId)" />
     <AssemblyMetadata Include="MdblistClientId" Value="$(MdblistClientId)" />
@@ -74,6 +77,8 @@
     <!-- Noto Sans is under the SIL Open Font License, which travels with the fonts. -->
     <Resource Include="Assets\Fonts\OFL.txt" />
     <Resource Include="Assets\app.ico" />
+    <!-- The watch party's reactions in colour: WPF draws emoji fonts in black and white. Fluent Emoji, MIT (Assets\Reactions\LICENSE). -->
+    <Resource Include="Assets\Reactions\*.png" />
     <!-- The profile faces, drawn from the same file as the phone's and the TV's. -->
     <EmbeddedResource Include="..\..\tv\core\src\main\resources\avatars.json" LogicalName="avatars.json" />
     <EmbeddedResource Include="..\..\tv\core\src\main\resources\watch-orders.json" LogicalName="watch-orders.json" />

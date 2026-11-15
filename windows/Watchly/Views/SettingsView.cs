@@ -80,6 +80,8 @@ public sealed class SettingsView : UserControl
         {
             new("radio", "Streaming", "Trackers and how the cache works", "magnet storage", () => Go("Streaming")),
             new("play", "Playback", "Skip intros", "player", () => Go("Playback")),
+            // ponytail: shown whether or not this build has the relay; the page says when it hasn't.
+            new("users", "Watch party", "Join one, and how yours runs", "together friends group sync invite", () => Go("Watch party")),
             new("download", "Downloads", "Folder, speed limits and seeding", "upload", () => Go("Downloads")),
         });
         groups.Add(new()
@@ -179,6 +181,7 @@ public sealed class SettingsView : UserControl
                     Row("Skip intros automatically", "Where an episode's intro is known, jump past it instead of showing the Skip intro button. Once per episode — seek back to watch it.",
                         Toggle(S.AutoSkipIntro, v => Set(S with { AutoSkipIntro = v })))));
                 break;
+            case "Watch party": PartyPage(); break;
             case "Downloads": DownloadsPage(); break;
             case "Integrations": Integrations(); break;
             case "Services":
@@ -190,6 +193,75 @@ public sealed class SettingsView : UserControl
             case "Privacy policy": page.Children.Add(AgreementView.Sections(Legal.Privacy)); break;
             case "Terms and conditions": page.Children.Add(AgreementView.Sections(Legal.Terms)); break;
         }
+    }
+
+    /// <summary>Joining a party by its link, and how one led from here runs — the phone's and TV's settings.</summary>
+    void PartyPage()
+    {
+        if (!Party.Enabled)
+        {
+            page.Children.Add(Note("Not in this build", "This copy of Watchly was built without the watch party relay."));
+            return;
+        }
+        page.Children.Add(Note("How it works",
+            "Start one with Watch party in the player, and send the link it copies. Everyone streams the film on their own device — phone, TV or PC; " +
+            "only play, pause and the spot are shared, encrypted, with no account."));
+        page.Children.Add(Group("Watch party",
+            Row("Watch parties", "Off, the player has no party button and invite links are turned away. Turning it off leaves any party you're in.",
+                Toggle(S.PartyOn, v =>
+                {
+                    Set(S with { PartyOn = v });
+                    if (!v)
+                    {
+                        Party.Leave();
+                        Party.Forget();
+                    }
+                }))));
+        if (!S.PartyOn) return;
+
+        var link = new TextBox { Style = (Style)FindResource("Field"), MinWidth = 320 };
+        void JoinNow()
+        {
+            if (Party.Join(link.Text) is null) shell.Toast("That isn't a whole watch party link — copy all of it.", true);
+            else shell.Toast("Joining the watch party…");
+        }
+        link.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) JoinNow(); };
+        var join = Ui.Button(Ui.Text("Join", "Label", "Text", 14, FontWeights.SemiBold), JoinNow, "Pill");
+        page.Children.Add(Group("Join a party", Party.Room is { } now
+            ? Row(now.Leader ? "You're leading a party" : "You're in a party", "Leave it from Watch party in the player.")
+            : new StackPanel { Children = { Row("Paste the link someone sent you", "Watchly shows what it would play and asks before it starts."), new StackPanel { Orientation = Orientation.Horizontal, Children = { link, join } } } }));
+
+        var name = new TextBox { Style = (Style)FindResource("Field"), MinWidth = 320, Text = S.PartyName, MaxLength = 24 };
+        void SaveName() { if (name.Text.Trim() != S.PartyName) Set(S with { PartyName = name.Text.Trim() }); }
+        name.LostFocus += (_, _) => SaveName();
+        name.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) SaveName(); };
+        page.Children.Add(Group("Your name", new StackPanel { Children = { Row("What the others see", $"Left blank, it is the profile's name{(shell.Who is { } who ? $", {who.Name}" : "")}."), name } }));
+
+        page.Children.Add(Group("When you lead",
+            new StackPanel
+            {
+                Children =
+                {
+                    ChoiceRow("Guests' requests", "When a guest asks to pause, play or jump.",
+                        new[] { ("ask", "Ask me"), ("allow", "Allow at once"), ("off", "Ignore") }, S.PartyAsks, v => Set(S with { PartyAsks = v })),
+                    ChoiceRow("Wait for slow connections", "The film pauses for anyone whose stream stops to load, for this long at most.",
+                        new[] { ("0", "Don't wait"), ("30", "30 s"), ("60", "1 min"), ("120", "2 min") }, S.PartyWaitSec.ToString(), v => Set(S with { PartyWaitSec = int.Parse(v) })),
+                },
+            }));
+
+        page.Children.Add(Group("When you watch",
+            new StackPanel
+            {
+                Children =
+                {
+                    Row("Smooth catch-up", "A small gap to the leader closes by playing up to 8% faster or slower. Off, the player jumps instead.",
+                        Toggle(S.PartySmooth, v => Set(S with { PartySmooth = v }))),
+                    Row("Chat messages on the picture", "A new message shows over the film for a moment while the party panel is shut.",
+                        Toggle(S.PartyShowChat, v => Set(S with { PartyShowChat = v }))),
+                    Row("Reactions on the picture", "Reactions float up over the film.",
+                        Toggle(S.PartyShowReactions, v => Set(S with { PartyShowReactions = v }))),
+                },
+            }));
     }
 
     /// <summary>Waiting on a tracking account's approval: the code, and how to stop waiting.</summary>

@@ -166,6 +166,8 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     // After the terms: nothing is asked of GitHub until they are accepted.
     val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
     LaunchedEffect(Unit) { Updates.check(appContext, BuildConfig.VERSION_NAME, "Watchly-tv-", BuildConfig.DEBUG) }
+    // Subtitles from OpenSubtitles out of the box, through Stremio's addon.
+    LaunchedEffect(Unit) { Addons.seedSubtitles() }
 
     val profiles by Profiles.list.collectAsState()
     var who by remember { mutableStateOf<Profile?>(null) }
@@ -189,6 +191,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     fun enter(profile: Profile) {
         // Before anything is read: every store call below goes through this profile.
         Kv.useProfile(profile.id, profile.isGuest)
+        Party.profileName = profile.name
         com.torrentviewer.core.SettingsStore.load()
         History.load()
         SavedStore.load()
@@ -272,6 +275,31 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
             onRemoved = { if (who?.id == it.id) who = null },
         )
         return
+    }
+
+    // A guest opens whatever the party's leader plays — once the viewer has said yes to the party —
+    // and again when the leader moves on to the next episode or another film.
+    val room = Party.room
+    var joinOffer by remember { mutableStateOf<PartyState?>(null) }
+    LaunchedEffect(room, room?.accepted) {
+        if (room == null || room.leader) return@LaunchedEffect
+        var opened: String? = null
+        launch {
+            room.ended.collect {
+                Party.leave(ended = true)
+                joinOffer = null
+                watch.notes.tryEmit("The watch party has ended — Rejoin is in Settings → Watch party.")
+            }
+        }
+        room.states.collect { s ->
+            if (!room.accepted) {
+                joinOffer = s
+                return@collect
+            }
+            if (s.media.file == opened) return@collect
+            opened = s.media.file
+            watch.openParty(s)
+        }
     }
 
     if (watch.phase == Phase.PLAYING) {
@@ -363,6 +391,31 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
                 empty = "This torrent holds no video.",
                 onPick = { watch.pick(item, meta, it) },
                 onDismiss = { watch.choose = null },
+            )
+        }
+
+        // What an invite would play, shown and asked about before anything starts.
+        joinOffer?.let { s ->
+            val r = Party.room
+            if (r == null || r.leader) {
+                joinOffer = null
+                return@let
+            }
+            Sheet(
+                title = "Join ${s.by.ifBlank { "this" }}'s watch party?",
+                options = listOf(
+                    Option(true, "Join and watch ${s.media.title}", "${maxOf(r.people, r.members.size)} watching · ${if (s.playing) "playing" else "paused"} at ${clock(s.pos)}"),
+                    Option(false, "Not now"),
+                ),
+                selected = null,
+                onPick = { yes ->
+                    joinOffer = null
+                    if (yes) r.accepted = true else Party.leave()
+                },
+                onDismiss = {
+                    joinOffer = null
+                    Party.leave()
+                },
             )
         }
     }

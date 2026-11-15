@@ -304,6 +304,20 @@ public sealed record AppSettings
     public string SubSize { get; init; } = "normal";
     /// <summary>The language Find subtitles looks in: a <see cref="Lang"/> code.</summary>
     public string SubLang { get; init; } = "EN";
+    /// <summary>Watch parties at all: off, no party button in the player and invite links are turned away.</summary>
+    public bool PartyOn { get; init; } = true;
+    /// <summary>What a watch party shows this PC as; blank is the profile's name.</summary>
+    public string PartyName { get; init; } = "";
+    /// <summary>Leading a party, a guest's pause, play or jump is: ask (Allow / No), allow (at once) or off (ignored).</summary>
+    public string PartyAsks { get; init; } = "ask";
+    /// <summary>Leading a party, the longest the film is held for someone loading, seconds; 0 never holds it.</summary>
+    // A name of its own when saved: under the old one every PC had stored 60 s, the first default — now Don't wait.
+    [System.Text.Json.Serialization.JsonPropertyName("PartyHoldSec")]
+    public int PartyWaitSec { get; init; }
+    /// <summary>As a guest, close a small gap by playing a touch faster or slower; off, only ever jump.</summary>
+    public bool PartySmooth { get; init; } = true;
+    public bool PartyShowChat { get; init; } = true;
+    public bool PartyShowReactions { get; init; } = true;
     const string Key = "settings";
 
     /// <summary>libVLC's freetype-rel-fontsize per size — a fraction of the picture's height, so smaller is bigger.</summary>

@@ -193,6 +193,21 @@ object Addons {
         return fresh.size
     }
 
+    /** Stremio's own subtitles addon: Find subtitles gets OpenSubtitles without anyone having to add it. */
+    const val SUBTITLES_DEFAULT = "https://opensubtitles-v3.strem.io"
+    private const val SEEDED = "seeded-subtitles-addon"
+
+    /**
+     * Once per device: [SUBTITLES_DEFAULT] added, unless something here serves subtitles already.
+     * Marked done only once it is in (or not needed), so a first launch offline tries again next time;
+     * removed afterwards, it stays removed.
+     */
+    suspend fun seedSubtitles() {
+        if (Kv.global(SEEDED) != null) return
+        if (_list.value.none { a -> a.resources.any { it.name == "subtitles" } }) runCatching { add(SUBTITLES_DEFAULT) }.getOrElse { return }
+        Kv.setGlobal(SEEDED, "1")
+    }
+
     fun toggle(url: String) = save(_list.value.map { if (it.url == url) it.copy(on = !it.on) else it })
 
     /** Gone here — and from the Stremio account too, as every change is ([save]), so an import won't bring it back. */

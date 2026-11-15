@@ -29,6 +29,8 @@ android {
         buildConfigField("String", "SIMKL_CLIENT_ID", "\"${env("SIMKL_CLIENT_ID")}\"")
         buildConfigField("String", "MDBLIST_CLIENT_ID", "\"${env("MDBLIST_CLIENT_ID")}\"")
         buildConfigField("String", "TMDB_KEY", "\"${env("TMDB_KEY")}\"")
+        // The watch party relay (party/, a Cloudflare Worker); blank hides the feature.
+        buildConfigField("String", "PARTY_URL", "\"${env("PARTY_URL")}\"")
         buildConfigField("long", "BUILD_TIME", "${System.currentTimeMillis()}L")
         manifestPlaceholders["appLabel"] = "Watchly"
     }

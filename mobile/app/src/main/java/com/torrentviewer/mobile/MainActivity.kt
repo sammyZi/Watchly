@@ -23,6 +23,7 @@ import com.torrentviewer.core.Profiles
 import com.torrentviewer.core.SettingsStore
 import com.torrentviewer.core.TorrentStream
 import com.torrentviewer.core.Watch
+import com.torrentviewer.core.openParty
 import com.torrentviewer.core.preferHighRefreshRate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -42,14 +43,18 @@ object Services {
         com.torrentviewer.core.Simkl.clientId = BuildConfig.SIMKL_CLIENT_ID
         com.torrentviewer.core.Mdblist.clientId = BuildConfig.MDBLIST_CLIENT_ID
         com.torrentviewer.core.Tmdb.key = BuildConfig.TMDB_KEY
+        com.torrentviewer.core.Party.server = BuildConfig.PARTY_URL
         // 6882: the TV (6881) and the Windows app (51413) may share the router.
         // lan: the stream is also served to the network, for a Cast receiver to fetch.
         engine = TorrentStream(context.applicationContext, port = 6882, lan = true)
         // Readable over adb (Android/data/<app>/files/engine.log): this phone keeps app logs out of logcat.
         engine.logFile = context.getExternalFilesDir(null)?.let { java.io.File(it, "engine.log") }
+        com.torrentviewer.core.Party.log = { engine.note("party: $it") }
         // DHT bootstrapped while the viewer browses, not after they press Play.
         AppScope.launch(Dispatchers.IO) { engine.warmUp() }
         watch = Watch(engine)
+        // A leader's Reopen puts its film back on, unless something is playing already.
+        com.torrentviewer.core.Party.reopen = { m -> if (watch.phase == com.torrentviewer.core.Phase.IDLE) with(watch) { openParty(m) } }
         Downloads.init(context)
         EpisodeAlerts.schedule(context.applicationContext)
     }

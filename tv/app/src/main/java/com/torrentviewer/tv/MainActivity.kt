@@ -29,12 +29,16 @@ object Services {
         com.torrentviewer.core.Simkl.clientId = BuildConfig.SIMKL_CLIENT_ID
         com.torrentviewer.core.Mdblist.clientId = BuildConfig.MDBLIST_CLIENT_ID
         com.torrentviewer.core.Tmdb.key = BuildConfig.TMDB_KEY
+        com.torrentviewer.core.Party.server = BuildConfig.PARTY_URL
         com.torrentviewer.core.ArtFadeMs = 0
         // Pictures are decoded two at a time, not four: a television has four slow cores, and a row
         // coming on screen took all of them just as the page needed one to move and one to draw.
         coil3.SingletonImageLoader.setSafe { coil3.ImageLoader.Builder(it).bitmapFactoryMaxParallelism(2).build() }
         engine = TorrentStream(context.applicationContext)
+        com.torrentviewer.core.Party.log = { engine.note("party: $it") }
         watch = Watch(engine)
+        // A leader's Reopen puts its film back on, unless something is playing already.
+        com.torrentviewer.core.Party.reopen = { m -> if (watch.phase == com.torrentviewer.core.Phase.IDLE) watch.openParty(m) }
     }
 }
 

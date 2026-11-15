@@ -171,7 +171,25 @@ data class Settings(
     val autoSkipIntro: Boolean = false,
     /** A notification when a followed series has a new episode out — the phone's. */
     val episodeAlerts: Boolean = true,
+    /** Watch parties at all: off, no party button in the player and invite links are turned away. */
+    val partyOn: Boolean = true,
+    /** What a watch party shows this device as; blank is the profile's name. */
+    val partyName: String = "",
+    /** Leading a party, a guest's pause, play or jump is: "ask" (Allow / No), "allow" (at once) or "off" (ignored). */
+    val partyAsks: String = "ask",
+    /** Leading a party, the longest the film is held for someone loading, seconds; 0 never holds it. */
+    val partyWaitSec: Int = 0,
+    /** As a guest, close a small gap by playing a touch faster or slower; off, only ever jump. */
+    val partySmooth: Boolean = true,
+    /** A new chat line shows over the picture for a moment while the party panel is shut. */
+    val partyShowChat: Boolean = true,
+    /** Reactions float up over the picture. */
+    val partyShowReactions: Boolean = true,
 )
+
+val PARTY_ASKS = listOf("ask", "allow", "off")
+const val PARTY_NAME_MAX = 24
+val PARTY_WAITS = listOf(0, 30, 60, 120)
 
 /** Subtitle text; [size] is one of [SUB_SIZES]' keys. The Expo build's names and values. */
 data class SubtitleStyle(val size: String = "normal", val yellow: Boolean = false, val box: Boolean = false)
@@ -234,6 +252,14 @@ object SettingsStore {
         themeMode = o.optString("themeMode").takeIf { it == "light" || it == "dark" } ?: "system",
         autoSkipIntro = o.optBoolean("autoSkipIntro", false),
         episodeAlerts = o.optBoolean("episodeAlerts", true),
+        partyOn = o.optBoolean("partyOn", true),
+        partyName = o.optString("partyName", "").trim().take(PARTY_NAME_MAX),
+        partyAsks = o.optString("partyAsks").takeIf { it in PARTY_ASKS } ?: "ask",
+        // A key of its own: under the old one every device had saved 60 s, the first default — now Don't wait.
+        partyWaitSec = o.optInt("partyHoldSec", 0).takeIf { it in PARTY_WAITS } ?: 0,
+        partySmooth = o.optBoolean("partySmooth", true),
+        partyShowChat = o.optBoolean("partyShowChat", true),
+        partyShowReactions = o.optBoolean("partyShowReactions", true),
     )
 
     /** Over what is stored, not instead of it: the TV and the phone each keep fields the other never reads. */
@@ -245,6 +271,8 @@ object SettingsStore {
             .put("subLang", next.subLang).put("audioLang", next.audioLang)
             .put("subSize", next.subtitles.size).put("subColor", if (next.subtitles.yellow) "yellow" else "white").put("subBackground", next.subtitles.box)
             .put("playbackRate", next.playbackRate.toDouble()).put("playerScale", next.playerScale).put("streamWholeFile", next.wholeFile).put("themeMode", next.themeMode).put("autoSkipIntro", next.autoSkipIntro).put("episodeAlerts", next.episodeAlerts)
+            .put("partyOn", next.partyOn).put("partyName", next.partyName).put("partyAsks", next.partyAsks).put("partyHoldSec", next.partyWaitSec).put("partySmooth", next.partySmooth)
+            .put("partyShowChat", next.partyShowChat).put("partyShowReactions", next.partyShowReactions)
         Kv.setGlobal("settings", o.toString())
         Kv.set(GENRES_KEY, JSONArray(next.genres).toString())
     }

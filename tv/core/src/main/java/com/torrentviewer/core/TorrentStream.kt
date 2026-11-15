@@ -301,6 +301,8 @@ class TorrentStream(
     private var info: TorrentInfo? = null
     private var handle: TorrentHandle? = null
     private var infoHashHex: String? = null
+    /** The open torrent's, for a watch party's magnet. */
+    val infoHash get() = infoHashHex
     private var fileIndex = -1
     private var firstPiece = 0
     private var lastPiece = 0

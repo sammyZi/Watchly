@@ -59,6 +59,12 @@ Root: HKA; Subkey: "Software\Classes\stremio"; ValueType: string; ValueName: "UR
 Root: HKA; Subkey: "Software\Classes\stremio\DefaultIcon"; ValueType: string; ValueData: """{app}\Watchly.exe"",0"; Tasks: stremiolinks
 Root: HKA; Subkey: "Software\Classes\stremio\shell\open\command"; ValueType: string; ValueData: """{app}\Watchly.exe"" ""%1"""; Tasks: stremiolinks
 
+; Watch party invites: the relay's join page hands its link on as watchly://party/…, which is ours alone.
+Root: HKA; Subkey: "Software\Classes\watchly"; ValueType: string; ValueData: "URL:Watchly link"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\watchly"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKA; Subkey: "Software\Classes\watchly\DefaultIcon"; ValueType: string; ValueData: """{app}\Watchly.exe"",0"
+Root: HKA; Subkey: "Software\Classes\watchly\shell\open\command"; ValueType: string; ValueData: """{app}\Watchly.exe"" ""%1"""
+
 [Files]
 Source: "..\dist\Watchly.exe"; DestDir: "{app}"; Flags: ignoreversion
 
