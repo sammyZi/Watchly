@@ -68,7 +68,8 @@ val PARTY_REACTIONS = listOf("😂", "😮", "😱", "❤️", "👏", "🔥")
  *    until it is back (unnoticeable); off by more than [SKIP_SECONDS], it jumps.
  *  - Everyone waits for the slowest: a phone stuck loading for [STUCK_MS] says so, and the leader
  *    holds the film until it is through — or until the leader goes on without it (Settings say how long at most).
- *  - A guest's own pause or jump is only asked of the leader.
+ *  - A guest's own pause or jump is theirs alone (Catch up rejoins), or asked of the leader.
+ *  - A guest may play a release of their own ([Room.ownSource]): followed by the imdb id, not the file.
  */
 object Party {
     /** The Worker's address (https://…workers.dev); blank turns the feature off. */

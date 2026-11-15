@@ -38,7 +38,8 @@ Put a free [subdl.com](https://subdl.com) key in `mobile/.env`
 (`SUBDL_KEY=…`; the Expo name `EXPO_PUBLIC_SUBDL_KEY` works too) for online
 subtitle search, and a free [TMDB](https://www.themoviedb.org) key (`TMDB_KEY=…`)
 for suggestions, age ratings, cast pages and film collections; they go into
-`BuildConfig` and never into git. Without them those features are left out, and
+`BuildConfig` and never into git. `PARTY_URL=…` is the watch party relay (see
+[docs/watch-party.md](../docs/watch-party.md#running-your-own-relay)). Without them those features are left out, and
 everything else needs no key.
 
 - **Release** is `com.torrentviewer.app`, signed with the Expo build's debug
@@ -118,6 +119,13 @@ Media3 first, with libVLC taking over by itself for a file Media3 cannot play.
 or Cast TV: the engine serves it to the network as well as to itself, the
 default media receiver plays it, and the phone becomes the remote. Ending the
 session picks the film up on the phone where the TV left it.
+
+**Watch party.** The player's party button opens a room and shares its link; anyone with it
+joins from a phone, TV or PC, on the leader's torrent or a release of their own. The leader's
+play, pause, jumps and speed reach everyone; a guest's own pause is just theirs or asked of the
+leader. Chat, reactions, who's there and who's loading are in the party panel, with Rejoin after
+leaving. Links open in a join screen laid out like the title page (`PartyJoin.kt`). The shared
+logic is `tv/core`'s `Party.kt` and `PartyDriver.kt`; see [docs/watch-party.md](../docs/watch-party.md).
 
 **TorBox.** Paste a [torbox.app](https://torbox.app) API key in Settings and
 streams TorBox already has cached say **Instant** in the sources list and play

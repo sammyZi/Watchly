@@ -1,8 +1,8 @@
 <h1 align="center">Watchly</h1>
 
 <p align="center">
-  <b>A beautiful media player for Android phones, Android TV and Windows.</b><br>
-  Bring your own sources — Stremio-compatible addons, a debrid service, or your own media server — and your Stremio account comes along.
+  <b>One player for your phone, TV and PC.</b><br>
+  Your addons, your account, your friends — all in step.
 </p>
 
 <p align="center">
@@ -37,6 +37,11 @@
     <td valign="top">✨ <b>Picked for you</b><br>Suggestions from what you actually played, each saying why, and never what you've already seen.</td>
     <td valign="top">🏆 <b>Top on IMDb</b><br>Ranked charts of films and series in your genres, IMDb ratings on every poster, and filters from 7+ to 9+.</td>
     <td valign="top">🧭 <b>Watch orders</b><br>Franchises film by film, in release or story order, with what's up next.</td>
+  </tr>
+  <tr>
+    <td valign="top">🎉 <b>Watch party</b><br>Watch together across phones, TVs and PCs anywhere, kept in step. Share a link — no account, end-to-end encrypted.</td>
+    <td valign="top">💬 <b>Chat and reactions</b><br>Talk and react over the film, see who's watching and who's still loading, and ask the host to pause.</td>
+    <td valign="top">🎚️ <b>Your own copy</b><br>Join with the host's source, or pick your own release of the same film. It stays in step either way.</td>
   </tr>
 </table>
 
@@ -102,6 +107,13 @@ when Android asks.
 2. **Sign in to Stremio** (or skip). You approve on Stremio's own page; your library, Continue Watching and addons come with you.
 3. No Stremio account? Open the **Addons** tab and paste an addon's link, or tap **Install** on an addon's site and choose Watchly.
 4. On the TV, **Settings → Addons → Copy addons from phone** brings every addon over with one QR scan.
+5. Subtitles work from the start: the OpenSubtitles addon is added for you.
+
+### 🎉 Watch party
+
+Start a film and press the player's **party** button, then send the link. Friends open it on a phone,
+TV or PC, see what's on, and choose **Join the party**, or **Pick my own source** for a release that
+suits their connection. More in [docs/watch-party.md](docs/watch-party.md).
 
 <a name="the-apps"></a>
 <h2><img src="https://img.shields.io/badge/The_apps-3ECF8E?style=for-the-badge" alt="The apps" height="34"></h2>
@@ -113,6 +125,7 @@ Three apps, each with its own README:
 | 📱 Phone (Android) | [`mobile/`](mobile/README.md) | Kotlin + Compose on `tv/core`; Media3 / libVLC |
 | 📺 Television (Android TV) | [`tv/`](tv/README.md) | Kotlin + Compose; Media3 / libVLC |
 | 🪟 Windows desktop | [`windows/`](windows/README.md) | LibVLCSharp (.NET 8, WPF) |
+| 🎉 Watch party relay | [`party/`](docs/watch-party.md#running-your-own-relay) | Cloudflare Worker + Durable Objects |
 
 The phone and the TV share one Gradle module, `tv/core`: the addon client, the
 Stremio account sync, the players, metadata, the store and the look.
@@ -125,12 +138,14 @@ cd mobile && ./gradlew compileDebugKotlin
 cd tv && ./gradlew compileDebugKotlin testDebugUnitTest
 ```
 
-[`docs/`](docs/rolling-cache-architecture.md) describes how streams reach the
-player, and the streaming engine and cache the apps share.
+[`docs/rolling-cache-architecture.md`](docs/rolling-cache-architecture.md) describes how streams reach the
+player, and the streaming engine and cache the apps share. [`docs/watch-party.md`](docs/watch-party.md)
+covers the watch party: the relay, encryption, the shared clock and how guests keep in step.
 
 Optional keys go in `mobile/.env`, which stays out of git: `TMDB_KEY` for
-suggestions, age ratings, cast pages and film collections, and `SUBDL_KEY` for
-online subtitles. Without them those features are simply left out.
+suggestions, age ratings, cast pages and film collections, `SUBDL_KEY` for
+online subtitles, and `PARTY_URL` for the watch party relay. Without them those
+features are simply left out. The TV and Windows builds read the same file.
 
 <a name="built-on"></a>
 <h2><img src="https://img.shields.io/badge/Built_on-A855F7?style=for-the-badge" alt="Built on" height="34"></h2>
@@ -143,7 +158,8 @@ online subtitles. Without them those features are simply left out.
 | 🎨 Look | [Jetpack Compose](https://developer.android.com/jetpack/compose) · [Coil](https://github.com/coil-kt/coil) · [Lucide](https://lucide.dev) icons |
 | 🗂️ Titles &amp; art | [Cinemeta](https://v3-cinemeta.strem.io), Stremio's public catalogue · [TVmaze](https://www.tvmaze.com) episode stills · [TMDB](https://www.themoviedb.org) suggestions, cast, age ratings and collections |
 | ⏭️ Intros | [IntroDB](https://introdb.app) · [TheIntroDB](https://theintrodb.org) |
-| 💬 Subtitles | Subtitle addons you add · [SubDL](https://subdl.com) with your own free key |
+| 💬 Subtitles | The [OpenSubtitles](https://www.opensubtitles.org) addon, added by default · subtitle addons you add · [SubDL](https://subdl.com) with your own free key |
+| 🎉 Watch party | [Cloudflare Workers](https://workers.cloudflare.com) and Durable Objects relay messages it can't read · [Fluent Emoji](https://github.com/microsoft/fluentui-emoji) reactions on Windows |
 | 🔗 Peer streams | For addons that send them: [libtorrent](https://libtorrent.org) via [libtorrent4j](https://github.com/aldenml/libtorrent4j) on Android · [MonoTorrent](https://github.com/alanmcgovern/monotorrent) on Windows |
 
 Watchly is licensed under the [GPL-3.0](LICENSE). Licenses for all of these are listed in

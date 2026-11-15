@@ -155,6 +155,16 @@ name `src/...` files point there.
   re-applied after a resize. Setting them while the output was still being
   created crashed libVLC natively on some files.
 
+## Watch party
+
+The player's party button starts a room and copies its invite; the panel holds the link, chat,
+reactions (Fluent Emoji, in colour) and who's there. A `watchly://party` link, registered by the
+installer, opens a join screen laid out like the title page: **Join the party** on the leader's
+torrent, or **Pick my own source**. After leaving, a bar offers Rejoin (or Reopen for the leader).
+`Core/Party.cs` and `Core/PartyDriver.cs` are the C# port of the phone's; see
+[the watch party doc](../docs/watch-party.md). The relay's address is `PARTY_URL` in `mobile/.env`,
+baked in at build time. A worktree has no `.env` of its own, so copy it in before building.
+
 ## Incoming connections
 
 Peers can only connect to you through an open port. The engine listens on a

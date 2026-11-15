@@ -17,8 +17,8 @@ build's AsyncStorage database (`RKStorage`) is imported once, so profiles,
 history, My List, recent searches and settings carry over.
 
 "Find subtitles online" asks your subtitle addons; a SubDL key (`SUBDL_KEY=…`) adds SubDL. A TMDB key
-(`TMDB_KEY=…`) adds suggestions, age ratings, cast pages and film collections. Both are read from `tv/.env`,
-then `mobile/.env`, into `BuildConfig` at build time and never committed.
+(`TMDB_KEY=…`) adds suggestions, age ratings, cast pages and film collections, and `PARTY_URL=…` the watch
+party relay. All are read from `tv/.env`, then `mobile/.env`, into `BuildConfig` at build time and never committed.
 
 ## Layout
 
@@ -35,6 +35,7 @@ then `mobile/.env`, into `BuildConfig` at build time and never committed.
 | `ForYou.kt`, `WatchOrders.kt`, `TmdbTitle.kt` | Suggestions, the watch order list, and the TMDB client: ratings, cast, collections. |
 | `Store.kt` | SharedPreferences with the Expo build's keys and JSON; per-profile namespaces; guest in memory only. |
 | `ExoView.kt` | Media3 surface with the FFmpeg audio decoders; `VlcView` takes over when it cannot play a file. |
+| `Party.kt`, `PartyDriver.kt` | The watch party: rooms, encrypted invites, the shared clock, chat, and how a guest keeps in step. See [the watch party doc](../docs/watch-party.md). |
 | `Theme.kt` | Ink palette, type, artwork, title logos, facts row, progress line, hero scrims, avatars. |
 
 `app/` (package `com.torrentviewer.tv`):
@@ -80,6 +81,14 @@ watched, and adds it again holding what is left, read-ahead included, so playbac
 carries on while peers reconnect. Where a hole can't be punched it deletes the file
 and starts over at the playhead, one rebuffer per roll. **Settings → Storage for one
 film** sets the cap (Auto by default: the free space less 1.5 GB).
+
+## Watch party
+
+The player's Party control starts a room or opens its panel: the invite as a QR code, chat,
+reactions and who's there. An invite opened on the TV asks first: join on the leader's torrent,
+pick your own source, or not now. **Settings → Watch party** joins by scanning a QR with the phone,
+rejoins the last party, and holds the name, requests and waiting settings. See
+[the watch party doc](../docs/watch-party.md).
 
 ## Incoming connections
 

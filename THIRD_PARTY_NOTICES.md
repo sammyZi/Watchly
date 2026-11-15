@@ -37,6 +37,7 @@ are at the links.
 | [CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet) | [MIT](https://github.com/CommunityToolkit/dotnet/blob/main/License.md) |
 | [.NET](https://github.com/dotnet/runtime) | [MIT](https://github.com/dotnet/runtime/blob/main/LICENSE.TXT) |
 | [Noto Sans](https://github.com/notofonts/latin-greek-cyrillic) font | [SIL Open Font License 1.1](windows/Watchly/Assets/Fonts/OFL.txt) |
+| [Fluent Emoji](https://github.com/microsoft/fluentui-emoji) watch party reactions | [MIT](windows/Watchly/Assets/Reactions/LICENSE) |
 
 ## Online services
 
@@ -50,3 +51,5 @@ of their content is part of this repository, and it belongs to its respective ow
 | [Wikipedia](https://www.wikipedia.org) | Cast photos (freely licensed images only) |
 | [IntroDB](https://introdb.app), [TheIntroDB](https://theintrodb.org) | Intro timings for Skip intro |
 | [SubDL](https://subdl.com) | Subtitles, with your own key |
+| [OpenSubtitles](https://www.opensubtitles.org) addon (Stremio) | Subtitles, through the addon added by default |
+| [Cloudflare Workers](https://workers.cloudflare.com) | The watch party relay, passing messages it can't read |
