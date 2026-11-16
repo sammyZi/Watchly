@@ -47,6 +47,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -293,9 +294,21 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         var opened: String? = null
         launch {
             room.ended.collect {
+                // Still at the join sheet: it says "closed" itself.
+                if (!room.accepted) return@collect
                 Party.leave(ended = true)
                 joinOffer = null
                 watch.notes.tryEmit("The watch party has ended — Rejoin is in Settings → Watch party.")
+            }
+        }
+        // Rejoined a party that has long closed: nothing to wait for.
+        launch {
+            snapshotFlow { room.over }.collect { over ->
+                if (over && room.accepted && opened == null) {
+                    Party.leave(ended = true)
+                    Party.last = null
+                    watch.notes.tryEmit("That watch party has closed.")
+                }
             }
         }
         room.states.collect { s ->
@@ -402,8 +415,19 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
             )
         }
 
+        // An invite for a party that has ended or has no one in it: say so, rather than wait for ever.
+        Party.room?.takeIf { !it.leader && !it.accepted && it.over }?.let {
+            Sheet(
+                title = "This watch party is closed",
+                options = listOf(Option(true, "Close", "Its host has left, or ended it. Ask them for a new link.")),
+                selected = null,
+                onPick = { Party.leave() },
+                onDismiss = { Party.leave() },
+            )
+        }
+
         // What an invite would play, shown and asked about before anything starts.
-        joinOffer?.let { s ->
+        joinOffer?.takeIf { Party.room?.over != true }?.let { s ->
             val r = Party.room
             if (r == null || r.leader) {
                 joinOffer = null

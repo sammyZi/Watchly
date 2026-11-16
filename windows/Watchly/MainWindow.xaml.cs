@@ -726,6 +726,7 @@ public partial class MainWindow : Window
         {
             old.State -= OnPartyState;
             old.Ended -= OnPartyEnded;
+            old.Changed -= OnFollowedChanged;
         }
         followed = r is { Leader: false } ? r : null;
         // Rejoining: said yes once already, so straight back in, no preview.
@@ -735,6 +736,7 @@ public partial class MainWindow : Window
         if (followed is null) return;
         followed.State += OnPartyState;
         followed.Ended += OnPartyEnded;
+        followed.Changed += OnFollowedChanged;
         if (joinedFollowed) return;
         // Its own screen at once, saying it's connecting, rather than nothing until the host answers.
         joinView = new Views.JoinPartyView(followed, JoinNow, JoinOwn, () => Party.Leave());
@@ -775,7 +777,20 @@ public partial class MainWindow : Window
         if (await Meta.LoadTitle(imdb, s.Media.Kind ?? "movie") is { } title) OpenTitle(title);
     }
 
-    void OnPartyEnded() => Party.Leave(ended: true);
+    // Still at the join screen: it says "closed" itself, and Close leaves.
+    void OnPartyEnded()
+    {
+        if (followed?.Accepted == true) Party.Leave(ended: true);
+    }
+
+    /// <summary>Rejoined a party that has long closed: nothing to wait for.</summary>
+    void OnFollowedChanged()
+    {
+        if (followed is not { Over: true, Accepted: true } || openedFile is not null) return;
+        Party.Leave(ended: true);
+        Party.Forget();
+        Toast("That watch party has closed.");
+    }
 
     Border? rejoinBar;
 

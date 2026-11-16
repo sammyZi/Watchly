@@ -59,6 +59,8 @@ public static class Party
     public const double DeadzoneSeconds = 0.15;
     public const double Nudge = 0.08;
     public const int StuckMs = 2_000;
+    /// <summary>A link opened on a room with no one in it, for this long, is a closed party.</summary>
+    public const int EmptyMs = 6_000;
     public const int GoneMs = 75_000;
     public const int ChatMax = 300;
     public static readonly string[] Reactions = { "😂", "😮", "😱", "❤️", "👏", "🔥" };
@@ -67,9 +69,9 @@ public static class Party
     public static float CatchUpRate(double drift, float rate) =>
         Math.Abs(drift) < DeadzoneSeconds ? rate : (float)(rate * (1 + Math.Clamp(drift / 4, -Nudge, Nudge)));
 
-    public static Room Host()
+    public static Room Host(PartyMedia? film = null)
     {
-        var r = new Room(Hex(RandomNumberGenerator.GetBytes(16)), RandomNumberGenerator.GetBytes(16), leader: true);
+        var r = new Room(Hex(RandomNumberGenerator.GetBytes(16)), RandomNumberGenerator.GetBytes(16), leader: true) { Film = film };
         Enter(r);
         return r;
     }
@@ -119,7 +121,7 @@ public static class Party
     public static void Rejoin()
     {
         if (Last is not { } l) return;
-        var r = new Room(l.Id, Convert.FromHexString(l.Key), l.Leader) { Accepted = true, OwnSource = l.Own };
+        var r = new Room(l.Id, Convert.FromHexString(l.Key), l.Leader) { Accepted = true, OwnSource = l.Own, Film = l.Media };
         Enter(r);
         // A leader's film, open again: a room with nothing on was why Reopen seemed to do nothing.
         if (l.Leader && l.Media is { } m) Reopen(m);
@@ -239,7 +241,19 @@ public sealed class Room
     ClientWebSocket? socket;
     string status = "opening";
 
-    public string Link => $"{Party.Server}/j/{Id}#{Party.Hex(key)}";
+    /// <summary>The invite. A leader's carries the film's imdb id and name after the ?, so a chat app's preview shows its art; the key stays after the #, which no server sees.</summary>
+    public string Link
+    {
+        get
+        {
+            var m = Film ?? LastTold?.Media;
+            var query = m?.Imdb is { } imdb && System.Text.RegularExpressions.Regex.IsMatch(imdb, "^tt[0-9]{1,10}$")
+                ? $"?i={imdb}&t={Uri.EscapeDataString(m.Title.Length > 80 ? m.Title[..80] : m.Title)}" : "";
+            return $"{Party.Server}/j/{Id}{query}#{Party.Hex(key)}";
+        }
+    }
+    /// <summary>Leader: the film the invite is for, from the start — LastTold is only set once the player has said something.</summary>
+    public PartyMedia? Film { get; set; }
     internal string KeyHex => Party.Hex(key);
     /// <summary>A guest who has seen what the party plays and said yes (or is rejoining); a leader's own party is accepted.</summary>
     public bool Accepted { get; set; }
@@ -255,6 +269,12 @@ public sealed class Room
     public int Unread { get; set; }
     /// <summary>Guests: the leader's last word, for whoever starts listening late.</summary>
     public PartyState? LastState { get; private set; }
+    /// <summary>
+    /// Guests: this party is over — its leader ended it, or the link was opened on an empty room (the leader is
+    /// long gone, so no one answers). The join screen says so rather than wait for ever. A leader coming back
+    /// with a film turns it off again.
+    /// </summary>
+    public bool Over { get; private set; }
 
     public event Action<PartyState>? State;
     public event Action<PartyAsk>? Asked;
@@ -310,7 +330,16 @@ public sealed class Room
                 await ws.ConnectAsync(new Uri(Party.Server.Replace("https://", "wss://").Replace("http://", "ws://") + "/room/" + Id), life.Token);
                 socket = ws;
                 Post(() => { Connected = true; Changed?.Invoke(); });
-                if (!Leader) SayHello();
+                if (!Leader)
+                {
+                    SayHello();
+                    // Nobody else in the room, and no word from a leader, after this long: it is closed.
+                    // (A leader's own reconnect is a few seconds; it says where it is every 10.)
+                    _ = Task.Delay(Party.EmptyMs).ContinueWith(_ => Post(() =>
+                    {
+                        if (!life.IsCancellationRequested && ReferenceEquals(socket, ws) && People <= 1 && LastState is null) { Over = true; Changed?.Invoke(); }
+                    }));
+                }
                 _ = Pings(ws);
                 await Receive(ws);
             }
@@ -515,7 +544,7 @@ public sealed class Room
         switch (Party.Text(j, "t"))
         {
             case "state" when !Leader:
-                if (Party.DecodeState(j) is { } s) Post(() => { LastState = s; State?.Invoke(s); });
+                if (Party.DecodeState(j) is { } s) Post(() => { LastState = s; Over = false; State?.Invoke(s); });
                 break;
             case "ask" when Leader:
                 var ask = new PartyAsk(from, Party.Text(j, "what"), Party.Num(j, "pos", 0));
@@ -529,7 +558,7 @@ public sealed class Room
                 Post(() => Stuck?.Invoke(from, on));
                 break;
             case "end" when !Leader:
-                Post(() => Ended?.Invoke());
+                Post(() => { Over = true; Changed?.Invoke(); Ended?.Invoke(); });
                 break;
             case "here":
                 var id = Party.Text(j, "id");

@@ -86,12 +86,23 @@ public sealed class JoinPartyView : Grid
         Children.Clear();
         var s = state;
         var imdb = s?.Media.Imdb;
+        Background = Brushes.Black;
+        // The leader has ended it, or no one is in the room any more: say so, rather than wait for ever.
+        if (room.Over)
+        {
+            var closed = new StackPanel { Width = 460, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            closed.Children.Add(Center(new Controls.Icon { Kind = "users", Size = 44, Foreground = White(0x99) }));
+            closed.Children.Add(Centered(Text("This watch party is closed", 22, Brushes.White, FontWeights.SemiBold), 20));
+            closed.Children.Add(Centered(Text("Its host has left, or ended it. Ask them for a new link.", 13, White(0xb0)), 6));
+            closed.Children.Add(Centered(Pill("Close", cancel, true), 32));
+            Children.Add(closed);
+            return;
+        }
         if (s is not null)
         {
             AsDetail(s, imdb);
             return;
         }
-        Background = Brushes.Black;
         // The film's backdrop behind it all, blurred and darkened, as the player's loading screen has it.
         if (imdb is { Length: > 0 } && ImageUrl.Load($"https://images.metahub.space/background/medium/{imdb}/img", 1280) is { } backdrop)
             Children.Add(new Grid

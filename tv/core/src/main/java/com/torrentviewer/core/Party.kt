@@ -93,6 +93,8 @@ object Party {
     const val NUDGE = 0.08
     /** Loading this long holds the party (for as long as the leader's Settings allow). */
     const val STUCK_MS = 2_000L
+    /** A link opened on a room with no one in it, for this long, is a closed party. */
+    const val EMPTY_MS = 6_000L
 
     /** How fast a guest [drift] seconds behind (negative: ahead) plays at to close the gap, for a leader at [rate]. */
     fun catchUpRate(drift: Double, rate: Float): Float =
@@ -103,7 +105,7 @@ object Party {
     /** …and the viewer hasn't turned it off. */
     val enabled get() = available && SettingsStore.value.value.partyOn
 
-    fun host(): Room = Room(randomHex(16), random(16), leader = true).also(::enter)
+    fun host(film: PartyMedia? = null): Room = Room(randomHex(16), random(16), leader = true).also { it.film = film; enter(it) }
 
     /** From the invite (https://…/j/<id>#<key> or watchly://party/<id>?k=<key>); null if it isn't one. */
     fun join(link: String): Room? {
@@ -138,7 +140,7 @@ object Party {
     fun rejoin() {
         val l = last ?: return
         last = null
-        enter(Room(l.id, hex(l.key), l.leader).also { it.accepted = true; it.ownSource = l.own })
+        enter(Room(l.id, hex(l.key), l.leader).also { it.accepted = true; it.ownSource = l.own; it.film = l.media })
         // A leader's film, open again — the room with nothing on was why Reopen seemed to do nothing.
         if (l.leader) l.media?.let(reopen)
     }
@@ -173,7 +175,18 @@ object Party {
 data class LastParty(val id: String, val key: String, val leader: Boolean, val ended: Boolean, val media: PartyMedia? = null, val own: Boolean = false)
 
 class Room internal constructor(val id: String, private val key: ByteArray, val leader: Boolean) {
-    val link get() = "${Party.server.trimEnd('/')}/j/$id#${hex(key)}"
+    /**
+     * The invite. A leader's carries the film's imdb id and name after the `?`, so a chat app's preview of it
+     * shows the film's art (the page sets it as og:image); the key stays after the `#`, which no server sees.
+     */
+    val link: String get() {
+        val m = film ?: lastTold?.media
+        val imdb = m?.imdb?.takeIf { Regex("tt\\d{1,10}").matches(it) }
+        val query = if (m == null || imdb == null) "" else "?i=$imdb&t=" + java.net.URLEncoder.encode(m.title.take(80), "UTF-8").replace("+", "%20")
+        return "${Party.server.trimEnd('/')}/j/$id$query#${hex(key)}"
+    }
+    /** Leader: the film the invite is for, from the start — [lastTold] is only set once the player has said something. */
+    var film: PartyMedia? = null
     internal val keyHex get() = hex(key)
     /** Everyone in the room, this phone included. */
     var people by mutableIntStateOf(1)
@@ -198,6 +211,13 @@ class Room internal constructor(val id: String, private val key: ByteArray, val 
     val stuck = MutableSharedFlow<Pair<String, Boolean>>(extraBufferCapacity = 16)
     /** Guests: the leader ended it. */
     val ended = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    /**
+     * Guests: this party is over — its leader ended it, or the link was opened on an empty room (the
+     * leader is long gone, so no one answers). The join screen says so rather than wait for ever.
+     * A leader coming back with a film turns it off again.
+     */
+    var over by mutableStateOf(false)
+        private set
     /** Who is here, by a random id per phone (two people may share a name); this phone included. */
     val members = androidx.compose.runtime.mutableStateMapOf<String, Member>()
     val chat = androidx.compose.runtime.mutableStateListOf<ChatLine>()
@@ -246,7 +266,15 @@ class Room internal constructor(val id: String, private val key: ByteArray, val 
                         delay(if (++n < 5) 1000 else 30_000)
                     }
                 }
-                if (!leader) hello()
+                if (!leader) {
+                    hello()
+                    // Nobody else in the room, and no word from a leader, after this long: it is closed.
+                    // (A leader's own reconnect is a few seconds; it says where it is every 10.)
+                    AppScope.launch {
+                        delay(Party.EMPTY_MS)
+                        if (!closed && socket === webSocket && people <= 1 && states.replayCache.isEmpty()) over = true
+                    }
+                }
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) = receive(text)
@@ -382,11 +410,15 @@ class Room internal constructor(val id: String, private val key: ByteArray, val 
                 val last = states.replayCache.lastOrNull()
                 if (last?.media?.file != s.media.file) Party.log("the leader (${s.by}) plays ${s.media.file} — ${s.media.uri.substringBefore("&dn=").take(60)}, ${s.media.uri.split('&').count { it.startsWith("tr=") }} trackers")
                 states.tryEmit(s)
+                AppScope.launch { over = false }
             }
             "ask" -> if (leader) asks.tryEmit(PartyAsk(from, j.optString("what"), j.optDouble("pos", 0.0)))
             "hello" -> if (leader) hellos.tryEmit(from)
             "stuck" -> if (leader) stuck.tryEmit(from to j.optBoolean("on"))
-            "end" -> if (!leader) ended.tryEmit(Unit)
+            "end" -> if (!leader) {
+                ended.tryEmit(Unit)
+                AppScope.launch { over = true }
+            }
             "here" -> {
                 val id = j.optString("id").takeIf { it.isNotEmpty() && it != self } ?: return
                 val status = j.optString("status", "watching")

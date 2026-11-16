@@ -241,6 +241,23 @@ fun JoinPartyScreen(room: Room) {
     val poster = title?.poster ?: s?.media?.poster
     val white = Color.White
     val wide = isWide()
+    // The leader has ended it, or no one is in the room any more: say so, rather than wait for ever.
+    if (room.over) {
+        Box(Modifier.fillMaxSize().background(Color.Black).windowInsetsPadding(WindowInsets.safeDrawing).padding(24.dp), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Lc(L.drawable.lucide_ic_users, tint = white.copy(alpha = 0.6f), size = 44.dp)
+                Text("This watch party is closed", Modifier.padding(top = 20.dp), style = Type.title.copy(color = white, fontWeight = FontWeight.SemiBold), textAlign = TextAlign.Center)
+                Text(
+                    "Its host has left, or ended it. Ask them for a new link.",
+                    Modifier.padding(top = 6.dp).widthIn(max = 320.dp),
+                    style = Type.meta.copy(color = white.copy(alpha = 0.7f)),
+                    textAlign = TextAlign.Center,
+                )
+                Button("Close", { Party.leave() }, Modifier.padding(top = 32.dp).widthIn(min = 200.dp), icon = L.drawable.lucide_ic_x, primary = true)
+            }
+        }
+        return
+    }
     // Once the leader has said what is on: the film's own Detail page, with Join where Play would be.
     if (s != null) {
         JoinAsDetail(room, s, title, people, backdrop, wide)

@@ -67,6 +67,20 @@ class PartyTest {
         assertNull(shareableUri("https://example.com/film.mp4", "Film", null))
     }
 
+    @Test fun theInviteCarriesTheFilmForPreviewsAndKeepsTheKeyAfterTheHash() {
+        Party.server = "https://p.example.dev"
+        val id = "a".repeat(32)
+        val room = Room(id, ByteArray(16) { 1 }, leader = true)
+        assertEquals("https://p.example.dev/j/$id#${"01".repeat(16)}", room.link)
+        room.film = PartyMedia("magnet:?xt=urn:btih:$hash", "f.mkv", "Ten zing", "tt1234567", "movie", null)
+        assertEquals("https://p.example.dev/j/$id?i=tt1234567&t=Ten%20zing#${"01".repeat(16)}", room.link)
+        // Still an invite as far as the apps' parser goes.
+        assertEquals(id to "01".repeat(16), Party.parseInvite(room.link))
+        // A made-up id is left out of the link.
+        room.film = PartyMedia("magnet:?xt=urn:btih:$hash", "f.mkv", "Ten zing", "not-an-id", null, null)
+        assertEquals("https://p.example.dev/j/$id#${"01".repeat(16)}", room.link)
+    }
+
     @Test fun aLongMagnetLosesItsLastTrackersOnly() {
         val long = "magnet:?xt=urn:btih:$hash&dn=Film" + (1..400).joinToString("") { "&tr=udp://tracker$it.example:1337" }
         val fit = fitMagnet(long)

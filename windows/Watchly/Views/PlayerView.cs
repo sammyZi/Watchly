@@ -2146,8 +2146,10 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
         if (more) chrome.Children.Add(MoreSheet());
         if (episodesOpen && series is not null) chrome.Children.Add(EpisodeSheet());
         if (searchingSubs) chrome.Children.Add(SearchSheet());
-        if (partyOpen && Party.Room is not null) chrome.Children.Add(PartySheet());
-        else partyOpen = false;
+        // The party's sheet; with no party, the one offering to start one — unless the party was just left, then it shuts.
+        if (partyOpen && Party.Room is not null) { partyWasRoom = true; chrome.Children.Add(PartySheet()); }
+        else if (partyOpen && !partyWasRoom) chrome.Children.Add(StartPartySheet());
+        else { partyOpen = false; partyWasRoom = false; }
         if (PauseCard)
         {
             pauseCardAt ??= DateTime.UtcNow;

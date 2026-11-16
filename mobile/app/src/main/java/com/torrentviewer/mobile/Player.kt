@@ -671,26 +671,54 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         }
     }
     wp.Effects(partyPlayer, panel == Panel.PARTY)
-
-    fun invite(r: com.torrentviewer.core.Room) {
-        val what = title?.title ?: watch.item?.label ?: "a film"
-        val send = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
-            .putExtra(android.content.Intent.EXTRA_TEXT, "Watch $what with me on Watchly: ${r.link}")
-        runCatching { context.startActivity(android.content.Intent.createChooser(send, "Invite to the watch party")) }
+    // The party gone while its panel was up (the leader ended it): the panel shuts, rather than offer to start another.
+    val hadRoom = remember { booleanArrayOf(false) }
+    LaunchedEffect(room) {
+        if (room == null && hadRoom[0] && panel == Panel.PARTY) panel = null
+        hadRoom[0] = room != null
     }
 
-    fun partyButton() {
-        val r = room
-        if (r != null) {
-            panel = Panel.PARTY
-            return
+    /**
+     * Shares the film's artwork with the link and nothing else: the link as the text, the poster as the picture.
+     * With no art to be had (offline, no poster) it is the link alone.
+     */
+    fun invite(r: com.torrentviewer.core.Room) {
+        val film = r.film ?: watch.partyMedia()
+        val art = film?.poster ?: film?.imdb?.takeIf { it.startsWith("tt") }?.let { "https://images.metahub.space/poster/medium/$it/img" }
+        scope.launch {
+            val uri = art?.let { url ->
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        val file = File(context.cacheDir, "party-art.jpg")
+                        val c = java.net.URL(url).openConnection().apply { connectTimeout = 5000; readTimeout = 5000 }
+                        c.getInputStream().use { i -> file.outputStream().use { o -> i.copyTo(o) } }
+                        androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+                    }.getOrNull()
+                }
+            }
+            val send = android.content.Intent(android.content.Intent.ACTION_SEND).putExtra(android.content.Intent.EXTRA_TEXT, r.link)
+            if (uri != null) {
+                send.setType("image/jpeg").putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                send.clipData = android.content.ClipData.newRawUri("", uri)
+                send.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } else send.setType("text/plain")
+            runCatching { context.startActivity(android.content.Intent.createChooser(send, "Invite to the watch party")) }
         }
-        if (watch.partyMedia() == null) {
+    }
+
+    /** The button opens the panel: with no party yet it offers "Start a watch party", and nothing opens until it is pressed. */
+    fun partyButton() {
+        if (room == null && watch.partyMedia() == null) {
             watch.notes.tryEmit("Only a torrent can be watched together — this one is a file or a plain link.")
             return
         }
-        invite(Party.host())
         panel = Panel.PARTY
+    }
+
+    fun startParty() {
+        val media = watch.partyMedia()
+        if (room != null || media == null) return
+        invite(Party.host(media))
     }
 
     /* ------------------------------------------------------------ effects */
@@ -1553,6 +1581,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                 onDismiss = { panel = Panel.FIND },
             )
             Panel.EPISODES -> title?.let { EpisodesPanel(it, episode, ::playEpisode) { panel = null } }
+            // A party just left shuts its panel (Leave does) rather than turn into the offer to start one.
             Panel.PARTY -> room?.let { r ->
                 PartyPanel(
                     r,
@@ -1565,8 +1594,41 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                     },
                     onDismiss = { panel = null },
                 )
-            } ?: run { panel = null }
+            } ?: StartPartyPanel(title?.title ?: watch.item?.label ?: "this film", ::startParty) { panel = null }
             null -> Unit
+        }
+    }
+}
+
+/**
+ * The party button with no party yet: what a watch party is, and one button to begin it. Nothing is
+ * opened or shared until it is pressed — a tap on the button alone used to start a room at once.
+ */
+@Composable
+private fun StartPartyPanel(film: String, onStart: () -> Unit, onDismiss: () -> Unit) {
+    BackHandler(onBack = onDismiss)
+    Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)).pointerInput(Unit) { awaitEachGesture { awaitFirstDown().consume(); onDismiss() } })
+        Column(
+            Modifier.align(Alignment.CenterEnd).fillMaxHeight().widthIn(max = 460.dp).fillMaxWidth(0.9f)
+                .background(Color(0xF2101012)).pointerInput(Unit) { awaitEachGesture { awaitFirstDown().consume() } }
+                .windowInsetsPadding(WindowInsets.safeDrawing).padding(start = 18.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+        ) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Watch party", Modifier.weight(1f), style = Type.label.copy(color = Color.White, fontWeight = FontWeight.Bold))
+                PanelIcon(L.drawable.lucide_ic_x, "Close", onDismiss)
+            }
+            Column(Modifier.weight(1f).fillMaxWidth().padding(end = 8.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+                Lc(L.drawable.lucide_ic_users, tint = Color.White.copy(alpha = 0.6f), size = 44.dp)
+                Text("Watch $film together", Modifier.padding(top = 18.dp), style = Type.title.copy(color = Color.White, fontWeight = FontWeight.SemiBold), textAlign = TextAlign.Center)
+                Text(
+                    "Start a party and send the link. Everyone who opens it plays the film in step with you, with chat and reactions. No account, and only play, pause and the spot are shared — encrypted.",
+                    Modifier.padding(top = 8.dp).widthIn(max = 340.dp),
+                    style = Type.meta.copy(color = Color.White.copy(alpha = 0.7f)),
+                    textAlign = TextAlign.Center,
+                )
+                Button("Start a watch party", onStart, Modifier.padding(top = 28.dp).widthIn(min = 240.dp), icon = L.drawable.lucide_ic_users, primary = true)
+            }
         }
     }
 }

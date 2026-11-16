@@ -16,6 +16,8 @@ public sealed partial class PlayerView
 {
     readonly PartyDriver party;
     bool partyOpen;
+    /// <summary>The open sheet is a party's, not the start offer: with the room gone it shuts rather than offer to start another.</summary>
+    bool partyWasRoom;
     /// <summary>Reactions rise here, over the controls and never rebuilt with them.</summary>
     readonly Canvas floatLayer = new() { IsHitTestVisible = false };
     /// <summary>Kept across redraws, or a message half typed would go with every one.</summary>
@@ -105,15 +107,11 @@ public sealed partial class PlayerView
     {
         // The party just left, back again: a guest straight in, a leader's same room reopened.
         if (Party.Room is null && Party.Last is not null) Party.Rejoin();
-        else if (Party.Room is null)
+        // No party yet: the sheet offers "Start a watch party", and nothing begins until it is pressed.
+        else if (Party.Room is null && ((IPartyPlayer)this).PartyShare() is null)
         {
-            if (((IPartyPlayer)this).PartyShare() is null)
-            {
-                ShowHud("Only a torrent can be watched together — this one is a file or a plain link.", 3000);
-                return;
-            }
-            var r = Party.Host();
-            CopyInvite(r);
+            ShowHud("Only a torrent can be watched together — this one is a file or a plain link.", 3000);
+            return;
         }
         var open = !partyOpen;
         CloseSheets();
@@ -139,6 +137,34 @@ public sealed partial class PlayerView
     {
         Party.Room?.Say(chatBox.Text);
         chatBox.Text = "";
+    }
+
+    /// <summary>The party button with no party yet: what a watch party is, and one button to begin it.</summary>
+    FrameworkElement StartPartySheet()
+    {
+        party.PanelOpen = true;
+        var close = Circle(WIcon("x", 16), 30, () => { partyOpen = false; party.PanelOpen = false; Render(); }, 0x55, "Close");
+        close.HorizontalAlignment = HorizontalAlignment.Right;
+        var start = Controls.Ui.Button(new Border
+        {
+            CornerRadius = new CornerRadius(20), Background = new SolidColorBrush(Color.FromRgb(0xe5, 0x09, 0x14)), Padding = new Thickness(24, 10, 24, 10),
+            Child = WText("Start a watch party", 14, Brushes.White, FontWeights.SemiBold),
+        }, () =>
+        {
+            if (((IPartyPlayer)this).PartyShare() is not { } media) return;
+            CopyInvite(Party.Host(media));
+            Render();
+        }, "Bare", "Start a watch party");
+        start.HorizontalAlignment = HorizontalAlignment.Left;
+        start.Margin = new Thickness(0, 20, 0, 0);
+        var words = WText("Start a party and send the link. Everyone who opens it plays the film in step with you, with chat and reactions. No account, and only play, pause and the spot are shared — encrypted.", 12, White(0xb0));
+        words.TextWrapping = TextWrapping.Wrap;
+        words.Margin = new Thickness(0, 8, 0, 0);
+        return SheetBox(new StackPanel
+        {
+            Width = 380, Margin = new Thickness(10),
+            Children = { close, WText($"Watch {request.MetaTitle ?? request.Title} together", 18, Brushes.White, FontWeights.Bold), words, start },
+        });
     }
 
     FrameworkElement PartySheet()

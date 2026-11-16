@@ -477,6 +477,12 @@ private fun Player(watch: Watch) {
         }
     }
     wp.Effects(partyPlayer, panel == Panel.PARTY)
+    // The party gone while its panel was up (the leader ended it): the panel shuts, rather than offer to start another.
+    val hadRoom = remember { booleanArrayOf(false) }
+    LaunchedEffect(room) {
+        if (room == null && hadRoom[0] && panel == Panel.PARTY) panel = null
+        hadRoom[0] = room != null
+    }
 
     // Saved every few seconds, so a power cut still remembers the spot.
     LaunchedEffect(loaded) {
@@ -789,11 +795,9 @@ private fun Player(watch: Watch) {
                                     Party.rejoin()
                                     panel = Panel.PARTY
                                 } else if (room == null) {
+                                    // Opens the panel; "Start a watch party" there is what begins one.
                                     if (watch.partyMedia() == null) watch.notes.tryEmit("Only a torrent can be watched together — this one is a file or a plain link.")
-                                    else {
-                                        Party.host()
-                                        panel = Panel.PARTY
-                                    }
+                                    else panel = Panel.PARTY
                                 } else panel = Panel.PARTY
                             }
                             Control(L.drawable.lucide_ic_captions, "Audio & subtitles", on = subtitle != null, onFocus = toTransport) { panel = Panel.TRACKS }
@@ -966,7 +970,7 @@ private fun Player(watch: Watch) {
                     closePanel()
                     Party.leave()
                 }, onDismiss = ::closePanel)
-            } ?: run { panel = null }
+            } ?: StartPartyPanel(title?.title ?: watch.item?.label ?: "this film", { watch.partyMedia()?.let { Party.host(it) } }, ::closePanel)
             null -> Unit
         }
 
@@ -1080,6 +1084,32 @@ private fun androidx.compose.foundation.layout.BoxScope.PartyCards(wp: PartyDriv
             }
         }
     }
+}
+
+/**
+ * The Party control with no party yet: what a watch party is, and one button to begin it. Nothing is
+ * opened until it is pressed — the control alone used to start a room at once.
+ */
+@Composable
+private fun StartPartyPanel(film: String, onStart: () -> Unit, onDismiss: () -> Unit) {
+    BackHandler(onBack = onDismiss)
+    val first = remember { FocusRequester() }
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(520.dp).background(Color.Black.copy(alpha = 0.94f))
+                .padding(start = 28.dp, end = Safe.x, top = Safe.y, bottom = Safe.y),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text("Watch $film together", style = Type.title.copy(color = Color.White, fontWeight = FontWeight.Bold))
+            Text(
+                "Start a party and share the link or QR code. Everyone who opens it plays the film in step with you, with chat and reactions. No account, and only play, pause and the spot are shared — encrypted.",
+                Modifier.padding(top = 10.dp, bottom = 24.dp),
+                style = Type.meta.copy(color = Color.White.copy(alpha = 0.6f)),
+            )
+            TvButton("Start a watch party", onStart, icon = L.drawable.lucide_ic_users, primary = true, requester = first)
+        }
+    }
+    first.claim()
 }
 
 /**

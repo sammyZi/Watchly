@@ -64,6 +64,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -332,7 +333,18 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         var opened: String? = null
         launch {
             room.ended.collect {
-                Party.leave(ended = true)
+                // Still at the join screen: it says "closed" itself, and Close leaves.
+                if (room.accepted) Party.leave(ended = true)
+            }
+        }
+        // Rejoined a party that has long closed: nothing to wait for.
+        launch {
+            snapshotFlow { room.over }.collect { over ->
+                if (over && room.accepted && opened == null) {
+                    Party.leave(ended = true)
+                    Party.last = null
+                    watch.notes.tryEmit("That watch party has closed.")
+                }
             }
         }
         room.states.collect { s ->
