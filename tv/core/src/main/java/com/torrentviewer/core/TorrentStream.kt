@@ -1327,7 +1327,7 @@ class TorrentStream(
         // as the only one wanted at the start took 1-2s. The read-ahead is back on the next tick.
         // Never for the seed's piece: nobody is reading it yet, and the focus shut out the header pieces
         // the player was blocked on.
-        val focus = announcedReady && blocked >= 0 && blocked != seed && clock - blockedFrom > LAST_BLOCKS_MS && blocksLeft(h, blocked) <= LAST_BLOCKS
+        val focus = announcedReady && blocked >= 0 && blocked != seed && clock - blockedFrom > LAST_BLOCKS_MS && hung(h, blocked, clock)
         val aim = if (focus) listOf(blocked) else targets
 
         // `reach` is what the swarm is told to rush; `width` is what it may fetch at all.
@@ -1767,8 +1767,8 @@ class TorrentStream(
      * here; it comes off again [DROP_MS] later, or when the stream ends.
      */
     private fun dropStalled(h: TorrentHandle, piece: Int, clock: Long) {
+        if (!hung(h, piece, clock)) return
         val left = blocksLeft(h, piece)
-        if (left > LAST_BLOCKS) return
         val found = peer_info_vector().also { h.swig().get_peer_info(it) }
         val peers = (0 until found.size).map { i ->
             val p = found.get(i)
@@ -1786,6 +1786,15 @@ class TorrentStream(
     private fun expireDropped(clock: Long) {
         if (dropped.values.removeIf { clock - it > DROP_MS }) runCatching { applyDropped() }
     }
+
+    /**
+     * The piece the player waits on is down to blocks only slow peers hold: its last few, or — however
+     * many — every one still missing out with a peer for [STUCK_PIECE_MS]. A 4MB piece has 256 blocks:
+     * piece 1774 of a 4K resume sat 12s at 21 left, all asked for, read-ahead open and nobody dropped,
+     * because only 8 or fewer counted.
+     */
+    private fun hung(h: TorrentHandle, piece: Int, clock: Long): Boolean =
+        blocksLeft(h, piece) <= LAST_BLOCKS || (clock - blockedFrom > STUCK_PIECE_MS && allRequested(h, piece))
 
     /** Blocks of a piece still to arrive; a piece not begun counts as all of them. */
     private fun blocksLeft(h: TorrentHandle, piece: Int): Int =

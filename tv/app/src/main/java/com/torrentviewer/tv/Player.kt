@@ -651,14 +651,19 @@ private fun Player(watch: Watch) {
                         if (!loaded) {
                             loaded = true
                             watch.saveDuration(duration)
-                            // Aim the engine at the resume point now the real runtime is known.
-                            if (startAt > 0 && duration > 0) {
+                            engine.noteStarted()
+                            // Aim the engine at the resume point now the real runtime is known. Not over a
+                            // measured start: running time is a poorer guess, and pulled pieces from behind the picture.
+                            if (startAt > 0 && duration > 0 && !watch.startIsMeasured()) {
                                 val ratio = minOf(0.99, startAt / duration)
                                 scope.launch(Dispatchers.IO) { engine.aimStart(ratio) }
                             }
                         }
                     }
                     v.onTime = { ms ->
+                        // Without it the saved resume byte is where the player reads, its whole buffer past the
+                        // picture: a 4K resume aimed 48MB (25s) late and waited for the pieces it really wanted.
+                        watch.aheadSeconds = v.aheadSeconds
                         val t = ms / 1000.0
                         val s = seeking.value
                         // Landed once a report is nearer the target than the spot it left.
