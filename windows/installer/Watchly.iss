@@ -32,9 +32,9 @@ UninstallDisplayIcon={app}\Watchly.exe
 UninstallDisplayName=Watchly
 OutputDir=Output
 OutputBaseFilename=Watchly-Setup-{#AppVersion}-x64
-; The exe is already compressed inside; packing it again only costs time.
-Compression=lzma2/fast
-SolidCompression=no
+; The app is a folder of files now, the runtime and libVLC among them: packed as one, they shrink a lot.
+Compression=lzma2
+SolidCompression=yes
 WizardStyle=modern
 ; A running Watchly is closed (and offered a restart) rather than the install failing on a locked file.
 CloseApplications=yes
@@ -65,8 +65,14 @@ Root: HKA; Subkey: "Software\Classes\watchly"; ValueType: string; ValueName: "UR
 Root: HKA; Subkey: "Software\Classes\watchly\DefaultIcon"; ValueType: string; ValueData: """{app}\Watchly.exe"",0"
 Root: HKA; Subkey: "Software\Classes\watchly\shell\open\command"; ValueType: string; ValueData: """{app}\Watchly.exe"" ""%1"""
 
+[Dirs]
+; libVLC writes its plugin cache (plugins.dat) here on the first play: without it, it opens all 300+
+; plugin DLLs every launch. Installed for everyone, under Program Files, that needs leave to write.
+Name: "{app}\libvlc\win-x64\plugins"; Permissions: users-modify
+
 [Files]
-Source: "..\dist\Watchly.exe"; DestDir: "{app}"; Flags: ignoreversion
+; The published folder whole: Watchly.exe, the .NET runtime beside it, and libVLC.
+Source: "..\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\Watchly"; Filename: "{app}\Watchly.exe"
@@ -76,8 +82,10 @@ Name: "{autodesktop}\Watchly"; Filename: "{app}\Watchly.exe"; Tasks: desktopicon
 Filename: "{app}\Watchly.exe"; Description: "{cm:LaunchProgram,Watchly}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-; What the exe unpacks to run (libVLC and all, ~250 MB a build) — always safe to remove.
+; What the old single-file exe unpacked to run (libVLC and all, ~250 MB a build) — always safe to remove.
 Type: filesandordirs; Name: "{%TEMP}\.net\Watchly"
+; libVLC's plugin cache: written by the app, not installed, so not removed with the rest by itself.
+Type: files; Name: "{app}\libvlc\win-x64\plugins\plugins.dat"
 
 [Code]
 // stremio:// is free, or already Watchly's (an update): anyone else's command is left alone.

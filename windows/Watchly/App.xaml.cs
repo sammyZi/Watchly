@@ -126,19 +126,20 @@ public partial class App : Application
     });
 
     /// <summary>
-    /// The single-file exe unpacks itself (≈240 MB, libVLC and all) to %TEMP%\.net\Watchly\&lt;build id&gt;\
-    /// and nothing ever removes the folders of earlier builds. A folder whose build is still running
-    /// is left whole: deleting it would strip the files that build hasn't loaded yet (a libVLC plugin
-    /// it opens later). Renaming doesn't tell — Windows renames a folder with a running exe in it —
-    /// but a loaded DLL can't be opened for writing, so that is the test. Nothing is written.
+    /// The single-file exe of earlier versions unpacked itself (≈250 MB, libVLC and all) to
+    /// %TEMP%\.net\Watchly\&lt;build id&gt;\, and nothing ever removed those folders. The app runs from its
+    /// install folder now, so every one of them is left over — but one whose build is still running is
+    /// left whole: deleting it would strip the files that build hasn't loaded yet (a libVLC plugin it
+    /// opens later). Renaming doesn't tell — Windows renames a folder with a running exe in it — but a
+    /// loaded DLL can't be opened for writing, so that is the test. Nothing is written.
     /// </summary>
     static void RemoveOldBuilds()
     {
         try
         {
             var current = new DirectoryInfo(AppContext.BaseDirectory.TrimEnd('\\'));
-            var root = current.Parent;
-            if (root is null || !root.FullName.EndsWith(@"\.net\Watchly", StringComparison.OrdinalIgnoreCase)) return;
+            var root = new DirectoryInfo(Path.Combine(Path.GetTempPath(), ".net", "Watchly"));
+            if (!root.Exists) return;
             foreach (var dir in root.EnumerateDirectories())
             {
                 if (dir.FullName.Equals(current.FullName, StringComparison.OrdinalIgnoreCase)) continue;

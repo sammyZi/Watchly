@@ -19,15 +19,17 @@
   </PropertyGroup>
 
   <!--
-    Publish as one Watchly.exe, libVLC included. VLC can only load its codec plugins
-    from disk, so everything is unpacked on first launch to
-    %TEMP%\.net\Watchly\<build id>\ (again only for a new build, or if Temp was
-    cleaned) and the app runs from there — AppContext.BaseDirectory is that folder,
-    which is where PlayerView looks for libvlc\ and writes VLC's plugin cache.
+    Published as a plain folder — Watchly.exe beside the runtime and libVLC — that the installer
+    copies in whole. It used to be one self-extracting Watchly.exe (VLC loads its plugins only from
+    disk), which unpacked ~250 MB to %TEMP%\.net\Watchly\ on the first launch of every build and
+    again whenever Temp was cleaned: seconds before the window, and a 254 MB exe for antivirus to
+    scan. AppContext.BaseDirectory is the install folder, where PlayerView finds libvlc\ and
+    keeps VLC's plugin cache.
+    ReadyToRun: the app's code and WPF's arrive compiled, rather than JIT-compiled on every start
+    (~9 s of CPU at launch before).
   -->
   <PropertyGroup>
-    <PublishSingleFile>true</PublishSingleFile>
-    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+    <PublishReadyToRun>true</PublishReadyToRun>
     <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
     <!-- The app is win-x64 only; the package ships x86 and arm64 VLC too. -->
     <VlcWindowsX86Enabled>false</VlcWindowsX86Enabled>
