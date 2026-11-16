@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="mobile/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.webp" alt="Watchly" width="96">
+</p>
+
 <h1 align="center">Watchly</h1>
 
 <p align="center">
@@ -18,6 +22,17 @@
   &nbsp;
   <a href="#install"><img src="https://img.shields.io/badge/How_to-install-2B2B2B?style=for-the-badge" alt="How to install" height="40"></a>
 </p>
+
+<p align="center">
+  <a href="#features">Features</a> ·
+  <a href="#install">Install</a> ·
+  <a href="#first-launch">First launch</a> ·
+  <a href="#the-apps">The apps</a> ·
+  <a href="#built-on">Built on</a> ·
+  <a href="#disclaimer">Disclaimer</a>
+</p>
+
+---
 
 <a name="features"></a>
 <h2><img src="https://img.shields.io/badge/Features-E50914?style=for-the-badge" alt="Features" height="34"></h2>
@@ -48,23 +63,45 @@
 <a name="install"></a>
 <h2><img src="https://img.shields.io/badge/Install-2B8CFF?style=for-the-badge" alt="Install" height="34"></h2>
 
-Every file is on the **[latest release](https://github.com/sammyZi/Watchly/releases/latest)**.
+Every file is on the **[latest release](https://github.com/sammyZi/Watchly/releases/latest)**. Most people need one of these three:
+
+<table>
+  <tr>
+    <th width="33%">🪟 Windows 10 / 11</th>
+    <th width="33%">📱 Android phone / tablet</th>
+    <th width="33%">📺 Android TV / Google TV</th>
+  </tr>
+  <tr>
+    <td align="center"><code>Watchly-windows-…-x64-setup.exe</code></td>
+    <td align="center"><code>Watchly-phone-…-arm64-v8a.apk</code></td>
+    <td align="center"><code>Watchly-tv-…-armeabi-v7a.apk</code></td>
+  </tr>
+  <tr>
+    <td valign="top"><sub>Any 64-bit Windows 10 or 11 PC.</sub></td>
+    <td valign="top"><sub>Phones and tablets from the last several years — Samsung, Pixel, OnePlus, Xiaomi, vivo, Oppo, Motorola…</sub></td>
+    <td valign="top"><sub>Sony BRAVIA, TCL, Philips, Hisense, Xiaomi, and boxes / sticks such as Mi Box and Chromecast with Google TV. Works on every ARM TV.</sub></td>
+  </tr>
+</table>
+
+<details>
+<summary><b>Other devices</b> — 32-bit phones, NVIDIA Shield, emulators, Chromebooks, one-file-fits-all</summary>
+
+<br>
 
 | Device | File |
 |---|---|
-| 🪟 Windows 10 / 11 (64-bit) | `Watchly-windows-…-x64-setup.exe` |
-| 📱 Android phones and tablets from the last several years — Samsung, Pixel, OnePlus, Xiaomi, vivo, Oppo, Motorola… | `Watchly-phone-…-arm64-v8a.apk` |
 | 📱 Older or entry-level 32-bit phones and tablets | `Watchly-phone-…-armeabi-v7a.apk` |
 | 💻 Android emulators, x86 tablets and Chromebooks | `Watchly-phone-…-x86.apk` |
-| 📺 Android TVs and Google TVs — Sony BRAVIA, TCL, Philips, Hisense, Xiaomi — and TV boxes / sticks such as Mi Box and Chromecast with Google TV | `Watchly-tv-…-armeabi-v7a.apk` |
 | 📺 64-bit TV boxes such as NVIDIA Shield TV | `Watchly-tv-…-arm64-v8a.apk` (the `armeabi-v7a` one runs there too) |
 | 📺 Android TV emulator, x86 TV boxes | `Watchly-tv-…-x86.apk` |
 | 📦 Any Android phone, tablet or TV — one file that has every version inside | `Watchly-phone-…-universal.apk` / `Watchly-tv-…-universal.apk` (about 3× larger) |
 
-Almost every phone sold in the last several years takes `arm64-v8a`; on a TV, the `armeabi-v7a` file works everywhere ARM.
-The `universal` APKs fit every device at once, at a bigger download.
+</details>
 
-### 🪟 Windows 10 / 11
+<details>
+<summary><b>🪟 Install on Windows 10 / 11</b></summary>
+
+<br>
 
 1. Download `Watchly-windows-…-x64-setup.exe` and run it.
 2. Follow the setup — Watchly lands in the Start menu, and on the desktop if you tick it.
@@ -78,12 +115,22 @@ The `universal` APKs fit every device at once, at a bigger download.
 > To remove it: **Settings → Apps → Watchly → Uninstall**. It asks before deleting your profiles
 > and history — downloaded videos are never deleted.
 
-### 📱 Android phone
+</details>
+
+<details>
+<summary><b>📱 Install on an Android phone</b></summary>
+
+<br>
 
 Download the phone APK in the phone's browser, open it, and allow your browser to install apps
 when Android asks.
 
-### 📺 Android TV / Google TV — with LocalSend
+</details>
+
+<details>
+<summary><b>📺 Install on Android TV / Google TV</b> — with LocalSend</summary>
+
+<br>
 
 > [!TIP]
 > A TV has no browser to download with, so send the APK to it from your phone or PC with
@@ -101,6 +148,9 @@ when Android asks.
    go back, and press **Install**.
 6. Open Watchly from the TV's apps row. Later updates install the same way, over the old one.
 
+</details>
+
+<a name="first-launch"></a>
 ### ✨ First launch
 
 1. Pick a few favourite genres — the home screen leads with them.
@@ -118,7 +168,7 @@ suits their connection. More in [docs/watch-party.md](docs/watch-party.md).
 <a name="the-apps"></a>
 <h2><img src="https://img.shields.io/badge/The_apps-3ECF8E?style=for-the-badge" alt="The apps" height="34"></h2>
 
-Three apps, each with its own README:
+Three apps, each with its own README, and the watch party relay:
 
 | App | Folder | Stack |
 |---|---|---|
@@ -129,6 +179,11 @@ Three apps, each with its own README:
 
 The phone and the TV share one Gradle module, `tv/core`: the addon client, the
 Stremio account sync, the players, metadata, the store and the look.
+
+<details>
+<summary><b>🛠️ Build from source</b></summary>
+
+<br>
 
 ```bash
 cd mobile && ./gradlew compileDebugKotlin
@@ -146,6 +201,8 @@ Optional keys go in `mobile/.env`, which stays out of git: `TMDB_KEY` for
 suggestions, age ratings, cast pages and film collections, `SUBDL_KEY` for
 online subtitles, and `PARTY_URL` for the watch party relay. Without them those
 features are simply left out. The TV and Windows builds read the same file.
+
+</details>
 
 <a name="built-on"></a>
 <h2><img src="https://img.shields.io/badge/Built_on-A855F7?style=for-the-badge" alt="Built on" height="34"></h2>
