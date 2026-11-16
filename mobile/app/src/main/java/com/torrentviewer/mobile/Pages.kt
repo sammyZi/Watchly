@@ -70,7 +70,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.torrentviewer.core.EMOJI_ICONS
+import com.torrentviewer.core.PROFILE_ICONS
+import com.torrentviewer.core.personOf
 import com.torrentviewer.core.Avatar
 import com.torrentviewer.core.CACHE_CAPS
 import com.torrentviewer.core.cacheCapLabel
@@ -1557,7 +1558,7 @@ private fun Tile(name: String, onClick: () -> Unit, face: @Composable androidx.c
 @Composable
 private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, String, String, Boolean) -> Unit, onDelete: () -> Unit, onCancel: () -> Unit) {
     var name by remember { mutableStateOf(profile?.name.orEmpty()) }
-    var icon by remember { mutableStateOf(profile?.let { it.icon ?: Avatars.of(it).id } ?: EMOJI_ICONS[0]) }
+    var icon by remember { mutableStateOf(profile?.let { p -> p.icon?.takeIf { it.startsWith("/") } ?: personOf(p) } ?: PROFILE_ICONS[0]) }
     var colour by remember { mutableStateOf(profile?.colour ?: COLOURS[0]) }
     var kids by remember { mutableStateOf(profile?.kids ?: false) }
     val context = LocalContext.current
@@ -1587,7 +1588,7 @@ private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, Strin
             Field(name, { name = it.take(20) }, "Name", Modifier.fillMaxWidth())
             Text("ICON", Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 10.dp), style = Type.overline)
             FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                EMOJI_ICONS.forEach { a ->
+                PROFILE_ICONS.forEach { a ->
                     Tap({ icon = a }, Modifier.size(54.dp), RoundedCornerShape(12.dp)) {
                         Box {
                             AvatarImage(a, colorOf(colour), 54.dp)

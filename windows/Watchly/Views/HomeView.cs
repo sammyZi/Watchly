@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -30,7 +31,8 @@ public sealed class HomeView : UserControl
     /// A poster on Home's rows, and the gap between rows (mobile Home.kt): 22 from one row's posters
     /// to the next heading, of which each row keeps Ui.LiftRoom itself for the card under the pointer.
     /// </summary>
-    const double CardHeight = 210, RowGap = 22 - Ui.LiftRoom;
+    /// <summary>A poster, and the whole card with its name and year under it (Templates.xaml RailCard).</summary>
+    const double PosterHeight = 240, CardHeight = 284, RowGap = 22 - Ui.LiftRoom;
 
     readonly MainWindow shell = MainWindow.Shell;
     readonly ScrollViewer scroll;
@@ -41,8 +43,14 @@ public sealed class HomeView : UserControl
     readonly Border header = new() { VerticalAlignment = VerticalAlignment.Top, Padding = new Thickness(24, 14, 24, 14), Background = new LinearGradientBrush(Color.FromArgb(0x99, 0, 0, 0), Color.FromArgb(0, 0, 0, 0), 90), IsHitTestVisible = false };
     /// <summary>The page's own colour behind the wordmark, faded in once the rows are under it.</summary>
     readonly Border headerBar = new() { VerticalAlignment = VerticalAlignment.Top, Opacity = 0, IsHitTestVisible = false };
-    readonly StackPanel personal = new();
-    readonly StackPanel shelves = new();
+    /// <summary>
+    /// Every row, from all three builders (BuildPersonal, LoadSuggested, BuildShelves), in one panel so the
+    /// profile's order can mix them: see <see cref="Put"/> and <see cref="Arrange"/>.
+    /// </summary>
+    readonly StackPanel rows = new();
+    /// <summary>Each row's builder, key (the profile's order), name (Edit Home) and place in Home's own order.</summary>
+    readonly Dictionary<UIElement, (string Group, string Key, string Name, int Seq)> rowInfo = new();
+    readonly StackPanel editor = new() { Margin = new Thickness(Ui.Gutter, 8, Ui.Gutter, 0), Visibility = Visibility.Collapsed };
     readonly Dictionary<string, List<Title>> loaded = new();
 
     const string TasteKey = "home-taste";
@@ -56,7 +64,6 @@ public sealed class HomeView : UserControl
     /// <summary>What TMDB suggests for this profile's own titles, and the ids of all the rows above the genres, which those don't repeat.</summary>
     ForYou forYou = new(new(), new());
     HashSet<string> suggestedIds = new();
-    readonly StackPanel suggested = new();
 
     /// <summary>The viewer's latest titles that suggestions are drawn from, and how many of the best to show.</summary>
     const int ForYouSeeds = 4, ForYouPicks = 15, ChartSize = 15;
@@ -80,9 +87,16 @@ public sealed class HomeView : UserControl
         SizeChanged += (_, e) => { if (heroTitles.Count > 0) hero.Height = HeroHeight(e.NewSize.Height); };
 
         page.Children.Add(hero);
-        page.Children.Add(personal);
-        page.Children.Add(suggested);
-        page.Children.Add(shelves);
+        page.Children.Add(rows);
+        var edit = Ui.Button("Edit Home", () =>
+        {
+            editor.Visibility = editor.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+            BuildEditor();
+        }, "Pill");
+        edit.HorizontalAlignment = HorizontalAlignment.Center;
+        edit.Margin = new Thickness(0, RowGap + 10, 0, 0);
+        page.Children.Add(edit);
+        page.Children.Add(editor);
         header.Child = Ui.Text("WATCHLY", "TitleText", "Accent", 20, FontWeights.Black);
         headerBar.SetResourceReference(Border.BackgroundProperty, "PageBg");
         // The bar is as tall as the wordmark's strip, whatever that lays out at.
@@ -192,6 +206,7 @@ public sealed class HomeView : UserControl
         // records, and every shelf used to sit on a spinner until it finished.
         LoadMissing();
         LoadSuggested(mine);
+        LoadUpcoming(mine);
         TagOrders(mine);
 
         // What is mid-way leads the taste signal, then the rest, then saved titles.
@@ -227,7 +242,7 @@ public sealed class HomeView : UserControl
         if (KidsMode.On)
         {
             forYou = new(new(), new());
-            suggested.Children.Clear();
+            Put("suggested", new());
             return;
         }
         var seeds = shell.HistoryList.OrderByDescending(h => h.LastPlayed).Where(h => h.Imdb is not null).Select(h => (h.Imdb!, h.Kind ?? "movie"))
@@ -246,28 +261,31 @@ public sealed class HomeView : UserControl
         known.UnionWith(shell.HistoryList.Select(h => h.Imdb).OfType<string>());
         known.UnionWith(shell.SavedList.Select(s => s.Imdb));
         var ids = new HashSet<string>();
-        suggested.Children.Clear();
-        void Row(string heading, Action? seeAll, FrameworkElement row) =>
-            suggested.Children.Add(new StackPanel { Margin = new Thickness(0, RowGap, 0, 0), Children = { Ui.Head(heading, seeAll), row } });
+        var made = new List<(string, string, FrameworkElement)>();
+        void Row(string key, string name, string heading, Action? seeAll, FrameworkElement row) =>
+            made.Add((key, name, new StackPanel { Margin = new Thickness(0, RowGap, 0, 0), Children = { Ui.Head(heading, seeAll), row } }));
         ScrollViewer Strip(IEnumerable<UIElement> items) => OrderUi.Strip(items, Ui.Gutter);
 
         var chosen = found.Picks.Where(p => !known.Contains(p.Title.Imdb)).Take(ForYouPicks).ToList();
-        if (chosen.Count > 0) Row("Picked for you", null, Strip(chosen.Select(OrderUi.PickCard)));
+        if (chosen.Count > 0) Row("picks", "Picked for you", "Picked for you", null, Strip(chosen.Select(OrderUi.PickCard)));
         ids.UnionWith(chosen.Select(p => p.Title.Imdb));
         foreach (var (kind, word, titles) in charts)
         {
             var top = titles.Take(ChartSize).ToList();
             if (top.Count == 0) continue;
-            Row(genres.Count == 0 ? $"Top {word} on IMDb" : $"Top IMDb {word} in your genres", () => shell.OpenTop(kind), Strip(top.Select((t, i) => OrderUi.Ranked(i + 1, t, this))));
+            var heading = genres.Count == 0 ? $"Top {word} on IMDb" : $"Top IMDb {word} in your genres";
+            Row($"chart:{kind}", heading, heading, () => shell.OpenTop(kind), Strip(top.Select((t, i) => OrderUi.Ranked(i + 1, t, this))));
             ids.UnionWith(top.Select(t => t.Imdb));
         }
+        // One key for them all: which titles they name changes with every film played.
         foreach (var rail in found.Rails)
         {
             var titles = rail.Titles.Where(t => !known.Contains(t.Imdb)).ToList();
             if (titles.Count < 3) continue;
-            Row($"Because you watched {rail.Name}", null, (FrameworkElement)Ui.Rail(titles, "RailCard", CardHeight));
+            Row("because", "Because you watched…", $"Because you watched {rail.Name}", null, (FrameworkElement)Ui.Rail(titles, "RailCard", CardHeight));
             ids.UnionWith(titles.Select(t => t.Imdb));
         }
+        Put("suggested", made);
         suggestedIds = ids;
         // The genre rows drop what's now above them, and the ones TMDB's rows replace, once; not on every refresh.
         if (had != found.Picks.Count > 0) BuildShelves();
@@ -363,7 +381,7 @@ public sealed class HomeView : UserControl
 
     void BuildPersonal()
     {
-        personal.Children.Clear();
+        var made = new List<(string, string, FrameworkElement)>();
         // One card per title: its newest started release or episode, while part-watched.
         var resumable = History.LatestPerTitle(shell.HistoryList).Where(h => InProgress(h) && !Stremio.Library.FinishedSince(h)).Select(item =>
         {
@@ -379,13 +397,13 @@ public sealed class HomeView : UserControl
                 new HistoryItem { Uri = $"stremio:{p.Imdb}", Title = p.Title, Imdb = p.Imdb, Kind = p.Kind },
                 0, p.Progress,
                 string.Join(" · ", new[] { p.Ep is { } e ? $"S{e.Season}:E{e.Episode}" : null, $"{(int)p.Progress}%" }.Where(s => s is not null)))));
-        if (resumable.Count > 0) personal.Children.Add(Section("Continue Watching", () => shell.ShowTab("history"), resumable, "ResumeCard"));
+        if (resumable.Count > 0) made.Add(("resume", "Continue Watching", Section("Continue Watching", () => shell.ShowTab("history"), resumable, "ResumeCard")));
 
         var later = Saved.InList(shell.SavedList, "later").Select(s => s.AsTitle()).ToList();
-        if (later.Count > 0) personal.Children.Add(Section("My List", null, later, "RailCard"));
+        if (later.Count > 0) made.Add(("list", "My List", Section("My List", null, later, "RailCard")));
 
         var favorites = Saved.InList(shell.SavedList, "favorite").Select(s => s.AsTitle()).ToList();
-        if (favorites.Count > 0) personal.Children.Add(Section("Liked", null, favorites, "RailCard"));
+        if (favorites.Count > 0) made.Add(("liked", "Liked", Section("Liked", null, favorites, "RailCard")));
 
         if (!KidsMode.On)
         {
@@ -396,17 +414,127 @@ public sealed class HomeView : UserControl
             var strip = OrderUi.Strip(WatchOrders.ForHome(genres, seen, begun).Select(o =>
             {
                 var banner = OrderUi.Banner(o, seen, 330);
-                banner.Margin = new Thickness(0, 0, 10, 0);
+                banner.Margin = new Thickness(0, 0, 16, 0);
                 return banner;
             }), Ui.Gutter);
-            personal.Children.Add(new StackPanel { Margin = new Thickness(0, RowGap, 0, 0), Children = { Ui.Head("Watch orders", shell.OpenOrders), strip } });
+            made.Add(("orders", "Watch orders", new StackPanel { Margin = new Thickness(0, RowGap, 0, 0), Children = { Ui.Head("Watch orders", shell.OpenOrders), strip } }));
         }
+        Put("personal", made);
+    }
+
+    static readonly string[] Groups = { "personal", "upcoming", "suggested", "shelves" };
+
+    List<Coming> upcoming = new();
+
+    /// <summary>Upcoming — mobile Home.kt: the followed series' next episodes and saved films not out yet, soonest first.</summary>
+    async void LoadUpcoming(int mine)
+    {
+        var shows = shell.HistoryList.Where(h => h.Kind == "tv").OrderByDescending(h => h.LastPlayed).Select(h => h.Imdb).OfType<string>()
+            .Concat(shell.SavedList.Where(s => s.Kind == "tv").Select(s => s.Imdb)).Where(i => i.StartsWith("tt")).ToList();
+        var films = shell.SavedList.Where(s => s.Kind == "movie").Select(s => s.Imdb).Where(i => i.StartsWith("tt")).ToList();
+        List<Coming> coming;
+        try { coming = await Upcoming.Load(shows, films); }
+        catch (Exception e) when (e is not OutOfMemoryException) { return; }
+        if (mine != version) return;
+        upcoming = coming;
+        var made = new List<(string, string, FrameworkElement)>();
+        if (coming.Count > 0)
+        {
+            // Each title once, at its soonest date, under its poster where the year goes.
+            var cards = coming.DistinctBy(c => c.Title.Imdb).Select(c => c.Title with { Year = $"{Upcoming.Label(c.Date)}  ·  {c.What}" }).ToList();
+            var add = Ui.Button("Add to calendar", SaveCalendar, "Pill");
+            add.HorizontalAlignment = HorizontalAlignment.Left;
+            add.Margin = new Thickness(Ui.Gutter, 4, 0, 0);
+            made.Add(("upcoming", "Upcoming", new StackPanel { Margin = new Thickness(0, RowGap, 0, 0), Children = { Ui.Head("Upcoming", null), Ui.Rail(cards, "RailCard", CardHeight), add } }));
+        }
+        Put("upcoming", made);
+    }
+
+    /// <summary>The .ics of every date ahead, saved where the viewer says, then opened: the calendar app takes it in.</summary>
+    void SaveCalendar()
+    {
+        var dialog = new Microsoft.Win32.SaveFileDialog { FileName = "watchly-upcoming.ics", Filter = "Calendar file (*.ics)|*.ics", DefaultExt = ".ics" };
+        if (dialog.ShowDialog() != true) return;
+        try
+        {
+            File.WriteAllText(dialog.FileName, Upcoming.Ics(upcoming));
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(dialog.FileName) { UseShellExecute = true });
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            Log.Warn("upcoming", $"calendar file: {e.Message}");
+        }
+    }
+
+    /// <summary>A builder's rows, in place of the ones it put in last time; then the page in the profile's order.</summary>
+    void Put(string group, List<(string Key, string Name, FrameworkElement Row)> made)
+    {
+        foreach (var old in rowInfo.Where(r => r.Value.Group == group).Select(r => r.Key).ToList()) rowInfo.Remove(old);
+        var seq = Array.IndexOf(Groups, group) * 10_000;
+        foreach (var (key, name, row) in made) rowInfo[row] = (group, key, name, seq++);
+        Arrange();
+    }
+
+    /// <summary>Home's own order with the profile's over it: its moves, and the rows it switched off left out.</summary>
+    void Arrange()
+    {
+        var all = rowInfo.OrderBy(r => r.Value.Seq).ToList();
+        var order = HomeLayout.Arrange(all.Select(r => r.Value.Key).Distinct().ToList(), HomeLayout.Order);
+        var hidden = HomeLayout.Hidden;
+        rows.Children.Clear();
+        foreach (var key in order)
+            foreach (var (row, info) in all.Where(r => r.Value.Key == key))
+            {
+                row.Visibility = hidden.Contains(key) ? Visibility.Collapsed : Visibility.Visible;
+                rows.Children.Add(row);
+            }
+        if (editor.Visibility == Visibility.Visible) BuildEditor();
+        Dispatcher.BeginInvoke(FillVisible, DispatcherPriority.Loaded);
+    }
+
+    /// <summary>Edit Home: each row moved a step up or down, or switched off, where it stands.</summary>
+    void BuildEditor()
+    {
+        editor.Children.Clear();
+        if (editor.Visibility != Visibility.Visible) return;
+        var all = rowInfo.OrderBy(r => r.Value.Seq).ToList();
+        var names = all.GroupBy(r => r.Value.Key).ToDictionary(g => g.Key, g => g.First().Value.Name);
+        var order = HomeLayout.Arrange(names.Keys.ToList(), HomeLayout.Order);
+        var hidden = HomeLayout.Hidden;
+        var intro = Ui.Text("Move rows up or down, or hide them. Each profile keeps its own.", "Meta", "Muted");
+        intro.Margin = new Thickness(0, 0, 0, 10);
+        editor.Children.Add(intro);
+        foreach (var key in order)
+        {
+            var off = hidden.Contains(key);
+            var line = new DockPanel { Margin = new Thickness(0, 3, 0, 3), LastChildFill = true };
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal };
+            DockPanel.SetDock(buttons, Dock.Right);
+            buttons.Children.Add(Ui.Round("chevron-up", () => { HomeLayout.Save(HomeLayout.Moved(order, key, -1), hidden); Arrange(); }, size: 32, iconSize: 16, tooltip: "Move up"));
+            buttons.Children.Add(new Border { Width = 6 });
+            buttons.Children.Add(Ui.Round("chevron-down", () => { HomeLayout.Save(HomeLayout.Moved(order, key, 1), hidden); Arrange(); }, size: 32, iconSize: 16, tooltip: "Move down"));
+            buttons.Children.Add(new Border { Width = 6 });
+            buttons.Children.Add(Ui.Button(off ? "Show" : "Hide", () =>
+            {
+                if (off) hidden.Remove(key); else hidden.Add(key);
+                HomeLayout.Save(order, hidden);
+                Arrange();
+            }, "Pill"));
+            line.Children.Add(buttons);
+            line.Children.Add(Ui.Text(names[key], "Label", off ? "Muted" : "Text"));
+            editor.Children.Add(line);
+        }
+        var reset = Ui.Button("Reset to default", () => { HomeLayout.Save(new(), Array.Empty<string>()); Arrange(); }, "Pill");
+        reset.HorizontalAlignment = HorizontalAlignment.Left;
+        reset.Margin = new Thickness(0, 12, 0, 0);
+        editor.Children.Add(reset);
     }
 
     static FrameworkElement Section(string title, Action? seeAll, System.Collections.IEnumerable items, string template) => new StackPanel
     {
         Margin = new Thickness(0, RowGap, 0, 0),
-        Children = { Ui.Head(title, seeAll), Ui.Rail(items, template, CardHeight) },
+        // Continue Watching is the poster alone, its name over the art, as on the phone.
+        Children = { Ui.Head(title, seeAll), Ui.Rail(items, template, template == "ResumeCard" ? PosterHeight : CardHeight) },
     };
 
     /// <summary>A row still waiting for its titles: grey posters where they will be.</summary>
@@ -415,7 +543,7 @@ public sealed class HomeView : UserControl
         // As tall as the row that replaces it, room to rise included, so the page does not shift when it lands.
         var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(24, Ui.LiftRoom, 0, Ui.LiftRoom), Height = CardHeight, Tag = Loading };
         for (var i = 0; i < 8; i++)
-            row.Children.Add(Ui.Brushed(new Border { Width = 140, Margin = new Thickness(0, 0, 10, 0), CornerRadius = new CornerRadius(6) }, "Surface"));
+            row.Children.Add(Ui.Brushed(new Border { Width = 160, Height = PosterHeight, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 0, 16, 0), CornerRadius = new CornerRadius(6) }, "Surface"));
         return row;
     }
 
@@ -429,7 +557,7 @@ public sealed class HomeView : UserControl
 
         if (!currentKeys.SequenceEqual(newKeys))
         {
-            shelves.Children.Clear();
+            var made = new List<(string, string, FrameworkElement)>();
             shelfControls.Clear();
             waiting.Clear();
             foreach (var shelf in all)
@@ -445,10 +573,12 @@ public sealed class HomeView : UserControl
                 };
 
                 body.Content = Placeholders();
-                shelves.Children.Add(container);
+                made.Add(($"shelf:{shelf.Key}", shelf.Heading, container));
                 shelfControls[shelf.Key] = (container, body);
-                Fill(shelf, container, body, watched);
             }
+            // On the page before Fill: a row off it is never near the screen, and would wait for good.
+            Put("shelves", made);
+            foreach (var shelf in all) Fill(shelf, shelfControls[shelf.Key].Container, shelfControls[shelf.Key].Body, watched);
         }
         else
         {

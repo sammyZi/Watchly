@@ -1235,7 +1235,7 @@ private fun Tile(name: String, onClick: () -> Unit, requester: FocusRequester? =
 @Composable
 private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, String, String, Boolean) -> Unit, onDelete: () -> Unit, onCancel: () -> Unit) {
     var name by remember { mutableStateOf(profile?.name.orEmpty()) }
-    var icon by remember { mutableStateOf(profile?.let { it.icon ?: Avatars.of(it).id } ?: EMOJI_ICONS[0]) }
+    var icon by remember { mutableStateOf(profile?.let { p -> p.icon?.takeIf { it.startsWith("/") } ?: personOf(p) } ?: PROFILE_ICONS[0]) }
     var colour by remember { mutableStateOf(profile?.colour ?: COLOURS[0]) }
     var kids by remember { mutableStateOf(profile?.kids ?: false) }
     val field = remember { FocusRequester() }
@@ -1254,7 +1254,7 @@ private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, Strin
                 Field(name, { name = it.take(20) }, "Name", Modifier.fillMaxWidth(), requester = field)
                 Text("ICON", Modifier.padding(top = 22.dp, bottom = 10.dp), style = Type.overline)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    EMOJI_ICONS.forEach { a ->
+                    PROFILE_ICONS.forEach { a ->
                         Focusable({ icon = a }, Modifier.size(56.dp), RoundedCornerShape(12.dp), 1.12f) {
                             AvatarImage(a, colorOf(colour), 56.dp)
                             if (a == icon) Box(Modifier.fillMaxSize().border(3.dp, Ink.accent, RoundedCornerShape(12.dp)))

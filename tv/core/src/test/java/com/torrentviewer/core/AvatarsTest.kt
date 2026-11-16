@@ -7,7 +7,7 @@ import java.io.File
 class AvatarsTest {
     /** A name without its file would show an empty tile. */
     @Test fun everyEmojiIconHasItsPicture() {
-        assertEquals(emptyList<String>(), EMOJI_ICONS.filterNot { File("src/main/assets/$it.png").exists() })
+        assertEquals(emptyList<String>(), PROFILE_ICONS.filterNot { File("src/main/assets/$it.png").exists() })
     }
 
     @Test fun runtimesShowHoursFromTheHourUp() {

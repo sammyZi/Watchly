@@ -17,27 +17,30 @@ public static class Avatars
 
     public static readonly IReadOnlyList<AvatarArt> All = Load();
 
-    const string EmojiPrefix = "emoji/";
-
-    /// <summary>core EMOJI_ICONS: Microsoft's Fluent Emoji. A profile's icon is one of these, a drawn face's id, or the path of a picture of its own.</summary>
-    public static readonly string[] Emoji = new[]
+    /// <summary>
+    /// core PROFILE_ICONS: hand-drawn people from Open Peeps (CC0). A profile's icon is one of these or the
+    /// path of a picture of its own; anything else (an emoji or a drawn face from before) shows <see cref="PersonOf"/>.
+    /// </summary>
+    public static readonly string[] Icons = new[]
     {
-        "fox", "cat", "dog", "panda", "bear", "koala", "tiger", "lion", "rabbit", "hamster", "frog", "monkey",
-        "penguin", "owl", "unicorn", "dragon", "alien", "invader", "robot", "ghost", "cool", "starstruck", "popcorn", "clapper",
-    }.Select(n => EmojiPrefix + n).ToArray();
+        "nova", "theo", "raj", "maya", "leo", "kofi", "ivy", "rosa", "amara", "sana", "jin", "omar", "zoe", "gus", "dev", "kai",
+    }.Select(n => "people/" + n).ToArray();
 
-    public static bool IsEmoji(string? icon) => icon?.StartsWith(EmojiPrefix) == true;
+    static bool IsBundled(string? icon) => icon is not null && Icons.Contains(icon);
+
+    /// <summary>core personOf: the person a profile shows when it has no picture — its pick, or a steady one from its id.</summary>
+    public static string PersonOf(Profile p) => IsBundled(p.Icon) ? p.Icon! : Icons[(p.Id + p.Name).Sum(c => c) % Icons.Length];
 
     static readonly Dictionary<string, ImageSource> Pictures = new();
 
-    /// <summary>The picture of an emoji or a saved icon; null for a drawn face, or a file that isn't on this PC.</summary>
+    /// <summary>The picture of a person or a saved icon; null for anything else, or a file that isn't on this PC.</summary>
     public static ImageSource? Picture(string? icon)
     {
-        if (icon is null || !(IsEmoji(icon) || Path.IsPathRooted(icon))) return null;
+        if (icon is null || !(IsBundled(icon) || Path.IsPathRooted(icon))) return null;
         if (Pictures.TryGetValue(icon, out var known)) return known;
         try
         {
-            using var stream = IsEmoji(icon) ? typeof(Avatars).Assembly.GetManifestResourceStream(icon + ".png") : File.OpenRead(icon);
+            using var stream = IsBundled(icon) ? typeof(Avatars).Assembly.GetManifestResourceStream(icon + ".png") : File.OpenRead(icon);
             if (stream is null) return null;
             var image = Decode(stream, 0);
             Pictures[icon] = image;

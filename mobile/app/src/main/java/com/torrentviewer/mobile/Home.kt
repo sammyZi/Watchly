@@ -70,6 +70,12 @@ import com.torrentviewer.core.NewEpisodes
 import com.torrentviewer.core.Profile
 import com.torrentviewer.core.SavedStore
 import com.torrentviewer.core.SettingsStore
+import com.torrentviewer.core.Settings
+import com.torrentviewer.core.arrangeRows
+import com.torrentviewer.core.movedRow
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import com.torrentviewer.core.Title
 import com.torrentviewer.core.TitleMark
 import com.torrentviewer.core.Type
@@ -131,8 +137,22 @@ class HomeState {
     var picks by mutableStateOf<List<Shelf>>(emptyList())
     var forYou by mutableStateOf(com.torrentviewer.core.ForYou())
     var fresh by mutableStateOf<List<NewEpisodes.Fresh>>(emptyList())
+    var upcoming by mutableStateOf<List<com.torrentviewer.core.Coming>>(emptyList())
 
     fun row(key: String) = rows.getOrPut(key) { LazyListState() }
+}
+
+private fun dayLabel(date: String) = com.torrentviewer.core.Upcoming.label(date)
+
+/** The .ics of [items], handed to whichever calendar app the viewer picks. */
+private fun shareCalendar(context: android.content.Context, items: List<com.torrentviewer.core.Coming>) {
+    val file = java.io.File(java.io.File(context.filesDir, "calendar").apply { mkdirs() }, "watchly-upcoming.ics")
+    file.writeText(com.torrentviewer.core.Upcoming.ics(items))
+    val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+    val open = android.content.Intent(android.content.Intent.ACTION_VIEW).setDataAndType(uri, "text/calendar").addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/calendar").putExtra(android.content.Intent.EXTRA_STREAM, uri).addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    // Opened straight in a calendar app where one takes .ics; else to Files, mail, Drive…
+    runCatching { context.startActivity(android.content.Intent.createChooser(open, "Add to calendar").putExtra(android.content.Intent.EXTRA_INITIAL_INTENTS, arrayOf(send))) }
 }
 
 private fun inProgress(item: Item): Boolean {
@@ -155,11 +175,11 @@ fun Item.art() = backdrop ?: imdb?.let { "https://images.metahub.space/backgroun
 @Composable
 fun cardWidth() = if (isWide()) 260.dp else 220.dp
 
-/** Home's rows are tall posters: a little over three across a phone held upright. */
+/** Home's rows are tall posters: under three across a phone held upright, big enough to read. */
 @Composable
-fun posterWidth() = if (isWide()) 140.dp else 108.dp
+fun posterWidth() = if (isWide()) 152.dp else 118.dp
 
-/** Between the cards of a row: three and a bit across a phone, the next one peeking in. */
+/** Between the cards of a row, the next one peeking in. */
 private val CARD_GAP = 12.dp
 
 @Composable
@@ -188,6 +208,12 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
     LaunchedEffect(history.size, saved.size, online) {
         val shows = history.filter { it.kind == "tv" }.mapNotNull { it.imdb } + saved.filter { it.kind == "tv" }.map { it.imdb }
         state.fresh = runCatching { NewEpisodes.fresh(shows) }.getOrDefault(state.fresh)
+    }
+    // What's coming: the same followed series' next episodes, and saved films not out yet.
+    LaunchedEffect(history.size, saved.size, online) {
+        val shows = history.filter { it.kind == "tv" }.sortedByDescending { it.at }.mapNotNull { it.imdb } + saved.filter { it.kind == "tv" }.map { it.imdb }
+        val films = saved.filter { it.kind == "movie" }.map { it.imdb }
+        state.upcoming = runCatching { com.torrentviewer.core.Upcoming.load(shows.filter { it.startsWith("tt") }, films.filter { it.startsWith("tt") }) }.getOrDefault(state.upcoming)
     }
     val chosen = settings.genres.map { Shelf(if (it == ANIME_GENRE) "Anime" else it, kindOfGenre(it), it) }
     val kids = com.torrentviewer.core.Kids
@@ -227,6 +253,7 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
     val fromStremio = com.torrentviewer.core.Kids.only(stremio.paused.filter { p -> history.none { it.imdb == p.imdb } }.distinctBy { it.imdb }) { Title(it.imdb, it.kind, it.title) }.take(10)
     val watchlist = saved.filter { it.list == "later" }.map { it.asTitle() }
     var menu by remember { mutableStateOf<Item?>(null) }
+    var comingAll by remember { mutableStateOf(false) }
     var releases by remember { mutableStateOf<List<Item>?>(null) }
     // Nothing already played, seen elsewhere or saved is a suggestion.
     val everywhere by com.torrentviewer.core.WatchedEverywhere.collectAsState(stremio)
@@ -253,13 +280,11 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
     val rows = shelves.associate { s -> s.key to state.loaded[s.key].orEmpty().filter { seen.add(it.imdb) } }
     val visible = shelves.filter { state.loaded[it.key].isNullOrEmpty() || rows[it.key].orEmpty().isNotEmpty() }
 
-    Box(Modifier.fillMaxSize()) {
-        LazyColumn(state = state.list, contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
-            item(key = "hero") {
-                if (heroes.isEmpty()) Box(Modifier.fillMaxWidth().height(if (isWide()) 320.dp else 420.dp))
-                else Hero(state.hero, heroes, onOpen)
-            }
-            if (resumable.isNotEmpty() || fromStremio.isNotEmpty()) item(key = "resume") {
+    // Every row Home has right now, by a key that stays put, in Home's own order. The profile's order
+    // and the rows it turned off go over it: Edit Home, at the foot of the page.
+    val homeRows = mutableListOf<HomeRow>()
+    if (resumable.isNotEmpty() || fromStremio.isNotEmpty()) homeRows += HomeRow("resume", "Continue Watching") {
+        item(key = "resume") {
                 Rail("Continue Watching") {
                     LazyRow(state = state.row("resume"), contentPadding = PaddingValues(horizontal = EDGE), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         items(resumable, key = { it.uri }) { item ->
@@ -289,42 +314,86 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
                         }
                     }
                 }
-            }
-            // A list by hand isn't sorted for children: their rows stay the family ones.
-            if (!com.torrentviewer.core.Kids.on) item(key = "orders") {
-                // Nothing chosen: what they watch stands in.
-                Rail("Watch orders", onMore = onOrders) { WatchOrderRow(settings.genres.ifEmpty { state.picks.mapNotNull { it.genre } }, onOrder) }
-            }
-            if (state.fresh.isNotEmpty()) item(key = "fresh") {
-                Rail("New Episodes") {
-                    LazyRow(state = state.row("fresh"), contentPadding = PaddingValues(horizontal = EDGE), horizontalArrangement = Arrangement.spacedBy(CARD_GAP)) {
-                        items(state.fresh, key = { it.title.imdb }) { f ->
-                            TitleCard(
-                                f.title.poster ?: f.title.wide, f.title.title, { onOpen(f.title) }, Modifier.width(posterWidth()),
-                                info = if (f.count == 1) "1 new episode" else "${f.count} new episodes", badge = "NEW",
-                            )
-                        }
+        }
+    }
+    // A list by hand isn't sorted for children: their rows stay the family ones.
+    if (!com.torrentviewer.core.Kids.on) homeRows += HomeRow("orders", "Watch orders") {
+        item(key = "orders") {
+            // Nothing chosen: what they watch stands in.
+            Rail("Watch orders", onMore = onOrders) { WatchOrderRow(settings.genres.ifEmpty { state.picks.mapNotNull { it.genre } }, onOrder) }
+        }
+    }
+    if (state.fresh.isNotEmpty()) homeRows += HomeRow("fresh", "New Episodes") {
+        item(key = "fresh") {
+            Rail("New Episodes") {
+                LazyRow(state = state.row("fresh"), contentPadding = PaddingValues(horizontal = EDGE), horizontalArrangement = Arrangement.spacedBy(CARD_GAP)) {
+                    items(state.fresh, key = { it.title.imdb }) { f ->
+                        TitleCard(
+                            f.title.poster ?: f.title.wide, f.title.title, { onOpen(f.title) }, Modifier.width(posterWidth()),
+                            info = if (f.count == 1) "1 new episode" else "${f.count} new episodes", badge = "NEW",
+                        )
                     }
                 }
             }
-            if (watchlist.isNotEmpty()) item(key = "list") {
-                Rail("My List") { TitleRow(state.row("list"), watchlist, onOpen) }
+        }
+    }
+    if (state.upcoming.isNotEmpty()) homeRows += HomeRow("upcoming", "Upcoming") {
+        item(key = "upcoming") {
+            Rail("Upcoming", onMore = { comingAll = true }) {
+                LazyRow(state = state.row("upcoming"), contentPadding = PaddingValues(horizontal = EDGE), horizontalArrangement = Arrangement.spacedBy(CARD_GAP)) {
+                    items(state.upcoming.distinctBy { it.title.imdb }, key = { "coming:${it.title.imdb}" }) { c ->
+                        TitleCard(c.title.poster ?: c.title.wide, c.title.title, { onOpen(c.title) }, Modifier.width(posterWidth()), info = "${dayLabel(c.date)}  ·  ${c.what}")
+                    }
+                }
             }
-            if (picks.isNotEmpty()) item(key = "picks") {
-                Rail("Picked for you") { PickedRow(state.row("picks"), picks, onOpen) }
-            }
-            items(charts, key = { "chart:${it.first}" }) { (kind, heading, titles) ->
+        }
+    }
+    if (watchlist.isNotEmpty()) homeRows += HomeRow("list", "My List") {
+        item(key = "list") { Rail("My List") { TitleRow(state.row("list"), watchlist, onOpen) } }
+    }
+    if (picks.isNotEmpty()) homeRows += HomeRow("picks", "Picked for you") {
+        item(key = "picks") { Rail("Picked for you") { PickedRow(state.row("picks"), picks, onOpen) } }
+    }
+    charts.forEach { (kind, heading, titles) ->
+        homeRows += HomeRow("chart:$kind", heading) {
+            item(key = "chart:$kind") {
                 Rail(heading, onMore = { onTop(kind) }) {
                     if (titles.isEmpty()) Placeholders() else TopRow(state.row("chart:$kind"), titles, onOpen)
                 }
             }
-            items(because, key = { "because:${it.first}" }) { (name, titles) ->
-                Rail("Because you watched $name") { TitleRow(state.row("because:$name"), titles, onOpen) }
-            }
-            itemsIndexed(visible, key = { _, s -> s.key }) { _, shelf ->
+        }
+    }
+    // One switch for them all: which titles they name changes with every film played.
+    if (because.isNotEmpty()) homeRows += HomeRow("because", "Because you watched…") {
+        items(because, key = { "because:${it.first}" }) { (name, titles) ->
+            Rail("Because you watched $name") { TitleRow(state.row("because:$name"), titles, onOpen) }
+        }
+    }
+    visible.forEach { shelf ->
+        homeRows += HomeRow("shelf:${shelf.key}", shelf.title) {
+            item(key = shelf.key) {
                 val titles = rows[shelf.key].orEmpty()
                 Rail(shelf.title, onMore = { onShelf(shelf) }) {
                     if (titles.isEmpty()) Placeholders() else TitleRow(state.row(shelf.key), titles, onOpen)
+                }
+            }
+        }
+    }
+    val order = arrangeRows(homeRows.map { it.key }, settings.homeOrder)
+    val byKey = homeRows.associateBy { it.key }
+    var editing by remember { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(state = state.list, contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
+            item(key = "hero") {
+                if (heroes.isEmpty()) Box(Modifier.fillMaxWidth().height(if (isWide()) 320.dp else 420.dp))
+                else Hero(state.hero, heroes, onOpen)
+            }
+            order.filter { it !in settings.homeHidden }.forEach { key -> byKey[key]?.rows?.invoke(this) }
+            item(key = "edit") {
+                Box(Modifier.fillMaxWidth().padding(top = 4.dp), contentAlignment = Alignment.Center) {
+                    Button("Edit Home", { editing = true }, icon = L.drawable.lucide_ic_settings_2, compact = true)
                 }
             }
         }
@@ -339,7 +408,7 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
             Box(Modifier.matchParentSize().graphicsLayer { alpha = solid }.background(Ink.bg).grain())
             Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = EDGE, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("WATCHLY", Modifier.weight(1f), style = Type.title.copy(color = Ink.accent, fontWeight = FontWeight.Black, letterSpacing = 2.sp))
-                if (!isWide()) Tap(onProfile, shape = RoundedCornerShape(6.dp)) { Avatar(who, 30.dp) }
+                if (!isWide()) Tap(onProfile, shape = RoundedCornerShape(9.dp)) { Avatar(who, 40.dp) }
             }
         }
         if (!online) {
@@ -371,6 +440,51 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
     }
 
     releases?.let { all -> ReleasesSheet(all, watch) { releases = null } }
+    if (editing) BottomSheet("Edit Home", { editing = false }) { HomeEditor(order.map { it to byKey.getValue(it).name }, settings) }
+    if (comingAll) BottomSheet("Upcoming", { comingAll = false }) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = EDGE, vertical = 4.dp)) {
+            Text("The next ${com.torrentviewer.core.Upcoming.DAYS} days of the series you follow and the films you saved.", Modifier.padding(bottom = 12.dp), style = Type.meta)
+            Button("Add to calendar", { shareCalendar(context, state.upcoming) }, icon = L.drawable.lucide_ic_calendar_plus, primary = true, compact = true)
+            state.upcoming.groupBy { it.date }.forEach { (date, items) ->
+                Text(dayLabel(date), Modifier.padding(top = 18.dp, bottom = 6.dp), style = Type.overline)
+                items.forEach { c ->
+                    Tap({ comingAll = false; onOpen(c.title) }, Modifier.fillMaxWidth(), RoundedCornerShape(8.dp)) {
+                        Column(Modifier.padding(vertical = 6.dp)) {
+                            Text(c.title.title, style = Type.label.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(c.what, style = Type.meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
+/** One of Home's rows: [key] for the profile's order, [name] for Edit Home, [rows] what it puts on the page. */
+class HomeRow(val key: String, val name: String, val rows: LazyListScope.() -> Unit)
+
+/** Home's rows in the profile's order, each moved up or down or switched off where it stands. */
+@Composable
+private fun HomeEditor(rows: List<Pair<String, String>>, settings: Settings) {
+    val keys = rows.map { it.first }
+    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = EDGE, vertical = 4.dp)) {
+        Text("Move rows up or down, or switch them off. Each profile keeps its own.", Modifier.padding(bottom = 12.dp), style = Type.meta)
+        rows.forEachIndexed { i, (key, name) ->
+            val on = key !in settings.homeHidden
+            Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(name, Modifier.weight(1f), style = Type.label.copy(color = if (on) Ink.text else Ink.muted, fontSize = 15.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                RoundIcon(L.drawable.lucide_ic_chevron_up, { if (i > 0) SettingsStore.save(settings.copy(homeOrder = movedRow(keys, key, -1))) }, Modifier.padding(start = 6.dp), 36.dp)
+                RoundIcon(L.drawable.lucide_ic_chevron_down, { if (i < keys.lastIndex) SettingsStore.save(settings.copy(homeOrder = movedRow(keys, key, 1))) }, Modifier.padding(start = 6.dp), 36.dp)
+                RoundIcon(
+                    if (on) L.drawable.lucide_ic_eye else L.drawable.lucide_ic_eye_off,
+                    { SettingsStore.save(settings.copy(homeHidden = if (on) settings.homeHidden + key else settings.homeHidden - key)) },
+                    Modifier.padding(start = 6.dp), 36.dp,
+                )
+            }
+        }
+        Button("Reset to default", { SettingsStore.save(settings.copy(homeOrder = emptyList(), homeHidden = emptyList())) }, Modifier.padding(top = 14.dp, bottom = 8.dp), icon = L.drawable.lucide_ic_rotate_ccw, compact = true)
+    }
 }
 
 /** Every release a title was played from, each with its size and where it was left; picking one resumes it. */

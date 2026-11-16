@@ -278,6 +278,118 @@ public static class Saved
     }
 }
 
+/// <summary>Each profile's Home: its rows' order and the ones it switched off, by key. core arrangeRows / movedRow.</summary>
+public static class HomeLayout
+{
+    const string OrderKey = "homeOrder", HiddenKey = "homeHidden";
+
+    public static List<string> Order => Store.LoadOwn(OrderKey, new List<string>());
+    public static HashSet<string> Hidden => Store.LoadOwn(HiddenKey, new List<string>()).ToHashSet();
+
+    public static void Save(List<string> order, IEnumerable<string> hidden)
+    {
+        Store.SaveOwn(OrderKey, order);
+        Store.SaveOwn(HiddenKey, hidden.ToList());
+    }
+
+    /// <summary>
+    /// The keys in the saved order. One it doesn't know — a new addon's, or Continue Watching, which wasn't there
+    /// while the rows were moved — goes in just after the row it follows in Home's own order, not to the bottom.
+    /// </summary>
+    public static List<string> Arrange(List<string> keys, List<string> order)
+    {
+        var have = keys.ToHashSet();
+        var output = order.Where(have.Contains).Distinct().ToList();
+        for (var i = 0; i < keys.Count; i++)
+        {
+            if (output.Contains(keys[i])) continue;
+            var before = keys.Take(i).LastOrDefault(output.Contains);
+            output.Insert(before is null ? 0 : output.IndexOf(before) + 1, keys[i]);
+        }
+        return output;
+    }
+
+    /// <summary><paramref name="key"/> one step up (-1) or down (+1) among <paramref name="keys"/>, as the full order to save.</summary>
+    public static List<string> Moved(List<string> keys, string key, int step)
+    {
+        var at = keys.IndexOf(key);
+        var to = at + step;
+        if (at < 0 || to < 0 || to >= keys.Count) return keys;
+        var next = keys.ToList();
+        next.RemoveAt(at);
+        next.Insert(to, key);
+        return next;
+    }
+}
+
+/// <summary>A date ahead, yyyy-MM-dd: an episode of a followed series, or a saved film's release (no episode). core Coming.</summary>
+public sealed record Coming(Title Title, string Date, Episode? Episode)
+{
+    public string What => Episode is { } e
+        ? $"S{e.Season} E{e.Number}" + (!string.IsNullOrWhiteSpace(e.Name) && !e.Name.StartsWith("Episode") ? $" · {e.Name}" : "")
+        : "Film";
+}
+
+/// <summary>core Upcoming: followed series' next episodes and saved films not out yet, and the .ics of them.</summary>
+public static class Upcoming
+{
+    public const int Days = 60;
+    const int MaxTitles = 40;
+    static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+
+    public static string Today => DateTime.UtcNow.ToString("yyyy-MM-dd", Inv);
+
+    static string? Day(string? iso) => iso is { Length: >= 10 } ? iso[..10] : null;
+
+    /// <summary>From <paramref name="today"/> to <paramref name="until"/>, soonest first; specials left out.</summary>
+    public static List<Coming> Ahead(IEnumerable<Title> titles, string today, string until) => titles.SelectMany(t =>
+            t.Kind == "tv"
+                ? t.Episodes.Where(e => e.Season > 0 && Day(e.Released) is { } d && string.CompareOrdinal(d, today) >= 0 && string.CompareOrdinal(d, until) <= 0)
+                    .Select(e => new Coming(t, Day(e.Released)!, e))
+                : Day(t.Released) is { } d && string.CompareOrdinal(d, today) >= 0 && string.CompareOrdinal(d, until) <= 0
+                    ? new[] { new Coming(t, d, null) } : Array.Empty<Coming>())
+        .OrderBy(c => c.Date, StringComparer.Ordinal).ThenBy(c => c.Title.Name).ThenBy(c => c.Episode?.Season).ThenBy(c => c.Episode?.Number).ToList();
+
+    public static async Task<List<Coming>> Load(IEnumerable<string> shows, IEnumerable<string> films)
+    {
+        var lookups = shows.Distinct().Take(MaxTitles).Select(id => Meta.LoadTitle(id, "tv"))
+            .Concat(films.Distinct().Take(MaxTitles).Select(id => Meta.LoadTitle(id, "movie")));
+        var titles = (await Task.WhenAll(lookups)).OfType<Title>();
+        return Ahead(titles, Today, DateTime.UtcNow.AddDays(Days).ToString("yyyy-MM-dd", Inv));
+    }
+
+    /// <summary>"Thu 20 Nov"; today and tomorrow by name.</summary>
+    public static string Label(string date)
+    {
+        if (!DateTime.TryParseExact(date, "yyyy-MM-dd", Inv, System.Globalization.DateTimeStyles.None, out var d)) return date;
+        var today = DateTime.UtcNow.Date;
+        return d == today ? "Today" : d == today.AddDays(1) ? "Tomorrow" : d.ToString("ddd d MMM");
+    }
+
+    /// <summary>One all-day event each, as core's ics: the same UIDs, so importing again updates rather than doubles.</summary>
+    public static string Ics(IEnumerable<Coming> items)
+    {
+        static string Text(string s) => s.Replace("\\", "\\\\").Replace(";", "\\;").Replace(",", "\\,").Replace("\n", "\\n");
+        static string Fold(string line) => string.Join("\r\n ", Enumerable.Range(0, (line.Length + 72) / 73).Select(i => line.Substring(i * 73, Math.Min(73, line.Length - i * 73))));
+        var stamp = DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmss'Z'", Inv);
+        var lines = new List<string> { "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Watchly//Upcoming//EN", "CALSCALE:GREGORIAN", "X-WR-CALNAME:Watchly upcoming" };
+        foreach (var c in items)
+        {
+            var id = c.Episode is { } e ? $"{c.Title.Imdb}-{e.Season}-{e.Number}" : c.Title.Imdb;
+            var end = DateTime.ParseExact(c.Date, "yyyy-MM-dd", Inv).AddDays(1).ToString("yyyyMMdd", Inv);
+            lines.AddRange(new[]
+            {
+                "BEGIN:VEVENT", $"UID:{id}@watchly", $"DTSTAMP:{stamp}",
+                $"DTSTART;VALUE=DATE:{c.Date.Replace("-", "")}", $"DTEND;VALUE=DATE:{end}",
+                "SUMMARY:" + Text(c.Episode is null ? $"{c.Title.Name} (release)" : $"{c.Title.Name} — {c.What}"),
+                "TRANSP:TRANSPARENT", "END:VEVENT",
+            });
+        }
+        lines.Add("END:VCALENDAR");
+        return string.Join("\r\n", lines.Select(Fold)) + "\r\n";
+    }
+}
+
 public sealed record AppSettings
 {
     public bool AddTrackers { get; init; } = true;
@@ -469,7 +581,7 @@ public sealed record Profile
     public string Id { get; init; } = "";
     public string Name { get; init; } = "";
     public string Colour { get; init; } = Profiles.Colours[0];
-    /// <summary>The face picked, an avatars.json id; none picked, <see cref="Avatars.Of"/> picks a steady one.</summary>
+    /// <summary>The person picked (Avatars.Icons) or the path of a picture; anything else, <see cref="Avatars.PersonOf"/> picks a steady person.</summary>
     public string? Icon { get; init; }
     /// <summary>Four digits asked for before it opens — a lock for a shared PC, not a password.</summary>
     public string? Pin { get; init; }

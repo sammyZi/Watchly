@@ -3,6 +3,7 @@ package com.torrentviewer.core
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
@@ -233,5 +234,84 @@ object NewEpisodes {
         val known = read()
         val aired = airedCount(t)
         if (known[t.imdb] != aired) write(known + (t.imdb to aired))
+    }
+}
+
+/* -------------------------------------------------------------- upcoming */
+
+/** A date ahead, yyyy-MM-dd: an episode of a followed series, or a saved film's release ([episode] null). */
+data class Coming(val title: Title, val date: String, val episode: Episode?) {
+    /** "S2 E5 · The Long Night", or "Film" for a release. */
+    val what get() = episode?.let { "S${it.season} E${it.episode}" + (it.name.takeIf { n -> n.isNotBlank() && !n.startsWith("Episode") }?.let { n -> " · $n" } ?: "") } ?: "Film"
+}
+
+/**
+ * What's coming for the profile: its followed series' next episodes and the films it saved before they
+ * were out, from the metadata's day-long cache. Cinemeta lists episodes with their air dates ahead of time.
+ */
+object Upcoming {
+    /** How far ahead the page and the calendar file look. */
+    const val DAYS = 60
+    private const val MAX_TITLES = 40
+
+    private fun day() = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
+
+    fun today(now: Long = System.currentTimeMillis()): String = day().format(Date(now))
+
+    /** "Thu 20 Nov" for a yyyy-MM-dd day; today and tomorrow by name. */
+    fun label(date: String, now: Long = System.currentTimeMillis()): String {
+        val today = today(now)
+        if (date == today) return "Today"
+        if (date == nextDay(today)) return "Tomorrow"
+        return runCatching {
+            SimpleDateFormat("EEE d MMM", Locale.getDefault()).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(day().parse(date)!!)
+        }.getOrDefault(date)
+    }
+
+    /** The day after [date], for an all-day event's end. */
+    fun nextDay(date: String): String = runCatching {
+        val fmt = day()
+        fmt.format(Date(fmt.parse(date)!!.time + 24 * 60 * 60 * 1000L))
+    }.getOrDefault(date)
+
+    /** From [today] to [until], soonest first. Specials (season 0) are left out, as New Episodes leaves them. */
+    fun ahead(titles: List<Title>, today: String, until: String): List<Coming> = titles.flatMap { t ->
+        if (t.isSeries) t.episodes.filter { e -> e.season > 0 && e.released?.take(10)?.let { it in today..until } == true }.map { Coming(t, it.released!!.take(10), it) }
+        else listOfNotNull(t.released?.take(10)?.takeIf { it in today..until }?.let { Coming(t, it, null) })
+    }.sortedWith(compareBy({ it.date }, { it.title.title }, { it.episode?.season }, { it.episode?.episode }))
+
+    suspend fun load(shows: List<String>, films: List<String>, now: Long = System.currentTimeMillis()): List<Coming> {
+        val today = today(now)
+        val until = day().format(Date(now + DAYS * 24 * 60 * 60 * 1000L))
+        val titles = shows.distinct().take(MAX_TITLES).mapNotNull { Meta.title(it, "tv") } +
+            films.distinct().take(MAX_TITLES).mapNotNull { Meta.title(it, "movie") }
+        return ahead(titles, today, until)
+    }
+
+    /**
+     * An iCalendar file of [items], one all-day event each, for a calendar app to import. Each event's UID
+     * stays the same between exports, so importing again updates the same events rather than doubling them.
+     */
+    fun ics(items: List<Coming>, now: Long = System.currentTimeMillis()): String {
+        val stamp = SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date(now))
+        fun text(s: String) = s.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
+        // Lines over 75 characters go on, after a break and a space (RFC 5545 §3.1).
+        fun fold(line: String) = line.chunked(73).joinToString("\r\n ")
+        val lines = mutableListOf("BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Watchly//Upcoming//EN", "CALSCALE:GREGORIAN", "X-WR-CALNAME:Watchly upcoming")
+        for (c in items) {
+            val id = c.episode?.let { "${c.title.imdb}-${it.season}-${it.episode}" } ?: c.title.imdb
+            lines += listOf(
+                "BEGIN:VEVENT",
+                "UID:$id@watchly",
+                "DTSTAMP:$stamp",
+                "DTSTART;VALUE=DATE:${c.date.replace("-", "")}",
+                "DTEND;VALUE=DATE:${nextDay(c.date).replace("-", "")}",
+                "SUMMARY:${text(if (c.episode != null) "${c.title.title} — ${c.what}" else "${c.title.title} (release)")}",
+                "TRANSP:TRANSPARENT",
+                "END:VEVENT",
+            )
+        }
+        lines += "END:VCALENDAR"
+        return lines.joinToString("\r\n", postfix = "\r\n") { fold(it) }
     }
 }

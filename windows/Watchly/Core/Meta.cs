@@ -35,6 +35,8 @@ public sealed record Title
     /// <summary>The title's logo, set over its art in place of the name when there is one.</summary>
     public string? Logo { get; init; }
     public string? Runtime { get; init; }
+    /// <summary>Cinemeta's release date, an ISO timestamp: a film's comes to Upcoming.</summary>
+    public string? Released { get; init; }
     public List<Episode> Episodes { get; init; } = new();
     /// <summary>Its Stremio type — "movie", "series", "channel", "tv" or an addon's own — which addons are asked by. Null is the kind's.</summary>
     public string? Type { get; init; }
@@ -543,6 +545,7 @@ public static class Meta
                 Backdrop = S(m["background"]),
                 Logo = S(m["logo"]),
                 Runtime = S(m["runtime"]),
+                Released = S(m["released"]),
                 Episodes = episodes,
             });
         }

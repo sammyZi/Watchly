@@ -185,7 +185,34 @@ data class Settings(
     val partyShowChat: Boolean = true,
     /** Reactions float up over the picture. */
     val partyShowReactions: Boolean = true,
+    /** Home's rows by key, in the order this profile put them; see [arrangeRows]. */
+    val homeOrder: List<String> = emptyList(),
+    /** Home rows this profile turned off, by key. */
+    val homeHidden: List<String> = emptyList(),
 )
+
+/**
+ * Home's row keys in the profile's order. One the saved order doesn't know — a new addon's, or Continue
+ * Watching, which wasn't there while the rows were moved — goes in just after the row it follows in
+ * Home's own order, not to the bottom. Hidden rows are kept: the editor lists them too.
+ */
+fun arrangeRows(keys: List<String>, order: List<String>): List<String> {
+    val out = order.filter { it in keys }.distinct().toMutableList()
+    keys.forEachIndexed { i, key ->
+        if (key in out) return@forEachIndexed
+        val before = keys.subList(0, i).lastOrNull { it in out }
+        out.add(if (before == null) 0 else out.indexOf(before) + 1, key)
+    }
+    return out
+}
+
+/** [key] one step up (-1) or down (+1) among [keys] as shown, saved as the full order. */
+fun movedRow(keys: List<String>, key: String, step: Int): List<String> {
+    val at = keys.indexOf(key)
+    val to = at + step
+    if (at < 0 || to !in keys.indices) return keys
+    return keys.toMutableList().apply { add(to, removeAt(at)) }
+}
 
 val PARTY_ASKS = listOf("ask", "allow", "off")
 const val PARTY_NAME_MAX = 24
@@ -213,6 +240,8 @@ val CACHE_CAPS = listOf(0, 2048, 4096, 8192, 16384)
 fun cacheCapLabel(mb: Int) = if (mb == 0) "Auto" else "${mb / 1024} GB"
 
 internal const val GENRES_KEY = "genres"
+internal const val HOME_ORDER_KEY = "homeOrder"
+internal const val HOME_HIDDEN_KEY = "homeHidden"
 
 object SettingsStore {
     private val _value = MutableStateFlow(Settings())
@@ -221,7 +250,7 @@ object SettingsStore {
     /** Again at each change of profile, for its favourite genres. */
     fun load() {
         val device = fromJson(runCatching { JSONObject(Kv.global("settings") ?: "{}") }.getOrDefault(JSONObject()))
-        _value.value = device.copy(genres = ownGenres(device.genres))
+        _value.value = device.copy(genres = ownGenres(device.genres), homeOrder = ownList(HOME_ORDER_KEY), homeHidden = ownList(HOME_HIDDEN_KEY))
         // In the same stored object, so it comes back with a restored backup too.
         Addons.load()
     }
@@ -230,6 +259,10 @@ object SettingsStore {
     private fun ownGenres(shared: List<String>): List<String> =
         Kv.get(GENRES_KEY)?.let { stored -> runCatching { JSONArray(stored).let { a -> List(a.length()) { a.getString(it) } } }.getOrNull() }
             ?: if (Kv.onBareKeys) shared else emptyList()
+
+    /** A list kept for the profile alone, like its genres; nothing saved is empty. */
+    private fun ownList(key: String): List<String> =
+        Kv.get(key)?.let { stored -> runCatching { JSONArray(stored).let { a -> List(a.length()) { a.getString(it) } } }.getOrNull() }.orEmpty()
 
     /** Also what a backup restores, so nothing in it is trusted to be in range. */
     fun fromJson(o: JSONObject) = Settings(
@@ -275,6 +308,8 @@ object SettingsStore {
             .put("partyShowChat", next.partyShowChat).put("partyShowReactions", next.partyShowReactions)
         Kv.setGlobal("settings", o.toString())
         Kv.set(GENRES_KEY, JSONArray(next.genres).toString())
+        Kv.set(HOME_ORDER_KEY, JSONArray(next.homeOrder).toString())
+        Kv.set(HOME_HIDDEN_KEY, JSONArray(next.homeHidden).toString())
     }
 }
 

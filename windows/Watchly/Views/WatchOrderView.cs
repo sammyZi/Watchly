@@ -110,6 +110,8 @@ public static class OrderUi
         if (watched && !here) box.Children.Add(Layer(new SolidColorBrush(Color.FromArgb(0x66, 0, 0, 0))));
         var digits = White($"{number}", "TitleText", 22, FontWeights.Black);
         digits.VerticalAlignment = VerticalAlignment.Bottom;
+        // On the poster's foot, not beside the name and year under it.
+        digits.Margin = new Thickness(0, 0, 0, 44);
         digits.Margin = new Thickness(8, 0, 0, 4);
         box.Children.Add(digits);
         if (watched)
@@ -134,11 +136,11 @@ public static class OrderUi
     public static Button PickCard(ForYouPick pick)
     {
         var t = pick.Title;
-        var box = new Grid { Width = 310, Height = 174 };
+        var box = new Grid { Width = 354, Height = 199 };
         box.Children.Add(Layer(Brushes.Black));
         if (ImageUrl.Load(t.Wide, 640) is { } art) box.Children.Add(Layer(new ImageBrush(art) { Stretch = Stretch.UniformToFill }));
         box.Children.Add(Layer(FootFade));
-        var mark = Ui.TitleMark(t, 42, 270, 18, Brushes.White);
+        var mark = Ui.TitleMark(t, 48, 310, 20, Brushes.White);
         mark.Margin = new Thickness(0, 0, 0, 6);
         var why = new StackPanel { Orientation = Orientation.Horizontal };
         if (t.Rating is not null)
@@ -148,11 +150,11 @@ public static class OrderUi
         }
         var line = White($"Because you watched {pick.Because}", "Meta", 12, alpha: 0.78);
         line.VerticalAlignment = VerticalAlignment.Center;
-        line.MaxWidth = 210;
+        line.MaxWidth = 240;
         why.Children.Add(line);
         box.Children.Add(new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(12), Children = { mark, why } });
         var button = Ui.Button(box, () => MainWindow.Shell.OpenTitle(t), "Lift", t.Name);
-        button.Margin = new Thickness(0, 0, 10, 0);
+        button.Margin = new Thickness(0, 0, 16, 0);
         return button;
     }
 
@@ -162,8 +164,10 @@ public static class OrderUi
         var digits = Outlined($"{rank}", 92, here);
         digits.HorizontalAlignment = HorizontalAlignment.Left;
         digits.VerticalAlignment = VerticalAlignment.Bottom;
+        // On the poster's foot, not beside the name and year under it.
+        digits.Margin = new Thickness(0, 0, 0, 44);
         var card = new ContentPresenter { Content = title, ContentTemplate = (DataTemplate)Application.Current.FindResource("RailCard"), Margin = new Thickness(rank < 10 ? 44 : 84, 0, 0, 0) };
-        return new Grid { Height = 210, Children = { digits, card } };
+        return new Grid { Height = 284, Children = { digits, card } };
     }
 
     /// <summary>A TMDB title: opening it asks TMDB for its IMDb id first, the one thing the rest of the app goes by.</summary>

@@ -41,6 +41,8 @@ data class Title(
     val runtime: String? = null,
     /** YouTube video id, from /meta only. */
     val trailer: String? = null,
+    /** Cinemeta's release date, an ISO timestamp ("2026-12-18T00:00:00.000Z"): a film's comes to Upcoming. */
+    val released: String? = null,
     /** Series only, and only from /meta — a catalog row carries no episode list. */
     val episodes: List<Episode> = emptyList(),
     /** Its Stremio type — "movie", "series", "channel", "tv" or an addon's own — which addons are asked by. */
@@ -427,6 +429,7 @@ fun toTitles(metas: JSONArray, kind: String, withEpisodes: Boolean = false, anyI
             logo = m.str("logo"),
             runtime = m.str("runtime")?.takeIf(::plausibleRuntime),
             trailer = trailerOf(m),
+            released = m.str("released"),
             episodes = if (!withEpisodes) emptyList() else toEpisodes(m.optJSONArray("videos")).ifEmpty {
                 // A type of an addon's own with no videos plays its own id, as one "episode".
                 if (kind == "tv" && stremioType != "series") listOf(Episode(id, 1, 1, name, null, null, null)) else emptyList()
@@ -563,7 +566,7 @@ internal fun titlesJson(list: List<Title>): String = JSONArray(list.map { t ->
     JSONObject().put("imdb_id", t.imdb).put("kind", t.kind).put("type", t.type).put("name", t.title).put("year", t.year).put("imdbRating", t.rating)
         .put("genre", JSONArray(t.genres)).put("poster", t.poster).put("description", t.plot).put("cast", JSONArray(t.cast))
         .put("director", JSONArray(t.directors)).put("awards", t.awards).put("background", t.backdrop).put("logo", t.logo)
-        .put("runtime", t.runtime).put("trailer", t.trailer)
+        .put("runtime", t.runtime).put("trailer", t.trailer).put("released", t.released)
         .put("videos", JSONArray(t.episodes.map { e ->
             JSONObject().put("id", e.id).put("season", e.season).put("episode", e.episode).put("name", e.name)
                 .put("overview", e.overview).put("thumbnail", e.thumbnail).put("released", e.released)

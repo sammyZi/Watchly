@@ -2,7 +2,6 @@ package com.torrentviewer.core
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -21,7 +20,6 @@ import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import android.content.Context
 import android.graphics.Bitmap
 import coil3.SingletonImageLoader
@@ -36,16 +34,21 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 
-private const val EMOJI = "emoji/"
+private const val PEOPLE = "people/"
 
 /**
- * Profile icons from Microsoft's Fluent Emoji (MIT, assets/emoji/LICENSE). A profile's icon is one of
- * these, a drawn face's id, or the absolute path of a picture of its own.
+ * Profile icons: hand-drawn people from Open Peeps (CC0, assets/people/LICENSE). A profile's icon is one
+ * of these or the absolute path of a picture of its own; anything else (an emoji or a drawn face from
+ * before) shows a person picked from the profile's id.
  */
-val EMOJI_ICONS = listOf(
-    "fox", "cat", "dog", "panda", "bear", "koala", "tiger", "lion", "rabbit", "hamster", "frog", "monkey",
-    "penguin", "owl", "unicorn", "dragon", "alien", "invader", "robot", "ghost", "cool", "starstruck", "popcorn", "clapper",
-).map { EMOJI + it }
+val PROFILE_ICONS = listOf(
+    "nova", "theo", "raj", "maya", "leo", "kofi", "ivy", "rosa", "amara", "sana", "jin", "omar", "zoe", "gus", "dev", "kai",
+).map { PEOPLE + it }
+
+private fun bundled(icon: String) = icon in PROFILE_ICONS
+
+/** The person a profile shows when it has no picture: its pick, or a steady one from its id. */
+fun personOf(profile: Profile): String = profile.icon?.takeIf(::bundled) ?: PROFILE_ICONS[(profile.id + profile.name).sumOf { it.code } % PROFILE_ICONS.size]
 
 /**
  * A picture from the device or the web, as a small copy of our own: leave to read a picked file ends
@@ -137,22 +140,21 @@ fun AvatarTile(art: AvatarArt, colour: Color, size: Dp, modifier: Modifier = Mod
     }
 }
 
-/** A picture on an avatar's tile: an emoji sits inside it, a photo fills it. */
+/** A picture on an avatar's tile: a person stands on its bottom edge, a photo fills it. */
 @Composable
 fun AvatarImage(icon: String, colour: Color, size: Dp, modifier: Modifier = Modifier) {
-    val emoji = icon.startsWith(EMOJI)
     AsyncImage(
-        if (emoji) "file:///android_asset/$icon.png" else File(icon), null,
-        modifier.size(size).clip(RoundedCornerShape(size * 0.22f)).background(Ink.surface2).background(colour.copy(alpha = 0.28f)).padding(if (emoji) size * 0.12f else 0.dp),
-        contentScale = if (emoji) ContentScale.Fit else ContentScale.Crop,
+        if (bundled(icon)) "file:///android_asset/$icon.png" else File(icon), null,
+        modifier.size(size).clip(RoundedCornerShape(size * 0.22f)).background(Ink.surface2).background(colour.copy(alpha = 0.28f)),
+        contentScale = if (bundled(icon)) ContentScale.Fit else ContentScale.Crop,
     )
 }
 
 @Composable
 fun Avatar(profile: Profile, size: Dp, modifier: Modifier = Modifier) {
     val icon = profile.icon
-    // A photo stays on the device it was picked on: restored from a backup elsewhere, the drawn face stands in.
-    val image = remember(icon) { icon?.takeIf { !profile.isGuest && (it.startsWith(EMOJI) || it.startsWith("/") && File(it).exists()) } }
-    if (image != null) AvatarImage(image, colorOf(profile.colour), size, modifier)
-    else AvatarTile(Avatars.of(profile), colorOf(profile.colour), size, modifier)
+    if (profile.isGuest) return AvatarTile(Avatars.of(profile), colorOf(profile.colour), size, modifier)
+    // A photo stays on the device it was picked on: restored from a backup elsewhere, a person stands in.
+    val image = remember(icon, profile.id) { icon?.takeIf { it.startsWith("/") && File(it).exists() } ?: personOf(profile) }
+    AvatarImage(image, colorOf(profile.colour), size, modifier)
 }

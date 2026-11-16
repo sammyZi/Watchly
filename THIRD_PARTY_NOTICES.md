@@ -19,7 +19,7 @@ are at the links.
 | [JSON-java](https://github.com/stleary/JSON-java) (`org.json`) | [Public domain](https://github.com/stleary/JSON-java/blob/master/LICENSE) |
 | Google Play services Cast framework | [Android Software Development Kit License](https://developer.android.com/studio/terms) |
 | [Google Sans Flex](https://github.com/googlefonts/googlesans-flex) font | [SIL Open Font License 1.1](tv/core/src/main/assets/licenses/GoogleSansFlex-OFL.txt) |
-| [Fluent Emoji](https://github.com/microsoft/fluentui-emoji) profile icons, on Windows too | [MIT](tv/core/src/main/assets/emoji/LICENSE) |
+| [Open Peeps](https://www.openpeeps.com) by Pablo Stanley, via [DiceBear](https://www.dicebear.com/styles/open-peeps/): the people profile icons, on Windows too | [CC0 1.0](tv/core/src/main/assets/people/LICENSE) |
 | [TMDB](https://www.themoviedb.org) film collections, for watch orders | [API terms](https://www.themoviedb.org/api-terms-of-use). This product uses the TMDB API but is not endorsed or certified by TMDB. |
 
 > [!IMPORTANT]

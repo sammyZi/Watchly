@@ -64,18 +64,16 @@ public sealed class ProfilesView : UserControl
 
     /// <summary>core Avatar: the profile's face on the raised page colour, washed with its colour.</summary>
     public static FrameworkElement Avatar(Profile p, double size) =>
-        p.IsGuest ? Tile(Avatars.Of(p), p.Colour, size) : IconTile(p.Icon, p.Colour, size, Avatars.Of(p));
+        p.IsGuest ? Tile(Avatars.Of(p), p.Colour, size) : IconTile(IconOf(p), p.Colour, size);
 
-    /// <summary>An emoji or saved picture on its tile; for anything else, the drawn face <paramref name="fallback"/>.</summary>
-    public static FrameworkElement IconTile(string? icon, string colourHex, double size, AvatarArt? fallback = null)
-    {
-        if (Avatars.Picture(icon) is not { } picture) return Tile(fallback ?? Avatars.Art(icon), colourHex, size);
-        // An emoji sits inside the tile; a photo fills it, as a brush so the corners clip it.
-        var radius = new CornerRadius(size * 0.22);
-        return Avatars.IsEmoji(icon)
-            ? Tiled(new Image { Source = picture, Stretch = Stretch.Uniform, Margin = new Thickness(size * 0.12) }, colourHex, size)
-            : Tiled(new Border { CornerRadius = radius, Background = new ImageBrush(picture) { Stretch = Stretch.UniformToFill } }, colourHex, size);
-    }
+    /// <summary>Its own picture when that is on this PC, else its person.</summary>
+    static string IconOf(Profile p) => Avatars.Picture(p.Icon) is not null ? p.Icon! : Avatars.PersonOf(p);
+
+    /// <summary>A person or saved picture filling its tile, as a brush so the corners clip it.</summary>
+    public static FrameworkElement IconTile(string icon, string colourHex, double size) =>
+        Avatars.Picture(icon) is { } picture
+            ? Tiled(new Border { CornerRadius = new CornerRadius(size * 0.22), Background = new ImageBrush(picture) { Stretch = Stretch.UniformToFill } }, colourHex, size)
+            : Tile(Avatars.Art(icon), colourHex, size);
 
     public static FrameworkElement Tile(AvatarArt art, string colourHex, double size) =>
         Tiled(new Image { Source = art.Image, Stretch = Stretch.Fill }, colourHex, size);
@@ -167,7 +165,7 @@ public sealed class ProfilesView : UserControl
         var editing = target;
         var name = editing?.Name ?? "";
         var colour = editing?.Colour ?? Profiles.Colours[0];
-        var icon = editing is not null ? editing.Icon ?? Avatars.Of(editing).Id : Avatars.Emoji[0];
+        var icon = editing is not null ? IconOf(editing) : Avatars.Icons[0];
         var kids = editing?.Kids ?? false;
         var kidsRow = new StackPanel { Orientation = Orientation.Horizontal };
         var kidsHint = Ui.Text("", "Meta", "Faint", 13);
@@ -192,7 +190,7 @@ public sealed class ProfilesView : UserControl
         {
             preview.Content = IconTile(icon, colour, 160);
             faces.Children.Clear();
-            foreach (var emoji in Avatars.Emoji)
+            foreach (var emoji in Avatars.Icons)
             {
                 var chosen = emoji == icon;
                 var face = Ui.Button(new Border

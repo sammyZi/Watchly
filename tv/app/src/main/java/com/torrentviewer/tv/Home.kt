@@ -2,6 +2,7 @@
 
 package com.torrentviewer.tv
 import com.torrentviewer.core.*
+import com.composables.icons.lucide.R as L
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
@@ -118,6 +119,7 @@ class HomeState {
     var orders: List<WatchOrder> = emptyList()
     var picks by mutableStateOf<List<Shelf>>(emptyList())
     var forYou by mutableStateOf(ForYou())
+    var upcoming by mutableStateOf<List<Coming>>(emptyList())
 
     /** The same along a row: two cards past each edge are ready before the remote reaches them. */
     @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
@@ -164,6 +166,12 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit, onTop: (
         val seeds = (played + saved.map { it.imdb to it.kind }).filter { it.first.startsWith("tt") }.distinctBy { it.first }.take(FOR_YOU_SEEDS)
         if (seeds.isEmpty() || Kids.on) state.forYou = ForYou()
         else Meta.forYou(seeds).takeIf { it.picks.isNotEmpty() }?.let { state.forYou = it }
+    }
+    // What's coming: followed series' next episodes, and saved films not out yet.
+    LaunchedEffect(history.size, saved.size, online) {
+        val shows = history.filter { it.kind == "tv" }.sortedByDescending { it.at }.mapNotNull { it.imdb } + saved.filter { it.kind == "tv" }.map { it.imdb }
+        val films = saved.filter { it.kind == "movie" }.map { it.imdb }
+        state.upcoming = runCatching { Upcoming.load(shows.filter { it.startsWith("tt") }, films.filter { it.startsWith("tt") }) }.getOrDefault(state.upcoming)
     }
     val chosen = settings.genres.map { Shelf(if (it == ANIME_GENRE) "Anime" else it, kindOfGenre(it), it) }
     val addons by Addons.list.collectAsState()
@@ -247,6 +255,62 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit, onTop: (
     val firstKey = remember { if (state.restore == null) "first" else null }
     val aim: (Title) -> Unit = { state.aim = it }
 
+    // Every row Home has right now, by a key that stays put, in Home's own order. The profile's order
+    // and the rows it switched off go over it: Edit Home, at the foot of the page.
+    val homeRows = mutableListOf<TvRow>()
+    if (resuming) homeRows += TvRow("resume", "Continue Watching", "resume") { _, enter, first ->
+        Rail("Continue Watching", enter) {
+            ResumeRow(state, resumable, fromStremio, first, onResume = { item ->
+                releasesOf(history, item).let { all -> if (all.size > 1) releases = all else watch.resume(item) }
+            }, onFocus = aim, onOpen = onOpen)
+        }
+    }
+    // Each title once, at its soonest date: "Thu 20 Nov · S2 E1".
+    val coming = state.upcoming.distinctBy { it.title.imdb }
+    if (coming.isNotEmpty()) homeRows += TvRow("upcoming", "Upcoming", "shelf") { _, enter, _ ->
+        val when_ = coming.associate { it.title.imdb to "${Upcoming.label(it.date)}  ·  ${it.what}" }
+        Rail("Upcoming", enter) { TitleRow(state, "upcoming", coming.map { it.title }, false, onFocus = aim, onOpen = onOpen, stamp = { when_[it.imdb] }) }
+    }
+    if (watchlist.isNotEmpty()) homeRows += TvRow("list", "My List", "shelf") { _, enter, first ->
+        Rail("My List", enter) { TitleRow(state, "list", watchlist, first, onFocus = aim, onOpen = onOpen) }
+    }
+    if (!Kids.on) homeRows += TvRow("orders", "Watch orders", "orders") { _, enter, _ ->
+        // Nothing chosen: what they watch stands in.
+        Rail("Watch orders", enter) { OrderRow(state, settings.genres.ifEmpty { state.picks.mapNotNull { it.genre } }, aim, onOrders, onOrder) }
+    }
+    if (picks.isNotEmpty()) homeRows += TvRow("picks", "Picked for you", "shelf") { _, enter, _ ->
+        Rail("Picked for you", enter) { TitleRow(state, "picks", picks.map { it.title }, false, onFocus = aim, onOpen = onOpen, stamp = { why[it.imdb] }) }
+    }
+    charts.forEach { (kind, heading, titles) ->
+        homeRows += TvRow("chart:$kind", heading, "chart") { _, enter, _ ->
+            Rail(heading, enter) {
+                if (titles.isEmpty()) Box(Modifier.height(CARD_H).fillMaxWidth()) { Placeholders() }
+                else ChartRow(state, "chart:$kind", titles, aim, onOpen, onAll = { onTop(kind) })
+            }
+        }
+    }
+    // One switch for them all: which titles they name changes with every film played.
+    if (because.isNotEmpty()) homeRows += TvRow("because", "Because you watched…", "shelf", because.size, { "because:${because[it].first}" }) { part, enter, _ ->
+        val (name, titles) = because[part]
+        Rail("Because you watched $name", enter) { TitleRow(state, "because:$name", titles, false, onFocus = aim, onOpen = onOpen) }
+    }
+    visible.forEach { shelf ->
+        homeRows += TvRow("shelf:${shelf.key}", shelf.title, "shelf", itemKey = { shelf.key }) { _, enter, first ->
+            val titles = rows[shelf.key].orEmpty()
+            Rail(shelf.title, enter) {
+                if (titles.isEmpty()) Box(Modifier.height(CARD_H).fillMaxWidth()) { Placeholders() }
+                else TitleRow(state, shelf.key, titles, first, onFocus = aim, onOpen = onOpen)
+            }
+        }
+    }
+    val order = arrangeRows(homeRows.map { it.key }, settings.homeOrder)
+    val byKey = homeRows.associateBy { it.key }
+    val shownRows = order.filter { it !in settings.homeHidden }
+    // The first time in, focus lands on the top row that can take it: one of cards, not the orders or a chart.
+    val firstRow = shownRows.firstOrNull { it == "resume" || it == "list" || it.startsWith("shelf:") }
+    var editing by remember { mutableStateOf(false) }
+    var editRow by remember { mutableStateOf<String?>(null) }
+
     Box(Modifier.fillMaxSize()) {
         Billboard(state, fallback, Modifier.fillMaxWidth().fillMaxHeight(0.62f))
         // The column never scrolls itself on focus: each row pins itself to the top when
@@ -269,59 +333,18 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit, onTop: (
                 }
                 Unit
             }
+            // Each row pins itself by where it stands on the page, so the index counts every part shown.
             var at = 0
-            if (resuming) item(key = "resume", contentType = "resume") {
-                Rail("Continue Watching", pin(0)) {
-                    ResumeRow(state, resumable, fromStremio, firstKey != null, onResume = { item ->
-                        releasesOf(history, item).let { all -> if (all.size > 1) releases = all else watch.resume(item) }
-                    }, onFocus = aim, onOpen = onOpen)
-                }
-            }.also { at++ }
-            val listAt = at
-            if (watchlist.isNotEmpty()) item(key = "list", contentType = "shelf") {
-                Rail("My List", pin(listAt)) {
-                    TitleRow(state, "list", watchlist, firstKey != null && !resuming, onFocus = aim, onOpen = onOpen)
-                }
-            }.also { at++ }
-            val ordersAt = at
-            if (!Kids.on) item(key = "orders", contentType = "orders") {
-                // Nothing chosen: what they watch stands in.
-                Rail("Watch orders", pin(ordersAt)) { OrderRow(state, settings.genres.ifEmpty { state.picks.mapNotNull { it.genre } }, aim, onOrders, onOrder) }
-            }.also { at++ }
-            val picksAt = at
-            if (picks.isNotEmpty()) item(key = "picks", contentType = "shelf") {
-                Rail("Picked for you", pin(picksAt)) {
-                    TitleRow(state, "picks", picks.map { it.title }, false, onFocus = aim, onOpen = onOpen, stamp = { why[it.imdb] })
-                }
-            }.also { at++ }
-            charts.forEach { (kind, heading, titles) ->
-                val here = at++
-                item(key = "chart:$kind", contentType = "chart") {
-                    Rail(heading, pin(here)) {
-                        if (titles.isEmpty()) Box(Modifier.height(CARD_H).fillMaxWidth()) { Placeholders() }
-                        else ChartRow(state, "chart:$kind", titles, aim, onOpen, onAll = { onTop(kind) })
-                    }
+            for (key in shownRows) {
+                val row = byKey[key] ?: continue
+                repeat(row.parts) { part ->
+                    val here = at++
+                    item(key = row.itemKey(part), contentType = row.type) { row.content(part, pin(here), firstKey != null && part == 0 && key == firstRow) }
                 }
             }
-            because.forEach { (name, titles) ->
-                val here = at++
-                item(key = "because:$name", contentType = "shelf") {
-                    Rail("Because you watched $name", pin(here)) {
-                        TitleRow(state, "because:$name", titles, false, onFocus = aim, onOpen = onOpen)
-                    }
-                }
-            }
-            val shelvesAt = at
-            // A row scrolled off hands what it was built from to the next of its kind coming on.
-            itemsIndexed(visible, key = { _, s -> s.key }, contentType = { _, _ -> "shelf" }) { i, shelf ->
-                val titles = rows[shelf.key].orEmpty()
-                Rail(shelf.title, pin(shelvesAt + i)) {
-                    if (titles.isEmpty()) {
-                        Box(Modifier.height(CARD_H).fillMaxWidth()) { Placeholders() }
-                    } else {
-                        TitleRow(state, shelf.key, titles, firstKey != null && !resuming && watchlist.isEmpty() && i == 0, onFocus = aim, onOpen = onOpen)
-                    }
-                }
+            val editAt = at
+            item(key = "edit", contentType = "edit") {
+                Box(Modifier.padding(start = GUTTER, top = 6.dp)) { TvButton("Edit Home", { editing = true }, icon = L.drawable.lucide_ic_settings_2, onFocus = pin(editAt)) }
             }
         }
         }
@@ -333,8 +356,58 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit, onTop: (
             )
         }
         releases?.let { all -> ReleasesSheet(all, watch) { releases = null } }
+        if (editing) {
+            val row = editRow
+            if (row == null) {
+                Sheet(
+                    "Edit Home",
+                    order.map { Option(it, byKey.getValue(it).name, if (it in settings.homeHidden) "Off" else null) } + Option(RESET, "Reset Home to default"),
+                    null,
+                    { picked ->
+                        if (picked == RESET) SettingsStore.save(settings.copy(homeOrder = emptyList(), homeHidden = emptyList())) else editRow = picked
+                    },
+                    { editing = false },
+                )
+            } else {
+                // Stays open on the row, so it moves a step with each press.
+                val i = order.indexOf(row)
+                val off = row in settings.homeHidden
+                Sheet(
+                    byKey[row]?.name ?: "Row",
+                    listOfNotNull(
+                        Option("up", "Move up").takeIf { i > 0 },
+                        Option("down", "Move down").takeIf { i in 0 until order.lastIndex },
+                        Option("toggle", if (off) "Show this row" else "Hide this row"),
+                    ),
+                    null,
+                    { picked ->
+                        when (picked) {
+                            "up" -> SettingsStore.save(settings.copy(homeOrder = movedRow(order, row, -1)))
+                            "down" -> SettingsStore.save(settings.copy(homeOrder = movedRow(order, row, 1)))
+                            else -> SettingsStore.save(settings.copy(homeHidden = if (off) settings.homeHidden - row else settings.homeHidden + row))
+                        }
+                    },
+                    { editRow = null },
+                )
+            }
+        }
     }
 }
+
+private const val RESET = "\u0000reset"
+
+/**
+ * One of Home's rows: [key] for the profile's order, [name] for Edit Home. [parts] rows on the page
+ * ("Because you watched" is one per title), each with its own list key from [itemKey].
+ */
+private class TvRow(
+    val key: String,
+    val name: String,
+    val type: String,
+    val parts: Int = 1,
+    val itemKey: (Int) -> String = { key },
+    val content: @Composable (part: Int, onEnter: () -> Unit, first: Boolean) -> Unit,
+)
 
 val CARD_W = 210.dp
 val CARD_H = 118.dp
