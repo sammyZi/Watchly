@@ -16,6 +16,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackGroup
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.VideoSize
+import androidx.media3.common.text.Cue
 import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
@@ -106,7 +107,43 @@ class ExoView(context: Context) : Video(context) {
                 ),
             )
             subtitleView.setFractionalTextSize(1f / (SUB_SIZES[value.size] ?: 16))
+            // A picture line already up takes the new size now, not with the next line.
+            subtitleView.setCues(sized(shownCues))
         }
+
+    /** The lines as Media3 last gave them, so a size step re-scales what is on screen. */
+    private var shownCues: List<Cue> = emptyList()
+
+    /**
+     * Text sizes come from setFractionalTextSize, but a disc's subtitles (PGS, VobSub, DVB) are pictures,
+     * which it never touches: on a BluRay's own track the size steps changed nothing. Those are scaled
+     * here by the same steps, normal being the disc's size.
+     */
+    private fun sized(cues: List<Cue>): List<Cue> {
+        val k = subtitleStyle?.pictureScale() ?: return cues
+        if (k == 1f || cues.none { it.bitmap != null }) return cues
+        return cues.map { if (it.bitmap == null) it else scaledPicture(it, k) }
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun scaledPicture(cue: Cue, k: Float): Cue {
+        val w = cue.size
+        val h = cue.bitmapHeight
+        // Sized to the frame by Media3 itself (no box given), or placed by line number: left as it is.
+        if (w == Cue.DIMEN_UNSET || h == Cue.DIMEN_UNSET || cue.line == Cue.DIMEN_UNSET || cue.lineType != Cue.LINE_TYPE_FRACTION || w <= 0f || h <= 0f) return cue
+        fun start(at: Float, anchor: Int, length: Float) = when (anchor) {
+            Cue.ANCHOR_TYPE_MIDDLE -> at - length / 2
+            Cue.ANCHOR_TYPE_END -> at - length
+            else -> at
+        }
+        val x = if (cue.position == Cue.DIMEN_UNSET) (1f - w) / 2 else start(cue.position, cue.positionAnchor, w)
+        val (nx, ny, nw, nh) = scaledBox(x, start(cue.line, cue.lineAnchor, h), w, h, k).toList()
+        return cue.buildUpon()
+            .setPosition(nx).setPositionAnchor(Cue.ANCHOR_TYPE_START)
+            .setLine(ny, Cue.LINE_TYPE_FRACTION).setLineAnchor(Cue.ANCHOR_TYPE_START)
+            .setSize(nw).setBitmapHeight(nh)
+            .build()
+    }
     private var paused = false
     private var rate = 1f
     private var scale = ScaleType.SURFACE_BEST_FIT
@@ -480,7 +517,11 @@ class ExoView(context: Context) : Video(context) {
             val cues = cueGroup.cues
             // The first few lines after a change, in the log: whether any text reaches the screen at all.
             if (cues.isNotEmpty() && cuesSeen++ < 3) onNote("subtitles: line at ${(player?.currentPosition ?: 0L) / 1000}s shown ${if (subDelayMs > 0) "${subDelayMs}ms late" else "now"}: \"${cues.joinToString(" / ") { it.text?.toString().orEmpty() }.take(40)}\"")
-            if (subDelayMs > 0) subtitleView.postDelayed({ subtitleView.setCues(cues) }, subDelayMs) else subtitleView.setCues(cues)
+            val show = {
+                shownCues = cues
+                subtitleView.setCues(sized(cues))
+            }
+            if (subDelayMs > 0) subtitleView.postDelayed(show, subDelayMs) else show()
         }
 
         override fun onVideoSizeChanged(size: VideoSize) {

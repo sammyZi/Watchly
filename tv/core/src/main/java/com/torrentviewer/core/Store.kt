@@ -224,6 +224,22 @@ data class SubtitleStyle(val size: String = "normal", val yellow: Boolean = fals
 /** libVLC's relative font size: the screen height divided by this, so smaller is bigger. */
 val SUB_SIZES = linkedMapOf("small" to 20, "normal" to 16, "large" to 12, "huge" to 9)
 
+/** How much bigger than "normal" a picture subtitle is drawn at this size: normal is the disc's own. */
+fun SubtitleStyle.pictureScale(): Float = 16f / (SUB_SIZES[size] ?: 16)
+
+/**
+ * A picture subtitle's box (x, y, width, height, fractions of the frame) [k] times bigger, kept at the
+ * same bottom centre — where a line sits — and inside the frame; it stops growing at the frame's edges.
+ */
+fun scaledBox(x: Float, y: Float, w: Float, h: Float, k: Float): FloatArray {
+    val s = minOf(k, 1f / w, 1f / h)
+    val nw = w * s
+    val nh = h * s
+    val nx = (x + w / 2 - nw / 2).coerceIn(0f, 1f - nw)
+    val ny = (y + h - nh).coerceIn(0f, 1f - nh)
+    return floatArrayOf(nx, ny, nw, nh)
+}
+
 /** One size up (+1) or down (−1), stopping at the ends. */
 fun SubtitleStyle.resized(step: Int): SubtitleStyle {
     val sizes = SUB_SIZES.keys.toList()
