@@ -398,14 +398,13 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
             }
         }
 
-        // The wordmark and who is watching: a shade over the hero; once the rows scroll under it, the
-        // page itself, eased in. A clean edge: a fade under it washed out the tops of the cards.
+        // The wordmark and who is watching, on no bar of their own: a light shade over the hero, gone once
+        // the rows scroll under it, so the page shows through rather than a black strip.
         val scrolled by remember { derivedStateOf { state.list.firstVisibleItemIndex > 0 || state.list.firstVisibleItemScrollOffset > 240 } }
         val solid by animateFloatAsState(if (scrolled) 1f else 0f, tween(260), label = "bar")
         StatusIconsOverArt(!scrolled)
         Box(Modifier.fillMaxWidth()) {
             Box(Modifier.matchParentSize().graphicsLayer { alpha = 1f - solid }.background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent))))
-            Box(Modifier.matchParentSize().graphicsLayer { alpha = solid }.background(Ink.bg).grain())
             Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = EDGE, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("WATCHLY", Modifier.weight(1f), style = Type.title.copy(color = Ink.accent, fontWeight = FontWeight.Black, letterSpacing = 2.sp))
                 if (!isWide()) Tap(onProfile, shape = RoundedCornerShape(9.dp)) { Avatar(who, 40.dp) }

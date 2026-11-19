@@ -243,6 +243,18 @@ fun Onboarding(onDone: () -> Unit) {
     }
 }
 
+/** Who's watching's backdrop: the tour's wall of what is on, under a wash of the page's own colour so the names read in either theme. */
+@Composable
+fun ProfilesPosterWall() {
+    val films by produceState(Meta.peekCatalog("movie", null).orEmpty()) { value = Meta.catalog("movie") }
+    val series by produceState(Meta.peekCatalog("tv", null).orEmpty()) { value = Meta.catalog("tv") }
+    val posters = (films.take(14) + series.take(14)).filter { it.poster != null }
+    Box(Modifier.fillMaxSize().background(Ink.bg)) {
+        PosterWall(posters)
+        Box(Modifier.fillMaxSize().background(Ink.bg.copy(alpha = 0.7f)))
+    }
+}
+
 /** Three rows of posters drifting opposite ways, tilted, as a wall of what is on. */
 @Composable
 private fun PosterWall(posters: List<Title>) {

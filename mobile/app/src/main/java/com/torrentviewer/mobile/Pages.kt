@@ -1468,6 +1468,9 @@ fun ProfilesScreen(profiles: List<Profile>, onPick: (Profile) -> Unit, onCancel:
     }
     // The editor scrolls its own form so Save stays on screen; the rest scroll whole.
     val scroll = if (mode is ProfilesMode.Edit) Modifier else Modifier.verticalScroll(rememberScrollState())
+    // What's on, behind the profiles: the welcome screen's wall, washed back.
+    Box(Modifier.fillMaxSize()) {
+    ProfilesPosterWall()
     Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().then(scroll).padding(horizontal = EDGE, vertical = 24.dp), contentAlignment = Alignment.Center) {
         when (val m = mode) {
             ProfilesMode.Pick, ProfilesMode.Manage -> Picker(
@@ -1504,6 +1507,7 @@ fun ProfilesScreen(profiles: List<Profile>, onPick: (Profile) -> Unit, onCancel:
             )
             is ProfilesMode.Pin -> PinPad(m.profile, onOk = { onPick(m.profile) }, onBack = { mode = ProfilesMode.Pick })
         }
+    }
     }
 }
 
