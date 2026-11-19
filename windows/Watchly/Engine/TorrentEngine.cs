@@ -25,7 +25,15 @@ public sealed record Progress(double Percent, double Speed, double UploadSpeed, 
 public sealed class TorrentEngine
 {
     static readonly string MetaDir = Path.Combine(Paths.EngineCache, "torrents");
-    public static TorrentEngine Instance { get; } = new();
+    /// <summary>
+    /// Made the first time something streams or downloads: making it binds the peer port, maps it on the
+    /// router and starts DHT. As a plain static it was also made by closing the app — just to stop it again,
+    /// network and all, for a session that never streamed.
+    /// </summary>
+    static readonly Lazy<TorrentEngine> made = new(() => new TorrentEngine());
+    public static TorrentEngine Instance => made.Value;
+    /// <summary>Made yet: what shutting down, or new speed limits, can leave alone if not.</summary>
+    public static bool Started => made.IsValueCreated;
 
     readonly ClientEngine engine;
 

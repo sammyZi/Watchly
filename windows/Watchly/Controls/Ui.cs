@@ -274,10 +274,14 @@ public static class Ui
 
         var grid = new Grid();
         grid.Children.Add(list);
+        // Loaded comes again each time the row is put back on the page (Home reorders its rows), and every
+        // time it added another wheel and drag handler: the page then took each wheel notch twice, three times…
+        ScrollViewer? hooked = null;
         list.Loaded += (_, _) =>
         {
-            if (VisualTreeHelper.GetChildrenCount(list) > 0 && VisualTreeHelper.GetChild(list, 0) is ScrollViewer inner)
+            if (VisualTreeHelper.GetChildrenCount(list) > 0 && VisualTreeHelper.GetChild(list, 0) is ScrollViewer inner && inner != hooked)
             {
+                hooked = inner;
                 PassWheel(inner);
                 DragScroll(inner);
             }

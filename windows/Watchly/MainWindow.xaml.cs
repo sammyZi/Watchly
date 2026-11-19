@@ -556,7 +556,8 @@ public partial class MainWindow : Window
         Settings = next;
         next.Save();
         if (themeChanged) Theme.Apply(next.ThemeMode);
-        if (limitsChanged) _ = TorrentEngine.Instance.ApplyLimits(next);
+        // Not made yet, it reads the saved limits when it is: nothing to start the network for now.
+        if (limitsChanged && TorrentEngine.Started) _ = TorrentEngine.Instance.ApplyLimits(next);
         SettingsChanged?.Invoke();
     }
 
@@ -1458,7 +1459,7 @@ public partial class MainWindow : Window
         {
             if (PlayerHost.Content is PlayerView player) await player.Shutdown();
             await Downloads.Instance.StopAll();
-            await TorrentEngine.Instance.Shutdown();
+            if (TorrentEngine.Started) await TorrentEngine.Instance.Shutdown();
         }
         // Out of sight already; fast-resume data is saved within this, but a tracker that
         // never answers must not keep the process alive in the background for long.
