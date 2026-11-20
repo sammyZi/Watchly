@@ -4,7 +4,7 @@
         xmlns:c="clr-namespace:Watchly.Controls"
         xmlns:local="clr-namespace:Watchly"
         Title="Watchly" Icon="pack://application:,,,/Assets/app.ico" Width="1280" Height="840" MinWidth="760" MinHeight="560"
-        Background="{DynamicResource PageBg}" FontFamily="{StaticResource Noto}"
+        Background="{DynamicResource PageBg}" FontFamily="{StaticResource Sans}"
         TextOptions.TextFormattingMode="Ideal" UseLayoutRounding="True"
         WindowState="Maximized"
         WindowStartupLocation="CenterScreen" AllowDrop="True">

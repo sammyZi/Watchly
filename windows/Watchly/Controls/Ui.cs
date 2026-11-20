@@ -94,6 +94,9 @@ public static class Ui
     /// <summary>The page's side padding, and the gap between a heading and what it heads.</summary>
     public const double Gutter = 24;
 
+    /// <summary>Poppins, bundled — the phone's and the TV's face too — for text drawn by hand rather than set by the window's font.</summary>
+    public static readonly FontFamily Sans = new(new Uri("pack://application:,,,/"), "./Assets/Fonts/#Poppins");
+
     /// <summary>
     /// The room a row of picture cards leaves above and below them: a card under the pointer rises 4%
     /// (the Lift style), and a shelf cut to the cards' own height would slice the top and foot off it.

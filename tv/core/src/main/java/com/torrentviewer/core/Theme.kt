@@ -58,11 +58,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -118,14 +116,14 @@ object Ink {
     val focus = Color.White
 }
 
-@OptIn(ExperimentalTextApi::class)
-private fun flex(weight: Int) = Font(
-    R.font.google_sans_flex,
-    FontWeight(weight),
-    variationSettings = FontVariation.Settings(FontVariation.weight(weight)),
+/** Every [Type] style's face, on the phone and the TV alike (Windows bundles the same): Poppins, one file a weight. */
+val Sans = FontFamily(
+    Font(R.font.poppins_regular, FontWeight.Normal),
+    Font(R.font.poppins_medium, FontWeight.Medium),
+    Font(R.font.poppins_semibold, FontWeight.SemiBold),
+    Font(R.font.poppins_bold, FontWeight.Bold),
+    Font(R.font.poppins_extrabold, FontWeight.ExtraBold),
 )
-
-val Sans = FontFamily(flex(400), flex(500), flex(600), flex(700), flex(800))
 
 /**
  * Sized for the 960×540dp canvas a television reports, nudged up for ten feet. Getters,

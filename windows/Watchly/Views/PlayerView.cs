@@ -2914,7 +2914,7 @@ public sealed class Ring : FrameworkElement
     const double Size = 64, Radius = 26;
     static readonly Pen TrackPen = Frozen(new Pen(new SolidColorBrush(Color.FromArgb(0x22, 255, 255, 255)), 5));
     static readonly Pen ArcPen = Frozen(new Pen(new SolidColorBrush(Color.FromRgb(0xe5, 0x09, 0x14)), 5) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round });
-    static readonly Typeface Face = new(new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal);
+    static readonly Typeface Face = new(Ui.Sans, FontStyles.Normal, FontWeights.Bold, FontStretches.Normal);
 
     static T Frozen<T>(T f) where T : Freezable { f.Freeze(); return f; }
 

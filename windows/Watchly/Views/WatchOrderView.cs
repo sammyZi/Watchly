@@ -128,7 +128,7 @@ public static class OrderUi
     /// <summary>A number large and outlined, as Netflix's Top 10 sets its ranks; WPF text has no outline of its own.</summary>
     public static Path Outlined(string digits, double size, Visual here)
     {
-        var text = new FormattedText(digits, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, new Typeface(new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Black, FontStretches.Normal), size, Brushes.White, VisualTreeHelper.GetDpi(here).PixelsPerDip);
+        var text = new FormattedText(digits, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, new Typeface(Ui.Sans, FontStyles.Normal, FontWeights.ExtraBold, FontStretches.Normal), size, Brushes.White, VisualTreeHelper.GetDpi(here).PixelsPerDip);
         return new Path { Data = text.BuildGeometry(new Point()), Stroke = new SolidColorBrush(Color.FromArgb(0xC0, 0xff, 0xff, 0xff)), StrokeThickness = 1.6 };
     }
 

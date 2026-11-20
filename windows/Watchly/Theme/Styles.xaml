@@ -2,7 +2,7 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:c="clr-namespace:Watchly.Controls">
 
-  <FontFamily x:Key="Noto">pack://application:,,,/Assets/Fonts/#Noto Sans, Segoe UI</FontFamily>
+  <FontFamily x:Key="Sans">pack://application:,,,/Assets/Fonts/#Poppins, Segoe UI</FontFamily>
 
   <c:BoolToVisibility x:Key="Vis" />
   <c:ImageUrl x:Key="Img" />
