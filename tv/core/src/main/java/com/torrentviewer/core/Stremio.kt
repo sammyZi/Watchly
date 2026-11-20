@@ -55,10 +55,36 @@ fun localWatched(items: List<Item>): StremioLibrary {
     return StremioLibrary(films, episodes)
 }
 
-/** Where the viewer stopped, on any device: [progress] is 0–100, [seconds] the spot itself when known. [ep] is null for a film. */
-data class Paused(val imdb: String, val title: String, val year: String?, val ep: Ep?, val progress: Double, val seconds: Double? = null) {
+/**
+ * Where the viewer stopped, on any device: [progress] is 0–100, [seconds] the spot itself when known. [ep]
+ * is null for a film. [at] is when it was left (Stremio's lastWatched, ms; 0 when it doesn't say).
+ */
+data class Paused(val imdb: String, val title: String, val year: String?, val ep: Ep?, val progress: Double, val seconds: Double? = null, val at: Long = 0L) {
     val kind get() = if (ep == null) "movie" else "tv"
 }
+
+/**
+ * Its own spot is saved here the moment it is left, and sent up then too: within this of each other, both
+ * are this device's own stop. Calibration knob: two devices' clocks can differ by a few seconds as well.
+ */
+private const val SPOT_SLACK_MS = 30_000L
+
+/**
+ * Titles played here and then carried on with on another device: that device's later spot, for this one's
+ * history — as (uri, file index, seconds). Started on the phone and watched on to the 1h mark on the TV,
+ * the phone went back to where it had stopped, its own spot always winning over Stremio's. Only the same
+ * film or episode: one further on in a series is another file, perhaps another release.
+ */
+fun newerElsewhere(library: StremioLibrary, items: List<Item>, slackMs: Long = SPOT_SLACK_MS): List<Triple<String, Int, Double>> =
+    latestPerTitle(items).mapNotNull { item ->
+        val id = item.imdb ?: return@mapNotNull null
+        val i = item.lastFileIndex ?: return@mapNotNull null
+        val ep = if (item.kind == "movie") null else item.files?.find { it.index == i }?.name?.let(::parseEpisode) ?: return@mapNotNull null
+        val there = library.paused.find { it.imdb == id && it.ep == ep } ?: return@mapNotNull null
+        val seconds = there.seconds ?: return@mapNotNull null
+        if (there.at <= item.playedAt(i) + slackMs) return@mapNotNull null
+        if (kotlin.math.abs(seconds - (item.positions[i] ?: 0.0)) < 1.0) null else Triple(item.uri, i, seconds)
+    }
 
 /** A title in the viewer's Stremio library: [last] is "S01E05" for a show, [at] an ISO time, newest sorting first. */
 data class Seen(val imdb: String, val title: String, val year: String?, val kind: String, val at: String, val last: String? = null)
@@ -119,7 +145,7 @@ fun parseLibrary(json: String): StremioLibrary {
         if (through && ep != null && part == 0.0) episodes.getOrPut(id) { mutableSetOf() } += ep
         if (through && part == 0.0) isoMs(at)?.let { ms -> finished[id] = ms }
         if (offset > 0 && part >= 0.02 && part < WATCHED_AT && (kind == "movie" || ep != null)) {
-            paused += at to Paused(id, name, null, ep, part * 100, offset / 1000.0)
+            paused += at to Paused(id, name, null, ep, part * 100, offset / 1000.0, isoMs(at) ?: 0L)
         }
         if (!it.optBoolean("removed") && !it.optBoolean("temp")) seen += Seen(id, name, null, kind, at, ep?.let { e -> "S%02dE%02d".format(e.season, e.episode) })
     }
@@ -330,7 +356,17 @@ object Stremio {
                 }
                 if (owner == profile) Kv.set(LIST_SENT, JSONArray(listSent() + listed.map { it.imdb }).toString())
                 val merged = theirs + up
-                if (owner == profile) _library.value = parseLibrary(JSONObject().put("result", JSONArray(merged.values)).toString())
+                if (owner == profile) {
+                    val library = parseLibrary(JSONObject().put("result", JSONArray(merged.values)).toString())
+                    // Watched on further on another device: its spot here too, for Continue Watching and the
+                    // next resume. The old byte spot was for the old time, so it goes.
+                    for ((uri, index, seconds) in newerElsewhere(library, History.items.value)) {
+                        History.setPosition(uri, index, seconds)
+                        History.patch(uri) { it.copy(byteAts = it.byteAts - index) }
+                        Log.i("stremio", "spot from another device: ${seconds.toInt()}s for $uri")
+                    }
+                    _library.value = library
+                }
             }.onFailure { Log.w("stremio", "pull: ${it.message}") }
         }
     }
@@ -451,7 +487,7 @@ object Stremio {
         val imdb = at.imdb ?: return
         if (key == null || duration <= 0) return
         val title = at.label.substringBefore(" · ")
-        _library.value = _library.value.let { l -> l.copy(paused = listOf(Paused(imdb, title, null, ep, seconds / duration * 100, seconds)) + l.paused.filterNot { it.imdb == imdb && it.ep == ep }) }
+        _library.value = _library.value.let { l -> l.copy(paused = listOf(Paused(imdb, title, null, ep, seconds / duration * 100, seconds, System.currentTimeMillis())) + l.paused.filterNot { it.imdb == imdb && it.ep == ep }) }
         update(imdb, title, typeOf(at.kind), at.poster) { s ->
             s.put("timeOffset", (seconds * 1000).toLong()).put("duration", (duration * 1000).toLong()).put("lastWatched", isoNow())
             if (ep != null) s.put("video_id", "$imdb:${ep.season}:${ep.episode}")

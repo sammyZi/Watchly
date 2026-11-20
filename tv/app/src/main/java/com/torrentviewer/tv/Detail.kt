@@ -195,10 +195,12 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
         else -> "No $what in ${langName(lang)} — change the language and try again."
     }
 
-    fun playEpisode(ep: Episode) = scope.launch {
+    /** [fromTop]: Start over — from its start, whatever this TV or Stremio kept. */
+    fun playEpisode(ep: Episode, fromTop: Boolean = false) = scope.launch {
         val ready = if (episode?.id == ep.id && shown.isNotEmpty()) shown else findSources(ep).await()
-        ready.firstOrNull()?.let { watch.stream(it, title, episodeTag(ep.season, ep.episode), ep) }
-            ?: watch.notes.tryEmit(noneFound(episodeTag(ep.season, ep.episode)))
+        ready.firstOrNull()?.let {
+            if (fromTop) watch.streamFromTop(it, title, episodeTag(ep.season, ep.episode), ep) else watch.stream(it, title, episodeTag(ep.season, ep.episode), ep)
+        } ?: watch.notes.tryEmit(noneFound(episodeTag(ep.season, ep.episode)))
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -283,6 +285,12 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
                                 primary = true,
                                 requester = play,
                             )
+                            // Part-way, here or on another device: from the start instead.
+                            if (shown.isNotEmpty() && resumeLabel(title.imdb, history, stremio) != null) TvButton(
+                                label = "Start over",
+                                onClick = { watch.streamFromTop(shown.first(), title) },
+                                icon = L.drawable.lucide_ic_rotate_ccw,
+                            )
                         } else if (upNext != null) {
                             TvButton(
                                 label = if (busy && episode?.id == upNext.id && shown.isEmpty()) "Finding sources…"
@@ -295,6 +303,11 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
                                 icon = L.drawable.lucide_ic_play,
                                 primary = true,
                                 requester = play,
+                            )
+                            if (resumeLabel(title.imdb, history, stremio, Ep(upNext.season, upNext.episode)) != null) TvButton(
+                                label = "Start over",
+                                onClick = { playEpisode(upNext, fromTop = true) },
+                                icon = L.drawable.lucide_ic_rotate_ccw,
                             )
                         }
                         TvButton(

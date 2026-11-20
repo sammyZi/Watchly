@@ -75,10 +75,27 @@ class Watch(val engine: TorrentStream) {
      */
     private var torboxIndexed = false
 
+    /**
+     * Start over: the next file opened plays from its start, whatever this device or Stremio kept. Only
+     * setting the spot to 0 made it look never played here, so Stremio's spot was fetched — back where it was.
+     */
+    private var fromTop = false
+
+    fun startOver(picked: Item) {
+        fromTop = true
+        resume(picked)
+    }
+
+    fun streamFromTop(hit: Hit, from: Title?, tag: String? = null, episode: Episode? = null) {
+        fromTop = true
+        stream(hit, from, tag, episode)
+    }
+
     fun fail(message: String) {
         Log.w("watch", message)
         notes.tryEmit(message)
         phase = Phase.IDLE
+        fromTop = false
     }
 
     private fun uriOf(raw: String) = if (SettingsStore.value.value.addTrackers) withTrackers(raw) else raw
@@ -201,7 +218,14 @@ class Watch(val engine: TorrentStream) {
      * release of the title was played since — then that one's. Never played here at all: Stremio's.
      */
     private fun carried(uri: String, found: TorrentMeta, index: Int): Item {
-        val now = History.find(uri) ?: return item!!
+        val now = History.find(uri) ?: return item!!.also { fromTop = false }
+        if (fromTop) {
+            fromTop = false
+            // And its byte spot, which the engine would otherwise still aim at.
+            History.setPosition(uri, index, 0.0)
+            History.patch(uri) { it.copy(byteAts = it.byteAts - index) }
+            return (History.find(uri) ?: now).also { item = it }
+        }
         val name = found.files.find { it.index == index }?.name ?: return now
         val own = (now.positions[index] ?: 0.0) > 0.0
         val (at, duration) = carryOver(History.items.value, now, name, if (own) now.playedAt(index) else -1L)

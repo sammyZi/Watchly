@@ -141,6 +141,24 @@ class StremioTest {
         assertEquals("Resume  ·  20m left", resumeLabel("tt1", listOf(played("Show.S02E03.mkv", 600.0, 1800.0)), StremioLibrary(), Ep(2, 3)))
     }
 
+    @Test fun aLaterSpotFromAnotherDeviceWins() {
+        val hour = 3_600_000L
+        // Left here at 20 minutes, at 1 pm.
+        val here = Item(
+            uri = "magnet:film", title = "Film", at = 1, lastFileIndex = 0, files = listOf(StoredFile(0, "Film.mkv", 1, true, false, null)),
+            positions = mapOf(0 to 1200.0), durations = mapOf(0 to 7200.0), imdb = "tt1", kind = "movie", played = mapOf(0 to 13 * hour),
+        )
+        // Watched on to the hour on the TV, an hour later: that spot comes here.
+        val tv = StremioLibrary(paused = listOf(Paused("tt1", "Film", null, null, 50.0, 3600.0, 14 * hour)))
+        assertEquals(listOf(Triple("magnet:film", 0, 3600.0)), newerElsewhere(tv, listOf(here)))
+        // This device's own stop, sent up as it left: not another device's.
+        val own = StremioLibrary(paused = listOf(Paused("tt1", "Film", null, null, 16.0, 1190.0, 13 * hour + 2_000)))
+        assertEquals(emptyList<Triple<String, Int, Double>>(), newerElsewhere(own, listOf(here)))
+        // Older than the spot here: kept as it is.
+        val older = StremioLibrary(paused = listOf(Paused("tt1", "Film", null, null, 10.0, 600.0, 12 * hour)))
+        assertEquals(emptyList<Triple<String, Int, Double>>(), newerElsewhere(older, listOf(here)))
+    }
+
     @Test fun episodeIds() {
         assertEquals(Ep(1, 2), epOfVideo("tt0944947:1:2"))
         assertEquals(Ep(1, 5), epOfVideo("kitsu:123:1:5"))

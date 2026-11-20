@@ -7,7 +7,7 @@ using System.Text.RegularExpressions;
 namespace Watchly.Core;
 
 /// <summary>Where the viewer stopped, on any device: <see cref="Progress"/> is 0–100, <see cref="Seconds"/> the spot itself when known. <see cref="Ep"/> is null for a film.</summary>
-public sealed record StremioPaused(string Imdb, string Title, string? Year, (int Season, int Episode)? Ep, double Progress, double? Seconds = null)
+public sealed record StremioPaused(string Imdb, string Title, string? Year, (int Season, int Episode)? Ep, double Progress, double? Seconds = null, long LeftAt = 0)
 {
     public string Kind => Ep is null ? "movie" : "tv";
 }
@@ -149,7 +149,7 @@ public static class Stremio
             }
             if (through && part == 0 && DateTimeOffset.TryParse(at, out var when)) finished[id] = when.ToUnixTimeMilliseconds();
             if (offset > 0 && part >= 0.02 && part < WatchedAt && (kind == "movie" || ep is not null))
-                paused.Add((at, new StremioPaused(id, name, null, ep, part * 100, offset / 1000.0)));
+                paused.Add((at, new StremioPaused(id, name, null, ep, part * 100, offset / 1000.0, DateTimeOffset.TryParse(at, out var left) ? left.ToUnixTimeMilliseconds() : 0)));
             if (!Bool(it["removed"]) && !Bool(it["temp"]))
                 seen.Add(new(id, name, null, kind, at, ep is { } e ? $"S{e.Season:00}E{e.Episode:00}" : null));
         }
@@ -571,7 +571,7 @@ public static class Stremio
     {
         if (at.Imdb is not { } imdb || key is null || duration <= 0) return;
         var title = at.DisplayName.Split(" · ")[0];
-        Library = Library with { Paused = Library.Paused.Where(p => !(p.Imdb == imdb && p.Ep == ep)).Prepend(new StremioPaused(imdb, title, null, ep, seconds / duration * 100, seconds)).ToList() };
+        Library = Library with { Paused = Library.Paused.Where(p => !(p.Imdb == imdb && p.Ep == ep)).Prepend(new StremioPaused(imdb, title, null, ep, seconds / duration * 100, seconds, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())).ToList() };
         Changed?.Invoke();
         Update(imdb, title, TypeOf(at.Kind), PosterOf(at), change: s =>
         {

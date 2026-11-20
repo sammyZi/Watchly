@@ -1105,9 +1105,7 @@ public partial class MainWindow : Window
         var stored = HistoryList.FirstOrDefault(h => h.Uri == uri) ?? new HistoryItem { Uri = uri, Title = meta.Name };
         var file = meta.Files[index];
         // One spot per title on this PC, whichever release is opened: the one played last decides.
-        var resumeAt = startOver ? 0
-            : History.ResumeAt(HistoryList, stored with { Imdb = detail?.Imdb ?? stored.Imdb, TitleName = stored.TitleName ?? detail?.Name }, index, file.Name)
-              ?? FromStremio(detail?.Imdb ?? stored.Imdb, detail, file.Name);
+        var resumeAt = startOver ? 0 : ResumeSpot(stored with { Imdb = detail?.Imdb ?? stored.Imdb, TitleName = stored.TitleName ?? detail?.Name }, index, file.Name, detail);
         var request = new PlaybackRequest
         {
             Title = file.Name,
@@ -1145,9 +1143,7 @@ public partial class MainWindow : Window
         var file = new TorrentFileInfo { Index = 0, Name = name, Path = name, IsVideo = true };
         HistoryList = History.Patch(target.Uri, x => x with { TorrentName = name, LastFileIndex = 0, Files = new() { file } });
         var stored = HistoryList.FirstOrDefault(h => h.Uri == target.Uri) ?? target;
-        var resumeAt = startOver ? 0
-            : History.ResumeAt(HistoryList, stored with { Imdb = detail?.Imdb ?? stored.Imdb, TitleName = stored.TitleName ?? detail?.Name }, 0, name)
-              ?? FromStremio(detail?.Imdb ?? stored.Imdb, detail, name);
+        var resumeAt = startOver ? 0 : ResumeSpot(stored with { Imdb = detail?.Imdb ?? stored.Imdb, TitleName = stored.TitleName ?? detail?.Name }, 0, name, detail);
         OpenPlayer(new PlaybackRequest
         {
             Title = name,
@@ -1169,19 +1165,40 @@ public partial class MainWindow : Window
     /// Nothing here has played this title — a reinstall, another device — but Stremio kept where it was
     /// paused: the very second, or its percent of the runtime Cinemeta gives when that's all there is.
     /// </summary>
+    /// <summary>
+    /// Within this of each other, this PC's spot and Stremio's are both this PC's own stop: it saves one and
+    /// sends the other as it leaves. Calibration knob: two devices' clocks can differ by a few seconds too.
+    /// </summary>
+    const long SpotSlackMs = 30_000;
+
+    /// <summary>
+    /// Where to start: this PC's spot, unless another device left the same film or episode later — Stremio
+    /// has that one. Started here and watched on to the hour on the TV, this PC went back to where it had
+    /// stopped, its own spot always winning. Never played here at all: Stremio's, as before.
+    /// </summary>
+    double ResumeSpot(HistoryItem target, int index, string fileName, Title? detail)
+    {
+        if (History.ResumeAt(HistoryList, target, index, fileName) is not double here) return FromStremio(target.Imdb, detail, fileName);
+        var there = target.Imdb is { } imdb && EpisodeOf(detail, fileName, out var ep) ? Stremio.Library.Paused.FirstOrDefault(p => p.Imdb == imdb && p.Ep == ep) : null;
+        return there is { Seconds: double seconds } && there.LeftAt > target.PlayedAt(index) + SpotSlackMs ? seconds : here;
+    }
+
+    /// <summary>The episode [fileName] is, for a series; null for a film. False when a series' file says no episode.</summary>
+    static bool EpisodeOf(Title? detail, string fileName, out (int, int)? ep)
+    {
+        ep = null;
+        if (detail is null || detail.Kind == "movie") return detail is not null;
+        // By the series' episode list first: "Show S2 - 05" or "One Piece - 723" names no S/E of its own.
+        var i = Meta.IndexOfEpisode(detail.Episodes, fileName, fileName);
+        ep = i >= 0 ? (detail.Episodes[i].Season, detail.Episodes[i].Number) : Search.ParseEpisode(fileName);
+        return ep is not null;
+    }
+
     static double FromStremio(string? imdb, Title? detail, string fileName)
     {
-        if (imdb is null || detail is null) return 0;
-        (int, int)? ep = null;
-        if (detail.Kind != "movie")
-        {
-            // By the series' episode list first: "Show S2 - 05" or "One Piece - 723" names no S/E of its own.
-            var i = Meta.IndexOfEpisode(detail.Episodes, fileName, fileName);
-            ep = i >= 0 ? (detail.Episodes[i].Season, detail.Episodes[i].Number) : Search.ParseEpisode(fileName);
-        }
-        if (detail.Kind != "movie" && ep is null) return 0;
+        if (imdb is null || !EpisodeOf(detail, fileName, out var ep)) return 0;
         if (Stremio.Library.PausedSeconds(imdb, ep) is double seconds) return seconds;
-        var minutes = System.Text.RegularExpressions.Regex.Match(detail.Runtime ?? "", @"(\d+)\s*min", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var minutes = System.Text.RegularExpressions.Regex.Match(detail?.Runtime ?? "", @"(\d+)\s*min", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         if (!minutes.Success || Stremio.Library.PausedAt(imdb, ep) is not double percent) return 0;
         return int.Parse(minutes.Groups[1].Value) * 60 * percent / 100;
     }
