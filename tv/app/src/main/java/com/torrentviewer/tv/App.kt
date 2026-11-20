@@ -81,6 +81,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.composables.icons.lucide.R as L
+import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.hazeSource
 
 enum class Tab(val label: String, @DrawableRes val icon: Int) {
     SEARCH("Search", L.drawable.lucide_ic_search),
@@ -336,7 +338,14 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     /** The page as one focus group that remembers its last card — where Right from the rail goes. */
     val page = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
-    Box(Modifier.fillMaxSize()) {
+    // What the rail and the panels opened from here frost over: the page.
+    val pageHaze = dev.chrisbanes.haze.rememberHazeState()
+    var railOpen by remember { mutableStateOf(false) }
+    // The page feeds the frost only while something frosts it: a haze source draws the whole page into a layer
+    // every frame, and this TV's GPU lagged scrolling Home with it always on.
+    val frost = railOpen || watch.choose != null || joinOffer != null || Party.room?.let { !it.leader && !it.accepted && it.over } == true
+    // Focus handed back to the app (a TV keyboard closing) returns where it was, not to the first stop: the rail.
+    Box(Modifier.fillMaxSize().focusRestorer(page).focusGroup()) {
         // One page at a time, and no fade: a page's alpha draws the whole screen offscreen for
         // every frame of it, which this TV's GPU can't do at speed, just as the page is busiest.
         val pageKey = top?.key ?: tab.name
@@ -376,7 +385,9 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
                         }
                         if (e.type == KeyEventType.KeyDown) focusManager.moveFocus(way)
                         true
-                    },
+                    }
+                    // Last in the chain, so turning it on and off leaves the focus nodes above alone.
+                    .then(if (frost) Modifier.hazeSource(pageHaze) else Modifier),
             ) {
                 if (top != null) {
                     pages.SaveableStateProvider(top.key) {
@@ -390,7 +401,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
                     }
                 } else {
                     when (tab) {
-                        Tab.HOME -> HomeScreen(home, watch, onOpen = openTitle, onTop = { open(Stop.Top(it)) }, onOrders = { open(Stop.Orders) }, onOrder = openOrder)
+                        Tab.HOME -> HomeScreen(home, watch, onOpen = openTitle, onTop = { open(Stop.Top(it)) })
                         Tab.SEARCH -> SearchScreen(watch, onOpen = openTitle)
                         Tab.LIBRARY -> LibraryScreen(watch, who!!, onOpen = openTitle)
                         Tab.SETTINGS -> SettingsScreen(who!!, onSwitchProfile = { switching = true })
@@ -400,13 +411,14 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         }
         FocusRingLayer(focusRing)
         }
-        if (top == null) NavRail(tab, who!!, rail, page, onTab = { tab = it }, onProfile = { switching = true })
+        if (top == null) NavRail(tab, who!!, rail, page, onTab = { tab = it }, onProfile = { switching = true }, haze = pageHaze, onOpen = { railOpen = it })
 
         if (watch.phase == Phase.INSPECTING) Opening(watch)
 
         watch.choose?.let { (item, meta) ->
             Sheet(
                 title = "Which file?",
+                haze = pageHaze,
                 options = meta.files.filter { it.isVideo }.map { Option(it.index, it.name, bytes(it.size)) },
                 selected = null,
                 empty = "This torrent holds no video.",
@@ -419,6 +431,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         Party.room?.takeIf { !it.leader && !it.accepted && it.over }?.let {
             Sheet(
                 title = "This watch party is closed",
+                haze = pageHaze,
                 options = listOf(Option(true, "Close", "Its host has left, or ended it. Ask them for a new link.")),
                 selected = null,
                 onPick = { Party.leave() },
@@ -435,6 +448,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
             }
             Sheet(
                 title = "Join ${s.by.ifBlank { "this" }}'s watch party?",
+                haze = pageHaze,
                 options = listOfNotNull(
                     Option(0, "Join and watch ${s.media.title}", "${maxOf(r.people, r.members.size)} watching · ${if (s.playing) "playing" else "paused"} at ${clock(s.pos)}"),
                     // The leader's torrent may be slow here: any release of the same film keeps in step.
@@ -468,12 +482,13 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
  * opens with labels only while the remote is in it.
  */
 @Composable
-private fun NavRail(tab: Tab, who: Profile, current: FocusRequester, page: FocusRequester, onTab: (Tab) -> Unit, onProfile: () -> Unit) {
+private fun NavRail(tab: Tab, who: Profile, current: FocusRequester, page: FocusRequester, onTab: (Tab) -> Unit, onProfile: () -> Unit, haze: dev.chrisbanes.haze.HazeState? = null, onOpen: (Boolean) -> Unit = {}) {
     var focused by remember { mutableStateOf(false) }
     /** Snapping shut to hand focus to the page: the open rail lies over the page's
      *  first column, so focus search from it found nothing to the right. */
     var leaving by remember { mutableStateOf(false) }
     val open = focused && !leaving
+    LaunchedEffect(open) { onOpen(open) }
     val animated by animateDpAsState(if (open) 230.dp else NAV_W, Motion.spatial(), label = "rail")
     val width = if (leaving) NAV_W else animated
     val scope = rememberCoroutineScope()
@@ -483,16 +498,33 @@ private fun NavRail(tab: Tab, who: Profile, current: FocusRequester, page: Focus
             // Two frames: one to lay the collapsed rail out, one for focus to see it.
             withFrameNanos { }
             withFrameNanos { }
-            // Straight back to the card that was left, not a geometric guess from the rail.
-            runCatching { page.requestFocus() }
+            // Straight back to the card that was left, not a geometric guess from the rail. Only if the rail
+            // still has it: a new page may have taken it already — Search's box, whose keyboard this shut again.
+            if (focused) runCatching { page.requestFocus() }
             leaving = false
         }
     }
+    // Open, it frosts the page behind it, the frost fading out towards the page as the shade does.
+    val page = Ink.bg
     Box(
-        Modifier.fillMaxHeight().width(if (open) 640.dp else NAV_W + 24.dp).background(
-            if (open) Brush.horizontalGradient(0f to Ink.bg, 0.45f to Ink.bg.copy(alpha = 0.9f), 1f to Color.Transparent)
-            else Brush.horizontalGradient(0f to Ink.bg.copy(alpha = 0.85f), 1f to Color.Transparent),
-        ),
+        Modifier.fillMaxHeight().width(if (open) 640.dp else NAV_W + 24.dp)
+            .then(
+                if (open && haze != null) Modifier.hazeEffect(haze) {
+                    backgroundColor = page
+                    tints = emptyList()
+                    blurRadius = 28.dp
+                    // No grain: Haze's noise read as dots over the page.
+                    noiseFactor = 0f
+                    // Half resolution: this TV's GPU, which an offscreen page every frame already strained.
+                    inputScale = dev.chrisbanes.haze.HazeInputScale.Fixed(0.5f)
+                    mask = Brush.horizontalGradient(0f to Color.Black, 0.5f to Color.Black, 1f to Color.Transparent)
+                } else Modifier,
+            )
+            .background(
+                if (open && haze != null) Brush.horizontalGradient(0f to page.copy(alpha = 0.72f), 0.45f to page.copy(alpha = 0.55f), 1f to Color.Transparent)
+                else if (open) Brush.horizontalGradient(0f to page, 0.45f to page.copy(alpha = 0.9f), 1f to Color.Transparent)
+                else Brush.horizontalGradient(0f to page.copy(alpha = 0.85f), 1f to Color.Transparent),
+            ),
     ) {
         Column(
             Modifier.width(width).fillMaxHeight().padding(start = 14.dp, top = Safe.y, bottom = Safe.y)
@@ -617,11 +649,14 @@ fun <T> Sheet(
     onDismiss: () -> Unit,
     empty: String? = null,
     busy: Boolean = false,
+    /** The page this panel sits beside, to frost over; none, the solid panel. Never a source the panel is inside. */
+    haze: dev.chrisbanes.haze.HazeState? = null,
 ) {
     BackHandler(onBack = onDismiss)
     val first = remember { FocusRequester() }
     var shown by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { shown = true }
+    val surface = Ink.surface
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)), contentAlignment = Alignment.CenterEnd) {
         AnimatedVisibility(shown, enter = slideInHorizontally(Motion.spatial()) { it } + fadeIn(), exit = slideOutHorizontally { it } + fadeOut()) {
             Column(
@@ -630,7 +665,16 @@ fun <T> Sheet(
                     // player behind, and OK there paused or sought instead of picking. Back closes it.
                     .focusProperties { onExit = { cancelFocusChange() } }
                     .focusGroup()
-                    .background(Brush.horizontalGradient(listOf(Ink.surface.copy(alpha = 0.96f), Color(0xF2101010))))
+                    .then(
+                        if (haze == null) Modifier.background(Brush.horizontalGradient(listOf(surface.copy(alpha = 0.96f), Color(0xF2101010))))
+                        else Modifier.hazeEffect(haze) {
+                            backgroundColor = surface
+                            tints = listOf(dev.chrisbanes.haze.HazeTint(surface.copy(alpha = 0.74f)))
+                            blurRadius = 28.dp
+                            noiseFactor = 0f
+                            inputScale = dev.chrisbanes.haze.HazeInputScale.Fixed(0.5f)
+                        },
+                    )
                     .padding(start = 28.dp, end = Safe.x, top = Safe.y + 8.dp, bottom = Safe.y),
             ) {
                 Text(title, style = Type.display.copy(fontSize = 24.sp), modifier = Modifier.padding(bottom = 18.dp))

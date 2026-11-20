@@ -67,6 +67,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.produceState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalFocusManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -170,8 +180,27 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
     var recents by remember { mutableStateOf(Searches.load()) }
     val field = remember { FocusRequester() }
     field.claim()
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     /** On the first card or release in the results, when there are any. */
     val firstResult = remember { FocusRequester() }
+    /** Search pressed: to the first result when it is in, which may be a moment after. */
+    var toResults by remember { mutableStateOf(false) }
+    /** What the results shown were searched for. */
+    var resultsFor by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    LaunchedEffect(toResults, resultsFor, busy) {
+        if (!toResults || busy) return@LaunchedEffect
+        if (query.trim().length < 2) return@LaunchedEffect run { toResults = false }
+        // Not the last query's cards, about to be swapped out from under the focus.
+        if (resultsFor != query.trim() to torrents) return@LaunchedEffect
+        val any = (if (torrents) hits else results) ?: return@LaunchedEffect
+        // The card may be a frame or two from being laid out. Cleared after, not before: the recent searches
+        // stay up until then, or the chip pressed went with them and focus fell back to the box, keyboard and all.
+        if (any.isNotEmpty()) repeat(5) {
+            if (runCatching { firstResult.requestFocus() }.getOrDefault(false)) return@repeat
+            delay(32)
+        }
+        toResults = false
+    }
 
     LaunchedEffect(query, torrents) {
         val q = query.trim()
@@ -195,6 +224,7 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
                 Kids.only((films.await() + series.await() + mine.await()).distinctBy { it.imdb }.sortedBy { relevance(it.title, q) })
             }
         }
+        resultsFor = q to torrents
         busy = false
     }
 
@@ -223,7 +253,15 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
                         Modifier.weight(1f).widthIn(max = 640.dp),
                         requester = field,
                         leading = L.drawable.lucide_ic_search,
-                        onSubmit = { recents = Searches.remember(query) },
+                        // On to the results, as the keyboard's Search key means: left in the box with the keyboard
+                        // gone, the TV handed focus back to the screen's first stop, and the rail opened.
+                        // On to the first card as soon as there is one: left in the box with the keyboard gone,
+                        // the TV handed focus back to the box and the keyboard came up again.
+                        onSubmit = {
+                            recents = Searches.remember(query)
+                            keyboard?.hide()
+                            toResults = true
+                        },
                         imeAction = ImeAction.Search,
                         trailing = { if (busy) Spinner(size = 22.dp) },
                     )
@@ -232,11 +270,11 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
                         Chip("Streams", torrents, onClick = { torrents = !torrents; results = null; hits = null }, icon = L.drawable.lucide_ic_layers)
                     }
                 }
-                if (recents.isNotEmpty() && results == null && hits == null) {
+                if (recents.isNotEmpty() && (toResults || results == null && hits == null)) {
                     Text("Recent searches", Modifier.padding(top = 30.dp, bottom = 12.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
                     val recentLead = remember { FocusRequester() }
                     Row(Modifier.focusRow(recentLead), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        recents.forEachIndexed { i, r -> Chip(r, false, onClick = { query = r }, icon = L.drawable.lucide_ic_history, requester = recentLead.takeIf { i == 0 }) }
+                        recents.forEachIndexed { i, r -> Chip(r, false, onClick = { query = r; toResults = true }, icon = L.drawable.lucide_ic_history, requester = recentLead.takeIf { i == 0 }) }
                         Chip("Clear", false, onClick = { recents = Searches.clear() })
                     }
                 }
@@ -912,7 +950,8 @@ private fun AddonsList() {
     Column {
         addons.forEachIndexed { i, a ->
             Row(Modifier.padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.width(420.dp)) {
+                // What the buttons leave: at a fixed 420 the row overran the page and Remove was squeezed to an empty pill.
+                Column(Modifier.weight(1f)) {
                     Text(a.name, style = Type.label.copy(fontWeight = FontWeight.SemiBold, color = if (a.on) Ink.text else Ink.faint), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     // The host only: the rest of the link can be the viewer's own key.
                     Text("${a.host}   ·   ${a.offers}", style = Type.meta.copy(color = Ink.faint), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1146,6 +1185,7 @@ fun ProfilesScreen(profiles: List<Profile>, onPick: (Profile) -> Unit, onCancel:
         }
     }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        ProfilesPosterWall()
         when (val m = mode) {
             ProfilesMode.Pick, ProfilesMode.Manage -> Picker(profiles, m == ProfilesMode.Manage, onCancel,
                 open = { p ->
@@ -1210,6 +1250,42 @@ private fun Picker(
         }
     }
     first.claim(managing)
+}
+
+/** Who's watching's backdrop, as the phone's: three rows of posters drifting opposite ways, tilted, under a wash of the page colour. */
+@Composable
+private fun ProfilesPosterWall() {
+    val films by produceState(Meta.peekCatalog("movie", null).orEmpty()) { value = Meta.catalog("movie") }
+    val series by produceState(Meta.peekCatalog("tv", null).orEmpty()) { value = Meta.catalog("tv") }
+    val posters = (films.take(14) + series.take(14)).filter { it.poster != null }
+    if (posters.isEmpty()) return
+    val drift = rememberInfiniteTransition(label = "wall")
+    val t = drift.animateFloat(0f, 1f, infiniteRepeatable(tween(90_000, easing = LinearEasing), RepeatMode.Restart), label = "drift")
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            Modifier.fillMaxSize().graphicsLayer { rotationZ = -8f; scaleX = 1.35f; scaleY = 1.35f },
+            verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically),
+        ) {
+            posters.chunked((posters.size + 2) / 3).take(3).forEachIndexed { r, row ->
+                val card = 150.dp
+                // Twice over, so the second copy is in place as the first slides out: a seamless loop.
+                val span = (card + 12.dp) * row.size
+                Row(
+                    // The drift read in the layer only: each frame moves the rows, it doesn't recompose them — this TV's GPU.
+                    Modifier.requiredWidth(span * 2).graphicsLayer {
+                        val p = if (r % 2 == 0) t.value else 1 - t.value
+                        translationX = span.toPx() / 2 - span.toPx() * p
+                    },
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    (row + row).forEach { title ->
+                        Artwork(title.poster, title.title, Modifier.width(card).aspectRatio(2f / 3f).clip(RoundedCornerShape(12.dp)))
+                    }
+                }
+            }
+        }
+        Box(Modifier.fillMaxSize().background(Ink.bg.copy(alpha = 0.7f)))
+    }
 }
 
 @Composable

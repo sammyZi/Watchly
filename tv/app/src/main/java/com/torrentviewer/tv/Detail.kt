@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import com.composables.icons.lucide.R as L
+import dev.chrisbanes.haze.hazeSource
 
 /** The exact strings quality() returns, best first. */
 private val QUALITY_ORDER = listOf("4K", "1080p", "720p", "CAM")
@@ -203,7 +204,11 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
         } ?: watch.notes.tryEmit(noneFound(episodeTag(ep.season, ep.episode)))
     }
 
+    // What the language panel frosts over: the page, apart from the panel itself.
+    val pageHaze = dev.chrisbanes.haze.rememberHazeState()
     Box(Modifier.fillMaxSize()) {
+        // Only while the panel is up: a haze source draws the page into a layer every frame, which lagged this TV.
+        Box(Modifier.fillMaxSize().then(if (pickingLang) Modifier.hazeSource(pageHaze) else Modifier)) {
         Artwork(title.wide, title.title, Modifier.align(Alignment.TopEnd).fillMaxWidth(0.8f).fillMaxHeight(0.82f).heroScrims(), fill = false)
 
         // Scroll only what would be off-screen: the TV default pivots focus to a third of
@@ -251,7 +256,20 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
         fun pin(index: Int) {
             // Past the list's top padding (the room above the logo), or the section above
             // would still show its last lines over this one.
-            scope.launch { list.animateScrollToItem(index, if (index == 0) 0 else topPad) }
+            val to = if (index == 0) 0 else topPad
+            scope.launch {
+                val row = list.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return@launch list.animateScrollToItem(index, to)
+                // To where scrollToItem(index, to) would leave it: an offset of -to, in the list's own terms.
+                val by = (row.offset + to).toFloat()
+                if (kotlin.math.abs(by) < 1f) return@launch
+                // Above the focused card's own bring-into-view, which asks for a small scroll a moment later: at the
+                // same priority that one cancelled this part-way, the page stopping half-way down and nudged back —
+                // the flicker going down from a season to its episodes, the cards left at the screen's foot.
+                list.scroll(androidx.compose.foundation.MutatePriority.UserInput) {
+                    var gone = 0f
+                    androidx.compose.animation.core.animate(0f, by) { v, _ -> gone += scrollBy(v - gone) }
+                }
+            }
         }
         // Room below the last section, so any section can snap to the top of the screen.
         LazyColumn(state = list, contentPadding = PaddingValues(top = Safe.y + 72.dp, bottom = 420.dp), modifier = Modifier.fillMaxSize()) {
@@ -472,8 +490,11 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
         }
         }
 
+        }
+
         if (pickingLang) {
             Sheet(
+                haze = pageHaze,
                 title = "Release language",
                 options = listOf(Option("", "Any language")) + LANGS.map { Option(it.code, it.name) },
                 selected = lang,

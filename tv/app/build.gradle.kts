@@ -83,4 +83,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
     // The QR beside Stremio's sign-in code: a remote can't type, a phone camera can read.
     implementation("com.google.zxing:core:3.5.3")
+    // The frosted rail and side panels, as the phone's bars: Compose's own blur blurs a view itself, not what is behind it.
+    implementation("dev.chrisbanes.haze:haze:1.7.1")
 }
