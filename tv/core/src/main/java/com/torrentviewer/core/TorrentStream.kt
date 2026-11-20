@@ -463,6 +463,13 @@ class TorrentStream(
     /** On: a stopped film keeps its start on disk ([StartKits]); off, stop wipes everything as before. */
     @Volatile var keepStarts = false
     private val starts by lazy { StartKits(File(cacheRoot, "starts.json")) { saveDir } }
+
+    /** How much all kept starts may take together: 1GB unless set — less on a TV, whose storage is small. */
+    var keepStartsCap: Long
+        get() = starts.cap
+        set(value) {
+            starts.cap = value
+        }
     private val metaDir: File get() = File(cacheRoot, "meta").apply { mkdirs() }
     private val peersDir: File get() = File(cacheRoot, "peers").apply { mkdirs() }
     private val importDir: File get() = File(cacheRoot, "imported").apply { mkdirs() }

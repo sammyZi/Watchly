@@ -180,7 +180,7 @@ private fun delta(seconds: Double): String {
 
 private enum class Band { SLIDER, TRANSPORT }
 
-private enum class Panel { TRACKS, SPEED, ASPECT, FIND, LANG, EPISODES, PARTY }
+private enum class Panel { TRACKS, SPEED, ASPECT, FIND, LANG, EPISODES, PARTY, SOURCES, MORE }
 
 @Composable
 fun PlayerScreen(watch: Watch) {
@@ -807,8 +807,10 @@ private fun Player(watch: Watch) {
                             }
                             Control(L.drawable.lucide_ic_captions, "Audio & subtitles", on = subtitle != null, onFocus = toTransport) { panel = Panel.TRACKS }
                             Control(L.drawable.lucide_ic_gauge, "Speed ${rateLabel(rate)}", on = rate != 1f, onFocus = toTransport) { panel = Panel.SPEED }
-                            Control(L.drawable.lucide_ic_ratio, SCALES[scale].second, on = scale != 0, onFocus = toTransport) { panel = Panel.ASPECT }
-                            Control(L.drawable.lucide_ic_info, if (info) "Hide stats" else "Stats for nerds", on = info, onFocus = toTransport) { info = !info }
+                            // Another release of what is playing, from where it is — as the phone's; not a guest's, who follows the leader.
+                            if (title != null && !guest) Control(L.drawable.lucide_ic_layers, "Change stream", onFocus = toTransport) { panel = Panel.SOURCES }
+                            // Picture and the stats, under More as on the phone.
+                            Control(L.drawable.lucide_ic_ellipsis, "More", on = scale != 0 || info, onFocus = toTransport) { panel = Panel.MORE }
                         }
                     }
                 }
@@ -970,6 +972,36 @@ private fun Player(watch: Watch) {
                 onDismiss = { panel = Panel.FIND },
             )
             Panel.EPISODES -> title?.let { EpisodesPanel(it, episode, ::playEpisode, ::closePanel) }
+            Panel.MORE -> Sheet(
+                title = "More",
+                options = listOf(
+                    Option("picture", "Picture", SCALES[scale].second),
+                    Option("stats", "Stats for nerds", if (info) "On" else "Off"),
+                ),
+                selected = null,
+                onPick = { what ->
+                    when (what) {
+                        "picture" -> panel = Panel.ASPECT
+                        // Shut, so the numbers it turns on are in sight over the film.
+                        "stats" -> {
+                            info = !info
+                            closePanel()
+                        }
+                    }
+                },
+                onDismiss = ::closePanel,
+            )
+            Panel.SOURCES -> title?.let { t ->
+                SourcesPanel(t, episode, playing = watch.item?.uri, runtime = duration, onPick = { hit ->
+                    closePanel()
+                    if (advanced) return@SourcesPanel
+                    advanced = true
+                    // The spot first: the new release picks it up from this one (Watch.carried).
+                    if (at > 0) watch.savePosition(at)
+                    say("Switching stream…")
+                    watch.stream(hit, t, episode?.let { episodeTag(it.season, it.episode) }, episode)
+                }, onDismiss = ::closePanel)
+            }
             Panel.PARTY -> room?.let { r ->
                 PartyPanel(r, wp.heldFor, onGoOn = wp::goOnWithout, onLeave = {
                     closePanel()
@@ -1749,6 +1781,61 @@ private fun StatsPanel(s: Stats?, progress: Progress?, file: TorrentFile?, durat
             }
         }
     }
+}
+
+/** Best first: Change stream's quality chips. */
+private val QUALITY_ORDER = listOf("4K", "2160p", "1080p", "720p", "480p")
+
+/**
+ * Change stream, as on the phone: the other releases of what is playing, down the right of the picture as
+ * Episodes is, found as a title's page finds them, its rows those of that page; quality chips over them.
+ * Picking one plays it from where this one was. The one playing is left out.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun SourcesPanel(title: Title, episode: Episode?, playing: String?, runtime: Double, onPick: (Hit) -> Unit, onDismiss: () -> Unit) {
+    BackHandler(onBack = onDismiss)
+    var hits by remember { mutableStateOf<List<Hit>?>(null) }
+    var busy by remember { mutableStateOf(true) }
+    LaunchedEffect(title.imdb, episode?.id) {
+        val onHits: OnHits = { hits = it }
+        val all = runCatching {
+            if (episode != null) searchEpisode(title, episode.season, episode.episode, onHits)
+            else searchStreams(title.title, title.imdb, title.year?.take(4), type = title.type, onHits = onHits)
+        }.getOrNull()
+        if (all != null) hits = all
+        busy = false
+    }
+    val others = hits.orEmpty().filter { it.uri != playing }
+    var quality by remember { mutableStateOf<String?>(null) }
+    val qualities = remember(others) { others.mapNotNull { it.quality }.distinct().sortedBy { q -> QUALITY_ORDER.indexOf(q).takeIf { it >= 0 } ?: QUALITY_ORDER.size } }
+    val shown = others.filter { quality == null || it.quality == quality }
+    val first = remember { FocusRequester() }
+    val chips = remember { FocusRequester() }
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(500.dp).background(Color.Black.copy(alpha = 0.92f))
+                .padding(start = 20.dp, end = Safe.x, top = Safe.y, bottom = Safe.y),
+        ) {
+            Row(Modifier.padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Change stream", Modifier.weight(1f), style = Type.title.copy(color = Color.White, fontWeight = FontWeight.Bold))
+                if (busy) Spinner(size = 22.dp)
+            }
+            if (qualities.size > 1) LazyRow(Modifier.focusRestorer(chips).padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                itemsIndexed(listOf<String?>(null) + qualities) { i, q -> Chip(q ?: "All", q == quality, onClick = { quality = q }, requester = chips.takeIf { i == 0 }) }
+            }
+            if (!busy && shown.isEmpty()) Text(if (others.isEmpty()) "No other release found." else "None in $quality.", style = Type.body.copy(color = Color.White.copy(alpha = 0.7f)))
+            androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides rememberMinimalScroll(24.dp)) {
+                LazyColumn(Modifier.weight(1f).focusRestorer(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    itemsIndexed(shown, key = { _, h -> h.id }) { i, hit ->
+                        Source(hit, runtimeSeconds = runtime, requester = first.takeIf { i == 0 }) { onPick(hit) }
+                    }
+                }
+            }
+        }
+    }
+    // On the first release once there is one; until then, nothing in the panel can take the remote.
+    first.claim(shown.firstOrNull()?.id)
 }
 
 /** Every episode of the show down the right of the picture, by season, focus on the one playing; OK plays one. */

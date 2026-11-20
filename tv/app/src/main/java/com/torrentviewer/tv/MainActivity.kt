@@ -35,6 +35,11 @@ object Services {
         // coming on screen took all of them just as the page needed one to move and one to draw.
         coil3.SingletonImageLoader.setSafe { coil3.ImageLoader.Builder(it).bitmapFactoryMaxParallelism(2).build() }
         engine = TorrentStream(context.applicationContext)
+        // A film stopped part-way keeps its header, index and resume spot, so Continue Watching opens it at once
+        // (16-20s from the swarm on this TV before), as on the phone.
+        engine.keepStarts = true
+        // Less than the phone's 1GB: a television's own storage is small, and shared with every other app on it.
+        engine.keepStartsCap = 400L * 1024 * 1024
         com.torrentviewer.core.Party.log = { engine.note("party: $it") }
         watch = Watch(engine)
         // A leader's Reopen puts its film back on, unless something is playing already.

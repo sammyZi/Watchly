@@ -6,7 +6,7 @@ import java.io.File
 
 /** Left unplayed this long, a film's kept start goes. Calibration knob. */
 internal const val START_KIT_DAYS = 14L
-/** All kept starts together stay under this; the longest unplayed go first. Calibration knob. */
+/** All kept starts together stay under this unless the app sets its own ([StartKits.cap]); the longest unplayed go first. Calibration knob. */
 internal const val START_KIT_CAP = 1024L * 1024 * 1024
 
 /**
@@ -28,6 +28,9 @@ internal class StartKits(private val index: File, private val saveDir: () -> Fil
     )
 
     private val kits = load()
+
+    /** All kits together stay under this; the app sets its own (the TV less than the phone). */
+    @Volatile var cap: Long = START_KIT_CAP
 
     /**
      * A kit whose files are still there. Left on the list while the torrent plays — the play keeps it up
@@ -62,7 +65,7 @@ internal class StartKits(private val index: File, private val saveDir: () -> Fil
         var total = 0L
         val gone = kits.values.sortedByDescending { it.savedAt }.filter { k ->
             total += k.bytes
-            now - k.savedAt > START_KIT_DAYS * 24 * 3600 * 1000 || total > START_KIT_CAP || !File(saveDir(), k.name).exists()
+            now - k.savedAt > START_KIT_DAYS * 24 * 3600 * 1000 || total > cap || !File(saveDir(), k.name).exists()
         }
         if (gone.isEmpty()) return
         gone.forEach { k ->
