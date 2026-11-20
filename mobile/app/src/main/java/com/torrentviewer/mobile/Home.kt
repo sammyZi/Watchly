@@ -93,6 +93,9 @@ import com.torrentviewer.core.remoteArt
 import com.torrentviewer.core.TOP_SHELF
 import kotlinx.coroutines.delay
 import com.composables.icons.lucide.R as L
+import dev.chrisbanes.haze.hazeEffect
+import androidx.compose.ui.layout.layout
+import dev.chrisbanes.haze.hazeSource
 
 data class Shelf(val title: String, val kind: String, val genre: String? = null) {
     val key get() = "$kind:${genre.orEmpty()}"
@@ -138,6 +141,8 @@ class HomeState {
     var forYou by mutableStateOf(com.torrentviewer.core.ForYou())
     var fresh by mutableStateOf<List<NewEpisodes.Fresh>>(emptyList())
     var upcoming by mutableStateOf<List<com.torrentviewer.core.Coming>>(emptyList())
+    /** Edit Home is open: from its button at the foot of the page, or from Settings → Appearance. */
+    var editing by mutableStateOf(false)
 
     fun row(key: String) = rows.getOrPut(key) { LazyListState() }
 }
@@ -177,7 +182,7 @@ fun cardWidth() = if (isWide()) 260.dp else 220.dp
 
 /** Home's rows are tall posters: under three across a phone held upright, big enough to read. */
 @Composable
-fun posterWidth() = if (isWide()) 152.dp else 118.dp
+fun posterWidth() = if (isWide()) 156.dp else 120.dp
 
 /** Between the cards of a row, the next one peeking in. */
 private val CARD_GAP = 12.dp
@@ -224,9 +229,12 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
         // The viewer's addons' own lists lead, as on Stremio's board.
         val mine = com.torrentviewer.core.Addons.shelves().map { (title, kind, key) -> Shelf(title, kind, key) }
         val taken = chosen.map { it.key }.toMutableSet()
+        // Genres picked: theirs are the only genre rows — not the watched-genre ones, nor the standard list's.
+        // Trending and the addons' lists aren't genres, and stay. None picked: every genre, as before.
+        val picked = chosen.isNotEmpty()
         // A genre's popular list is no suggestion: it's what TMDB's rows replace, with no key or nothing played.
-        val rest = if (personal) emptyList() else state.picks.filter { taken.add(it.key) }
-        chosen + mine + rest + SHELVES.filter { it.key !in taken }
+        val rest = if (personal || picked) emptyList() else state.picks.filter { taken.add(it.key) }
+        chosen + mine + rest + SHELVES.filter { it.key !in taken && (!picked || it.genre == null) }
     }
     // The charts draw on every genre the viewer chose, or on all of them with none chosen.
     val tops = if (kids.on) emptyList() else listOf("movie", "tv").flatMap { kind ->
@@ -330,7 +338,7 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
                     items(state.fresh, key = { it.title.imdb }) { f ->
                         TitleCard(
                             f.title.poster ?: f.title.wide, f.title.title, { onOpen(f.title) }, Modifier.width(posterWidth()),
-                            info = if (f.count == 1) "1 new episode" else "${f.count} new episodes", badge = "NEW",
+                            info = if (f.count == 1) "1 new episode" else "${f.count} new episodes", badge = "NEW", outline = false,
                         )
                     }
                 }
@@ -342,7 +350,7 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
             Rail("Upcoming", onMore = { comingAll = true }) {
                 LazyRow(state = state.row("upcoming"), contentPadding = PaddingValues(horizontal = EDGE), horizontalArrangement = Arrangement.spacedBy(CARD_GAP)) {
                     items(state.upcoming.distinctBy { it.title.imdb }, key = { "coming:${it.title.imdb}" }) { c ->
-                        TitleCard(c.title.poster ?: c.title.wide, c.title.title, { onOpen(c.title) }, Modifier.width(posterWidth()), info = "${dayLabel(c.date)}  ·  ${c.what}")
+                        TitleCard(c.title.poster ?: c.title.wide, c.title.title, { onOpen(c.title) }, Modifier.width(posterWidth()), info = "${dayLabel(c.date)}  ·  ${c.what}", outline = false)
                     }
                 }
             }
@@ -381,11 +389,12 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
     }
     val order = arrangeRows(homeRows.map { it.key }, settings.homeOrder)
     val byKey = homeRows.associateBy { it.key }
-    var editing by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
 
+    // What the top edge's frost blurs: the rows passing under it.
+    val haze = dev.chrisbanes.haze.rememberHazeState()
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(state = state.list, contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
+        LazyColumn(state = state.list, contentPadding = PaddingValues(bottom = 24.dp + LocalTabBarInset.current), verticalArrangement = Arrangement.spacedBy(22.dp), modifier = Modifier.hazeSource(haze)) {
             item(key = "hero") {
                 if (heroes.isEmpty()) Box(Modifier.fillMaxWidth().height(if (isWide()) 320.dp else 420.dp))
                 else Hero(state.hero, heroes, onOpen)
@@ -393,18 +402,39 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
             order.filter { it !in settings.homeHidden }.forEach { key -> byKey[key]?.rows?.invoke(this) }
             item(key = "edit") {
                 Box(Modifier.fillMaxWidth().padding(top = 4.dp), contentAlignment = Alignment.Center) {
-                    Button("Edit Home", { editing = true }, icon = L.drawable.lucide_ic_settings_2, compact = true)
+                    Button("Edit Home", { state.editing = true }, icon = L.drawable.lucide_ic_settings_2, compact = true)
                 }
             }
         }
 
-        // The wordmark and who is watching, on no bar of their own: a light shade over the hero, gone once
-        // the rows scroll under it, so the page shows through rather than a black strip.
+        // The wordmark and who is watching, on no bar of their own: a light shade over the hero; once the rows
+        // scroll under it, OpenTune's top edge — the rows blurred and washed with the page's colour, both
+        // fading out downwards, so there's no strip and no line.
         val scrolled by remember { derivedStateOf { state.list.firstVisibleItemIndex > 0 || state.list.firstVisibleItemScrollOffset > 240 } }
         val solid by animateFloatAsState(if (scrolled) 1f else 0f, tween(260), label = "bar")
         StatusIconsOverArt(!scrolled)
+        val page = Ink.bg
         Box(Modifier.fillMaxWidth()) {
             Box(Modifier.matchParentSize().graphicsLayer { alpha = 1f - solid }.background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent))))
+            if (solid > 0f) Box(
+                Modifier.matchParentSize()
+                    .layout { measurable, constraints ->
+                        // Drawn a little past the wordmark's row, so it fades out under it rather than at its edge.
+                        val h = constraints.maxHeight + 24.dp.roundToPx()
+                        val p = measurable.measure(constraints.copy(minHeight = h, maxHeight = h))
+                        layout(constraints.maxWidth, constraints.maxHeight) { p.place(0, 0) }
+                    }
+                    .hazeEffect(haze) {
+                        alpha = solid
+                        backgroundColor = page
+                        tints = listOf(dev.chrisbanes.haze.HazeTint(page.copy(alpha = 0.35f)))
+                        blurRadius = 20.dp
+                        noiseFactor = 0f
+                        inputScale = dev.chrisbanes.haze.HazeInputScale.Fixed(0.5f)
+                        // The whole effect fades, its fill too: fading only the blur left the page colour ending in a line.
+                        mask = Brush.verticalGradient(0f to Color.Black, 0.5f to Color.Black.copy(alpha = 0.75f), 1f to Color.Transparent)
+                    },
+            )
             Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = EDGE, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("WATCHLY", Modifier.weight(1f), style = Type.title.copy(color = Ink.accent, fontWeight = FontWeight.Black, letterSpacing = 2.sp))
                 if (!isWide()) Tap(onProfile, shape = RoundedCornerShape(9.dp)) { Avatar(who, 40.dp) }
@@ -439,7 +469,7 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
     }
 
     releases?.let { all -> ReleasesSheet(all, watch) { releases = null } }
-    if (editing) BottomSheet("Edit Home", { editing = false }) { HomeEditor(order.map { it to byKey.getValue(it).name }, settings) }
+    if (state.editing) BottomSheet("Edit Home", { state.editing = false }) { HomeEditor(order.map { it to byKey.getValue(it).name }, settings) }
     if (comingAll) BottomSheet("Upcoming", { comingAll = false }) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = EDGE, vertical = 4.dp)) {
             Text("The next ${com.torrentviewer.core.Upcoming.DAYS} days of the series you follow and the films you saved.", Modifier.padding(bottom = 12.dp), style = Type.meta)
@@ -533,7 +563,7 @@ private fun Placeholders() {
 private fun TitleRow(state: LazyListState, titles: List<Title>, onOpen: (Title) -> Unit) {
     LazyRow(state = state, contentPadding = PaddingValues(horizontal = EDGE), horizontalArrangement = Arrangement.spacedBy(CARD_GAP)) {
         items(titles, key = { it.imdb }) { t ->
-            TitleCard(t.poster ?: t.wide, t.title, { onOpen(t) }, Modifier.width(posterWidth()), info = t.year?.take(4), rating = t.rating)
+            TitleCard(t.poster ?: t.wide, t.title, { onOpen(t) }, Modifier.width(posterWidth()), info = t.year?.take(4), rating = t.rating, outline = false)
         }
     }
 }

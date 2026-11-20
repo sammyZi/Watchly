@@ -8,6 +8,9 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.animateContentSize
+import com.torrentviewer.core.Lc
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -202,14 +205,27 @@ fun Onboarding(onDone: () -> Unit) {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             com.torrentviewer.core.GENRES.forEach { g ->
                                 val on = g in picked
-                                // The tour's own pills: white on the dark page, whatever the phone's theme.
+                                // The tour's own pills: white on the dark page, whatever the phone's theme. Picked, the colour
+                                // cross-fades and a tick grows in, the pill widening smoothly round it, as Settings' chips do.
+                                val bg by androidx.compose.animation.animateColorAsState(if (on) Color(0xFFE50914) else Color(0xFF2A2A2E), tween(350), label = "genre")
                                 Tap({ picked = if (on) picked - g else picked + g }, shape = CircleShape) {
-                                    Text(
-                                        g,
+                                    Row(
                                         // Solid, not see-through: a poster behind a pill made its word unreadable.
-                                        Modifier.background(if (on) Color(0xFFE50914) else Color(0xFF2A2A2E)).padding(horizontal = 14.dp, vertical = 8.dp),
-                                        style = Type.label.copy(color = Color.White, fontSize = 14.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium),
-                                    )
+                                        Modifier.background(bg).animateContentSize(spring(dampingRatio = 0.8f, stiffness = 500f)).padding(horizontal = 14.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        androidx.compose.animation.AnimatedVisibility(
+                                            on,
+                                            enter = androidx.compose.animation.scaleIn() + androidx.compose.animation.fadeIn() + androidx.compose.animation.expandHorizontally(),
+                                            exit = androidx.compose.animation.scaleOut() + androidx.compose.animation.fadeOut() + androidx.compose.animation.shrinkHorizontally(),
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Lc(L.drawable.lucide_ic_check, tint = Color.White, size = 15.dp)
+                                                Spacer(Modifier.width(6.dp))
+                                            }
+                                        }
+                                        Text(g, style = Type.label.copy(color = Color.White, fontSize = 14.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium))
+                                    }
                                 }
                             }
                         }

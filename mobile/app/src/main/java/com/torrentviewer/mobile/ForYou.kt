@@ -107,7 +107,7 @@ fun TopRow(state: LazyListState, titles: List<Title>, onOpen: (Title) -> Unit) {
                 TitleCard(
                     t.poster ?: t.wide, t.title, { onOpen(t) },
                     Modifier.padding(start = if (i < 9) 34.dp else 62.dp).width(poster),
-                    info = t.year?.take(4), rating = t.rating,
+                    info = t.year?.take(4), rating = t.rating, outline = false,
                 )
             }
         }
@@ -141,7 +141,7 @@ fun TopScreen(startKind: String, onOpen: (Title) -> Unit, onBack: () -> Unit) {
             GridCells.Adaptive(104.dp),
             state = rememberLazyGridState(),
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp),
+            contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp + LocalTabBarInset.current),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {

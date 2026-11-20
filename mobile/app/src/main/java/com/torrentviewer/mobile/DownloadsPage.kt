@@ -74,7 +74,7 @@ fun DownloadsScreen(watch: Watch, onBack: () -> Unit) {
     var cancelling by remember { mutableStateOf<LiveDownload?>(null) }
     var deleting by remember { mutableStateOf<Finished?>(null) }
 
-    LazyColumn(state = rememberLazyListState(), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp)) {
+    LazyColumn(state = rememberLazyListState(), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp + LocalTabBarInset.current)) {
         item {
             Heading("Downloads") {
                 Tap(onBack, shape = CircleShape) { Lc(L.drawable.lucide_ic_x, Modifier.padding(8.dp), tint = Ink.muted, size = 22.dp) }

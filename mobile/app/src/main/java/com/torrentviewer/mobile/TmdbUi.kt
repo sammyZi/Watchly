@@ -126,7 +126,7 @@ fun PersonScreen(id: Int, name: String, onOpen: (Title) -> Unit, onBack: () -> U
         LazyVerticalGrid(
             GridCells.Adaptive(110.dp),
             Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 32.dp),
+            contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 32.dp + LocalTabBarInset.current),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {

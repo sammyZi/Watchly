@@ -63,12 +63,19 @@ object EpisodeAlerts {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && nm.getNotificationChannel(CHANNEL) == null) {
                 nm.createNotificationChannel(NotificationChannel(CHANNEL, "New episodes", NotificationManager.IMPORTANCE_DEFAULT))
             }
-            val open = context.packageManager.getLaunchIntentForPackage(context.packageName)?.let {
-                PendingIntent.getActivity(context, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            }
             val named = Profiles.list.value.size > 1
             alerts.forEach { a ->
                 val e = a.episode
+                val id = (a.profile + a.title.imdb).hashCode()
+                // To the show's page at that season. Each its own: one shared intent opened the app's start
+                // and nothing more, and with one request code every alert would open the last one's show.
+                val link = android.net.Uri.Builder().scheme("watchly").authority(TITLE_LINK_HOST).appendPath(a.title.imdb)
+                    .appendQueryParameter("kind", "tv").appendQueryParameter("s", e.season.toString()).appendQueryParameter("name", a.title.title).build()
+                val open = context.packageManager.getLaunchIntentForPackage(context.packageName)?.let {
+                    it.data = link
+                    it.addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    PendingIntent.getActivity(context, id, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+                }
                 val text = (if (a.count > 1) "${a.count} new episodes, the latest is " else "") + "S${e.season}:E${e.episode}" + (e.name.takeIf { it.isNotBlank() && !it.startsWith("Episode") }?.let { " · $it" } ?: "")
                 val who = if (named) Profiles.list.value.find { it.id == a.profile }?.name else null
                 val note = NotificationCompat.Builder(context, CHANNEL)
@@ -80,7 +87,7 @@ object EpisodeAlerts {
                     .setAutoCancel(true)
                     .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
                     .build()
-                nm.notify((a.profile + a.title.imdb).hashCode(), note)
+                nm.notify(id, note)
             }
             return Result.success()
         }

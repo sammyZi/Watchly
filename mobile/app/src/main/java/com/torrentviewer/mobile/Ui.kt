@@ -8,6 +8,7 @@ import androidx.activity.compose.BackHandler
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -114,6 +115,7 @@ import com.torrentviewer.core.Spinner
 import com.torrentviewer.core.Title
 import com.torrentviewer.core.Type
 import com.composables.icons.lucide.R as L
+import dev.chrisbanes.haze.hazeEffect
 
 // The TV's look (Ink, Type, artwork, title marks — all from :core) on touch: what the
 // remote's focus ring did is a press that dips the control a little instead.
@@ -126,8 +128,9 @@ val EDGE = 16.dp
 fun isWide(): Boolean = LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
 
 /**
- * Anything tappable: dips while pressed, no ripple. [propagateMinConstraints] so a
- * caller's fillMaxWidth reaches the content and a bare one wraps it.
+ * Anything tappable: shrinks while pressed and springs back with a little overshoot on release, no
+ * ripple. [propagateMinConstraints] so a caller's fillMaxWidth reaches the content and a bare one wraps it.
+ * Calibration knobs: 0.9 is how far it shrinks (0.95 subtler); damping 0.45 the bounce (1 none); stiffness the speed.
  */
 @Composable
 fun Tap(
@@ -139,7 +142,7 @@ fun Tap(
 ) {
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
-    val s by animateFloatAsState(if (pressed) 0.96f else 1f, tween(120), label = "press")
+    val s by animateFloatAsState(if (pressed) PRESSED_SCALE else 1f, spring(dampingRatio = 0.45f, stiffness = 500f), label = "press")
     Box(
         modifier
             .graphicsLayer {
@@ -151,6 +154,9 @@ fun Tap(
         propagateMinConstraints = true,
     ) { content(pressed) }
 }
+
+/** How far a [Tap] shrinks while pressed: 0.95 is subtler, 0.85 more. */
+private const val PRESSED_SCALE = 0.9f
 
 /** The TV's buttons, on touch: red for the main action, translucent grey for the rest. */
 @Composable
@@ -218,17 +224,35 @@ fun Button(
 /** A pill of choices — seasons, qualities, genres, sorts. */
 @Composable
 fun Chip(label: String, on: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, @DrawableRes icon: Int? = null, @DrawableRes trailing: Int? = null, compact: Boolean = false, trailingTint: Color? = null) {
+    // The icon last shown, so a tick switched off can shrink away rather than vanish.
+    val lastIcon = remember { arrayOf(icon) }
+    if (icon != null) lastIcon[0] = icon
     Tap(onClick, modifier, CircleShape) { pressed ->
-        val bg = when {
-            on -> Ink.accent
-            pressed -> Ink.text.copy(alpha = 0.18f)
-            else -> Ink.text.copy(alpha = 0.08f)
-        }
-        val fg = if (on) Color.White else Ink.muted
-        Row(Modifier.background(bg).height(if (compact) 32.dp else 36.dp).padding(horizontal = if (compact) 11.dp else 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (icon != null) {
-                Lc(icon, tint = fg, size = 16.dp)
-                Spacer(Modifier.width(8.dp))
+        // Picked or not, the colours cross-fade, as a toggle pill does in Poetica.
+        val bg by animateColorAsState(
+            when {
+                on -> Ink.accent
+                pressed -> Ink.text.copy(alpha = 0.18f)
+                else -> Ink.text.copy(alpha = 0.08f)
+            },
+            tween(350), label = "chipBg",
+        )
+        val fg by animateColorAsState(if (on) Color.White else Ink.muted, tween(350), label = "chipFg")
+        Row(
+            Modifier.background(bg).height(if (compact) 32.dp else 36.dp).animateContentSize(spring(dampingRatio = 0.8f, stiffness = 500f))
+                .padding(horizontal = if (compact) 11.dp else 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // A tick coming on grows in and widens the pill smoothly; going off it shrinks back out.
+            androidx.compose.animation.AnimatedVisibility(
+                icon != null,
+                enter = androidx.compose.animation.scaleIn() + androidx.compose.animation.fadeIn() + androidx.compose.animation.expandHorizontally(),
+                exit = androidx.compose.animation.scaleOut() + androidx.compose.animation.fadeOut() + androidx.compose.animation.shrinkHorizontally(),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    lastIcon[0]?.let { Lc(it, tint = fg, size = 16.dp) }
+                    Spacer(Modifier.width(8.dp))
+                }
             }
             Text(label, style = Type.label.copy(fontSize = if (compact) 13.sp else 14.sp, color = fg, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium), maxLines = 1)
             if (trailing != null) {
@@ -422,9 +446,14 @@ fun <T> Sheet(
     }
 }
 
-/** The frame every sheet shares: scrim, rounded top, a grab handle and a heading. */
+/** The page a sheet over it may frost: the blurred source behind it, where the page provides one. */
+val LocalPageHaze = androidx.compose.runtime.staticCompositionLocalOf<dev.chrisbanes.haze.HazeState?> { null }
+
+/** The frame every sheet shares: scrim, rounded top, a grab handle and a heading — frosted over a page that offers it. */
 @Composable
 fun BottomSheet(title: String, onDismiss: () -> Unit, content: @Composable () -> Unit) {
+    val haze = LocalPageHaze.current
+    val surface = Ink.surface
     BackHandler(onBack = onDismiss)
     var shown by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { shown = true }
@@ -470,7 +499,16 @@ fun BottomSheet(title: String, onDismiss: () -> Unit, content: @Composable () ->
                 Modifier.widthIn(max = 600.dp).fillMaxWidth().heightIn(max = maxHeight)
                     .graphicsLayer { translationY = offset }
                     .nestedScroll(pull)
-                    .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)).background(Ink.surface)
+                    .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+                    .then(
+                        if (haze == null) Modifier.background(surface)
+                        else Modifier.hazeEffect(haze) {
+                            backgroundColor = surface
+                            tints = listOf(dev.chrisbanes.haze.HazeTint(surface.copy(alpha = 0.72f)))
+                            blurRadius = 24.dp
+                            noiseFactor = 0.03f
+                        },
+                    )
                     // Taps on the sheet stay on the sheet.
                     .clickable(remember { MutableInteractionSource() }, indication = null) {}
                     .navigationBarsPadding().padding(bottom = 10.dp),
@@ -550,11 +588,13 @@ private val CARD = RoundedCornerShape(10.dp)
 fun TitleCard(
     art: String?, name: String, onClick: () -> Unit, modifier: Modifier = Modifier,
     info: String? = null, badge: String? = null, progress: Float? = null, onLongClick: (() -> Unit)? = null, rating: String? = null,
+    /** The hairline round the poster; Home's rows go without it. */
+    outline: Boolean = true,
 ) {
     Column(modifier) {
         Tap(onClick, Modifier.fillMaxWidth().aspectRatio(2f / 3f), CARD, onLongClick) {
             Artwork(art, name, Modifier.fillMaxSize())
-            Box(Modifier.matchParentSize().border(1.dp, Ink.stroke, CARD))
+            if (outline) Box(Modifier.matchParentSize().border(1.dp, Ink.stroke, CARD))
             rating?.takeIf { it.isNotBlank() }?.let { ImdbMark(it, Modifier.align(Alignment.BottomStart).padding(6.dp)) }
             badge?.let {
                 Text(
@@ -586,13 +626,12 @@ fun CardPlaceholder(modifier: Modifier = Modifier) {
     }
 }
 
-/** Continue watching's art: the time left and how far over a fade at its foot, a hairline round it as [TitleCard] has; the name sits under the card. */
+/** Continue watching's art: the time left and how far over a fade at its foot, no outline, as Home's posters; the name sits under the card. */
 @Composable
 fun LandscapeCard(art: String?, name: String, stamp: String? = null, progress: Float? = null) {
     Box(Modifier.fillMaxSize()) {
         Artwork(art, name, Modifier.fillMaxSize())
         Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().fillMaxHeight(0.6f).background(Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.8f))))
-        Box(Modifier.matchParentSize().border(1.dp, Ink.stroke, RoundedCornerShape(6.dp)))
         Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = if (progress != null) 6.dp else 7.dp)) {
             // Over the artwork's dark fade: white on either page.
             stamp?.let { Text(it, style = Type.meta.copy(fontSize = 11.sp, color = Color.White.copy(alpha = 0.75f)), maxLines = 1) }

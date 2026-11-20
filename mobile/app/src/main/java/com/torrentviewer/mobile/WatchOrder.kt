@@ -219,7 +219,7 @@ fun WatchOrdersScreen(onOpen: (WatchOrder) -> Unit, onBack: () -> Unit) {
         Field(query, { query = it }, "Find a watch order", Modifier.fillMaxWidth().padding(horizontal = EDGE).padding(bottom = 12.dp), leading = L.drawable.lucide_ic_search)
         LazyVerticalGrid(
             GridCells.Adaptive(320.dp),
-            contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 32.dp),
+            contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 32.dp + LocalTabBarInset.current),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -250,7 +250,7 @@ fun WatchOrderScreen(order: WatchOrder, onOpen: (Title) -> Unit, onBack: () -> U
 
     StatusIconsOverArt(true)
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp + LocalTabBarInset.current)) {
             item(key = "head") {
                 Column {
                     Artwork(

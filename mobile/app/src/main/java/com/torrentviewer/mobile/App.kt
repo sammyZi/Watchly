@@ -108,6 +108,9 @@ import com.torrentviewer.core.titleOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.asPaddingValues
+import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.withContext
 import com.composables.icons.lucide.R as L
 
@@ -124,7 +127,7 @@ private fun tabs() = Tab.entries.filter { it != Tab.ADDONS || !Kids.on }
 
 /** What is stacked over the tabs: a title, a whole shelf, or the downloads (reached from Library). */
 sealed interface Page {
-    data class Detail(val title: Title) : Page
+    data class Detail(val title: Title, val season: Int? = null) : Page
     data class Catalog(val shelf: Shelf) : Page
     data object Downloads : Page
     data object WatchOrders : Page
@@ -189,6 +192,9 @@ fun ComponentActivity.applyTheme(dark: Boolean) {
 
 /** What the download notification opens. */
 const val DOWNLOADS_LINK = "watchly://downloads"
+
+/** watchly://title/<imdb>?kind=tv&s=<season>&name=…: a title's page, as a new-episode notification opens it. */
+const val TITLE_LINK_HOST = "title"
 
 @Composable
 fun App(watch: Watch, incoming: MutableState<Uri?>) {
@@ -294,6 +300,14 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
             clearPages()
             tab = Tab.LIBRARY
             pages.add(Page.Downloads)
+            return@LaunchedEffect
+        }
+        // A new-episode notification: the show's page, at that season.
+        if (uri.scheme == "watchly" && uri.host == TITLE_LINK_HOST) {
+            val imdb = uri.lastPathSegment?.takeIf { it.startsWith("tt") } ?: return@LaunchedEffect
+            clearPages()
+            tab = Tab.HOME
+            pages.add(Page.Detail(Title(imdb, uri.getQueryParameter("kind") ?: "tv", uri.getQueryParameter("name").orEmpty()), uri.getQueryParameter("s")?.toIntOrNull()))
             return@LaunchedEffect
         }
         // A magnet is anything at all: a kids profile plays only what it can browse to.
@@ -414,7 +428,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         if (top != null) {
             holder.SaveableStateProvider(keyOf(pages.lastIndex, top)) {
                 when (top) {
-                    is Page.Detail -> DetailScreen(top.title, watch, onOrder = openOrder, onOpen = openTitle, onPerson = { pages.add(Page.Person(it.id, it.name)) }, onBack = ::pop)
+                    is Page.Detail -> DetailScreen(top.title, watch, onOrder = openOrder, onOpen = openTitle, onPerson = { pages.add(Page.Person(it.id, it.name)) }, onBack = ::pop, startSeason = top.season)
                     is Page.Person -> PersonScreen(top.id, top.name, onOpen = openTitle, onBack = ::pop)
                     is Page.Top -> TopScreen(top.kind, onOpen = openTitle, onBack = ::pop)
                     is Page.Catalog -> CatalogScreen(top.shelf, onOpen = openTitle, onBack = ::pop)
@@ -440,7 +454,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
                         Tab.SEARCH -> SearchScreen(watch, onOpen = openTitle)
                         Tab.ADDONS -> AddonsScreen(watch)
                         Tab.LIBRARY -> LibraryScreen(watch, me, onOpen = openTitle, onDownloads = { pages.add(Page.Downloads) })
-                        Tab.SETTINGS -> SettingsScreen(watch, me, onSwitchProfile = { switching = true })
+                        Tab.SETTINGS -> SettingsScreen(watch, me, onSwitchProfile = { switching = true }, onEditHome = { home.editing = true; tab = Tab.HOME })
                     }
                 }
             }
@@ -458,10 +472,14 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
                 Box(Modifier.weight(1f).fillMaxHeight()) { body() }
             }
         } else {
-            Column(Modifier.fillMaxSize()) {
-                Box(Modifier.weight(1f).fillMaxWidth()) { body() }
-                TabBar(tab, choose)
+            // Every page runs on under the bar, which frosts what passes behind it — a tab, and a film's page
+            // opened over one; each leaves room at its foot for the bar (LocalTabBarInset).
+            val barHaze = dev.chrisbanes.haze.rememberHazeState()
+            val bar = TAB_BAR_HEIGHT + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            androidx.compose.runtime.CompositionLocalProvider(LocalTabBarInset provides bar) {
+                Box(Modifier.fillMaxSize().hazeSource(barHaze)) { body() }
             }
+            TabBar(tab, choose, barHaze, Modifier.align(Alignment.BottomCenter))
         }
 
         UpdateCard(watch, Modifier.align(Alignment.TopCenter).statusBarsPadding())
@@ -545,10 +563,29 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     }
 }
 
-/** Portrait: the tabs along the bottom, the one you are on white with the TV rail's red tick. */
+/** How tall the bottom tab bar is, above the system's navigation bar. */
+private val TAB_BAR_HEIGHT = 58.dp
+
+/** Room a tab's page leaves at its foot for the tab bar it runs on under; 0 where nothing is under it. */
+val LocalTabBarInset = androidx.compose.runtime.compositionLocalOf { 0.dp }
+
+/**
+ * Portrait: the tabs along the bottom, the one you are on white with the TV rail's red tick — on frost:
+ * the page passing under it blurred and washed with the page's own colour, as OpenTune's bars are.
+ */
 @Composable
-private fun TabBar(tab: Tab, onTab: (Tab) -> Unit) {
-    Row(Modifier.fillMaxWidth().background(Ink.bg).grain().navigationBarsPadding().height(58.dp)) {
+private fun TabBar(tab: Tab, onTab: (Tab) -> Unit, haze: dev.chrisbanes.haze.HazeState, modifier: Modifier = Modifier) {
+    val page = Ink.bg
+    Row(
+        modifier.fillMaxWidth()
+            .hazeEffect(haze) {
+                backgroundColor = page
+                tints = listOf(dev.chrisbanes.haze.HazeTint(page.copy(alpha = 0.65f)))
+                blurRadius = 22.dp
+                noiseFactor = 0.03f
+            }
+            .navigationBarsPadding().height(TAB_BAR_HEIGHT),
+    ) {
         tabs().forEach { t ->
             val on = t == tab
             Tap({ onTab(t) }, Modifier.weight(1f).fillMaxHeight(), RoundedCornerShape(0.dp)) {

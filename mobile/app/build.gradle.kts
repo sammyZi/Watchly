@@ -94,4 +94,6 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.10.0")
     // Only for the AppCompat theme that chooser dialog insists on.
     implementation("androidx.appcompat:appcompat:1.7.1")
+    // The frosted bar over a scrolled page: Compose's own blur blurs a view itself, not what scrolls behind it.
+    implementation("dev.chrisbanes.haze:haze:1.7.1")
 }

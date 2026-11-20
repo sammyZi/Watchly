@@ -102,6 +102,14 @@ import com.torrentviewer.core.Addons
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.launch
 import com.composables.icons.lucide.R as L
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.graphics.graphicsLayer
+import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.hazeSource
+
+/** How far below the bar its frost reaches as it thins out: just past it, so it reads as the bar's edge. */
+private val FROST_TAIL = 6.dp
 
 /** The exact strings quality() returns, best first. */
 private val QUALITY_ORDER = listOf("4K", "1080p", "720p", "CAM")
@@ -124,7 +132,7 @@ fun openUrl(context: Context, url: String) {
  * on it; turned, it sits behind on the right and the words run down the left, as on the TV.
  */
 @Composable
-fun DetailScreen(initial: Title, watch: Watch, onOrder: (com.torrentviewer.core.WatchOrder) -> Unit, onOpen: (Title) -> Unit, onPerson: (com.torrentviewer.core.CastMember) -> Unit, onBack: () -> Unit) {
+fun DetailScreen(initial: Title, watch: Watch, onOrder: (com.torrentviewer.core.WatchOrder) -> Unit, onOpen: (Title) -> Unit, onPerson: (com.torrentviewer.core.CastMember) -> Unit, onBack: () -> Unit, startSeason: Int? = null) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var title by remember(initial.imdb) { mutableStateOf(initial) }
@@ -147,7 +155,8 @@ fun DetailScreen(initial: Title, watch: Watch, onOrder: (com.torrentviewer.core.
     // And what Simkl and MDBList have seen, from any app that tells them.
     val stremio by com.torrentviewer.core.WatchedEverywhere.collectAsState(com.torrentviewer.core.Stremio.library.value)
     val continueAt = remember(history, title.episodes, stremio) { continueEpisode(title, history, stremio) }
-    var season by rememberSaveable(title.imdb) { mutableStateOf<Int?>(null) }
+    // Opened from a new-episode notification: that season, rather than where the viewer was.
+    var season by rememberSaveable(title.imdb) { mutableStateOf(startSeason) }
     // Not while the episode list is still loading: that would throw away the season being come back to.
     LaunchedEffect(seasons) {
         if (seasons.isNotEmpty() && (season == null || season !in seasons)) season = continueAt?.season?.takeIf { it in seasons } ?: seasons.first()
@@ -273,10 +282,12 @@ fun DetailScreen(initial: Title, watch: Watch, onOrder: (com.torrentviewer.core.
     }
 
     val wide = isWide()
+    // What the frosted bar blurs: the page scrolling under it.
+    val haze = dev.chrisbanes.haze.rememberHazeState()
     Box(Modifier.fillMaxSize()) {
         if (wide) Artwork(title.wide, title.title, Modifier.align(Alignment.TopEnd).fillMaxWidth(0.7f).fillMaxHeight(0.9f).heroScrims(), fill = false)
 
-        LazyColumn(state = list, contentPadding = PaddingValues(bottom = 32.dp), modifier = Modifier.fillMaxSize()) {
+        LazyColumn(state = list, contentPadding = PaddingValues(bottom = 32.dp + LocalTabBarInset.current), modifier = Modifier.fillMaxSize().hazeSource(haze)) {
             item(key = "head") {
                 if (!wide) {
                     Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
@@ -315,24 +326,25 @@ fun DetailScreen(initial: Title, watch: Watch, onOrder: (com.torrentviewer.core.
                                 icon = L.drawable.lucide_ic_play,
                                 primary = true,
                             )
-                            Button("Start over", {
-                                val i = last.lastFileIndex ?: 0
-                                History.setPosition(last.uri, i, 0.0)
-                                watch.resume(History.find(last.uri) ?: last)
-                            }, Modifier.fillMaxWidth().padding(top = 8.dp), icon = L.drawable.lucide_ic_rotate_ccw)
+                            Button("Start over", { watch.startOver(last) }, Modifier.fillMaxWidth().padding(top = 8.dp), icon = L.drawable.lucide_ic_rotate_ccw)
                         }
-                        // Left part-way on Stremio, never here: still Resume — the release picked starts at that spot.
-                        !title.isSeries -> Button(
-                            label = when {
-                                shown.isNotEmpty() -> com.torrentviewer.core.resumeLabel(title.imdb, history, stremio) ?: "Play"
-                                busy -> "Finding sources…"
-                                else -> "No sources"
-                            },
-                            onClick = { shown.firstOrNull()?.let { watch.stream(it, title) } ?: watch.notes.tryEmit(if (busy) "Still finding sources…" else noneFound(title.title)) },
-                            modifier = Modifier.fillMaxWidth(),
-                            icon = L.drawable.lucide_ic_play,
-                            primary = true,
-                        )
+                        // Left part-way on Stremio, never here: still Resume — the release picked starts at that spot —
+                        // and Start over under it, as for one left here.
+                        !title.isSeries -> {
+                            val resuming = shown.isNotEmpty() && com.torrentviewer.core.resumeLabel(title.imdb, history, stremio) != null
+                            Button(
+                                label = when {
+                                    shown.isNotEmpty() -> com.torrentviewer.core.resumeLabel(title.imdb, history, stremio) ?: "Play"
+                                    busy -> "Finding sources…"
+                                    else -> "No sources"
+                                },
+                                onClick = { shown.firstOrNull()?.let { watch.stream(it, title) } ?: watch.notes.tryEmit(if (busy) "Still finding sources…" else noneFound(title.title)) },
+                                modifier = Modifier.fillMaxWidth(),
+                                icon = L.drawable.lucide_ic_play,
+                                primary = true,
+                            )
+                            if (resuming) Button("Start over", { watch.streamFromTop(shown.first(), title) }, Modifier.fillMaxWidth().padding(top = 8.dp), icon = L.drawable.lucide_ic_rotate_ccw)
+                        }
                         upNext != null -> Button(
                             label = if (busy && episode?.id == upNext.id && shown.isEmpty()) "Finding sources…"
                                 else {
@@ -466,19 +478,48 @@ fun DetailScreen(initial: Title, watch: Watch, onOrder: (com.torrentviewer.core.
                 sources(title, episode, hits, shown, busy, quality, { quality = it }, Modifier.widthIn(max = 720.dp), language = searchLang()?.name, onDownload = { keep(it, null) }) { hit -> watch.stream(hit, title) }
             }
         }
-        // Over the art, a round back button; once the page scrolls under it, a solid bar with the name.
+        // Over the art, a round back button; once the page scrolls under it, the bar frosts in with the name —
+        // the page behind it blurred and washed with its own colour, thinning out over a short tail below the
+        // bar rather than stopping at a hard line (OpenTune's collapsed bar).
         val scrolled by remember { derivedStateOf { list.firstVisibleItemIndex > 0 || list.firstVisibleItemScrollOffset > 420 } }
+        val frost by androidx.compose.animation.core.animateFloatAsState(if (scrolled) 1f else 0f, androidx.compose.animation.core.tween(260), label = "frost")
         StatusIconsOverArt(!wide && !scrolled)
-        if (scrolled) {
-            Row(Modifier.fillMaxWidth().background(Ink.bg).grain().statusBarsPadding().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                RoundIcon(L.drawable.lucide_ic_arrow_left, onBack)
-                Text(title.title, Modifier.padding(start = 12.dp), style = Type.title.copy(fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (frost > 0f) {
+            val page = Ink.bg
+            val density = androidx.compose.ui.platform.LocalDensity.current.density
+            var tall by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+            Box(Modifier.fillMaxWidth()) {
+                Box(
+                    Modifier.matchParentSize()
+                        .layout { measurable, constraints ->
+                            // Drawn taller than the bar by the tail; the bar's own size is unchanged.
+                            val h = constraints.maxHeight + FROST_TAIL.roundToPx()
+                            val p = measurable.measure(constraints.copy(minHeight = h, maxHeight = h))
+                            layout(constraints.maxWidth, constraints.maxHeight) { p.place(0, 0) }
+                        }
+                        .onSizeChanged { tall = it.height }
+                        .hazeEffect(haze) {
+                            alpha = frost
+                            backgroundColor = page
+                            tints = listOf(dev.chrisbanes.haze.HazeTint(page.copy(alpha = 0.55f)))
+                            blurRadius = 26.dp
+                            noiseFactor = 0.03f
+                            // The whole effect fades over the tail, its fill too: fading only the blur left a line.
+                            val fadeFrom = if (tall > 0) ((tall - FROST_TAIL.value * density * 1.6f) / tall).coerceIn(0f, 1f) else 0.8f
+                            mask = androidx.compose.ui.graphics.Brush.verticalGradient(0f to Color.Black, fadeFrom to Color.Black, 1f to Color.Transparent)
+                        },
+                )
+                Row(Modifier.fillMaxWidth().graphicsLayer { alpha = frost }.statusBarsPadding().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    RoundIcon(L.drawable.lucide_ic_arrow_left, onBack)
+                    Text(title.title, Modifier.padding(start = 12.dp), style = Type.title.copy(fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
-        } else {
-            BackButton(onBack)
         }
+        if (!scrolled) BackButton(onBack)
     }
 
+    // The sheets below frost over the page — the episode's sources, the language — as its bar does.
+    androidx.compose.runtime.CompositionLocalProvider(LocalPageHaze provides haze) {
     // An episode's releases come up over the page, rather than at the foot of a long list.
     if (sheet) {
         val ep = episode
@@ -564,6 +605,7 @@ Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
             },
             onDismiss = { reviews = false },
         )
+    }
     }
 }
 

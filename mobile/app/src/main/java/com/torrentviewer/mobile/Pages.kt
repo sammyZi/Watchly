@@ -143,7 +143,7 @@ fun CatalogScreen(shelf: Shelf, onOpen: (Title) -> Unit, onBack: () -> Unit) {
             POSTER,
             state = rememberLazyGridState(),
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp),
+            contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp + LocalTabBarInset.current),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
@@ -271,7 +271,7 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
         POSTER,
         state = rememberLazyGridState(),
         modifier = Modifier.fillMaxSize().imePadding(),
-        contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp),
+        contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp + LocalTabBarInset.current),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -398,7 +398,7 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit, onDownload
         if (shelf == Shelfs.HISTORY) GridCells.Adaptive(340.dp) else POSTER,
         state = rememberLazyGridState(),
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp),
+        contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp + LocalTabBarInset.current),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -557,7 +557,7 @@ private fun HistoryRow(item: Item, releases: Int, onPlay: () -> Unit, onMore: ()
 /* ------------------------------------------------------------- settings */
 
 @Composable
-fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
+fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEditHome: () -> Unit = {}) {
     val settings by SettingsStore.value.collectAsState()
     val profiles by Profiles.list.collectAsState()
     val me = profiles.find { it.id == who.id } ?: who
@@ -604,7 +604,7 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
     val pageScroll = rememberScrollState()
     LaunchedEffect(page) { if (page != null) pageScroll.scrollTo(0) }
 
-    Column(Modifier.fillMaxSize().verticalScroll(if (page == null) listScroll else pageScroll).padding(horizontal = EDGE).padding(bottom = 32.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(if (page == null) listScroll else pageScroll).padding(horizontal = EDGE).padding(bottom = 32.dp + LocalTabBarInset.current)) {
         if (page == null) {
             Heading("Settings")
             Field(query, { query = it }, "Search settings", Modifier.fillMaxWidth().padding(bottom = 12.dp), leading = L.drawable.lucide_ic_search)
@@ -626,7 +626,7 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
                     ),
                     listOf(
                         Entry(L.drawable.lucide_ic_trophy, "Your stats", "Hours watched, favourites and streaks", "year recap history time") { page = "Your stats" },
-                        Entry(L.drawable.lucide_ic_palette, "Appearance", "Theme and home screen genres", "light dark") { page = "Appearance" },
+                        Entry(L.drawable.lucide_ic_palette, "Appearance", "Theme, home screen genres and rows", "light dark home rows edit") { page = "Appearance" },
                     ),
                     listOf(
                         Entry(L.drawable.lucide_ic_radio, "Streaming", "Storage, buffer and trackers", "cache magnet") { page = "Streaming" },
@@ -998,7 +998,11 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
 
-        Section("Genres on the home screen", "Leave all off to build the home screen from what you have watched.") {
+        Section("Home screen rows", "Move rows up or down, or switch them off. Each profile keeps its own.") {
+            Button("Edit Home", onEditHome, icon = L.drawable.lucide_ic_settings_2, compact = true)
+        }
+
+        Section("Genres on the home screen", "Only the genres picked here get rows on the home screen. Leave all off to build it from what you have watched.") {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 GENRES.forEach { g ->
                     val on = g in settings.genres
@@ -1245,7 +1249,7 @@ fun AddonsScreen(watch: Watch) {
             adding = false
         }
     }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).imePadding().padding(horizontal = EDGE).padding(bottom = 32.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).imePadding().padding(horizontal = EDGE).padding(bottom = 32.dp + LocalTabBarInset.current)) {
         Heading("Addons")
         Text(
             "Streams, subtitles and extra catalogues come from addons — public ones, your debrid service's, or your own media server's. Watchly comes with none.",
