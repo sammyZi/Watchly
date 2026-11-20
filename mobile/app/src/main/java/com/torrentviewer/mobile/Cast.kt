@@ -71,7 +71,9 @@ fun openExternally(context: Context, url: String, name: String, atSeconds: Doubl
         Uri.parse(url)
     }
     val view = Intent(Intent.ACTION_VIEW).apply {
-        setDataAndType(data, mimeOf(name))
+        // Any video, not the file's exact type: as video/x-matroska only players naming that type were offered,
+        // and most name a few or none. A wildcard matches every player that takes any kind of video.
+        setDataAndType(data, "video/*")
         putExtra("title", name)
         if (atSeconds > 0) {
             putExtra("position", (atSeconds * 1000).toLong())
@@ -86,6 +88,8 @@ fun openExternally(context: Context, url: String, name: String, atSeconds: Doubl
     val chooser = Intent.createChooser(view, "Play with").apply {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if (local) addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        // Not back into Watchly, which takes video links too.
+        putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, arrayOf(android.content.ComponentName(context, MainActivity::class.java)))
     }
     return runCatching { context.startActivity(chooser) }.isSuccess
 }

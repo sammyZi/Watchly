@@ -178,6 +178,9 @@ import com.torrentviewer.core.fileEpisodeLabel
 import com.torrentviewer.core.left
 import com.torrentviewer.core.parseEpisode
 import com.torrentviewer.core.searchEpisode
+import com.torrentviewer.core.searchStreams
+import com.torrentviewer.core.Hit
+import com.torrentviewer.core.OnHits
 import com.torrentviewer.core.searchableName
 import com.torrentviewer.core.trackForLang
 import com.torrentviewer.core.speed
@@ -236,7 +239,7 @@ private const val SEEK_CHECK_MS = 2500L
 /** A seek that has not landed: the player goes on reporting the old time until it does. */
 private class Seeking(val target: Double, val from: Double, val since: Long, val connections: Long)
 
-private enum class Panel { TRACKS, SPEED, ASPECT, FIND, LANG, MORE, EPISODES, PARTY }
+private enum class Panel { TRACKS, SPEED, ASPECT, FIND, LANG, MORE, EPISODES, PARTY, SOURCES }
 
 private data class Flash(val seconds: Int, val id: Long)
 
@@ -1135,13 +1138,14 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                 Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(190.dp).background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.88f)))))
                 Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(horizontal = 12.dp, vertical = 6.dp)) {
                     TopBar(
-                        title, episode, file, progressState.value, duration, { at }, rate, info,
+                        title, episode, file, progressState.value, duration, { at }, rate,
                         canCast = cast != null,
                         party = room?.let { maxOf(it.people, it.members.size) } ?: 0,
                         unread = room?.unread ?: 0,
                         onParty = if (Party.enabled) ::partyButton else null,
                         onBack = ::leave,
-                        onStats = { info = !info },
+                        // Another release of what is playing, from where it is; not a guest's, who follows the leader's.
+                        onSources = if (title != null && !guest) ({ panel = Panel.SOURCES }) else null,
                         onLock = {
                             locked = true
                             controls = false
@@ -1512,6 +1516,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                         },
                     ),
                     Option("download", "Download ahead", if (wholeFile) "Whole file" else "Next 5 minutes"),
+                    Option("stats", "Stats", if (info) "On" else "Off"),
                     Option("open", "Open in another player"),
                 ),
                 selected = null,
@@ -1519,6 +1524,11 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                     when (what) {
                         "picture" -> panel = Panel.ASPECT
                         "sleep" -> cycleSleep()
+                        // Shut, so the numbers it turns on are in sight over the film.
+                        "stats" -> {
+                            info = !info
+                            panel = null
+                        }
                         "download" -> {
                             wholeFile = !wholeFile
                             engine.wholeFile = wholeFile
@@ -1576,6 +1586,17 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                 onDismiss = { panel = Panel.FIND },
             )
             Panel.EPISODES -> title?.let { EpisodesPanel(it, episode, ::playEpisode) { panel = null } }
+            Panel.SOURCES -> title?.let { t ->
+                SourcesPanel(t, episode, playing = watch.item?.uri, runtime = duration, onPick = { hit ->
+                    panel = null
+                    if (advanced) return@SourcesPanel
+                    advanced = true
+                    // The spot first: the new release picks it up from this one (Watch.carried).
+                    if (at > 0) watch.savePosition(at)
+                    say("Switching stream…", L.drawable.lucide_ic_layers)
+                    watch.stream(hit, t, episode?.let { episodeTag(it.season, it.episode) }, episode)
+                }) { panel = null }
+            }
             // A party just left shuts its panel (Leave does) rather than turn into the offer to start one.
             Panel.PARTY -> room?.let { r ->
                 PartyPanel(
@@ -1825,6 +1846,69 @@ private fun FloatingReaction(f: Floater, onDone: () -> Unit) {
     }
 }
 
+/** Best first: Change stream's quality chips. */
+private val QUALITY_ORDER = listOf("4K", "2160p", "1080p", "720p", "480p")
+
+/**
+ * Change stream: the other releases of what is playing, down the right of the picture as Episodes is, found
+ * as a title's page finds them; picking one plays it from where this one was. The one playing is left out.
+ */
+@Composable
+private fun SourcesPanel(title: Title, episode: Episode?, playing: String?, runtime: Double, onPick: (Hit) -> Unit, onDismiss: () -> Unit) {
+    BackHandler(onBack = onDismiss)
+    var hits by remember { mutableStateOf<List<Hit>?>(null) }
+    var busy by remember { mutableStateOf(true) }
+    LaunchedEffect(title.imdb, episode?.id) {
+        val onHits: OnHits = { hits = it }
+        val all = runCatching {
+            if (episode != null) searchEpisode(title, episode.season, episode.episode, onHits)
+            else searchStreams(title.title, title.imdb, title.year?.take(4), type = title.type, onHits = onHits)
+        }.getOrNull()
+        if (all != null) hits = all
+        busy = false
+    }
+    val others = hits.orEmpty().filter { it.uri != playing }
+    /** The qualities on offer, best first, as a title's page lists them; null shows them all. */
+    var quality by remember { mutableStateOf<String?>(null) }
+    val qualities = remember(others) { others.mapNotNull { it.quality }.distinct().sortedBy { q -> QUALITY_ORDER.indexOf(q).takeIf { it >= 0 } ?: QUALITY_ORDER.size } }
+    val shown = others.filter { quality == null || it.quality == quality }
+    Box(Modifier.fillMaxSize()) {
+        // The picture stays in view beside the list; a tap on it closes the list.
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)).pointerInput(Unit) { awaitEachGesture { awaitFirstDown().consume(); onDismiss() } })
+        Column(
+            Modifier.align(Alignment.CenterEnd).fillMaxHeight().widthIn(max = 480.dp).fillMaxWidth(0.94f)
+                .background(Color.Black.copy(alpha = 0.92f)).pointerInput(Unit) { awaitEachGesture { awaitFirstDown().consume() } }
+                .windowInsetsPadding(WindowInsets.safeDrawing).padding(start = 16.dp, end = 12.dp, top = 12.dp),
+        ) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Change stream", Modifier.weight(1f), style = Type.title.copy(color = Color.White, fontWeight = FontWeight.Bold))
+                if (busy) Spinner(size = 20.dp)
+                Tap(onDismiss, shape = CircleShape) { Lc(L.drawable.lucide_ic_x, Modifier.padding(8.dp), tint = Color.White, size = 22.dp) }
+            }
+            // Dark chips of its own: the page's Chip takes the theme's colours, which over the film may be light.
+            if (qualities.size > 1) Row(Modifier.padding(top = 6.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                (listOf<String?>(null) + qualities).forEach { q ->
+                    val on = q == quality
+                    Tap({ quality = q }, shape = RoundedCornerShape(50)) {
+                        Text(
+                            q ?: "All",
+                            Modifier.background(if (on) Ink.accent else Color.White.copy(alpha = 0.12f)).padding(horizontal = 14.dp, vertical = 7.dp),
+                            style = Type.label.copy(color = Color.White, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium),
+                        )
+                    }
+                }
+            }
+            if (!busy && shown.isEmpty()) Text(if (others.isEmpty()) "No other release found." else "None in $quality.", Modifier.padding(top = 16.dp), style = Type.body.copy(color = Color.White.copy(alpha = 0.7f)))
+            LazyColumn(Modifier.padding(top = 10.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                // The title's page's own row: quality, the name scrolling through, size, seeds, the add-on, how fast
+                // it should go, TorBox's Instant. The player keeps the dark palette, so it reads over the film.
+                items(shown, key = { it.id }) { hit -> Source(hit, runtimeSeconds = runtime) { onPick(hit) } }
+                item { Spacer(Modifier.height(16.dp)) }
+            }
+        }
+    }
+}
+
 /** Every episode of the show down the right of the picture, by season, the one playing in view; picking one plays it. */
 @Composable
 private fun EpisodesPanel(title: Title, playing: Episode?, onPlay: (Episode) -> Unit, onDismiss: () -> Unit) {
@@ -1907,7 +1991,6 @@ private fun TopBar(
     duration: Double,
     at: () -> Double,
     rate: Float,
-    info: Boolean,
     canCast: Boolean,
     /** How many are in the watch party, 0 outside one. */
     party: Int,
@@ -1915,7 +1998,8 @@ private fun TopBar(
     unread: Int,
     onParty: (() -> Unit)?,
     onBack: () -> Unit,
-    onStats: () -> Unit,
+    /** Change stream: null where there is no title to find another release of. */
+    onSources: (() -> Unit)?,
     onLock: () -> Unit,
 ) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -1945,7 +2029,10 @@ private fun TopBar(
             }
         }
         if (canCast) AndroidView(factory = ::castButton, modifier = Modifier.size(42.dp))
-        Tap(onStats, shape = CircleShape) { Lc(L.drawable.lucide_ic_info, Modifier.padding(9.dp), tint = if (info) Ink.accent else Color.White, size = 22.dp) }
+        // Where the stats were; they are under More now.
+        if (onSources != null) Tap(onSources, Modifier.semantics { contentDescription = "Change stream" }, CircleShape) {
+            Lc(L.drawable.lucide_ic_layers, Modifier.padding(9.dp), tint = Color.White, size = 22.dp)
+        }
         Tap(onLock, shape = CircleShape) { Lc(L.drawable.lucide_ic_lock, Modifier.padding(9.dp), tint = Color.White, size = 22.dp) }
     }
 }

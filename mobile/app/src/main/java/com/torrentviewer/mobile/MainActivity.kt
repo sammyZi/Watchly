@@ -87,7 +87,7 @@ class MainActivity : FragmentActivity() {
         setContent {
             androidx.compose.foundation.layout.Box {
                 App(Services.watch, incoming)
-                com.torrentviewer.core.Splash(skip = incoming.value != null)
+                FilmSplash(skip = incoming.value != null)
             }
         }
         preferHighRefreshRate()
