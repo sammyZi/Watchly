@@ -534,7 +534,10 @@ class Watch(val engine: TorrentStream) {
         creditedAt = seconds
         val duration = History.find(at.uri)?.durations?.get(playingIndex) ?: 0.0
         // Nothing on disk to measure when it streams from a link.
-        History.setPosition(at.uri, playingIndex, seconds, if (via != null || source == null) -1.0 else playheadRatio(engine.readRatio(), aheadSeconds, duration))
+        val byteAt = if (via != null || source == null) -1.0 else playheadRatio(engine.readRatio(), aheadSeconds, duration)
+        History.setPosition(at.uri, playingIndex, seconds, byteAt)
+        // For the start the engine keeps of it as it plays.
+        if (byteAt >= 0) engine.playheadRatio = byteAt
         markWatched(at, seconds)
     }
 
@@ -591,6 +594,9 @@ class Watch(val engine: TorrentStream) {
 
     fun exit() {
         pauseOnStremio()
+        // How far in it was left, for the start the engine keeps of it; read before the item goes. In bytes
+        // where measured, as a resume aims: the running time's share of a file can be well off its bytes'.
+        val left = item?.let { History.find(it.uri) }?.resumeRatio(playingIndex)?.takeIf { it > 0 }
         gen++
         phase = Phase.IDLE
         item = null
@@ -598,7 +604,7 @@ class Watch(val engine: TorrentStream) {
         source = null
         via = null
         askingTorBox = false
-        AppScope.launch(Dispatchers.IO) { engine.stop() }
+        AppScope.launch(Dispatchers.IO) { engine.stop(left) }
     }
 
     /** Back out of "Opening…" before the file list arrives. */

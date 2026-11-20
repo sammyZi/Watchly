@@ -566,24 +566,19 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
             b.setAspectRatio(Rational((ratio * 1000).toInt(), 1000))
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            b.setAutoEnterEnabled(!paused && loaded)
+            // Only from the PiP button: Home pauses the film instead (the ON_STOP observer below).
+            b.setAutoEnterEnabled(false)
             b.setSeamlessResizeEnabled(false)
         }
         return b.build()
     }
     val canPip = remember { Pip.supported(context) }
     DisposableEffect(Unit) {
-        Pip.params = { if (!paused && loaded) pipParams() else null }
         onDispose {
-            Pip.params = null
             if (canPip && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 runCatching { activity?.setPictureInPictureParams(PictureInPictureParams.Builder().setAutoEnterEnabled(false).build()) }
             }
         }
-    }
-    // Android 12+ shrinks on Home by itself, from whatever the params say right now.
-    LaunchedEffect(paused, loaded) {
-        if (canPip && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) pipParams()?.let { p -> runCatching { activity?.setPictureInPictureParams(p) } }
     }
     LaunchedEffect(pip) {
         if (pip) {

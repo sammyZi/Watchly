@@ -49,6 +49,8 @@ object Services {
         engine = TorrentStream(context.applicationContext, port = 6882, lan = true)
         // Readable over adb (Android/data/<app>/files/engine.log): this phone keeps app logs out of logcat.
         engine.logFile = context.getExternalFilesDir(null)?.let { java.io.File(it, "engine.log") }
+        // A film stopped part-way keeps its header, index and resume spot, so it opens at once next time.
+        engine.keepStarts = true
         com.torrentviewer.core.Party.log = { engine.note("party: $it") }
         // DHT bootstrapped while the viewer browses, not after they press Play.
         AppScope.launch(Dispatchers.IO) { engine.warmUp() }
@@ -63,8 +65,6 @@ object Services {
 /** Picture-in-picture, between the player (which knows whether a film is playing) and the activity. */
 object Pip {
     var active by mutableStateOf(false)
-    /** The window's params while a film plays, else null: Home then just leaves. */
-    var params: (() -> PictureInPictureParams?)? = null
 
     fun supported(context: Context) =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && context.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
@@ -102,14 +102,6 @@ class MainActivity : FragmentActivity() {
         super.onResume()
         preferHighRefreshRate()
         com.torrentviewer.core.refreshWatched()
-    }
-
-    /** Home while a film plays shrinks it to a window. Android 12+ does this itself from the params' auto-enter. */
-    override fun onUserLeaveHint() {
-        super.onUserLeaveHint()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && Build.VERSION.SDK_INT < Build.VERSION_CODES.S && Pip.supported(this)) {
-            Pip.params?.invoke()?.let { runCatching { enterPictureInPictureMode(it) } }
-        }
     }
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {

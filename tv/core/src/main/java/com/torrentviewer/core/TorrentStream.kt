@@ -184,6 +184,31 @@ private const val STALLED_AFTER_MS = 5_000L
  * was switched off for each one, so the next piece started from nothing.
  */
 private const val LAST_BLOCKS = 8
+/**
+ * A kept start ([StartKits]) holds this much before where the film was left — this many seconds of it, within
+ * the bounds — and this much after: the player reads ahead before its first picture. Calibration knobs: whole
+ * pieces are kept, so with 16MB pieces each side rounds up to one or two of them.
+ *
+ * Behind by time, not a fixed 8MB: a resume opens at the index's keyframe before its spot, 15-21MB back on an
+ * 8MB-piece HEVC film (~40s of it) and 5MB on a 2MB-piece one, and each replay waited 6-9s on that one piece.
+ */
+private const val START_BEHIND_SECONDS = 60L
+private const val START_BEHIND_MIN = 16L * 1024 * 1024
+private const val START_BEHIND_MAX = 64L * 1024 * 1024
+private const val START_AHEAD_BYTES = 24L * 1024 * 1024
+/** A playing film's kept start is checked this often, in poll ticks (0.5s each once playing): ~2s. Calibration knob. */
+private const val START_CHECK_TICKS = 4
+
+/** A resume's pre-roll starts this far before its spot, where the player's keyframe is. Calibration knobs. */
+private const val START_LEAD_SECONDS = 20L
+private const val START_LEAD_MIN = 4L * 1024 * 1024
+private const val START_LEAD_MAX = 16L * 1024 * 1024
+
+/** Left past this much of the file, it was watched: no start is kept. */
+private const val START_WATCHED = 0.95
+/** A reader this near the start is on the header, not the film; as much as the kept start holds of it. */
+private const val ROLL_HEAD_KEEP = 8L * 1024 * 1024
+
 /** How long a dropped peer stays out, so it isn't straight back with another block. */
 private const val DROP_MS = 120_000L
 /**
@@ -434,6 +459,10 @@ class TorrentStream(
 
     /** Survives stop/restart: .torrent bytes, peer endpoints, DHT routing table. */
     private val cacheRoot: File get() = File(context.filesDir, "torrent-cache").apply { mkdirs() }
+
+    /** On: a stopped film keeps its start on disk ([StartKits]); off, stop wipes everything as before. */
+    @Volatile var keepStarts = false
+    private val starts by lazy { StartKits(File(cacheRoot, "starts.json")) { saveDir } }
     private val metaDir: File get() = File(cacheRoot, "meta").apply { mkdirs() }
     private val peersDir: File get() = File(cacheRoot, "peers").apply { mkdirs() }
     private val importDir: File get() = File(cacheRoot, "imported").apply { mkdirs() }
@@ -441,8 +470,10 @@ class TorrentStream(
     private val sessionFile: File get() = File(cacheRoot, "session.dat")
 
     init {
-        // Nothing is kept between launches; whatever a crash or a kill left behind goes now.
+        // Nothing is kept between launches but the starts of films stopped part-way; whatever a crash or a kill left behind goes now.
         wipeStreamCache()
+        // And of a film the app was closed over, all but its start: a stop would have cut the rest.
+        runCatching { starts.trim() }
     }
 
     /* ---------------------------------------------------------------- API */
@@ -533,10 +564,13 @@ class TorrentStream(
     /** Connections the player has opened to the stream so far. */
     fun connections(): Long = server?.connections() ?: 0L
 
-    fun stop() {
+    /** @param resumeFraction how far into the file playback was left, for the start kept of it ([keepStarts]). */
+    fun stop(resumeFraction: Double? = null) {
         playGen++
         val h = handle?.takeIf { it.isValid }
         handle = null
+        // Where the player was reading, taken before the server's shutdown lets every reader go.
+        val playingAt = playingNow()
         // Readers and the poll thread both look into the torrent's metadata, which the
         // removal below frees: stop them first, or a tick in flight reads freed memory.
         server?.stop()
@@ -545,13 +579,16 @@ class TorrentStream(
         if (h != null) {
             runCatching { h.unsetFlags(TorrentFlags.AUTO_MANAGED) }
             runCatching { h.pause() }
+            // Read before the removal frees the metadata it comes from.
+            val start = runCatching { planStart(h, resumeFraction, playingAt) }.onFailure { log("start: not kept — ${it.message}") }.getOrNull()
             info?.let { ti ->
                 runCatching { h.prioritizeFiles(Array(ti.files().numFiles()) { Priority.IGNORE }) }
                 runCatching { h.prioritizePieces(Array(ti.numPieces()) { Priority.IGNORE }) }
             }
-            runCatching { session.remove(h, SessionHandle.DELETE_FILES) }
+            runCatching { if (start != null) session.remove(h) else session.remove(h, SessionHandle.DELETE_FILES) }
             // Cached metadata may be a view onto this torrent's memory.
             forgetMeta()
+            start?.let { runCatching { keepStart(it) }.onFailure { e -> log("start: not kept — ${e.message}") } }
         }
         teardown()
         wipeStreamCache()
@@ -775,8 +812,11 @@ class TorrentStream(
             // TorrentInfo through session.download(ti, …), which OOMs on large files.
             val clean = normalize(uri)
             if (clean.startsWith("magnet:", true)) {
-                val hash = infoHashOf(clean)?.let { hex -> runCatching { Sha1Hash.parseHex(hex) }.getOrNull() }
-                if (hash != null && session.find(hash) == null) {
+                val hex = infoHashOf(clean)
+                val hash = hex?.let { runCatching { Sha1Hash.parseHex(it) }.getOrNull() }
+                // Not over a kept start: play() adds it holding those pieces, which a bare magnet can't.
+                val kept = keepStarts && hex != null && runCatching { starts.has(hex) }.getOrDefault(false)
+                if (hash != null && session.find(hash) == null && !kept) {
                     ensureSession()
                     session.download(clean, saveDir, TorrentFlags.SEQUENTIAL_DOWNLOAD)
                 }
@@ -982,9 +1022,12 @@ class TorrentStream(
         val files = ti.files()
         if (index < 0 || index >= files.numFiles()) throw TorrentException("No file at index $index")
 
-        // Sweep what a killed session left before deciding there is no room.
+        // Starts unplayed too long, or past their cap, go.
+        if (keepStarts) runCatching { starts.prune() }
+        // Sweep what a killed session left before deciding there is no room; short of it, kept starts go too.
         var free = saveDir.usableSpace
         if (free < FREE_SPACE_MIN) {
+            if (keepStarts) runCatching { starts.clear() }
             cleanOrphans(ti)
             free = saveDir.usableSpace
         }
@@ -994,6 +1037,7 @@ class TorrentStream(
         if (gen != playGen) return
 
         val perSecond = options.bitrate.takeIf { it > 0 }?.toLong() ?: 0L
+        sourceRate = perSecond
         // Only what the viewer asked for in Settings: the player opens the moment it has a header
         // to read, and buffers as it goes. Contiguous from the start, so two pieces at most.
         prepareBytes = (options.prepareMb.toLong() * 1024 * 1024).coerceAtMost(ti.pieceLength().toLong() * 2)
@@ -1070,10 +1114,23 @@ class TorrentStream(
             running.prioritizeFiles(priorities)
             running
         } else {
+            // Played before: back with the start it kept, owning those pieces without hashing the file again.
+            val kit = if (keepStarts) runCatching { starts.get(infoHashHex!!) }.getOrNull() else null
             cleanOrphans(ti)
             val peers = loadPeers(infoHashHex!!)
-            session.download(ti, saveDir, null, priorities, peers, TorrentFlags.SEQUENTIAL_DOWNLOAD)
-            awaitHandle(ti) ?: throw TorrentException("Torrent could not be added to the session")
+            if (kit != null) {
+                log("start: back with ${kit.pieces.size} piece(s) and ${kit.blocks.size} part-done kept from the last play")
+                addKeeping(ti, priorities, peers, kit.pieces, kit.blocks)
+            } else {
+                session.download(ti, saveDir, null, priorities, peers, TorrentFlags.SEQUENTIAL_DOWNLOAD)
+            }
+            val added = awaitHandle(ti) ?: throw TorrentException("Torrent could not be added to the session")
+            // The server reads a piece still arriving by the blocks it has; these came with the kit, not as alerts.
+            kit?.blocks?.takeIf { it.isNotEmpty() }?.let { b ->
+                val mine = partial.getOrPut(added.swig().id()) { ConcurrentHashMap() }
+                b.forEach { (piece, done) -> mine[piece] = BitSet().apply { done.forEach(::set) } }
+            }
+            added
         }
         // Piece deadlines do the ordering; sequential mode hands piece 0 to the slowest peer.
         h.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
@@ -1092,7 +1149,10 @@ class TorrentStream(
         indexPiece = maxOf(tailPiece, ti.mapFile(index, maxOf(0, size - INDEX_BYTES), 1).piece())
         headWant = 0L
         sniffedBytes = 0
-        val startAt = (size * options.startRatio.coerceIn(0.0, 0.99)).toLong()
+        // A resume opens at the keyframe before its spot, some seconds back: with 8MB pieces that was the piece
+        // before the one aimed at, fetched only once the player asked — 18s of a 50s start on the phone.
+        val lead = if (options.startRatio > 0) (perSecond * START_LEAD_SECONDS).coerceIn(START_LEAD_MIN, START_LEAD_MAX) else 0L
+        val startAt = ((size * options.startRatio.coerceIn(0.0, 0.99)).toLong() - lead).coerceAtLeast(0L)
         startPiece = ti.mapFile(index, startAt, 1).piece()
         startOffset = startAt
         headPiece = startPiece
@@ -1408,6 +1468,8 @@ class TorrentStream(
         session.postSessionStats()
         if (ticks % 2 == 0) reportProgress(h, ((buffered * 100 / maxOf(1L, startNeed)).coerceAtMost(100L)).toInt())
 
+        // Often: every ~6s, an app closed mid-film lost the header that had landed in the last few seconds.
+        if (ticks % START_CHECK_TICKS == 0) runCatching { checkpointStart(h, ti) }
         if (status.numPeers() > 0 && ++peerSaveTick % 30 == 0) {
             persistPeers()
             // How many are actually sending: a swarm of seeds can be nearly all choking us.
@@ -1487,6 +1549,8 @@ class TorrentStream(
         }
         val freeBefore = saveDir.usableSpace
         log("roll: ${onDisk / 1024 / 1024}MB on disk, cap ${cacheCapBytes / 1024 / 1024}MB — restarting at byte $at")
+        // The punch below may take pieces a kept start lists; the next checkpoint or stop writes it again.
+        infoHashHex?.let { hex -> runCatching { starts.forget(hex) } }
 
         persistPeers()
         val peers = loadPeers(infoHashHex ?: ti.infoHash().toHex())
@@ -1574,13 +1638,20 @@ class TorrentStream(
      * SessionManager.download, plus the pieces already on disk ([have]): the torrent comes back
      * owning them without hashing the file again — a 50GB film would take minutes.
      */
-    private fun addKeeping(ti: TorrentInfo, priorities: Array<Priority>, peers: List<TcpEndpoint>, have: List<Int>) {
+    private fun addKeeping(ti: TorrentInfo, priorities: Array<Priority>, peers: List<TcpEndpoint>, have: List<Int>, unfinished: Map<Int, List<Int>> = emptyMap()) {
         val p = add_torrent_params()
         p.set_ti(ti.swig())
         p.setSave_path(saveDir.absolutePath)
         p.set_file_priorities(org.libtorrent4j.swig.byte_vector().apply { priorities.forEach { add(it.swig()) } })
         if (peers.isNotEmpty()) p.setPeers(org.libtorrent4j.swig.tcp_endpoint_vector().apply { peers.forEach { add(it.swig()) } })
         if (have.isNotEmpty()) p.set_have_pieces(org.libtorrent4j.swig.bitfield(ti.numPieces()).apply { have.forEach(::set_bit) })
+        // Blocks of pieces not yet whole: not asked for again, and the piece hash-checked once it is whole.
+        if (unfinished.isNotEmpty()) {
+            val blocksPer = ((ti.pieceLength() + BLOCK_BYTES - 1) / BLOCK_BYTES).toInt()
+            p.set_unfinished_pieces(org.libtorrent4j.swig.int_bitfield_map().apply {
+                unfinished.forEach { (piece, done) -> put(piece, org.libtorrent4j.swig.bitfield(blocksPer).apply { done.filter { it < blocksPer }.forEach(::set_bit) }) }
+            })
+        }
         p.setFlags(p.getFlags().or_(TorrentFlags.SEQUENTIAL_DOWNLOAD))
         session.swig().async_add_torrent(p)
     }
@@ -1927,6 +1998,9 @@ class TorrentStream(
         cacheCapBytes = 0L
         lastRollTick = -1000
         lastReaderAt = 0L
+        playheadRatio = -1.0
+        checkpointed = emptyList()
+        sourceRate = 0L
         readaheadBytes = READAHEAD_BYTES
     }
 
@@ -1937,18 +2011,123 @@ class TorrentStream(
         runCatching { File(context.cacheDir, "torrents").takeIf { it.exists() }?.deleteRecursively() }
         runCatching { context.getExternalFilesDir(null)?.let { File(it, "torrents") }?.takeIf { it.exists() }?.deleteRecursively() }
         val dir = runCatching { saveDir }.getOrNull() ?: return
-        runCatching { if (dir.exists()) dir.deleteRecursively() }
+        // All but the starts kept of films stopped earlier.
+        val kept = keptNames()
+        runCatching { dir.listFiles()?.forEach { if (it.name !in kept) it.deleteRecursively() } }
         runCatching { dir.mkdirs() }
     }
 
-    /** Piece data left by sessions that never stopped cleanly; this torrent's tree stays. */
+    /** Piece data left by sessions that never stopped cleanly; this torrent's tree stays, and every kept start. */
     private fun cleanOrphans(ti: TorrentInfo) {
         val dir = runCatching { saveDir }.getOrNull() ?: return
         val mine = safeName(ti.name())
+        val kept = keptNames()
         dir.listFiles()?.forEach { child ->
-            if (child.name == ti.name() || safeName(child.name) == mine) return@forEach
+            if (child.name == ti.name() || safeName(child.name) == mine || child.name in kept) return@forEach
             runCatching { child.deleteRecursively() }
         }
+    }
+
+    /**
+     * Not by [keepStarts]: the launch's sweep runs in the constructor, before the app can switch it on, and
+     * wiped every kept start, so a film was only quick again until the app closed. Only an engine keeping
+     * starts writes the list, so with the setting off it is empty.
+     */
+    private fun keptNames(): Set<String> = runCatching { starts.names() }.getOrDefault(emptySet())
+
+    /** What [stop] keeps of a film, worked out while its metadata is still alive. */
+    private class StartPlan(val hash: Sha1Hash, val hex: String, val name: String, val file: File, val cuts: List<Cut>, val kit: StartKits.Kit, val at: Long)
+
+    /** Where the picture is, in bytes of the file, as [Watch] last saved it; below zero, not known. */
+    @Volatile var playheadRatio = -1.0
+
+    /** Where the player is reading the film itself — not the header or the index at the end, which it also reads. */
+    private fun playingNow(): Long? = (readers.values + lately.values.map { it.first })
+        .filter { it >= ROLL_HEAD_KEEP && runCatching { pieceAt(it) < tailPiece }.getOrDefault(false) }
+        .maxOrNull()
+
+    /**
+     * The start kept of the playing file around byte [at]: the cuts that free the rest, and the kit — the
+     * header, the pieces about the spot and the end, whole ones and the blocks of those still arriving.
+     */
+    private fun startOf(h: TorrentHandle, ti: TorrentInfo, hex: String, at: Long): Pair<List<Cut>, StartKits.Kit> {
+        val files = ti.files()
+        val size = files.fileSize(fileIndex)
+        val pieceLen = ti.pieceLength().toLong()
+        val behind = (sourceRate * START_BEHIND_SECONDS).coerceIn(START_BEHIND_MIN, START_BEHIND_MAX)
+        val cuts = rollCuts(files.fileOffset(fileIndex), size, at - behind, at + START_AHEAD_BYTES, tailPiece, pieceLen)
+        val within = (firstPiece..lastPiece).filterNot { p -> cuts.any { p in it.pieces } }
+        val whole = within.filter { runCatching { h.havePiece(it) }.getOrDefault(false) }
+        // The header and the resume spot are read block by block long before their 8MB pieces are whole:
+        // stopped early, only whole ones were kept, and the next play waited on the header all over again.
+        val blocks = within.filterNot { it in whole }.mapNotNull { p ->
+            blocksOf(h, p)?.let { b -> synchronized(b) { b.stream().toArray().toList() } }?.takeIf { it.isNotEmpty() }?.let { p to it }
+        }.toMap()
+        val bytes = whole.size * pieceLen + blocks.values.sumOf { it.size } * BLOCK_BYTES
+        return cuts to StartKits.Kit(hex, ti.name(), whole, bytes, System.currentTimeMillis(), blocks, files.filePath(fileIndex), files.fileOffset(fileIndex), size, pieceLen)
+    }
+
+    /** While it plays, the start as it stands: an app closed or killed mid-film still opens quickly next time. */
+    private fun checkpointStart(h: TorrentHandle, ti: TorrentInfo) {
+        if (!keepStarts || !announcedReady || fileIndex < 0) return
+        val hex = infoHashHex ?: return
+        val size = ti.files().fileSize(fileIndex)
+        val at = playheadRatio.takeIf { it in 0.0..START_WATCHED }?.let { (size * it).toLong() } ?: playingNow() ?: return
+        // Whole pieces only: a block counts as arrived before it is surely on disk, and a kill now would
+        // leave the list promising blocks the player then read as zeros. A stop flushes first; this can't.
+        val kit = startOf(h, ti, hex, at).second.let { it.copy(blocks = emptyMap(), bytes = it.pieces.size * ti.pieceLength().toLong()) }
+        // Written only when it changes: this runs every couple of seconds.
+        if (kit.pieces.isEmpty() || kit.pieces == checkpointed) return
+        checkpointed = kit.pieces
+        starts.put(kit)
+    }
+
+    /** The playing film's bytes per second of running time, or 0 not known: how much a kept start reaches back. */
+    @Volatile private var sourceRate = 0L
+
+    /** The pieces the last checkpoint wrote, so an unchanged start isn't written again. */
+    @Volatile private var checkpointed: List<Int> = emptyList()
+
+    /**
+     * The start a stopped film keeps — the header, the index at the end, and the pieces around where it was
+     * left — or null to wipe it as before: the setting is off, it never got going, or it was watched to the end.
+     */
+    private fun planStart(h: TorrentHandle, resumeFraction: Double?, playingAt: Long?): StartPlan? {
+        if (!keepStarts || !announcedReady || fileIndex < 0) return null
+        val ti = info ?: return null
+        val hex = infoHashHex ?: return null
+        // At the end it has been watched: nothing to come back to, and nothing kept of it.
+        if (resumeFraction != null && resumeFraction > START_WATCHED) {
+            runCatching { starts.forget(hex) }
+            return null
+        }
+        val files = ti.files()
+        val size = files.fileSize(fileIndex)
+        // The playhead in bytes, as the resume will aim; else where the player was reading, a little ahead of it.
+        val at = resumeFraction?.let { (size * it).toLong() } ?: playingAt ?: return null
+        val (cuts, kit) = startOf(h, ti, hex, at)
+        if (kit.pieces.isEmpty() && kit.blocks.isEmpty()) return null
+        return StartPlan(h.infoHash(), hex, ti.name(), File(saveDir, files.filePath(fileIndex)), cuts, kit, at)
+    }
+
+    /** After the removal: the rest of the file punched out, and the start remembered for the next play. */
+    private fun keepStart(plan: StartPlan) {
+        var waited = 0
+        while (session.find(plan.hash) != null && waited < REMOVE_WAIT_MS) {
+            Thread.sleep(50)
+            waited += 50
+        }
+        // Holes punched under a torrent still writing would come back filled; and where they can't be
+        // punched the whole file would stay. Either way, nothing is kept.
+        val err = if (session.find(plan.hash) != null) -2 else plan.cuts.firstNotNullOfOrNull { c -> Holes.punch(plan.file, c.from, c.to - c.from).takeIf { it != 0 } } ?: 0
+        if (err != 0) {
+            log("start: not kept (error $err)")
+            runCatching { starts.forget(plan.hex) }
+            return
+        }
+        val kit = plan.kit
+        starts.put(kit.copy(savedAt = System.currentTimeMillis()))
+        log("start: kept ${kit.pieces.size} piece(s) and ${kit.blocks.size} part-done, ${kit.bytes / 1024 / 1024}MB, around byte ${plan.at} — ${kit.pieces.joinToString(",")}${if (kit.blocks.isEmpty()) "" else " + " + kit.blocks.entries.joinToString(",") { "${it.key}(${it.value.size})" }}")
     }
 
     private fun safeName(name: String) = name.replace(Regex("[\\\\/:*?\"<>|]+"), "_").trim().ifBlank { "download" }
