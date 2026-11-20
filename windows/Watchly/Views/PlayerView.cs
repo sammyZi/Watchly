@@ -2889,9 +2889,28 @@ public sealed class SpeedGraph : FrameworkElement
     }
 }
 
-/// <summary>The loading screen's ring: it fills red with the buffer, the percentage inside it.</summary>
+/// <summary>
+/// The loading screen's ring: it fills red with the buffer, the percentage inside it. Until libVLC has
+/// anything to report — the whole wait for a stream's first pieces, when its read is parked on the engine —
+/// it spins with no number: it sat at a still 0% and then the film began.
+/// </summary>
 public sealed class Ring : FrameworkElement
 {
+    readonly RotateTransform spin = new(0, Size / 2, Size / 2);
+    bool spinning;
+
+    void Spin(bool on)
+    {
+        if (on == spinning) return;
+        spinning = on;
+        if (on) spin.BeginAnimation(RotateTransform.AngleProperty, new System.Windows.Media.Animation.DoubleAnimation(0, 360, TimeSpan.FromSeconds(1)) { RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever });
+        else
+        {
+            spin.BeginAnimation(RotateTransform.AngleProperty, null);
+            spin.Angle = 0;
+        }
+    }
+
     const double Size = 64, Radius = 26;
     static readonly Pen TrackPen = Frozen(new Pen(new SolidColorBrush(Color.FromArgb(0x22, 255, 255, 255)), 5));
     static readonly Pen ArcPen = Frozen(new Pen(new SolidColorBrush(Color.FromRgb(0xe5, 0x09, 0x14)), 5) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round });
@@ -2909,6 +2928,7 @@ public sealed class Ring : FrameworkElement
             var next = Math.Clamp(value, 0, 100);
             if (Math.Abs(next - percent) < 0.5) return;
             percent = next;
+            Spin(percent < 1);
             InvalidateVisual();
         }
     }
@@ -2916,6 +2936,8 @@ public sealed class Ring : FrameworkElement
     public Ring()
     {
         Width = Height = Size;
+        RenderTransform = spin;
+        Spin(true);
     }
 
     protected override void OnRender(DrawingContext dc)
@@ -2923,6 +2945,19 @@ public sealed class Ring : FrameworkElement
         var c = new Point(Size / 2, Size / 2);
         dc.DrawEllipse(null, TrackPen, c, Radius, Radius);
         var p = percent / 100;
+        if (percent < 1)
+        {
+            // Waiting, with nothing to count yet: a quarter of the ring, turned by the spin.
+            var arc = new StreamGeometry();
+            using (var g = arc.Open())
+            {
+                g.BeginFigure(new Point(c.X, c.Y - Radius), false, false);
+                g.ArcTo(new Point(c.X + Radius, c.Y), new Size(Radius, Radius), 0, false, SweepDirection.Clockwise, true, false);
+            }
+            arc.Freeze();
+            dc.DrawGeometry(null, ArcPen, arc);
+            return;
+        }
         if (p >= 0.999)
         {
             dc.DrawEllipse(null, ArcPen, c, Radius, Radius);
