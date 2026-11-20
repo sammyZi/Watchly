@@ -126,7 +126,12 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
     /// <summary>Everything that is not in the bottom row — the phone's More sheet.</summary>
     bool more;
     bool SheetOpen => picking || searchingSubs || more || episodesOpen || partyOpen;
-    void CloseSheets() => picking = searchingSubs = more = episodesOpen = partyOpen = false;
+    void CloseSheets() => picking = searchingSubs = more = episodesOpen = partyOpen = sourcesOpen = false;
+    /// <summary>Change stream: open, the releases found (null while asking), and the quality the list is narrowed to.</summary>
+    bool sourcesOpen;
+    List<Core.Hit>? sourceHits;
+    string? sourceQuality;
+    static readonly string[] QualityOrder = { "4K", "2160p", "1080p", "720p", "480p" };
     /// <summary>The show this is an episode of, once its episode list is in, and the season on show in the list.</summary>
     Core.Title? series;
     int? seriesSeason;
@@ -931,6 +936,100 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
             Margin = new Thickness(10),
             Children = { heading, chips, list },
         });
+    }
+
+    /// <summary>Change stream opened: the releases asked for the first time, the sheet up meanwhile.</summary>
+    void OpenSources()
+    {
+        var open = !sourcesOpen;
+        CloseSheets();
+        sourcesOpen = open;
+        Render();
+        if (!open || sourceHits is not null || request.Streams is not { } find) return;
+        _ = Task.Run(async () =>
+        {
+            List<Core.Hit> hits;
+            try { hits = await find(life.Token); }
+            catch { hits = new(); }
+            await Dispatcher.InvokeAsync(() =>
+            {
+                sourceHits = hits;
+                if (!disposed && sourcesOpen) Render();
+            });
+        });
+    }
+
+    /// <summary>
+    /// Change stream, as on the phone: the other releases of what is playing, quality chips over them, each row
+    /// what the title's page shows of it (DetailView.SourceRow) in the player's own colours. The one playing is left out.
+    /// </summary>
+    FrameworkElement SourceSheet()
+    {
+        var heading = WText("Change stream", 18, Brushes.White, FontWeights.Bold);
+        var others = (sourceHits ?? new()).Where(h => h.Uri != request.HistoryUri).ToList();
+        var qualities = others.Select(h => h.Quality).OfType<string>().Distinct()
+            .OrderBy(q => Array.IndexOf(QualityOrder, q) is >= 0 and var i ? i : QualityOrder.Length).ToList();
+        if (sourceQuality is not null && !qualities.Contains(sourceQuality)) sourceQuality = null;
+        var chips = new WrapPanel { Margin = new Thickness(0, 8, 0, 6) };
+        if (qualities.Count > 1)
+            foreach (var q in new string?[] { null }.Concat(qualities))
+            {
+                var chip = Controls.Ui.Chip(q ?? "All", q == sourceQuality, () => { sourceQuality = q; Render(); });
+                chip.Margin = new Thickness(0, 0, 8, 6);
+                chips.Children.Add(chip);
+            }
+        var rows = new StackPanel();
+        if (sourceHits is null) rows.Children.Add(WText("Finding releases…", 13, White(0xb0)));
+        else if (others.Count == 0) rows.Children.Add(WText("No other release found.", 13, White(0xb0)));
+        foreach (var hit in others.Where(h => sourceQuality is null || h.Quality == sourceQuality))
+        {
+            var tone = Controls.Ui.HealthTone(hit.Seeders);
+            var dock = new DockPanel();
+            if (hit.Quality is not null)
+            {
+                var tag = new Border { CornerRadius = new CornerRadius(4), Padding = new Thickness(7, 3, 7, 3), Margin = new Thickness(0, 0, 12, 0), VerticalAlignment = VerticalAlignment.Center, Background = White(0x24), Child = WText(hit.Quality, 11, Brushes.White, FontWeights.Bold) };
+                DockPanel.SetDock(tag, Dock.Left);
+                dock.Children.Add(tag);
+            }
+            var grade = hit.Direct ? WText("Direct", 13, (Brush)FindResource("Good"), FontWeights.Bold)
+                : WText(tone.Label, 13, (Brush)FindResource(tone.Fg), FontWeights.Bold);
+            grade.VerticalAlignment = VerticalAlignment.Center;
+            grade.Margin = new Thickness(10, 0, 0, 0);
+            DockPanel.SetDock(grade, Dock.Right);
+            dock.Children.Add(grade);
+            var name = WText(hit.Name, 13, Brushes.White, FontWeights.SemiBold);
+            name.TextTrimming = TextTrimming.CharacterEllipsis;
+            name.ToolTip = hit.Name;
+            var scope = hit.Scope switch { "season" => "Season pack", "complete" => "Complete series", _ => null };
+            var facts = WText(string.Join("  ·  ", new[] { scope, hit.Size > 0 ? Format.Bytes(hit.Size) : null, hit.IsTorrent ? $"{hit.Seeders} seeds" : null, hit.Addon.Length > 0 ? hit.Addon : null }.Where(s => s is not null)), 12, White(0x99));
+            facts.Margin = new Thickness(0, 2, 0, 0);
+            var lines = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { name, facts } };
+            if (hit.IsTorrent && TorBox.IsCached(hit.Id)) lines.Children.Add(WText("Instant · TorBox", 12, (Brush)FindResource("Good"), FontWeights.SemiBold));
+            dock.Children.Add(lines);
+            var picked = hit;
+            var row = Controls.Ui.Button(new Border { Padding = new Thickness(12, 10, 10, 10), CornerRadius = new CornerRadius(8), Background = White(0x14), Child = dock }, () => SwitchStream(picked));
+            row.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+            row.Margin = new Thickness(0, 0, 0, 6);
+            rows.Children.Add(row);
+        }
+        double Taken(FrameworkElement e)
+        {
+            e.Measure(new Size(480, double.PositiveInfinity));
+            return e.DesiredSize.Height;
+        }
+        // As the Episodes sheet: what is left above the controls once the heading and chips have theirs.
+        var room = ActualHeight / ControlsScale - 68 - 96 - 12 - 20;
+        var list = new ScrollViewer { MaxHeight = Math.Max(120, room - Taken(heading) - Taken(chips)), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = rows };
+        return SheetBox(new StackPanel { Width = 480, Margin = new Thickness(10), Children = { heading, chips, list } });
+    }
+
+    /// <summary>A release picked from Change stream: this one closes, its spot saved, and that one opens there.</summary>
+    void SwitchStream(Core.Hit hit)
+    {
+        CloseSheets();
+        Render();
+        if (request.ChangeStream is not { } change || party.Guest) return;
+        Leave(() => change(hit));
     }
 
     void PlayEpisode(Episode ep)
@@ -2127,6 +2226,8 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
             }));
             if (request.Next is not null) actions.Children.Add(Action("skip-forward", "Next Episode", false, PlayNext));
             if (Party.Enabled && shell.Settings.PartyOn && !KidsMode.On) actions.Children.Add(Action("users", PartyLabel, partyOpen || Party.Room is not null, OpenParty));
+            // Another release of what is playing, from where it is — as on the phone; not a guest's, who follows the leader.
+            if (request.ChangeStream is not null && !party.Guest) actions.Children.Add(Action("layers", "Change stream", sourcesOpen, OpenSources));
             actions.Children.Add(Action("more-horizontal", "More", more, () =>
             {
                 var open = !more;
@@ -2145,6 +2246,7 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
         if (picking) chrome.Children.Add(TrackSheet());
         if (more) chrome.Children.Add(MoreSheet());
         if (episodesOpen && series is not null) chrome.Children.Add(EpisodeSheet());
+        if (sourcesOpen) chrome.Children.Add(SourceSheet());
         if (searchingSubs) chrome.Children.Add(SearchSheet());
         // The party's sheet; with no party, the one offering to start one — unless the party was just left, then it shuts.
         if (partyOpen && Party.Room is not null) { partyWasRoom = true; chrome.Children.Add(PartySheet()); }

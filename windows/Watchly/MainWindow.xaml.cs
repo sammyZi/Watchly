@@ -68,6 +68,10 @@ public sealed record PlaybackRequest
     public (string Name, Func<Task> Go)? Next { get; init; }
     /// <summary>Plays another episode of the show, picked from the player's list.</summary>
     public Func<Title, Episode, Task>? GoEpisode { get; init; }
+    /// <summary>Change stream: the title's releases, found as its page finds them (this episode's, for a series).</summary>
+    public Func<CancellationToken, Task<List<Hit>>>? Streams { get; init; }
+    /// <summary>Play one of those instead, from the spot this one leaves (one spot per title: ResumeSpot).</summary>
+    public Func<Hit, Task>? ChangeStream { get; init; }
 }
 
 /// <summary>
@@ -1106,6 +1110,7 @@ public partial class MainWindow : Window
         var file = meta.Files[index];
         // One spot per title on this PC, whichever release is opened: the one played last decides.
         var resumeAt = startOver ? 0 : ResumeSpot(stored with { Imdb = detail?.Imdb ?? stored.Imdb, TitleName = stored.TitleName ?? detail?.Name }, index, file.Name, detail);
+        var hooks = ChangeHooks(stored, detail, file.Name);
         var request = new PlaybackRequest
         {
             Title = file.Name,
@@ -1119,6 +1124,8 @@ public partial class MainWindow : Window
             SavedSubs = stored.Subtitles?.GetValueOrDefault(index) ?? new(),
             Next = UpNext(stored, torrent, meta, index, detail),
             GoEpisode = (show, ep) => GoTo(show, ep, stored, torrent, meta),
+            Streams = hooks.Streams,
+            ChangeStream = hooks.Change,
             Remote = remote,
         };
         var player = OpenPlayer(request);
@@ -1144,6 +1151,7 @@ public partial class MainWindow : Window
         HistoryList = History.Patch(target.Uri, x => x with { TorrentName = name, LastFileIndex = 0, Files = new() { file } });
         var stored = HistoryList.FirstOrDefault(h => h.Uri == target.Uri) ?? target;
         var resumeAt = startOver ? 0 : ResumeSpot(stored with { Imdb = detail?.Imdb ?? stored.Imdb, TitleName = stored.TitleName ?? detail?.Name }, 0, name, detail);
+        var linkHooks = ChangeHooks(stored, detail, name);
         OpenPlayer(new PlaybackRequest
         {
             Title = name,
@@ -1156,9 +1164,31 @@ public partial class MainWindow : Window
             SavedSubs = stored.Subtitles?.GetValueOrDefault(0) ?? new(),
             Next = UpNext(stored, null, new TorrentMeta(name, new() { file }), 0, detail),
             GoEpisode = FindEpisode,
+            Streams = linkHooks.Streams,
+            ChangeStream = linkHooks.Change,
             Link = target.Uri,
             Headers = headers,
         });
+    }
+
+    /// <summary>
+    /// Change stream's two halves for what is about to play: by the title page open, or — played from Continue
+    /// Watching or a library, with no page open — the title looked up by the IMDb id the entry kept, once asked.
+    /// Neither, and there is nothing to search with: no button.
+    /// </summary>
+    (Func<CancellationToken, Task<List<Hit>>>? Streams, Func<Hit, Task>? Change) ChangeHooks(HistoryItem stored, Title? detail, string fileName)
+    {
+        var imdb = detail?.Imdb ?? stored.Imdb;
+        if (string.IsNullOrEmpty(imdb)) return (null, null);
+        var kind = detail?.Kind ?? stored.Kind ?? (Search.ParseEpisode(fileName) is not null ? "tv" : "movie");
+        Task<Title?>? looked = null;
+        Task<Title?> TitleOf() => detail is not null ? Task.FromResult<Title?>(detail) : looked ??= Meta.LoadTitle(imdb, kind);
+        return (
+            async ct => await TitleOf() is { } t ? await StreamsOf(t, fileName, ct) : new List<Hit>(),
+            async hit =>
+            {
+                if (await TitleOf() is { } t) await StreamHit(hit, ChangeOptions(t, fileName));
+            });
     }
 
     /// <summary>
@@ -1219,6 +1249,25 @@ public partial class MainWindow : Window
         var next = list[i + 1];
         return ($"{Search.EpisodeTag(next.Season, next.Number)} · {next.Name}", () => FindEpisode(detail, next));
     }
+
+    /// <summary>The episode of [detail] that [fileName] is, from its episode list; null for a film, or a file it can't place.</summary>
+    static Episode? EpisodeIn(Title detail, string fileName) =>
+        EpisodeOf(detail, fileName, out var ep) && ep is { } at ? detail.Episodes.FirstOrDefault(e => e.Season == at.Item1 && e.Number == at.Item2) : null;
+
+    /// <summary>Every release of what is playing, as the title's page asks for them: the episode's for a series, the film's otherwise.</summary>
+    static Task<List<Hit>> StreamsOf(Title detail, string fileName, CancellationToken ct) => EpisodeIn(detail, fileName) is { } ep
+        ? Search.SearchEpisode(ep.Id, detail.Name, ep.Season, ct, null, detail.StremioType, detail)
+        : Search.SearchStreams(detail.Name, ct, detail.Imdb, type: detail.StremioType);
+
+    /// <summary>How a release picked from Change stream opens: the same episode out of a pack, the title's own details, the spot kept.</summary>
+    static OpenOptions ChangeOptions(Title detail, string fileName) => new()
+    {
+        Auto = EpisodeIn(detail, fileName) is { } ep ? Search.PickTag(ep.Season, ep.Number, Meta.AbsoluteNumber(detail.Episodes, ep.Season, ep.Number)) : "best",
+        Imdb = detail.Imdb,
+        Kind = detail.Kind,
+        Poster = detail.Poster,
+        TitleName = detail.Name,
+    };
 
     /// <summary>An episode of this show, by asking the addons.</summary>
     async Task FindEpisode(Title show, Episode ep)
