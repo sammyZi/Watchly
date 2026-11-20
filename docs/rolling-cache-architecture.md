@@ -330,6 +330,39 @@ phone is FUSE, which refuses to punch holes (`EOPNOTSUPP`).
   up at its spot, so nothing followed that aim: it led for 30 s, 75 pieces from the
   picture on one film, with the stuck-piece watchdog on a piece nobody read (13 of
   52 starts in one phone's log).
+- A resume's **pre-roll starts a little before its spot** (`START_LEAD_SECONDS`, 20 s
+  of the film, 4–16 MB): the player opens at the keyframe before the spot, and with
+  8 MB pieces that was the piece before the one aimed at, fetched only once the player
+  asked for it — 18 s of a 50 s start on the phone.
+- **Change stream** in the player plays another release of the same title from the
+  same spot: the position is saved first, and the new release picks it up
+  (`Watch.carried`, one spot per title).
+
+### Kept starts (`StartKits`)
+
+Without them a second play waited on the swarm for the header, the index and the
+pieces at the spot all over again: 10–50 s on the phone, 16–20 s from Continue
+Watching on the TV. With `keepStarts` on, a film stopped part-way keeps just those:
+
+- **What is kept** (`planStart`): the head (`ROLL_HEAD_BYTES`), the tail with the
+  index, and the pieces about the playhead — 60 s of the film behind it
+  (`START_BEHIND_SECONDS`, 16–64 MB, as the player opens at the index's keyframe well
+  before the spot) and 24 MB ahead. Whole pieces, and on a stop the blocks of pieces
+  not yet whole too, so a header read block by block is not fetched again. The rest
+  of the file is punched out as a roll does (section 4). About 70 MB for a 1080p film
+  with 8 MB pieces, 150–200 MB for a 4K one.
+- **Coming back**: `play` adds the torrent with those pieces as `have_pieces` and the
+  part-done ones as `unfinished_pieces`, so nothing is hashed, and the server can read
+  those blocks at once. The first picture comes in about a second.
+- **Kept current**: the list stays while the film plays and is rewritten every ~2 s
+  (`START_CHECK_TICKS`) with the whole pieces about the playhead, so an app closed or
+  killed mid-film still has a start. Blocks are only kept on a stop, which flushes
+  them first: mid-film a block counts before it is surely on disk. At launch each kept
+  film is cut back to its list (`StartKits.trim`), as one closed mid-film still holds
+  all it fetched.
+- **Expiry**: 14 days unplayed (`START_KIT_DAYS`), past the cap counting from the
+  newest (`keepStartsCap`: 1 GB on the phone, 400 MB on the TV), or every one when
+  space runs short. A film watched past 95% keeps nothing.
 
 ---
 
@@ -359,7 +392,8 @@ would not send them.
 
 | where | what | lifetime |
 |---|---|---|
-| `files/torrents/` | piece data of the stream | wiped at launch and on stop; a roll frees what was watched |
+| `files/torrents/` | piece data of the stream | wiped at launch and on stop but for kept starts (section 6); a roll frees what was watched |
+| `files/torrent-cache/starts.json` | the kept starts: each film's kept pieces and when it was last played | until they expire (section 6) |
 | `files/torrent-cache/meta/` | `.torrent` files seen before | kept |
 | `files/torrent-cache/peers/` | peers per torrent, so a restart finds them at once | kept |
 | `files/torrent-cache/session.dat` | DHT routing table | kept |
@@ -397,7 +431,14 @@ The Windows app streams with MonoTorrent and libVLC (`windows/Watchly/Engine/`):
 - **What it can't match.** MonoTorrent's stream only serves whole pieces, so
   Android's blocks-as-they-land (section 1) has no counterpart here, and the resume
   guess never outranks the player's real reader, as there is no seeded reader.
-- There is no cap to roll: the stream's files are deleted when the player closes.
+- There is no cap to roll: the stream's files are deleted when the player closes —
+  but for **kept starts** (`Engine/StartKits.cs`), as on Android (section 6). A film
+  closed part-way keeps its head, index and the stretch about its spot; the rest of
+  the sparse file is zeroed (`FSCTL_SET_ZERO_DATA`, which frees it), and MonoTorrent's
+  fast-resume file is rewritten to own only what is left, so the next play adds the
+  torrent holding those pieces without hashing it. Closing the app closes the player
+  first, so there is no mid-film checkpoint. Kept starts go after 14 days or past
+  1 GB, and a download's folder is never touched.
 - Streams come from the viewer's addons here too (`Core/Addons.cs`). A `url`
   stream plays straight in libVLC (`PlayLink` in `MainWindow.xaml.cs`), never
   through the engine; streams that need `proxyHeaders`, and `ytId` /

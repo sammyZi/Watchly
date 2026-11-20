@@ -142,6 +142,15 @@ name `src/...` files point there.
 - Streams fetch only the next five minutes past the playhead (*Next 5 min*), or
   switch to *Whole file* to fetch everything; the choice is remembered. The
   seek bar shows what is already on disk as a white strip, gaps included.
+- *Change stream* (the layers button by More): the title's other releases with
+  quality chips, each row as the title page shows it; one picked opens from the
+  same spot. It is there from Continue Watching too: with no title page open, the
+  title is looked up by the IMDb id the history entry kept.
+- A film closed part-way keeps its start in the stream cache (`Engine/StartKits.cs`):
+  its header, index and the stretch about its spot, the rest of the sparse file
+  freed and MonoTorrent's fast-resume rewritten to own just that, so it opens again
+  at once. Kept starts go after 14 days unplayed or past 1 GB; see
+  [the architecture doc](../docs/rolling-cache-architecture.md#9-windows).
 - *Mini player* (P): a borderless, always-on-top window in a corner of the
   screen, shaped like the video. Drag the picture to move it; hover for
   play/pause, back to the full player, and close.

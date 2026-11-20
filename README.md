@@ -58,6 +58,11 @@
     <td valign="top">💬 <b>Chat and reactions</b><br>Talk and react over the film, see who's watching and who's still loading, and ask the host to pause.</td>
     <td valign="top">🎚️ <b>Your own copy</b><br>Join with the host's source, or pick your own release of the same film. It stays in step either way.</td>
   </tr>
+  <tr>
+    <td valign="top">⚡ <b>Instant resume</b><br>A film you stopped part-way keeps its start, so Continue Watching opens it in about a second — even after closing the app.</td>
+    <td valign="top">🔀 <b>Change stream</b><br>Switch to another release mid-film, picked by quality, and carry on from the same second.</td>
+    <td valign="top">🎨 <b>Looks the part</b><br>Frosted glass bars, a theme change that spreads from your touch, and opening titles on a film reel.</td>
+  </tr>
 </table>
 
 <a name="install"></a>
@@ -212,7 +217,7 @@ features are simply left out. The TV and Windows builds read the same file.
 | 🧩 Sources | The [Stremio addon protocol](https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/protocol.md): catalogues, titles, streams and subtitles from addons you add yourself |
 | 🔄 Sync | Your [Stremio](https://www.stremio.com) account: library, Continue Watching, watched marks and addons |
 | 🎞️ Players | [AndroidX Media3](https://github.com/androidx/media) with the [Jellyfin FFmpeg decoder](https://github.com/jellyfin/jellyfin-androidx-media) · [VLC / libVLC](https://www.videolan.org/vlc/libvlc.html) and [LibVLCSharp](https://github.com/videolan/libvlcsharp) |
-| 🎨 Look | [Jetpack Compose](https://developer.android.com/jetpack/compose) · [Coil](https://github.com/coil-kt/coil) · [Lucide](https://lucide.dev) icons |
+| 🎨 Look | [Jetpack Compose](https://developer.android.com/jetpack/compose) · [Haze](https://github.com/chrisbanes/haze) frosted glass · [Coil](https://github.com/coil-kt/coil) · [Lucide](https://lucide.dev) icons · [Poppins](https://github.com/itfoundry/Poppins) and [Anton](https://github.com/googlefonts/AntonFont) type |
 | 🗂️ Titles &amp; art | [Cinemeta](https://v3-cinemeta.strem.io), Stremio's public catalogue · [TVmaze](https://www.tvmaze.com) episode stills · [TMDB](https://www.themoviedb.org) suggestions, cast, age ratings and collections |
 | ⏭️ Intros | [IntroDB](https://introdb.app) · [TheIntroDB](https://theintrodb.org) |
 | 💬 Subtitles | The [OpenSubtitles](https://www.opensubtitles.org) addon, added by default · subtitle addons you add · [SubDL](https://subdl.com) with your own free key |

@@ -27,6 +27,7 @@ party relay. All are read from `tv/.env`, then `mobile/.env`, into `BuildConfig`
 | File | What |
 | --- | --- |
 | `TorrentStream.kt` | The streaming engine: one libtorrent session, piece deadlines aimed at each reader, the rolling cache. See [the architecture doc](../docs/rolling-cache-architecture.md). |
+| `StartKits.kt` | Kept starts: what a film stopped part-way leaves on disk so it opens again at once, and when it goes. |
 | `Holes.kt`, `cpp/holes.c` | Where a roll cuts, and the native call that frees those stretches of the file in place. |
 | `LocalFileServer.kt` | Loopback HTTP server that blocks on pieces that have not landed, so libVLC never reads holes. |
 | `VlcView.kt` | libVLC surface: AC3/DTS decoders, PGS subtitles, audio focus, stats. |
@@ -36,7 +37,7 @@ party relay. All are read from `tv/.env`, then `mobile/.env`, into `BuildConfig`
 | `Store.kt` | SharedPreferences with the Expo build's keys and JSON; per-profile namespaces; guest in memory only. |
 | `ExoView.kt` | Media3 surface with the FFmpeg audio decoders; `VlcView` takes over when it cannot play a file. |
 | `Party.kt`, `PartyDriver.kt` | The watch party: rooms, encrypted invites, the shared clock, chat, and how a guest keeps in step. See [the watch party doc](../docs/watch-party.md). |
-| `Theme.kt` | Ink palette, type, artwork, title logos, facts row, progress line, hero scrims, avatars. |
+| `Theme.kt` | Ink palette, type (Poppins), artwork, title logos, facts row, progress line, hero scrims, avatars. |
 
 `app/` (package `com.torrentviewer.tv`):
 
@@ -58,7 +59,9 @@ Built for the big screen, driven entirely by the remote:
   top-right; a red seek bar with time left, a scrub bubble showing the target
   and the jump; round controls whose names rise above them on focus.
 - **Audio & subtitles** side by side, with "Find subtitles online" (your subtitle addons, and SubDL with a key);
-  speed, picture fit and "stats for nerds" (codecs, bitrate, dropped frames).
+  speed; **Change stream**, the title's other releases down the right with quality chips, each
+  picked one playing from the same spot; and **More**, with picture fit and "stats for nerds"
+  (codecs, bitrate, dropped frames).
 - **Loading** over the title's own backdrop and logo with a ring that fills;
   a stall spinner mid-film; a "You're watching" card when paused; an
   Up Next card with the next episode's still and a filling Play button.
@@ -81,6 +84,12 @@ watched, and adds it again holding what is left, read-ahead included, so playbac
 carries on while peers reconnect. Where a hole can't be punched it deletes the file
 and starts over at the playhead, one rebuffer per roll. **Settings → Storage for one
 film** sets the cap (Auto by default: the free space less 1.5 GB).
+
+**Kept starts.** A film stopped part-way keeps its header, its index and the stretch about
+its spot, the rest freed, so Continue Watching opens it at once rather than waiting 16–20 s
+on the swarm. They go after 14 days unplayed, past 400 MB in all on the TV (the phone keeps
+1 GB), or when space runs short. See
+[the architecture doc](../docs/rolling-cache-architecture.md#kept-starts-startkits).
 
 ## Watch party
 

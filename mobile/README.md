@@ -59,9 +59,10 @@ everything else needs no key.
 | File | What |
 | --- | --- |
 | `MainActivity.kt` | Engine and session (`Services`), picture-in-picture hooks (`Pip`). |
-| `App.kt` | Shell: tabs along the bottom upright, the TV's rail when turned; pages stacked over them; profiles; "Opening…"; the file chooser. |
-| `Ui.kt` | Touch primitives in the TV's look: press-to-dip, buttons, chips, bottom sheets, poster and landscape cards. |
-| `Home.kt` | Swiped billboard, Continue Watching, Watch orders, New Episodes, My List, Picked for you, the charts, shelves, See all. |
+| `FilmSplash.kt` | The opening titles: a film reel unrolling a red strip with the name along it, in Anton. |
+| `App.kt` | Shell: frosted tabs along the bottom upright, the TV's rail when turned; pages stacked over them; profiles; "Opening…"; the file chooser; the theme change spreading from the touch. |
+| `Ui.kt` | Touch primitives in the TV's look: press-to-dip, buttons, chips, frosted bars and bottom sheets, poster and landscape cards. |
+| `Home.kt` | Swiped billboard, Continue Watching, New Episodes, My List, Picked for you, the charts, genre shelves, See all. |
 | `ForYou.kt` | Picked for you's cards, the ranked chart rows, and the Top on IMDb page. |
 | `WatchOrder.kt` | Watch order banners, the franchise rail on a film's page, and the order pages. |
 | `TmdbUi.kt` | The kids block by rating, cast with photos, More like this, and actor pages. |
@@ -94,9 +95,7 @@ its share of the places (`mixTop`), and See all opens the full page.
 
 **Watch orders.** 67 franchises kept by hand in `watch-orders.json`, shared with
 the TV and Windows, in release or story order, and any other film's TMDB collection
-in release order. The Home row follows the viewer: franchises begun or saved lead,
-then their genres take turns (Cinemeta's, from each franchise's first two films,
-fetched once), and finished ones drop out. Title pages add the franchise, the age rating, TMDB's cast with
+in release order, on the page of every film in one. Title pages add the franchise, the age rating, TMDB's cast with
 actor pages, and More like this. A kids profile stops at titles rated above PG.
 Without a key, cast photos come from Wikipedia (freely licensed images, performers
 only).
@@ -108,12 +107,25 @@ the sides to skip (taps add up), hold for 2×, brightness from the slider on the
 left of the controls or a swipe down the left edge (volume stays with the
 phone's own keys), lock the screen. Audio and subtitle tracks
 side by side, subtitles from your subtitle addons and SubDL, subtitle delay; speed and picture fit, remembered
-between videos; stats for nerds; skip intro (timings from IntroDB and TheIntroDB); sleep timer
-(15/30/60 minutes or the end of the episode); picture-in-picture from the Mini
-player button or Home; "Open in…" any other video app at the same position;
-a playback card in the notification shade and on the lock screen (play/pause,
-the scrubber, next episode) that headset buttons reach too.
-Media3 first, with libVLC taking over by itself for a file Media3 cannot play.
+between videos; skip intro (timings from IntroDB and TheIntroDB); **Change stream** in the
+top bar, the title's other releases with quality chips, each picked one playing from the
+same spot; under More, picture fit, the sleep timer (15/30/60 minutes or the end of the
+episode), download ahead, stats for nerds and "Open in another player", which offers
+every app on the phone that plays video, at the same position; picture-in-picture from
+the Mini player button only, Home pausing the film; a playback card in the notification
+shade and on the lock screen (play/pause, the scrubber, next episode) that headset buttons
+reach too. Media3 first, with libVLC taking over by itself for a file Media3 cannot play.
+
+**Instant resume.** A film stopped part-way keeps its start on the phone: the header,
+the index at the end and about a minute either side of where it was left, the rest of the
+file freed (`StartKits` in `tv/core`; see
+[docs/rolling-cache-architecture.md](../docs/rolling-cache-architecture.md#kept-starts-startkits)).
+Played again, from Continue Watching or anywhere, its first picture comes in about a second,
+even after the app was closed. Kept starts go after 14 days unplayed or past 1 GB in all.
+
+**Look.** Poppins throughout, frosted glass for the tab bar, the top bars and the sheets
+(Haze), switching light and dark spreading out from where the screen was touched, and
+opening titles with a film reel unrolling the name.
 
 **Google Cast.** The Cast button in the player hands the stream to a Chromecast
 or Cast TV: the engine serves it to the network as well as to itself, the

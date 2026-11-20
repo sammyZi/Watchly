@@ -18,7 +18,9 @@ are at the links.
 | [Lucide icons](https://lucide.dev) via [composables icons-lucide](https://github.com/composablehorizons/compose-icons) | [ISC](https://lucide.dev/license) · wrapper: [MIT](https://opensource.org/license/mit) |
 | [JSON-java](https://github.com/stleary/JSON-java) (`org.json`) | [Public domain](https://github.com/stleary/JSON-java/blob/master/LICENSE) |
 | Google Play services Cast framework | [Android Software Development Kit License](https://developer.android.com/studio/terms) |
-| [Google Sans Flex](https://github.com/googlefonts/googlesans-flex) font | [SIL Open Font License 1.1](tv/core/src/main/assets/licenses/GoogleSansFlex-OFL.txt) |
+| [Haze](https://github.com/chrisbanes/haze): the frosted bars and panels | [Apache 2.0](https://github.com/chrisbanes/haze/blob/main/LICENSE) |
+| [Poppins](https://github.com/itfoundry/Poppins) font, on Windows too | [SIL Open Font License 1.1](tv/core/src/main/assets/licenses/Poppins-OFL.txt) |
+| [Anton](https://github.com/googlefonts/AntonFont) font: the phone's opening titles | [SIL Open Font License 1.1](mobile/app/src/main/assets/licenses/Anton-OFL.txt) |
 | [Open Peeps](https://www.openpeeps.com) by Pablo Stanley, via [DiceBear](https://www.dicebear.com/styles/open-peeps/): the people profile icons, on Windows too | [CC0 1.0](tv/core/src/main/assets/people/LICENSE) |
 | [TMDB](https://www.themoviedb.org) film collections, for watch orders | [API terms](https://www.themoviedb.org/api-terms-of-use). This product uses the TMDB API but is not endorsed or certified by TMDB. |
 
@@ -36,7 +38,7 @@ are at the links.
 | [QRCoder](https://github.com/codebude/QRCoder) | [MIT](https://github.com/codebude/QRCoder/blob/master/LICENSE.txt) |
 | [CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet) | [MIT](https://github.com/CommunityToolkit/dotnet/blob/main/License.md) |
 | [.NET](https://github.com/dotnet/runtime) | [MIT](https://github.com/dotnet/runtime/blob/main/LICENSE.TXT) |
-| [Noto Sans](https://github.com/notofonts/latin-greek-cyrillic) font | [SIL Open Font License 1.1](windows/Watchly/Assets/Fonts/OFL.txt) |
+| [Poppins](https://github.com/itfoundry/Poppins) font | [SIL Open Font License 1.1](windows/Watchly/Assets/Fonts/OFL.txt) |
 | [Fluent Emoji](https://github.com/microsoft/fluentui-emoji) watch party reactions | [MIT](windows/Watchly/Assets/Reactions/LICENSE) |
 
 ## Online services
