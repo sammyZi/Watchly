@@ -13,6 +13,12 @@ import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -201,23 +207,77 @@ fun App(watch: Watch, incoming: MutableState<Uri?>) {
     val settings by SettingsStore.value.collectAsState()
     val dark = darkFor(settings.themeMode, isSystemInDarkTheme())
     val activity = LocalActivity.current as? ComponentActivity
+    // The screen as last drawn, and where the finger last came down: a new theme spreads out from the touch
+    // as a circle over a still of the old one, the way Telegram's does.
+    val screen = androidx.compose.ui.graphics.rememberGraphicsLayer()
+    var touch by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Unspecified) }
+    var old by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    val reveal = remember { androidx.compose.animation.core.Animatable(0f) }
+    var started by remember { mutableStateOf(false) }
     // Live, for the setting and the system's own switch; the player keeps its dark while it is up.
-    LaunchedEffect(dark) { if (watch.phase != Phase.PLAYING) activity?.applyTheme(dark) }
-    val scheme = if (dark) darkColorScheme(primary = Ink.accent, background = Ink.bg, surface = Ink.surface) else lightColorScheme(primary = Ink.accent, background = Ink.bg, surface = Ink.surface)
+    LaunchedEffect(dark) {
+        if (watch.phase == Phase.PLAYING) return@LaunchedEffect
+        // Not at launch, and not if it is already in this theme: nothing to change from.
+        val animate = started && Ink.isDark != dark && screen.size.width > 0
+        started = true
+        // Before the palette changes, while the layer still holds the old one.
+        if (animate) old = runCatching { screen.toImageBitmap() }.getOrNull()
+        activity?.applyTheme(dark)
+        if (old != null) {
+            reveal.snapTo(0f)
+            reveal.animateTo(1f, tween(650, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+            old = null
+        }
+    }
+    // By the palette in use, so Material's colours change in the same frame as the page's.
+    val scheme = if (Ink.isDark) darkColorScheme(primary = Ink.accent, background = Ink.bg, surface = Ink.surface) else lightColorScheme(primary = Ink.accent, background = Ink.bg, surface = Ink.surface)
     MaterialTheme(colorScheme = scheme) {
-        Box(Modifier.fillMaxSize().background(Ink.bg).grain()) {
-            Shell(watch, incoming)
-            // An invite opened: its own screen, over everything, until Join or Not now.
-            Party.room?.takeIf { !it.leader && !it.accepted }?.let { JoinPartyScreen(it) }
-            // Left one — by Back, Leave, or its leader ending it: the way back in, until taken or dismissed.
-            Party.last?.takeIf { Party.room == null && Party.enabled }?.let { RejoinBar(it, top = watch.phase == Phase.PLAYING) }
-            Toast(watch)
+        // The pages, which the tab bar frosts over — and the toast and the rejoin card floating over them.
+        val pageHaze = dev.chrisbanes.haze.rememberHazeState()
+        // Over the film there is no page to frost: the video is its own surface, which the blur can't see.
+        val glass = pageHaze.takeIf { watch.phase != Phase.PLAYING }
+        Box(
+            Modifier.fillMaxSize()
+                // Seen first, and let through: only where the touch was is kept.
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val e = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                            if (e.type == androidx.compose.ui.input.pointer.PointerEventType.Press) touch = e.changes.first().position
+                        }
+                    }
+                },
+        ) {
+            Box(
+                Modifier.fillMaxSize()
+                    .drawWithContent {
+                        screen.record { this@drawWithContent.drawContent() }
+                        drawLayer(screen)
+                    }
+                    .background(Ink.bg).grain(),
+            ) {
+                Shell(watch, incoming, pageHaze)
+                // An invite opened: its own screen, over everything, until Join or Not now.
+                Party.room?.takeIf { !it.leader && !it.accepted }?.let { JoinPartyScreen(it) }
+                // Left one — by Back, Leave, or its leader ending it: the way back in, until taken or dismissed.
+                Party.last?.takeIf { Party.room == null && Party.enabled }?.let { RejoinBar(it, top = watch.phase == Phase.PLAYING, haze = glass) }
+                Toast(watch, glass)
+            }
+            old?.let { still ->
+                androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                    val from = if (touch.isSpecified) touch else center
+                    // To the farthest corner, so the circle has covered everything when it ends.
+                    val far = listOf(Offset.Zero, Offset(size.width, 0f), Offset(0f, size.height), Offset(size.width, size.height)).maxOf { (it - from).getDistance() }
+                    val hole = androidx.compose.ui.graphics.Path().apply { addOval(androidx.compose.ui.geometry.Rect(from, far * reveal.value)) }
+                    clipPath(hole, androidx.compose.ui.graphics.ClipOp.Difference) { drawImage(still) }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
+private fun Shell(watch: Watch, incoming: MutableState<Uri?>, barHaze: dev.chrisbanes.haze.HazeState) {
     val profiles by Profiles.list.collectAsState()
     var who by remember { mutableStateOf(startProfile(Profiles.list.value)?.also(::open)) }
     // An edit to the profile in use — its name, face or colour — shows at once.
@@ -450,7 +510,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
             ) { t ->
                 holder.SaveableStateProvider(t.name) {
                     when (t) {
-                        Tab.HOME -> HomeScreen(home, watch, me, onOpen = openTitle, onShelf = { pages.add(Page.Catalog(it)) }, onTop = { pages.add(Page.Top(it)) }, onOrders = { pages.add(Page.WatchOrders) }, onOrder = openOrder, onProfile = { switching = true })
+                        Tab.HOME -> HomeScreen(home, watch, me, onOpen = openTitle, onShelf = { pages.add(Page.Catalog(it)) }, onTop = { pages.add(Page.Top(it)) }, onProfile = { switching = true })
                         Tab.SEARCH -> SearchScreen(watch, onOpen = openTitle)
                         Tab.ADDONS -> AddonsScreen(watch)
                         Tab.LIBRARY -> LibraryScreen(watch, me, onOpen = openTitle, onDownloads = { pages.add(Page.Downloads) })
@@ -469,12 +529,11 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         if (isWide()) {
             Row(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal))) {
                 NavRail(tab, me, choose, onProfile = { switching = true })
-                Box(Modifier.weight(1f).fillMaxHeight()) { body() }
+                Box(Modifier.weight(1f).fillMaxHeight().hazeSource(barHaze)) { body() }
             }
         } else {
             // Every page runs on under the bar, which frosts what passes behind it — a tab, and a film's page
             // opened over one; each leaves room at its foot for the bar (LocalTabBarInset).
-            val barHaze = dev.chrisbanes.haze.rememberHazeState()
             val bar = TAB_BAR_HEIGHT + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
             androidx.compose.runtime.CompositionLocalProvider(LocalTabBarInset provides bar) {
                 Box(Modifier.fillMaxSize().hazeSource(barHaze)) { body() }
@@ -578,6 +637,8 @@ private fun TabBar(tab: Tab, onTab: (Tab) -> Unit, haze: dev.chrisbanes.haze.Haz
     val page = Ink.bg
     Row(
         modifier.fillMaxWidth()
+            // Rounded at the top, where it meets the page; flush with the screen's own edge below.
+            .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
             .hazeEffect(haze) {
                 backgroundColor = page
                 tints = listOf(dev.chrisbanes.haze.HazeTint(page.copy(alpha = 0.65f)))
@@ -648,7 +709,7 @@ private fun Opening(watch: Watch) {
 }
 
 @Composable
-private fun Toast(watch: Watch) {
+private fun Toast(watch: Watch, haze: dev.chrisbanes.haze.HazeState?) {
     var note by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
         watch.notes.collect {
@@ -662,7 +723,7 @@ private fun Toast(watch: Watch) {
     Box(Modifier.fillMaxSize().navigationBarsPadding().padding(bottom = 72.dp, start = EDGE, end = EDGE), contentAlignment = Alignment.BottomCenter) {
         AnimatedVisibility(note != null, enter = fadeIn() + slideInVertically { it / 2 }, exit = fadeOut() + slideOutVertically { it / 2 }) {
             Row(
-                Modifier.widthIn(max = 520.dp).clip(RoundedCornerShape(10.dp)).background(Ink.surface2).padding(horizontal = 16.dp, vertical = 12.dp),
+                Modifier.widthIn(max = 520.dp).clip(RoundedCornerShape(10.dp)).glass(haze, Ink.surface2).padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Start,
             ) {

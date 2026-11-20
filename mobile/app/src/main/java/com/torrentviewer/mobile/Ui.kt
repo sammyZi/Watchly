@@ -72,6 +72,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
@@ -449,11 +450,78 @@ fun <T> Sheet(
 /** The page a sheet over it may frost: the blurred source behind it, where the page provides one. */
 val LocalPageHaze = androidx.compose.runtime.staticCompositionLocalOf<dev.chrisbanes.haze.HazeState?> { null }
 
+/** Something has scrolled under the page's top edge: its frost comes on. */
+@Composable
+fun androidx.compose.foundation.lazy.grid.LazyGridState.scrolled(): Boolean =
+    remember(this) { androidx.compose.runtime.derivedStateOf { firstVisibleItemIndex > 0 || firstVisibleItemScrollOffset > 24 } }.value
+
+@Composable
+fun androidx.compose.foundation.lazy.LazyListState.scrolled(): Boolean =
+    remember(this) { androidx.compose.runtime.derivedStateOf { firstVisibleItemIndex > 0 || firstVisibleItemScrollOffset > 24 } }.value
+
+@Composable
+fun androidx.compose.foundation.ScrollState.scrolled(): Boolean = remember(this) { androidx.compose.runtime.derivedStateOf { value > 24 } }.value
+
+/**
+ * A page's top edge frosted as Details' bar, once [scrolled]: what passes under it blurred and washed with the
+ * page's colour, the whole of it fading out a little past its own foot, so there's no strip and no line.
+ */
+@Composable
+fun FrostTop(haze: dev.chrisbanes.haze.HazeState, scrolled: Boolean, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    val frost by animateFloatAsState(if (scrolled) 1f else 0f, tween(260), label = "frost")
+    val page = Ink.bg
+    Box(modifier.fillMaxWidth()) {
+        if (frost > 0f) Box(
+            Modifier.matchParentSize()
+                .layout { measurable, constraints ->
+                    // Drawn taller than the bar by the tail; the bar's own size is unchanged.
+                    val h = constraints.maxHeight + 16.dp.roundToPx()
+                    val p = measurable.measure(constraints.copy(minHeight = h, maxHeight = h))
+                    layout(constraints.maxWidth, constraints.maxHeight) { p.place(0, 0) }
+                }
+                .hazeEffect(haze) {
+                    alpha = frost
+                    backgroundColor = page
+                    tints = listOf(dev.chrisbanes.haze.HazeTint(page.copy(alpha = 0.55f)))
+                    blurRadius = 24.dp
+                    noiseFactor = 0f
+                    // The whole effect fades over the tail, its fill too: fading only the blur left a line.
+                    mask = Brush.verticalGradient(0f to Color.Black, 0.7f to Color.Black, 1f to Color.Transparent)
+                },
+        )
+        content()
+    }
+}
+
+/** A page's back, top-left as [BackButton]; scrolled, on frost with the page's name beside it, as Details does. */
+@Composable
+fun BoxScope.FrostBackBar(haze: dev.chrisbanes.haze.HazeState, scrolled: Boolean, title: String, onBack: () -> Unit) {
+    FrostTop(haze, scrolled, Modifier.align(Alignment.TopStart)) {
+        Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            RoundIcon(L.drawable.lucide_ic_arrow_left, onBack)
+            AnimatedVisibility(scrolled, enter = fadeIn(), exit = androidx.compose.animation.fadeOut()) {
+                Text(title, Modifier.padding(start = 12.dp), style = Type.title.copy(fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/** A floating card's glass: the page behind it blurred under [tint], or the tint alone where nothing offers a page. */
+fun Modifier.glass(haze: dev.chrisbanes.haze.HazeState?, tint: Color, alpha: Float = 0.72f): Modifier =
+    if (haze == null) background(tint)
+    else hazeEffect(haze) {
+        backgroundColor = tint
+        tints = listOf(dev.chrisbanes.haze.HazeTint(tint.copy(alpha = alpha)))
+        blurRadius = 24.dp
+        noiseFactor = 0f
+    }
+
 /** The frame every sheet shares: scrim, rounded top, a grab handle and a heading — frosted over a page that offers it. */
 @Composable
 fun BottomSheet(title: String, onDismiss: () -> Unit, content: @Composable () -> Unit) {
     val haze = LocalPageHaze.current
     val surface = Ink.surface
+    val tabBar = LocalTabBarInset.current
     BackHandler(onBack = onDismiss)
     var shown by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { shown = true }
@@ -511,7 +579,9 @@ fun BottomSheet(title: String, onDismiss: () -> Unit, content: @Composable () ->
                     )
                     // Taps on the sheet stay on the sheet.
                     .clickable(remember { MutableInteractionSource() }, indication = null) {}
-                    .navigationBarsPadding().padding(bottom = 10.dp),
+                    // Over a tab's page the tab bar is drawn on top of the sheet: its last options ended up under the
+                    // bar (Search's "Series only"). The bar's height includes the navigation bar's.
+                    .then(if (tabBar > 0.dp) Modifier.padding(bottom = tabBar) else Modifier.navigationBarsPadding()).padding(bottom = 10.dp),
             ) {
                 Column(
                     Modifier.fillMaxWidth().draggable(

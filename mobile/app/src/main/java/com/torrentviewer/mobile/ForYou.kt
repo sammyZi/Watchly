@@ -1,5 +1,6 @@
 package com.torrentviewer.mobile
 
+import dev.chrisbanes.haze.hazeSource
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.FlowRow
@@ -136,11 +137,13 @@ fun TopScreen(startKind: String, onOpen: (Title) -> Unit, onBack: () -> Unit) {
     }
     val shown = remember(titles, atLeast) { Kids.only(titles.orEmpty()).filter { t -> atLeast.let { it == null || (t.imdbScore ?: 0.0) >= it } } }
 
+    val grid = rememberLazyGridState()
+    val haze = dev.chrisbanes.haze.rememberHazeState()
     Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             GridCells.Adaptive(104.dp),
-            state = rememberLazyGridState(),
-            modifier = Modifier.fillMaxSize(),
+            state = grid,
+            modifier = Modifier.fillMaxSize().then(Modifier.hazeSource(haze)),
             contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp + LocalTabBarInset.current),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -170,6 +173,6 @@ fun TopScreen(startKind: String, onOpen: (Title) -> Unit, onBack: () -> Unit) {
                 }
             }
         }
-        BackButton(onBack)
+        FrostBackBar(haze, grid.scrolled(), "Top on IMDb", onBack)
     }
 }

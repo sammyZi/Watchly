@@ -1,5 +1,7 @@
 package com.torrentviewer.mobile
 
+import androidx.compose.foundation.layout.statusBarsPadding
+import dev.chrisbanes.haze.hazeSource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -74,7 +76,10 @@ fun DownloadsScreen(watch: Watch, onBack: () -> Unit) {
     var cancelling by remember { mutableStateOf<LiveDownload?>(null) }
     var deleting by remember { mutableStateOf<Finished?>(null) }
 
-    LazyColumn(state = rememberLazyListState(), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp + LocalTabBarInset.current)) {
+    val list = rememberLazyListState()
+    val haze = dev.chrisbanes.haze.rememberHazeState()
+    Box(Modifier.fillMaxSize()) {
+    LazyColumn(state = list, modifier = Modifier.fillMaxSize().hazeSource(haze), contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp + LocalTabBarInset.current)) {
         item {
             Heading("Downloads") {
                 Tap(onBack, shape = CircleShape) { Lc(L.drawable.lucide_ic_x, Modifier.padding(8.dp), tint = Ink.muted, size = 22.dp) }
@@ -105,6 +110,17 @@ fun DownloadsScreen(watch: Watch, onBack: () -> Unit) {
             if (group.size == 1) FinishedRow(group[0], group[0].label, poster = true, { play(group[0]) }, { deleting = group[0] })
             else ShowGroup(group.sortedBy { it.label }, play) { deleting = it }
         }
+    }
+    // The heading scrolled away: its name and close on frost, as Details' bar.
+    val scrolled = list.scrolled()
+    FrostTop(haze, scrolled) {
+        androidx.compose.animation.AnimatedVisibility(scrolled, enter = androidx.compose.animation.fadeIn(), exit = androidx.compose.animation.fadeOut()) {
+            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(start = EDGE, end = 8.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Downloads", Modifier.weight(1f), style = Type.title.copy(fontWeight = FontWeight.Bold))
+                Tap(onBack, shape = CircleShape) { Lc(L.drawable.lucide_ic_x, Modifier.padding(8.dp), tint = Ink.muted, size = 22.dp) }
+            }
+        }
+    }
     }
 
     cancelling?.let { row ->

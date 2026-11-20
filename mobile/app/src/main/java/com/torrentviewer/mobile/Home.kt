@@ -188,13 +188,12 @@ fun posterWidth() = if (isWide()) 156.dp else 120.dp
 private val CARD_GAP = 12.dp
 
 @Composable
-fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> Unit, onShelf: (Shelf) -> Unit, onTop: (String) -> Unit, onOrders: () -> Unit, onOrder: (com.torrentviewer.core.WatchOrder) -> Unit, onProfile: () -> Unit) {
+fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> Unit, onShelf: (Shelf) -> Unit, onTop: (String) -> Unit, onProfile: () -> Unit) {
     val history by History.items.collectAsState()
     val saved by SavedStore.items.collectAsState()
     val settings by SettingsStore.value.collectAsState()
     val online by Net.online.collectAsState()
 
-    LaunchedEffect(online, com.torrentviewer.core.Kids.on) { if (!com.torrentviewer.core.Kids.on) com.torrentviewer.core.WatchOrders.tag() }
     // Shelves inferred from what has been watched: the lead pick says so.
     LaunchedEffect(history.size, saved.size, online) {
         val seen = (history.mapNotNull { h -> h.imdb?.let { it to (h.kind ?: "movie") } } + saved.map { it.imdb to it.kind }).take(30)
@@ -322,13 +321,6 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
                         }
                     }
                 }
-        }
-    }
-    // A list by hand isn't sorted for children: their rows stay the family ones.
-    if (!com.torrentviewer.core.Kids.on) homeRows += HomeRow("orders", "Watch orders") {
-        item(key = "orders") {
-            // Nothing chosen: what they watch stands in.
-            Rail("Watch orders", onMore = onOrders) { WatchOrderRow(settings.genres.ifEmpty { state.picks.mapNotNull { it.genre } }, onOrder) }
         }
     }
     if (state.fresh.isNotEmpty()) homeRows += HomeRow("fresh", "New Episodes") {

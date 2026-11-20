@@ -1,5 +1,6 @@
 package com.torrentviewer.mobile
 
+import dev.chrisbanes.haze.hazeSource
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -248,9 +249,13 @@ fun WatchOrderScreen(order: WatchOrder, onOpen: (Title) -> Unit, onBack: () -> U
     val next = nextUp(ids, seen)
     val done = ids.count { it in seen }
 
-    StatusIconsOverArt(true)
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    val haze = dev.chrisbanes.haze.rememberHazeState()
+    val scrolled = list.scrolled()
+    // Light icons over the art; on the frost, the page's own.
+    StatusIconsOverArt(!scrolled)
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp + LocalTabBarInset.current)) {
+        LazyColumn(Modifier.fillMaxSize().hazeSource(haze), list, contentPadding = PaddingValues(bottom = 32.dp + LocalTabBarInset.current)) {
             item(key = "head") {
                 Column {
                     Artwork(
@@ -297,7 +302,7 @@ fun WatchOrderScreen(order: WatchOrder, onOpen: (Title) -> Unit, onBack: () -> U
                 )
             }
         }
-        RoundIcon(L.drawable.lucide_ic_arrow_left, onBack, Modifier.statusBarsPadding().padding(start = 12.dp, top = 8.dp))
+        FrostBackBar(haze, scrolled, order.name, onBack)
     }
 }
 

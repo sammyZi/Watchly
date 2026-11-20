@@ -168,7 +168,7 @@ private fun JoinAsDetail(room: Room, s: PartyState, title: Title?, people: List<
  * opens the same room again, so the link everyone has still works.
  */
 @Composable
-fun RejoinBar(last: com.torrentviewer.core.LastParty, top: Boolean) {
+fun RejoinBar(last: com.torrentviewer.core.LastParty, top: Boolean, haze: dev.chrisbanes.haze.HazeState? = null) {
     val white = Color.White
     // Over the film, up top, clear of the seek bar; elsewhere above the tab bar.
     Box(
@@ -177,7 +177,8 @@ fun RejoinBar(last: com.torrentviewer.core.LastParty, top: Boolean) {
     ) {
         Row(
             Modifier.widthIn(max = 520.dp).fillMaxWidth().shadow(12.dp, RoundedCornerShape(14.dp)).clip(RoundedCornerShape(14.dp))
-                .background(Color(0xF21A1A1E)).padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                // Always dark, its words white in either theme: frosted, the page shows through a dark glass.
+                .glass(haze, Color(0xFF1A1A1E), alpha = 0.8f).padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Lc(L.drawable.lucide_ic_users, tint = Ink.accent, size = 20.dp)

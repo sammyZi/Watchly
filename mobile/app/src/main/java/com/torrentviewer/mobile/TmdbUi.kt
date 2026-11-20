@@ -1,5 +1,6 @@
 package com.torrentviewer.mobile
 
+import dev.chrisbanes.haze.hazeSource
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -122,10 +123,13 @@ fun PersonScreen(id: Int, name: String, onOpen: (Title) -> Unit, onBack: () -> U
     val open = rememberCardOpener(onOpen)
     var more by rememberSaveable(id) { mutableStateOf(false) }
     val p = person
+    val grid = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    val haze = dev.chrisbanes.haze.rememberHazeState()
     Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             GridCells.Adaptive(110.dp),
-            Modifier.fillMaxSize(),
+            Modifier.fillMaxSize().hazeSource(haze),
+            grid,
             contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 32.dp + LocalTabBarInset.current),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -154,6 +158,6 @@ fun PersonScreen(id: Int, name: String, onOpen: (Title) -> Unit, onBack: () -> U
                 TitleCard(card.poster, card.title, { open(card) }, Modifier.fillMaxWidth(), info = card.year)
             }
         }
-        RoundIcon(L.drawable.lucide_ic_arrow_left, onBack, Modifier.statusBarsPadding().padding(start = 12.dp, top = 8.dp))
+        FrostBackBar(haze, grid.scrolled(), name, onBack)
     }
 }

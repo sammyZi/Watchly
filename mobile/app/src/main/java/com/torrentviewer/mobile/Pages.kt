@@ -2,6 +2,7 @@
 
 package com.torrentviewer.mobile
 
+import dev.chrisbanes.haze.hazeSource
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -27,6 +28,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -138,11 +140,13 @@ fun CatalogScreen(shelf: Shelf, onOpen: (Title) -> Unit, onBack: () -> Unit) {
     var titles by remember(source) { mutableStateOf(Meta.peekCatalog(shelf.kind, source)) }
     LaunchedEffect(source) { if (titles.isNullOrEmpty()) titles = Meta.catalog(shelf.kind, source) }
     val shown = remember(titles, sort) { sortTitles(Kids.only(titles.orEmpty()), sort) }
+    val grid = rememberLazyGridState()
+    val haze = dev.chrisbanes.haze.rememberHazeState()
     Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             POSTER,
-            state = rememberLazyGridState(),
-            modifier = Modifier.fillMaxSize(),
+            state = grid,
+            modifier = Modifier.fillMaxSize().hazeSource(haze),
             contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp + LocalTabBarInset.current),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -159,7 +163,7 @@ fun CatalogScreen(shelf: Shelf, onOpen: (Title) -> Unit, onBack: () -> Unit) {
             else if (shown.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) { Note("Nothing on this shelf right now.") }
             items(shown, key = { it.imdb }) { t -> PosterCard(t, { onOpen(t) }, sub = subOf(t)) }
         }
-        BackButton(onBack)
+        FrostBackBar(haze, grid.scrolled(), shelf.title, onBack)
     }
 }
 
@@ -267,33 +271,24 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
         }
     }
 
+    val grid = rememberLazyGridState()
+    val haze = dev.chrisbanes.haze.rememberHazeState()
+    // The box stays put at the top, on frost, and the results run on under it.
+    var pinned by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    val pinnedDp = with(androidx.compose.ui.platform.LocalDensity.current) { pinned.toDp() }
+    Box(Modifier.fillMaxSize()) {
     LazyVerticalGrid(
         POSTER,
-        state = rememberLazyGridState(),
-        modifier = Modifier.fillMaxSize().imePadding(),
-        contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp + LocalTabBarInset.current),
+        state = grid,
+        modifier = Modifier.fillMaxSize().imePadding().hazeSource(haze),
+        contentPadding = PaddingValues(start = EDGE, end = EDGE, top = pinnedDp, bottom = 24.dp + LocalTabBarInset.current),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             Column {
-                Heading("Search")
-                Field(
-                    query,
-                    { query = it },
-                    if (torrents) "A film, or a link to play" else "Movies, shows, anime",
-                    Modifier.fillMaxWidth(),
-                    leading = L.drawable.lucide_ic_search,
-                    onSubmit = { recents = Searches.remember(query) },
-                    trailing = {
-                        when {
-                            busy -> Spinner(size = 20.dp)
-                            query.isNotEmpty() -> Tap({ query = "" }, shape = CircleShape) { Lc(L.drawable.lucide_ic_x, Modifier.padding(4.dp), tint = Ink.muted, size = 18.dp) }
-                        }
-                    },
-                )
                 // A kids profile searches titles only.
-                if (!Kids.on) Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!Kids.on) Row(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Chip("Titles", !torrents, onClick = { torrents = false; hits = null })
                     Chip("Streams", torrents, onClick = { torrents = true; results = null }, icon = L.drawable.lucide_ic_layers)
                 }
@@ -354,11 +349,32 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
             }
         }
     }
+    FrostTop(haze, grid.scrolled(), Modifier.onSizeChanged { pinned = it.height }) {
+        Column(Modifier.padding(start = EDGE, end = EDGE, bottom = 12.dp)) {
+            Heading("Search")
+            Field(
+                query,
+                { query = it },
+                if (torrents) "A film, or a link to play" else "Movies, shows, anime",
+                Modifier.fillMaxWidth(),
+                leading = L.drawable.lucide_ic_search,
+                onSubmit = { recents = Searches.remember(query) },
+                trailing = {
+                    when {
+                        busy -> Spinner(size = 20.dp)
+                        query.isNotEmpty() -> Tap({ query = "" }, shape = CircleShape) { Lc(L.drawable.lucide_ic_x, Modifier.padding(4.dp), tint = Ink.muted, size = 18.dp) }
+                    }
+                },
+            )
+        }
+    }
+    }
 
-    picking?.let { which ->
+    // Frosted over the results, as a film's language list is over its page.
+    picking?.let { which -> androidx.compose.runtime.CompositionLocalProvider(LocalPageHaze provides haze) {
         val close = { picking = null }
         when (which) {
-            Picking.KIND -> Sheet("Show", listOf(Option<String?>(null, "Films & series"), Option("movie", "Films"), Option("tv", "Series")), kind, { kind = it; close() }, close)
+            Picking.KIND -> Sheet("Show", listOf(Option<String?>(null, "Films & series"), Option("movie", "Films only"), Option("tv", "Series only")), kind, { kind = it; close() }, close)
             Picking.GENRE -> Sheet("Genre", listOf(Option<String?>(null, "Any genre")) + GENRES.map { Option<String?>(it, it) }, genre, { genre = it; close() }, close)
             Picking.DECADE -> Sheet("Year", listOf(Option<Int?>(null, "Any year")) + DECADES.map { (y, label) -> Option<Int?>(y, label) }, decade, { decade = it; close() }, close)
             Picking.RATING -> Sheet("IMDb rating", listOf(Option<Int?>(null, "Any rating")) + listOf(6, 7, 8, 9).map { Option<Int?>(it, "IMDb $it+") }, atLeast, { atLeast = it; close() }, close)
@@ -366,7 +382,7 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
             Picking.QUALITY -> Sheet("Quality", listOf(Option<String?>(null, "Any quality")) + listOf("4K", "1080p", "720p").map { Option<String?>(it, it) }, quality, { quality = it; close() }, close)
             Picking.ORDER -> Sheet("Order", HitOrder.entries.map { Option(it, it.label) }, order, { order = it; close() }, close)
         }
-    }
+    } }
 }
 
 /* -------------------------------------------------------------- library */
@@ -394,28 +410,22 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit, onDownload
     val sources = history.groupingBy { it.titleKey }.eachCount()
     val listed = saved.filter { it.list == if (shelf == Shelfs.FAVORITE) "favorite" else "later" }.map { it.asTitle() }
 
+    val grid = rememberLazyGridState()
+    val haze = dev.chrisbanes.haze.rememberHazeState()
+    // The heading and the shelf chips stay put at the top, on frost, and the shelf runs on under them.
+    var pinned by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    val pinnedDp = with(androidx.compose.ui.platform.LocalDensity.current) { pinned.toDp() }
+    Box(Modifier.fillMaxSize()) {
     LazyVerticalGrid(
         if (shelf == Shelfs.HISTORY) GridCells.Adaptive(340.dp) else POSTER,
-        state = rememberLazyGridState(),
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = EDGE, end = EDGE, bottom = 24.dp + LocalTabBarInset.current),
+        state = grid,
+        modifier = Modifier.fillMaxSize().hazeSource(haze),
+        contentPadding = PaddingValues(start = EDGE, end = EDGE, top = pinnedDp, bottom = 24.dp + LocalTabBarInset.current),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             Column {
-                Heading("Library") {
-                    if (shelf == Shelfs.HISTORY && items.isNotEmpty()) Tap({ clearing = true }, shape = CircleShape) {
-                        Lc(L.drawable.lucide_ic_trash_2, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp)
-                    }
-                    // Downloads live here now, off the tab bar; the dot says one is running.
-                    Tap(onDownloads, shape = CircleShape) {
-                        Box {
-                            Lc(L.drawable.lucide_ic_download, Modifier.padding(8.dp), tint = Ink.muted, size = 22.dp)
-                            if (downloading.isNotEmpty()) Box(Modifier.align(Alignment.TopEnd).padding(6.dp).size(8.dp).clip(CircleShape).background(Ink.accent))
-                        }
-                    }
-                }
                 // Where the history is, the history's sync is offered.
                 if (Stremio.available && !stremio && !stremioLater) {
                     StremioSection(me, onLater = {
@@ -424,9 +434,6 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit, onDownload
                     })
                 }
                 if (stremio) Text("✓ Signed in to Stremio — your library and where you stopped are below", Modifier.padding(bottom = 10.dp), style = Type.meta.copy(color = Ink.faint))
-                Row(Modifier.padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Shelfs.entries.forEach { s -> Chip(s.label, s == shelf, onClick = { shelf = s }) }
-                }
             }
         }
         if (shelf == Shelfs.HISTORY) {
@@ -448,6 +455,26 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit, onDownload
             }
             items(listed, key = { it.imdb }) { t -> PosterCard(t, { onOpen(t) }, sub = subOf(t)) }
         }
+    }
+    FrostTop(haze, grid.scrolled(), Modifier.onSizeChanged { pinned = it.height }) {
+        Column(Modifier.padding(start = EDGE, end = EDGE, bottom = 12.dp)) {
+            Heading("Library") {
+                if (shelf == Shelfs.HISTORY && items.isNotEmpty()) Tap({ clearing = true }, shape = CircleShape) {
+                    Lc(L.drawable.lucide_ic_trash_2, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp)
+                }
+                // Downloads live here now, off the tab bar; the dot says one is running.
+                Tap(onDownloads, shape = CircleShape) {
+                    Box {
+                        Lc(L.drawable.lucide_ic_download, Modifier.padding(8.dp), tint = Ink.muted, size = 22.dp)
+                        if (downloading.isNotEmpty()) Box(Modifier.align(Alignment.TopEnd).padding(6.dp).size(8.dp).clip(CircleShape).background(Ink.accent))
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Shelfs.entries.forEach { s -> Chip(s.label, s == shelf, onClick = { shelf = s }) }
+            }
+        }
+    }
     }
 
     menu?.let { item ->
@@ -604,7 +631,13 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEd
     val pageScroll = rememberScrollState()
     LaunchedEffect(page) { if (page != null) pageScroll.scrollTo(0) }
 
-    Column(Modifier.fillMaxSize().verticalScroll(if (page == null) listScroll else pageScroll).padding(horizontal = EDGE).padding(bottom = 32.dp + LocalTabBarInset.current)) {
+    val haze = dev.chrisbanes.haze.rememberHazeState()
+    val scroll = if (page == null) listScroll else pageScroll
+    // A page's back and name stay put at the top, on frost; the list's own heading scrolls, and its name comes onto the frost.
+    var pinned by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    val pinnedDp = with(androidx.compose.ui.platform.LocalDensity.current) { pinned.toDp() }
+    Box(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().hazeSource(haze).verticalScroll(scroll).padding(horizontal = EDGE).padding(bottom = 32.dp + LocalTabBarInset.current)) {
         if (page == null) {
             Heading("Settings")
             Field(query, { query = it }, "Search settings", Modifier.fillMaxWidth().padding(bottom = 12.dp), leading = L.drawable.lucide_ic_search)
@@ -671,10 +704,7 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEd
                 style = Type.meta.copy(color = Ink.faint, fontSize = 11.sp),
             )
         } else {
-            Row(Modifier.statusBarsPadding().padding(top = 8.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                RoundIcon(L.drawable.lucide_ic_arrow_left, { page = null })
-                Text(page.orEmpty(), Modifier.padding(start = 12.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
-            }
+            Spacer(Modifier.height(pinnedDp))
         }
 
         if (page == "Legal notice") Panel { LegalText(com.torrentviewer.core.Legal.NOTICE) }
@@ -1040,6 +1070,17 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEd
             }
         }
         }
+    }
+    val scrolled = scroll.scrolled()
+    FrostTop(haze, scrolled, Modifier.onSizeChanged { pinned = it.height }) {
+        val name = page
+        if (name != null) Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = EDGE).padding(top = 8.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            RoundIcon(L.drawable.lucide_ic_arrow_left, { page = null })
+            Text(name, Modifier.padding(start = 12.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
+        } else androidx.compose.animation.AnimatedVisibility(scrolled, enter = androidx.compose.animation.fadeIn(), exit = androidx.compose.animation.fadeOut()) {
+            Text("Settings", Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = EDGE, vertical = 14.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
+        }
+    }
     }
 
     picking?.let { which ->
