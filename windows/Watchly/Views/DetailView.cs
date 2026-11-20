@@ -433,10 +433,11 @@ public sealed class DetailView : UserControl, IDisposable
         var done = order.Films.Count(seen.Contains);
         var name = Ui.Text(order.Name, "TitleText", "Text", 18, FontWeights.Bold);
         var line = Ui.Text(string.Join("  ·  ", new[] { $"Film {at + 1} of {order.Films.Count}", done > 0 ? $"{done} watched" : null }.Where(s => s is not null)), "Meta", "Faint", 12);
-        var link = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Children = { Ui.Text("Watch order", "Meta"), Ui.Glyph("chevron-right", 16, "Muted") } };
-        DockPanel.SetDock(link, Dock.Right);
-        var head = Ui.Button(new DockPanel { Children = { link, new StackPanel { Children = { name, line } } } }, () => shell.OpenOrder(order));
-        head.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        // Beside the name, not docked at the column's far edge: a three-film strip ended a long way short of it.
+        var link = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(14, 2, 0, 0), Children = { Ui.Text("Watch order", "Meta"), Ui.Glyph("chevron-right", 16, "Muted") } };
+        var top = new StackPanel { Orientation = Orientation.Horizontal, Children = { name, link } };
+        var head = Ui.Button(new StackPanel { Children = { top, line } }, () => shell.OpenOrder(order));
+        head.HorizontalAlignment = HorizontalAlignment.Left;
         head.Margin = new Thickness(0, 0, 0, 10);
         var strip = OrderUi.Strip(order.Films.Select((id, i) => (UIElement)OrderUi.Poster(i + 1, id, id == title.Imdb, seen.Contains(id), () =>
         {
