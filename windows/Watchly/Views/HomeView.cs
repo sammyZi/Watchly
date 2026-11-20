@@ -207,7 +207,6 @@ public sealed class HomeView : UserControl
         LoadMissing();
         LoadSuggested(mine);
         LoadUpcoming(mine);
-        TagOrders(mine);
 
         // What is mid-way leads the taste signal, then the rest, then saved titles.
         var recent = shell.HistoryList;
@@ -373,12 +372,6 @@ public sealed class HomeView : UserControl
             if (body.Parent is FrameworkElement container && NearScreen(container)) build();
     }
 
-    /// <summary>Beside the taste lookup, not before it: the first time, this is over a hundred small requests.</summary>
-    async void TagOrders(int mine)
-    {
-        if (!KidsMode.On && await WatchOrders.Tag() && mine == version) BuildPersonal();
-    }
-
     void BuildPersonal()
     {
         var made = new List<(string, string, FrameworkElement)>();
@@ -404,21 +397,6 @@ public sealed class HomeView : UserControl
 
         var favorites = Saved.InList(shell.SavedList, "favorite").Select(s => s.AsTitle()).ToList();
         if (favorites.Count > 0) made.Add(("liked", "Liked", Section("Liked", null, favorites, "RailCard")));
-
-        if (!KidsMode.On)
-        {
-            var seen = WatchOrders.Seen(shell.HistoryList);
-            // Nothing chosen: what they watch stands in.
-            var genres = shell.Settings.Genres.Count > 0 ? shell.Settings.Genres : picks.Select(p => p.Genre).OfType<string>().ToList();
-            var begun = seen.Concat(shell.HistoryList.Select(h => h.Imdb).OfType<string>()).Concat(shell.SavedList.Select(s => s.Imdb)).ToHashSet();
-            var strip = OrderUi.Strip(WatchOrders.ForHome(genres, seen, begun).Select(o =>
-            {
-                var banner = OrderUi.Banner(o, seen, 330);
-                banner.Margin = new Thickness(0, 0, 16, 0);
-                return banner;
-            }), Ui.Gutter);
-            made.Add(("orders", "Watch orders", new StackPanel { Margin = new Thickness(0, RowGap, 0, 0), Children = { Ui.Head("Watch orders", shell.OpenOrders), strip } }));
-        }
         Put("personal", made);
     }
 
