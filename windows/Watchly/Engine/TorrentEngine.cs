@@ -82,6 +82,9 @@ public sealed class TorrentEngine
         if (app.MaxUploadKbps > 0) settings.MaximumUploadRate = app.MaxUploadKbps * 1024;
         dhtSeeded = Task.Run(SeedDhtNodes);
         engine = new ClientEngine(settings.ToSettings());
+        // Kept starts unplayed too long, or past their cap, go — the fast-resume files beside them too.
+        StartKits.ResumeFile = hex => { try { return engine.Settings.GetFastResumePath(InfoHashes.FromV1(InfoHash.FromHex(hex))); } catch { return null; } };
+        _ = Task.Run(StartKits.Prune);
         HookDht();
         Log.Info("engine", $"ClientEngine initialized on {settings.HttpStreamingPrefix} (DiskCache: 128MB, MaxConn: 600, HalfOpen: 120)");
     }
@@ -576,22 +579,24 @@ public sealed class TorrentEngine
         try { _ = manager.DhtAnnounceAsync(); } catch { }
     }
 
-    public Task Remove(TorrentManager manager, bool deleteFiles)
+    /// <param name="keep">Its start is kept rather than its files deleted ([StartKits]), where it can be.</param>
+    public Task Remove(TorrentManager manager, bool deleteFiles, StartKeep? keep = null)
     {
         var hex = Hex(manager.InfoHashes);
-        var task = RemoveCore(manager, deleteFiles);
+        var task = RemoveCore(manager, deleteFiles, keep);
         leaving[hex] = task;
         _ = task.ContinueWith(_ => leaving.TryRemove(new KeyValuePair<string, Task>(hex, task)), TaskScheduler.Default);
         return task;
     }
 
-    async Task RemoveCore(TorrentManager manager, bool deleteFiles)
+    async Task RemoveCore(TorrentManager manager, bool deleteFiles, StartKeep? keep)
     {
         try
         {
             if (manager.State is not (TorrentState.Stopped or TorrentState.Error)) await manager.StopAsync(TimeSpan.FromSeconds(3));
         }
         catch { }
+        if (keep is not null && await KeepStart(manager, keep)) return;
         try
         {
             await engine.RemoveAsync(manager, deleteFiles ? RemoveMode.CacheDataAndDownloadedData : RemoveMode.CacheDataOnly);
@@ -599,6 +604,53 @@ public sealed class TorrentEngine
         catch (Exception e)
         {
             Log.Warn("engine", $"remove failed: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// The stopped torrent out of the engine with its files and cache kept; its file zeroed but for the start
+    /// [StartKits.Plan] picks, and its fast-resume rewritten to own only what is left, so the next play adds it
+    /// back holding those pieces without hashing the file. False, with nothing changed, where it can't.
+    /// </summary>
+    async Task<bool> KeepStart(TorrentManager manager, StartKeep keep)
+    {
+        if (manager.Torrent is not { } torrent || manager.Bitfield is not { } have || keep.FileIndex >= manager.Files.Count) return false;
+        var hex = Hex(manager.InfoHashes);
+        var file = manager.Files[keep.FileIndex];
+        var (cuts, kept) = StartKits.Plan(file.OffsetInTorrent, file.Length, torrent.PieceLength, torrent.PieceCount, keep.Ratio, keep.BytesPerSecond, i => have[i]);
+        if (kept.Count == 0) return false;
+        var path = File.Exists(file.DownloadIncompleteFullPath) ? file.DownloadIncompleteFullPath : file.FullPath;
+        if (!File.Exists(path)) return false;
+        try
+        {
+            await engine.RemoveAsync(manager, RemoveMode.KeepAllData);
+        }
+        catch (Exception e)
+        {
+            Log.Warn("start", $"not kept: {e.Message}");
+            return false;
+        }
+        var resume = engine.Settings.GetFastResumePath(manager.InfoHashes);
+        try
+        {
+            // The resume first: were the zeroing to stop part-way, it already claims only what will be left.
+            var bits = new BitField(torrent.PieceCount);
+            foreach (var p in kept) bits[p] = true;
+            Directory.CreateDirectory(Path.GetDirectoryName(resume)!);
+            await File.WriteAllBytesAsync(resume, new FastResume(manager.InfoHashes, bits, new BitField(torrent.PieceCount)).Encode());
+            if (!StartKits.Zero(path, cuts)) throw new IOException("the rest of the file could not be zeroed");
+            var bytes = kept.Count * (long)torrent.PieceLength;
+            StartKits.Put(hex, bytes);
+            Log.Stream($"start: kept {kept.Count} piece(s), {Format.Bytes(bytes)}, at {keep.Ratio:P0} of '{file.Path}'");
+            return true;
+        }
+        catch (Exception e)
+        {
+            // Out of the engine already: its files go now, as the removal would have taken them.
+            Log.Warn("start", $"not kept: {e.Message}");
+            try { File.Delete(resume); } catch { }
+            try { Directory.Delete(manager.SavePath, true); } catch { }
+            return true;
         }
     }
 
@@ -855,6 +907,7 @@ public sealed class StreamSession : IAsyncDisposable
     /// </summary>
     public Task KeepBuffer(double positionSeconds, double durationSeconds)
     {
+        if (durationSeconds > 0 && positionSeconds > 0) (lastPosition, lastDuration) = (positionSeconds, durationSeconds);
         if (window is null || durationSeconds <= 0) return Task.CompletedTask;
         var bytesPerSecond = Manager.Files[FileIndex].Length / durationSeconds;
         var from = (long)((positionSeconds - BehindSeconds) * bytesPerSecond);
@@ -868,14 +921,28 @@ public sealed class StreamSession : IAsyncDisposable
         .Select(i => Manager.Files[i].DownloadCompleteFullPath)
         .Where(File.Exists);
 
+    /// <summary>Where the player last said it was, and how long the film is: what a kept start is kept around.</summary>
+    double lastPosition, lastDuration;
+
     public async ValueTask DisposeAsync()
     {
         if (Current == this) Current = null;
         try { http.Dispose(); } catch { }
-        if (!Borrowed) await TorrentEngine.Instance.Remove(Manager, deleteFiles);
+        if (!Borrowed)
+        {
+            // Part-way through a film in the stream cache (not a download's folder): its start stays for next time.
+            var ratio = lastDuration > 0 ? lastPosition / lastDuration : 0;
+            var keep = deleteFiles && ratio > 0 && ratio < StartKits.Watched
+                ? new StartKeep(FileIndex, ratio, Manager.Files[FileIndex].Length / lastDuration)
+                : null;
+            await TorrentEngine.Instance.Remove(Manager, deleteFiles, keep);
+        }
         if (leftover is not null) try { File.Delete(leftover); } catch { }
     }
 }
+
+/// <summary>What of a closing stream to keep: its file, how far through it was left, and its bytes per second of running time.</summary>
+public sealed record StartKeep(int FileIndex, double Ratio, double BytesPerSecond);
 
 /// <summary>
 /// MonoTorrent's streaming picker fetches where the player reads — and, alongside, the rest
