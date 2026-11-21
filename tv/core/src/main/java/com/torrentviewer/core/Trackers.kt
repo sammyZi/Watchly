@@ -46,13 +46,19 @@ fun historyBody(imdb: String, ep: Ep?, at: String, animeSeasons: Boolean = false
     return JSONObject().put("shows", JSONArray().put(show))
 }
 
-/** Everything watched on either side; the paused and library lists are only ever Stremio's. */
+/** Everything watched on either side; the paused and library lists come from Stremio and Nuvio. */
 operator fun StremioLibrary.plus(other: StremioLibrary) = copy(
     films = films + other.films,
     episodes = (episodes.keys + other.episodes.keys).associateWith { episodes[it].orEmpty() + other.episodes[it].orEmpty() },
-    paused = paused + other.paused,
+    paused = (paused + other.paused).sortedByDescending { it.at },
     seen = seen + other.seen,
+    finishedAt = (finishedAt.keys + other.finishedAt.keys).associateWith { maxOf(finishedAt[it] ?: 0L, other.finishedAt[it] ?: 0L) },
 )
+
+/** Stremio's and Nuvio's accounts together: where films were left, the library, and what was finished. */
+val Synced: Flow<StremioLibrary> = combine(Stremio.library, Nuvio.library) { a, b -> a + b }
+
+fun syncedNow() = Stremio.library.value + Nuvio.library.value
 
 /** Simkl's /sync/all-items, any of its types. Anime episodes carry the season numbers the rest of the app uses under `tvdb`. */
 fun parseSimkl(json: String): StremioLibrary {
@@ -340,8 +346,9 @@ fun refreshWatched() {
     if (now - refreshedAt < REFRESH_MS) return
     refreshedAt = now
     Stremio.pull()
+    Nuvio.pull()
     WATCH_TRACKERS.forEach { it.pull() }
 }
 
-/** Stremio's library with what the tracking accounts say has been watched. */
-val WatchedEverywhere: Flow<StremioLibrary> = combine(Stremio.library, Simkl.library, Mdblist.library) { a, b, c -> a + b + c }
+/** Stremio's and Nuvio's libraries with what the tracking accounts say has been watched. */
+val WatchedEverywhere: Flow<StremioLibrary> = combine(Synced, Simkl.library, Mdblist.library) { a, b, c -> a + b + c }

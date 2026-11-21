@@ -359,16 +359,19 @@ fun Field(
     trailing: @Composable () -> Unit = {},
     /** The keyboard's action key; search unless the box says otherwise. Done also puts the keyboard away. */
     action: ImeAction = if (digits) ImeAction.Done else ImeAction.Search,
+    /** The words' colour, and the fill's: white on the tour, which is dark whatever the theme. */
+    tint: Color = Ink.text,
+    keyboard: KeyboardType = if (digits) KeyboardType.NumberPassword else KeyboardType.Text,
 ) {
     var focused by remember { mutableStateOf(false) }
     val focus = androidx.compose.ui.platform.LocalFocusManager.current
-    val ring by animateColorAsState(if (focused) Ink.text.copy(alpha = 0.7f) else Color.Transparent, Motion.effects(), label = "ring")
+    val ring by animateColorAsState(if (focused) tint.copy(alpha = 0.7f) else Color.Transparent, Motion.effects(), label = "ring")
     Row(
-        modifier.height(50.dp).clip(RoundedCornerShape(8.dp)).background(Ink.text.copy(alpha = if (focused) 0.12f else 0.07f)).border(1.5.dp, ring, RoundedCornerShape(8.dp)).padding(horizontal = 14.dp),
+        modifier.height(50.dp).clip(RoundedCornerShape(8.dp)).background(tint.copy(alpha = if (focused) 0.12f else 0.07f)).border(1.5.dp, ring, RoundedCornerShape(8.dp)).padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         leading?.let {
-            Lc(it, tint = if (focused) Ink.text else Ink.faint, size = 20.dp)
+            Lc(it, tint = if (focused) tint else Ink.faint, size = 20.dp)
             Spacer(Modifier.width(12.dp))
         }
         // A PIN sits in the middle of its box, placeholder and dots alike.
@@ -379,10 +382,10 @@ fun Field(
                 value = value,
                 onValueChange = onValue,
                 singleLine = true,
-                textStyle = Type.label.copy(fontSize = 16.sp, letterSpacing = if (secret) 8.sp else 0.sp, textAlign = align),
+                textStyle = Type.label.copy(color = tint, fontSize = 16.sp, letterSpacing = if (secret) 8.sp else 0.sp, textAlign = align),
                 cursorBrush = SolidColor(Ink.accent),
                 visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
-                keyboardOptions = KeyboardOptions(keyboardType = if (digits) KeyboardType.NumberPassword else KeyboardType.Text, imeAction = action),
+                keyboardOptions = KeyboardOptions(keyboardType = keyboard, imeAction = action),
                 keyboardActions = KeyboardActions(onAny = {
                     onSubmit()
                     if (action == ImeAction.Done) focus.clearFocus()

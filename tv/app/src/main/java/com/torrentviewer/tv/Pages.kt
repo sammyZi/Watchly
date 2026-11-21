@@ -335,7 +335,7 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit) {
     // One card per title, however many releases it was played from.
     val items = latestPerTitle(history)
     // After a reinstall this TV's history is empty; what Stremio has still belongs here.
-    val stremioLibrary by Stremio.library.collectAsState()
+    val stremioLibrary by com.torrentviewer.core.Synced.collectAsState(com.torrentviewer.core.syncedNow())
     val fromStremio = remember(stremioLibrary, history, Kids.on, Kids.allowed) { Kids.only(stremioLibrary.notIn(history)) { Title(it.imdb, it.kind, it.title) } }
     var focusedUri by remember { mutableStateOf<String?>(null) }
     val first = remember { FocusRequester() }
@@ -580,6 +580,7 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
 
         if (page == "Account") {
         StremioSection(me)
+        NuvioSection(me)
 
         Section("Profile", if (me.isGuest) "Guest keeps nothing — history and My List go when the app closes." else "Library, My List and resume points belong to this profile.") {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1148,6 +1149,110 @@ fun StremioSection(me: Profile, onLater: (() -> Unit)? = null, requester: FocusR
         Text("Bring your Stremio library", style = Type.title.copy(fontWeight = FontWeight.Bold))
         Text(hint, Modifier.padding(top = 4.dp, bottom = 16.dp).widthIn(max = 760.dp), style = Type.meta.copy(color = Ink.faint))
         body()
+    }
+}
+
+/**
+ * Sign in to Nuvio: email and password typed with the remote — Nuvio has no link code — sent only to
+ * Nuvio. Signed in, the account's addons come across, and its library and where films were left.
+ */
+@Composable
+fun NuvioSection(me: Profile) {
+    val connected by com.torrentviewer.core.Nuvio.connected.collectAsState()
+    val signedAs by com.torrentviewer.core.Nuvio.email.collectAsState()
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf<String?>(null) }
+    val nuvioProfile by com.torrentviewer.core.Nuvio.profileName.collectAsState()
+    /** The account's profiles, while asking which one this TV watches as. */
+    var choices by remember { mutableStateOf<List<com.torrentviewer.core.NuvioProfile>?>(null) }
+    val scope = rememberCoroutineScope()
+    val main = remember { FocusRequester() }
+    val firstChoice = remember { FocusRequester() }
+    // The buttons it replaces are gone: focus to the first profile, not off to the rail.
+    LaunchedEffect(choices) { if (choices != null) runCatching { firstChoice.requestFocus() } }
+
+    fun signIn() {
+        if (busy) return
+        if ('@' !in email || password.isEmpty()) {
+            note = "Enter your Nuvio email and password."
+            return
+        }
+        busy = true
+        note = null
+        scope.launch {
+            try {
+                val all = com.torrentviewer.core.Nuvio.signIn(email, password)
+                password = ""
+                if (all.size > 1) choices = all
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) note = e.message ?: "Couldn't reach Nuvio."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    val hint = when {
+        connected -> "Signed in${signedAs?.let { " as $it" }.orEmpty()}${nuvioProfile?.let { ", watching as $it" }.orEmpty()} — where you stopped on Nuvio is in Continue Watching, My List is your Nuvio library, and what you finish is marked watched."
+        me.isGuest -> "Your Nuvio library, Continue Watching and addons on this TV. As Guest it's forgotten when the app closes."
+        else -> "Your Nuvio library, Continue Watching and addons on this TV, kept in step both ways. Your password goes only to Nuvio."
+    }
+    Section("Nuvio account", hint) {
+        Column {
+            val open = choices
+            if (connected && open != null) {
+                Text("Which Nuvio profile is this?", Modifier.padding(bottom = 12.dp), style = Type.label.copy(fontWeight = FontWeight.SemiBold))
+                Row {
+                    open.forEachIndexed { i, p ->
+                        if (i > 0) Spacer(Modifier.width(10.dp))
+                        TvButton(p.name, {
+                            scope.launch {
+                                com.torrentviewer.core.Nuvio.choose(p)
+                                choices = null
+                                main.requestFocus()
+                            }
+                        }, icon = if (p.name == nuvioProfile) L.drawable.lucide_ic_check else L.drawable.lucide_ic_user, requester = if (i == 0) firstChoice else null)
+                    }
+                }
+                return@Column
+            }
+            if (!connected) {
+                Row(Modifier.widthIn(max = 760.dp)) {
+                    Field(email, { email = it.trim() }, "Email", Modifier.weight(1f), requester = main, leading = L.drawable.lucide_ic_mail, imeAction = androidx.compose.ui.text.input.ImeAction.Next, keyboardOnFocus = false)
+                    Spacer(Modifier.width(12.dp))
+                    Field(password, { password = it }, "Password", Modifier.weight(1f), secret = true, leading = L.drawable.lucide_ic_lock, onSubmit = ::signIn, keyboardOnFocus = false)
+                }
+                Spacer(Modifier.height(14.dp))
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (connected) {
+                    TvButton("Import addons", {
+                        note = "Bringing your addons…"
+                        scope.launch {
+                            note = runCatching { com.torrentviewer.core.Nuvio.importAddons() }.fold(
+                                { if (it == 0) "Every addon is here already." else "Added $it addon${if (it == 1) "" else "s"}." },
+                                { it.message ?: "Couldn't reach Nuvio." },
+                            )
+                        }
+                    }, icon = L.drawable.lucide_ic_puzzle, requester = main)
+                    Spacer(Modifier.width(10.dp))
+                    TvButton("Change Nuvio profile", {
+                        note = null
+                        scope.launch {
+                            runCatching { com.torrentviewer.core.Nuvio.profiles() }.fold(
+                                { if (it.size > 1) choices = it else note = "This Nuvio account has one profile." },
+                                { note = it.message ?: "Couldn't reach Nuvio." },
+                            )
+                        }
+                    }, icon = L.drawable.lucide_ic_users)
+                    Spacer(Modifier.width(10.dp))
+                    TvButton("Sign out", { com.torrentviewer.core.Nuvio.disconnect(); note = null }, icon = L.drawable.lucide_ic_link)
+                } else TvButton(if (busy) "Signing in…" else "Sign in to Nuvio", ::signIn, icon = L.drawable.lucide_ic_log_in)
+            }
+            note?.let { Text(it, Modifier.padding(top = 10.dp), style = Type.meta.copy(color = Ink.faint)) }
+        }
     }
 }
 

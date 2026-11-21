@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredWidth
@@ -111,12 +112,14 @@ fun Agreement(changed: Boolean, onAgree: () -> Unit) {
 private const val WELCOME = 0
 private const val GENRES_STEP = 1
 private const val SIGN_IN = 2
+/** Not a step of its own: Nuvio's form, in place of the sign-in page's two accounts. */
+private const val NUVIO = 3
 
 /**
  * The first launch: one welcome over a drifting wall of what is trending, then the genres the home
- * screen leads with, then signing in to Stremio — which brings the library, Continue Watching and
- * addons — or skipping it. Sign in opens Stremio's own page; no password comes here. Without a
- * network the pages stand on their gradient alone.
+ * screen leads with, then signing in to Stremio or Nuvio — which brings the library, Continue Watching
+ * and addons — or skipping it. Stremio signs in on its own page; Nuvio by email and password, sent only
+ * to Nuvio. Without a network the pages stand on their gradient alone.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -132,10 +135,14 @@ fun Onboarding(onDone: () -> Unit) {
     var job by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     val scope = rememberCoroutineScope()
     val browser = androidx.compose.ui.platform.LocalUriHandler.current
+    /** Nuvio's form in place of the two accounts. */
+    var nuvio by remember { mutableStateOf(false) }
     BackHandler(step > WELCOME) {
         job?.cancel()
         step--
     }
+    // After the step's, so it is asked first: back from Nuvio's form is the two accounts again.
+    BackHandler(nuvio) { nuvio = false }
 
     fun keepGenres() {
         val s = com.torrentviewer.core.SettingsStore.value.value
@@ -182,9 +189,9 @@ fun Onboarding(onDone: () -> Unit) {
             }
         }
 
-        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(horizontal = EDGE + 8.dp, vertical = 24.dp).widthIn(max = 520.dp)) {
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().imePadding().padding(horizontal = EDGE + 8.dp, vertical = 24.dp).widthIn(max = 520.dp)) {
             AnimatedContent(
-                step,
+                if (nuvio && step == SIGN_IN) NUVIO else step,
                 transitionSpec = { (fadeIn(tween(260)) + slideInVertically(tween(260)) { it / 6 }) togetherWith fadeOut(tween(160)) },
                 label = "step",
             ) { page ->
@@ -233,28 +240,57 @@ fun Onboarding(onDone: () -> Unit) {
                             if (picked.isEmpty()) "Continue" else "Continue with ${picked.size}",
                             ::keepGenres, Modifier.padding(top = 22.dp).fillMaxWidth(), icon = L.drawable.lucide_ic_arrow_right, primary = true,
                         )
-                    } else {
-                        Text("Sign in to Stremio", style = Type.hero.copy(color = Color.White, fontSize = 34.sp, lineHeight = 38.sp))
+                    } else if (page == NUVIO) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            com.torrentviewer.core.ServiceLogo("nuvio.tv", "Nuvio", 44.dp)
+                            Text("Sign in to Nuvio", Modifier.padding(start = 14.dp), style = Type.hero.copy(color = Color.White, fontSize = 30.sp, lineHeight = 34.sp))
+                        }
                         Text(
-                            "Your library, Continue Watching and addons come with you, and stay in step both ways. You sign in on Stremio's own page — your password never comes to Watchly.",
-                            Modifier.padding(top = 10.dp), style = Type.body.copy(color = Color.White.copy(alpha = 0.78f), fontSize = 16.sp, lineHeight = 23.sp),
+                            "Your Nuvio library, Continue Watching and addons. Your password goes only to Nuvio.",
+                            Modifier.padding(top = 10.dp, bottom = 18.dp), style = Type.body.copy(color = Color.White.copy(alpha = 0.78f), fontSize = 16.sp, lineHeight = 23.sp),
                         )
+                        NuvioForm(com.torrentviewer.core.Nuvio.profileId, tint = Color.White, onSignedIn = onDone)
+                        Button("Back", { nuvio = false }, Modifier.padding(top = 10.dp).fillMaxWidth(), icon = L.drawable.lucide_ic_arrow_left, tint = Color.White)
+                    } else {
+                        Text("Sign in", style = Type.hero.copy(color = Color.White, fontSize = 34.sp, lineHeight = 38.sp))
+                        Text(
+                            "Bring your library, Continue Watching and addons from Stremio or Nuvio. They stay in step both ways.",
+                            Modifier.padding(top = 10.dp, bottom = 20.dp), style = Type.body.copy(color = Color.White.copy(alpha = 0.78f), fontSize = 16.sp, lineHeight = 23.sp),
+                        )
+                        Provider("stremio.com", "Stremio", if (code != null) "Open Stremio again" else "Continue with Stremio", "Signs in on Stremio's own page") {
+                            code?.let { c -> runCatching { browser.openUri(c.uriComplete) } } ?: connect()
+                        }
                         code?.let { c ->
                             Text(
                                 "Sign in and approve on the page that opened — this notices by itself. Code ${c.userCode}",
-                                Modifier.padding(top = 14.dp), style = Type.meta.copy(color = Color.White.copy(alpha = 0.7f)),
+                                Modifier.padding(top = 10.dp), style = Type.meta.copy(color = Color.White.copy(alpha = 0.7f)),
                             )
                         }
                         note?.let { Text(it, Modifier.padding(top = 10.dp), style = Type.meta.copy(color = Color.White.copy(alpha = 0.7f))) }
-                        Button(
-                            if (code != null) "Open Stremio again" else "Sign in to Stremio",
-                            { code?.let { c -> runCatching { browser.openUri(c.uriComplete) } } ?: connect() },
-                            Modifier.padding(top = 22.dp).fillMaxWidth(), icon = L.drawable.lucide_ic_link, primary = true,
-                        )
-                        Button("Skip for now", { job?.cancel(); onDone() }, Modifier.padding(top = 10.dp).fillMaxWidth(), tint = Color.White)
+                        Provider("nuvio.tv", "Nuvio", "Continue with Nuvio", "Email and password", Modifier.padding(top = 10.dp)) {
+                            job?.cancel()
+                            nuvio = true
+                        }
+                        Button("Skip for now", { job?.cancel(); onDone() }, Modifier.padding(top = 18.dp).fillMaxWidth(), tint = Color.White)
                     }
                 }
             }
+        }
+    }
+}
+
+/** One account to sign in with, on the tour: its logo, what pressing does, and how it signs in. */
+@Composable
+private fun Provider(domain: String, name: String, label: String, how: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Tap(onClick, modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
+        // Solid, not see-through: the backdrop behind made the words hard to read.
+        Row(Modifier.fillMaxWidth().background(Color(0xFF1C1C1F)).padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            com.torrentviewer.core.ServiceLogo(domain, name, 36.dp)
+            Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
+                Text(label, style = Type.label.copy(color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold))
+                Text(how, style = Type.meta.copy(color = Color.White.copy(alpha = 0.6f)))
+            }
+            Lc(L.drawable.lucide_ic_chevron_right, tint = Color.White.copy(alpha = 0.6f), size = 20.dp)
         }
     }
 }

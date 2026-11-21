@@ -55,6 +55,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.animation.animateContentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -394,7 +395,7 @@ private enum class Shelfs(val label: String) { HISTORY("History"), LATER("My Lis
 fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit, onDownloads: () -> Unit) {
     val downloading by Downloads.live.collectAsState()
     val stremio by Stremio.connected.collectAsState()
-    val stremioLibrary by Stremio.library.collectAsState()
+    val stremioLibrary by com.torrentviewer.core.Synced.collectAsState(com.torrentviewer.core.syncedNow())
     /** Per profile; the guest is offered nothing it would lose on exit. */
     var stremioLater by remember(me.id) { mutableStateOf(me.isGuest || Kv.get(STREMIO_LATER) != null) }
     val history by History.items.collectAsState()
@@ -532,7 +533,7 @@ fun whereLeft(item: Item): String? {
  */
 @Composable
 private fun StremioRow(s: com.torrentviewer.core.Seen, onOpen: () -> Unit) {
-    val paused = com.torrentviewer.core.Stremio.library.collectAsState().value.paused.find { it.imdb == s.imdb }
+    val paused = com.torrentviewer.core.Synced.collectAsState(com.torrentviewer.core.syncedNow()).value.paused.find { it.imdb == s.imdb }
     Tap(onOpen, Modifier.fillMaxWidth(), RoundedCornerShape(10.dp)) { pressed ->
         Row(Modifier.background(if (pressed) Ink.surface2 else Ink.surface).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.width(64.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(6.dp))) {
@@ -654,7 +655,7 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEd
                         )
                     },
                     listOf(
-                        Entry(L.drawable.lucide_ic_user, "Account", "Profile, PIN and Stremio account", "lock sign in addons") { page = "Account" },
+                        Entry(L.drawable.lucide_ic_user, "Account", "Profile, Stremio, Nuvio and PIN", "lock sign in addons login") { page = "Account" },
                         Entry(L.drawable.lucide_ic_users, "Switch profile", "Change to a different profile", onClick = onSwitchProfile),
                     ),
                     listOf(
@@ -716,24 +717,35 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEd
             com.torrentviewer.core.WATCH_TRACKERS.forEach { TrackerSection(it) }
         }
 
-        if (page == "Account") Panel {
-        Section(
-            "Profile",
-            when {
-                me.isGuest -> "Guest keeps nothing — history and My List go when the app closes."
-                profiles.isEmpty() -> "One library on this phone. Add profiles to keep a library, My List and resume points each."
-                else -> "Library, My List and resume points belong to this profile."
-            },
-        ) {
+        if (page == "Account") Column {
+        // Who is watching, first and largest: everything below belongs to this profile.
+        Card {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Avatar(me, 44.dp)
-                Spacer(Modifier.width(14.dp))
-                Button(if (profiles.isEmpty()) "Add profiles" else "Switch profile", onSwitchProfile, icon = L.drawable.lucide_ic_users)
+                Avatar(me, 56.dp)
+                Column(Modifier.weight(1f).padding(start = 14.dp)) {
+                    Text(me.name, style = Type.title.copy(fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        when {
+                            me.isGuest -> "Guest keeps nothing — history and My List go when the app closes."
+                            profiles.isEmpty() -> "One library on this phone. Add profiles to keep a library, My List and resume points each."
+                            else -> "Library, My List and resume points belong to this profile."
+                        },
+                        Modifier.padding(top = 2.dp), style = Type.meta.copy(color = Ink.faint),
+                    )
+                }
             }
+            Button(if (profiles.isEmpty()) "Add profiles" else "Switch profile", onSwitchProfile, Modifier.padding(top = 14.dp).fillMaxWidth(), icon = L.drawable.lucide_ic_users)
         }
+
+        // With the profile: each connection is this profile's.
+        Text("Accounts", Modifier.padding(start = 4.dp, top = 10.dp, bottom = 8.dp), style = Type.overline)
+        if (Stremio.available) StremioSection(me)
+        NuvioSection(me)
 
         // Only a saved profile can carry a lock; the phone's owner before profiles has nowhere to keep one.
         if (!me.isGuest && profiles.any { it.id == me.id }) {
+            Text("Lock", Modifier.padding(start = 4.dp, top = 10.dp, bottom = 8.dp), style = Type.overline)
+            Card {
             Section(
                 "Profile PIN",
                 if (me.pin != null) "Asked for before this profile opens. Remove it to unlock."
@@ -773,10 +785,8 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEd
                     } else watch.notes.tryEmit(if (current.length < 4) "Enter the current PIN to remove it" else "That's not the PIN")
                 }, Modifier.padding(top = 10.dp), icon = L.drawable.lucide_ic_lock_open)
             }
+            }
         }
-
-        // With the profile: the connection is this profile's.
-        if (Stremio.available) StremioSection(me)
         }
 
         if (page == "Streaming") Panel {
@@ -1256,11 +1266,147 @@ fun StremioSection(me: Profile, onLater: (() -> Unit)? = null) {
         }
         note?.let { Text(it, Modifier.padding(top = 8.dp), style = Type.meta.copy(color = Ink.faint)) }
     }
-    if (onLater == null) Section("Stremio account", hint, body)
+    if (onLater == null) AccountCard(
+        "stremio.com", "Stremio", connected,
+        when { connected -> email?.takeIf { me.id == Stremio.profileId }?.let { "Signed in as $it" } ?: "Signed in"; code != null -> "Waiting for your approval…"; else -> "Not signed in" },
+        hint, body,
+    )
     else Column(Modifier.fillMaxWidth().padding(bottom = 14.dp).background(Ink.surface, RoundedCornerShape(12.dp)).padding(16.dp)) {
         Text("Bring your Stremio library", style = Type.title.copy(fontWeight = FontWeight.Bold))
         Text(hint, Modifier.padding(top = 4.dp, bottom = 12.dp), style = Type.meta.copy(color = Ink.faint))
         body()
+    }
+}
+
+/**
+ * Nuvio's sign-in: email and password, sent only to Nuvio (it has no link code). [tint] is the words'
+ * colour — white on the tour. An account with more than one Nuvio profile is asked which; then the
+ * addons come across and [onSignedIn] runs.
+ */
+@Composable
+fun NuvioForm(owner: String, tint: Color = Ink.text, onSignedIn: () -> Unit) {
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf<String?>(null) }
+    /** The account's profiles, once signed in to one with several. */
+    var choices by remember { mutableStateOf<List<com.torrentviewer.core.NuvioProfile>?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+
+    fun go() {
+        if (busy) return
+        if ('@' !in email || password.isEmpty()) {
+            note = "Enter your Nuvio email and password."
+            return
+        }
+        busy = true
+        note = null
+        scope.launch {
+            try {
+                val all = com.torrentviewer.core.Nuvio.signIn(email, password, owner)
+                password = ""
+                if (all.size > 1) choices = all else onSignedIn()
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) note = e.message ?: "Couldn't reach Nuvio."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    choices?.let { all ->
+        NuvioProfilePicker(all, owner, tint) { choices = null; onSignedIn() }
+        return
+    }
+    Column {
+        Field(
+            email, { email = it.trim() }, "Email", Modifier.fillMaxWidth(), leading = L.drawable.lucide_ic_mail,
+            action = androidx.compose.ui.text.input.ImeAction.Next, tint = tint, keyboard = androidx.compose.ui.text.input.KeyboardType.Email,
+        )
+        Field(
+            password, { password = it }, "Password", Modifier.padding(top = 10.dp).fillMaxWidth(), secret = true, leading = L.drawable.lucide_ic_lock,
+            action = androidx.compose.ui.text.input.ImeAction.Done, onSubmit = ::go, tint = tint, keyboard = androidx.compose.ui.text.input.KeyboardType.Password,
+        )
+        note?.let { Text(it, Modifier.padding(top = 10.dp), style = Type.meta.copy(color = tint.copy(alpha = 0.7f))) }
+        Button(if (busy) "Signing in…" else "Sign in to Nuvio", ::go, Modifier.padding(top = 14.dp).fillMaxWidth(), icon = L.drawable.lucide_ic_log_in, primary = true)
+    }
+}
+
+/** Which of the account's Nuvio profiles to watch as: each by its colour and name. */
+@Composable
+fun NuvioProfilePicker(all: List<com.torrentviewer.core.NuvioProfile>, owner: String, tint: Color = Ink.text, onPicked: () -> Unit) {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val chosen = com.torrentviewer.core.Nuvio.profileNameOf(owner)
+    Column {
+        Text("Which Nuvio profile is this?", Modifier.padding(bottom = 10.dp), style = Type.label.copy(color = tint, fontWeight = FontWeight.SemiBold))
+        all.forEach { p ->
+            val color = p.color?.let { runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull() } ?: Ink.accent
+            Tap({ scope.launch { com.torrentviewer.core.Nuvio.choose(p, owner); onPicked() } }, Modifier.padding(bottom = 8.dp).fillMaxWidth(), RoundedCornerShape(10.dp)) { pressed ->
+                Row(Modifier.fillMaxWidth().background(tint.copy(alpha = if (pressed) 0.14f else 0.07f)).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(32.dp).clip(CircleShape).background(color), contentAlignment = Alignment.Center) {
+                        Text(p.name.take(1).uppercase(), style = Type.label.copy(color = Color.White, fontWeight = FontWeight.Bold))
+                    }
+                    Text(p.name, Modifier.weight(1f).padding(horizontal = 12.dp), style = Type.label.copy(color = tint), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (p.name == chosen) Lc(L.drawable.lucide_ic_check, tint = Ink.good, size = 18.dp)
+                }
+            }
+        }
+    }
+}
+
+/** The Account page's Nuvio card, for the profile [me]: the form, or who is signed in, the Nuvio profile and its addons. */
+@Composable
+fun NuvioSection(me: Profile) {
+    val live by com.torrentviewer.core.Nuvio.connected.collectAsState()
+    val liveProfile by com.torrentviewer.core.Nuvio.profileName.collectAsState()
+    /** Bumped by sign-in and sign-out: a profile not being watched has no flow to say so. */
+    var changed by remember { mutableStateOf(0) }
+    val connected = remember(me.id, live, changed) { com.torrentviewer.core.Nuvio.isConnected(me.id) }
+    val nuvioProfile = remember(me.id, liveProfile, changed) { com.torrentviewer.core.Nuvio.profileNameOf(me.id) }
+    val email by com.torrentviewer.core.Nuvio.email.collectAsState()
+    var note by remember { mutableStateOf<String?>(null) }
+    /** The account's profiles while Change profile is open. */
+    var choices by remember { mutableStateOf<List<com.torrentviewer.core.NuvioProfile>?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val signedAs = email?.takeIf { me.id == com.torrentviewer.core.Nuvio.profileId }
+    val hint = when {
+        connected -> "Where you stopped on Nuvio is in Continue Watching, My List is your Nuvio library, and what you finish is marked watched."
+        me.isGuest -> "Your Nuvio library, Continue Watching and addons here. As Guest it's forgotten when the app closes."
+        else -> "Your Nuvio library, Continue Watching and addons here, kept in step both ways. Your password goes only to Nuvio."
+    }
+    val status = when {
+        !connected -> "Not signed in"
+        nuvioProfile != null -> listOfNotNull(nuvioProfile, signedAs).joinToString(" · ")
+        else -> signedAs?.let { "Signed in as $it" } ?: "Signed in"
+    }
+    AccountCard("nuvio.tv", "Nuvio", connected, status, hint) {
+        val open = choices
+        if (connected && open != null) NuvioProfilePicker(open, me.id) { choices = null; changed++ }
+        else if (connected) Column {
+            Button("Import addons", {
+                note = "Bringing your addons…"
+                scope.launch {
+                    note = runCatching { com.torrentviewer.core.Nuvio.importAddons() }.fold(
+                        { if (it == 0) "Every addon is here already" else "Added $it addon${if (it == 1) "" else "s"} — see the Addons tab" },
+                        { it.message ?: "Couldn't reach Nuvio" },
+                    )
+                }
+            }, Modifier.fillMaxWidth(), icon = L.drawable.lucide_ic_puzzle, primary = true)
+            Button("Change Nuvio profile", {
+                note = null
+                scope.launch {
+                    runCatching { com.torrentviewer.core.Nuvio.profiles(me.id) }.fold(
+                        { if (it.size > 1) choices = it else note = "This Nuvio account has one profile" },
+                        { note = it.message ?: "Couldn't reach Nuvio" },
+                    )
+                }
+            }, Modifier.padding(top = 10.dp).fillMaxWidth(), icon = L.drawable.lucide_ic_users)
+            Button("Sign out", {
+                com.torrentviewer.core.Nuvio.disconnect(me.id)
+                changed++
+            }, Modifier.padding(top = 10.dp).fillMaxWidth(), icon = L.drawable.lucide_ic_link)
+            note?.let { Text(it, Modifier.padding(top = 8.dp), style = Type.meta.copy(color = Ink.faint)) }
+        } else NuvioForm(me.id) { changed++ }
     }
 }
 
@@ -1389,6 +1535,40 @@ private fun Group(title: String, content: @Composable () -> Unit) {
 @Composable
 private fun Panel(content: @Composable () -> Unit) {
     Column(Modifier.padding(bottom = 22.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Ink.surface).padding(start = 16.dp, end = 16.dp, top = 18.dp)) { content() }
+}
+
+/** One card of the Account page. */
+@Composable
+private fun Card(content: @Composable () -> Unit) {
+    Column(Modifier.padding(bottom = 12.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Ink.surface).padding(16.dp)) { content() }
+}
+
+/**
+ * A signed-in service on the Account page: its logo, name and who is signed in, opening on a tap to
+ * what it brings and its buttons. Shut, the page is a short list of accounts rather than a wall of them.
+ */
+@Composable
+private fun AccountCard(domain: String, name: String, connected: Boolean, status: String, hint: String, content: @Composable () -> Unit) {
+    var open by rememberSaveable(name) { mutableStateOf(false) }
+    Column(Modifier.padding(bottom = 12.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Ink.surface).animateContentSize()) {
+        Tap({ open = !open }, Modifier.fillMaxWidth(), RoundedCornerShape(14.dp)) { pressed ->
+            Row(Modifier.fillMaxWidth().background(if (pressed) Ink.surface2 else Color.Transparent).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                com.torrentviewer.core.ServiceLogo(domain, name, 42.dp)
+                Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                    Text(name, style = Type.label.copy(fontSize = 16.sp, fontWeight = FontWeight.SemiBold))
+                    Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(7.dp).clip(CircleShape).background(if (connected) Ink.good else Ink.faint))
+                        Text(status, Modifier.padding(start = 6.dp), style = Type.meta.copy(color = if (connected) Ink.text else Ink.faint), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                Lc(if (open) L.drawable.lucide_ic_chevron_up else L.drawable.lucide_ic_chevron_down, tint = Ink.muted, size = 20.dp)
+            }
+        }
+        if (open) Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
+            Text(hint, Modifier.padding(bottom = 12.dp), style = Type.meta.copy(color = Ink.faint))
+            content()
+        }
+    }
 }
 
 /** One line of the settings list; [words] are what else it answers to in the search. */
@@ -1677,7 +1857,10 @@ private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, Strin
                 style = Type.meta.copy(color = Ink.faint),
             )
             // A profile not saved yet has no id to keep a connection under.
-            if (profile != null && Stremio.available) Box(Modifier.fillMaxWidth().padding(top = 24.dp)) { StremioSection(profile) }
+            if (profile != null) Column(Modifier.fillMaxWidth().padding(top = 24.dp)) {
+                if (Stremio.available) StremioSection(profile)
+                NuvioSection(profile)
+            }
         }
         Button("Save", { onSave(name, icon, colour, kids) }, Modifier.fillMaxWidth().padding(top = 20.dp), icon = L.drawable.lucide_ic_check, primary = true)
         Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {

@@ -114,6 +114,16 @@ val GENRES = listOf(
 
 fun kindOfGenre(genre: String) = if (genre == ANIME_GENRE) "tv" else "movie"
 
+/**
+ * The viewer's addon catalogue to show in place of a Cinemeta row of [type] while Cinemeta refuses: the
+ * first, in their order, that lists without being asked anything — or, for a [genre] row, one that takes a
+ * genre. A Cinemeta addon is no help, as it is the one refusing.
+ */
+fun standIn(addons: List<Addon>, type: String, genre: String?): Pair<Addon, AddonCatalog>? =
+    addons.filter { it.on && "cinemeta" !in it.url }.firstNotNullOfOrNull { a ->
+        a.catalogs.firstOrNull { it.type == type && if (genre == null) !it.required else it.genres }?.let { a to it }
+    }
+
 object Meta {
     private const val BASE = "https://v3-cinemeta.strem.io/meta"
     /** Popularity shelves, asked for directly to save a redirect per rail. */
@@ -131,6 +141,35 @@ object Meta {
     private const val STORE = "meta:tv7:"
 
     private val memory = ConcurrentHashMap<String, Any>()
+
+    /**
+     * Calibration knobs. Cinemeta limits by IP, and on mobile data one IP is shared by a whole carrier's
+     * worth of phones: a cold start used to send it dozens of requests at once, and the rest of them were
+     * refused. A few at a time, and once it says too many, none for a while.
+     */
+    private const val CINEMETA_AT_ONCE = 4
+    private const val CINEMETA_REST_MS = 60_000L
+    private val cinemetaGate = Semaphore(CINEMETA_AT_ONCE)
+    @Volatile private var cinemetaRestUntil = 0L
+
+    /** Every Cinemeta request, through [cinemetaGate]; refused at once while it is resting. Other hosts pass straight through. */
+    private suspend fun cinemeta(url: String, quiet: Boolean = false): String {
+        if ("cinemeta" !in url) return Net.get(url, quiet = quiet)
+        fun resting() = System.currentTimeMillis() < cinemetaRestUntil
+        if (resting()) throw java.io.IOException("Cinemeta asked to wait")
+        return cinemetaGate.withPermit {
+            if (resting()) throw java.io.IOException("Cinemeta asked to wait")
+            try {
+                Net.get(url, quiet = quiet)
+            } catch (e: HttpException) {
+                if (e.code == 429) {
+                    cinemetaRestUntil = System.currentTimeMillis() + maxOf(e.retryAfterMs, CINEMETA_REST_MS)
+                    android.util.Log.w("meta", "Cinemeta said too many requests: resting ${maxOf(e.retryAfterMs, CINEMETA_REST_MS) / 1000}s")
+                }
+                throw e
+            }
+        }
+    }
 
     /**
      * Memory over disk over network; a stale disk copy is served if the fetch fails. Off the main
@@ -168,8 +207,24 @@ object Meta {
     @Suppress("UNCHECKED_CAST")
     fun peekCatalog(kind: String, genre: String?): List<Title>? = memory["shelf:$kind:${genre.orEmpty()}"] as List<Title>?
 
-    /** A [genre] starting [ADDON_SHELF] is one of the viewer's addons' catalogues, by [Addons.shelves]' key. */
-    suspend fun catalog(kind: String, genre: String? = null): List<Title> = runCatching {
+    /**
+     * A [genre] starting [ADDON_SHELF] is one of the viewer's addons' catalogues, by [Addons.shelves]' key.
+     * A Cinemeta row it can't get, with no copy kept, is filled from the viewer's own catalogue addon
+     * instead ([standIn]) — not kept, so Cinemeta is asked again once it has rested.
+     */
+    suspend fun catalog(kind: String, genre: String? = null): List<Title> =
+        shelf(kind, genre).ifEmpty { if (genre == ANIME_GENRE || genre?.startsWith(ADDON_SHELF) == true || genre?.startsWith(TOP_SHELF) == true) emptyList() else standInShelf(kind, genre) }
+
+    private suspend fun standInShelf(kind: String, genre: String?): List<Title> = runCatching {
+        val key = "standin:$kind:${genre.orEmpty()}"
+        @Suppress("UNCHECKED_CAST")
+        (memory[key] as List<Title>?)?.let { return@runCatching it }
+        val (a, c) = standIn(Addons.list.value, if (kind == "tv") "series" else "movie", genre) ?: return@runCatching emptyList()
+        val metas = JSONObject(Net.get("${a.url}/catalog/${c.type}/${enc(c.id)}${genre?.let { "/genre=${enc(it)}" }.orEmpty()}.json", quiet = true)).optJSONArray("metas")
+        toTitles(metas ?: JSONArray(), kindOfType(c.type), anyId = true, type = c.type).also { if (it.isNotEmpty()) memory[key] = it }
+    }.getOrDefault(emptyList())
+
+    private suspend fun shelf(kind: String, genre: String?): List<Title> = runCatching {
         remember("shelf:$kind:${genre.orEmpty()}", ::titlesFrom, ::titlesJson) {
             if (genre?.startsWith(ADDON_SHELF) == true) {
                 val (addon, list) = Addons.shelf(genre) ?: error("addon gone")
@@ -179,7 +234,7 @@ object Meta {
             if (genre?.startsWith(TOP_SHELF) == true) return@remember topRated(kind, genre.removePrefix(TOP_SHELF).ifEmpty { null })
             val type = if (kind == "tv") "series" else "movie"
             val url = if (genre == ANIME_GENRE) ANIME else "$CATALOG/$type/top${genre?.let { "/genre=${enc(it)}" }.orEmpty()}.json"
-            toTitles(JSONObject(Net.get(url)).optJSONArray("metas") ?: JSONArray(), kind)
+            toTitles(JSONObject(cinemeta(url)).optJSONArray("metas") ?: JSONArray(), kind)
         }
     }.getOrDefault(emptyList())
 
@@ -195,7 +250,7 @@ object Meta {
             (0 until TOP_PAGES).map { "$CATALOG/$type/top/${named}skip=${it * 50}.json" }
         }
         pages.map { url ->
-            async { runCatching { toTitles(JSONObject(Net.get(url, quiet = true)).optJSONArray("metas") ?: JSONArray(), kind) }.getOrDefault(emptyList()) }
+            async { runCatching { toTitles(JSONObject(cinemeta(url, quiet = true)).optJSONArray("metas") ?: JSONArray(), kind) }.getOrDefault(emptyList()) }
         }.awaitAll().flatten().let(::bestRated).also { check(it.isNotEmpty()) { "no top list" } }
     }
 
@@ -206,12 +261,15 @@ object Meta {
     fun peekTopOf(kind: String, genres: List<String>): List<Title>? =
         mixTop(genres.map { peekCatalog(kind, TOP_SHELF + it) ?: return null }, TOP_SIZE)
 
-    /** A card's title in full, for its IMDb rating and art; not kept, as the whole answer is. */
+    /**
+     * A card's title in full, for its IMDb rating and art; not kept, as the whole answer is. While Cinemeta
+     * rests, TMDB's own rating from the card stands in, so the row still has its scores.
+     */
     private suspend fun cardTitle(card: TmdbCard): Title? {
         val imdb = Tmdb.imdbOf(card) ?: return null
         val type = if (card.kind == "tv") "series" else "movie"
-        return runCatching { toTitles(JSONArray().put(JSONObject(Net.get("$BASE/$type/$imdb.json", quiet = true)).getJSONObject("meta").put("imdb_id", imdb)), card.kind).first() }
-            .getOrElse { Title(imdb, card.kind, card.title, year = card.year, poster = card.poster) }
+        return runCatching { toTitles(JSONArray().put(JSONObject(cinemeta("$BASE/$type/$imdb.json", quiet = true)).getJSONObject("meta").put("imdb_id", imdb)), card.kind).first() }
+            .getOrElse { Title(imdb, card.kind, card.title, year = card.year, rating = card.rating, poster = card.poster) }
     }
 
     /**
@@ -245,7 +303,7 @@ object Meta {
             fromAddons(imdb, kind)?.let { return@remember it }
             require(imdb.startsWith("tt")) { "no meta addon for $imdb" }
             val type = if (kind == "tv") "series" else "movie"
-            val meta = JSONObject(Net.get("$BASE/$type/$imdb.json")).getJSONObject("meta")
+            val meta = JSONObject(cinemeta("$BASE/$type/$imdb.json")).getJSONObject("meta")
             meta.put("imdb_id", imdb)
             toTitles(JSONArray().put(meta), kind, withEpisodes = true).first().let { if (it.numberedThrough) withStills(it) else it }
         }
@@ -253,7 +311,7 @@ object Meta {
 
     /** Just a film's genres, for [WatchOrders.tag]: no addons asked, and nothing built or kept but the names. */
     suspend fun genresOf(imdb: String): List<String> = runCatching {
-        val meta = JSONObject(Net.get("$BASE/movie/$imdb.json", quiet = true)).getJSONObject("meta")
+        val meta = JSONObject(cinemeta("$BASE/movie/$imdb.json", quiet = true)).getJSONObject("meta")
         (meta.optJSONArray("genre") ?: meta.optJSONArray("genres"))?.let { g -> (0 until g.length()).map { g.optString(it) } }.orEmpty()
     }.getOrDefault(emptyList())
 
@@ -312,7 +370,7 @@ object Meta {
                 pages.map { (type, skip) ->
                     async {
                         runCatching {
-                            JSONObject(Net.get("$CATALOG/$type/top/genre=Family&skip=$skip.json", quiet = true))
+                            JSONObject(cinemeta("$CATALOG/$type/top/genre=Family&skip=$skip.json", quiet = true))
                                 .optJSONArray("metas")?.objects().orEmpty().mapNotNull { it.str("imdb_id") ?: it.str("id") }
                         }.getOrDefault(emptyList())
                     }
@@ -327,7 +385,7 @@ object Meta {
         @Suppress("UNCHECKED_CAST")
         (memory[key] as List<Title>?) ?: run {
             val type = if (kind == "tv") "series" else "movie"
-            toTitles(JSONObject(Net.get("$SEARCH/$type/top/search=${enc(query)}.json")).optJSONArray("metas") ?: JSONArray(), kind)
+            toTitles(JSONObject(cinemeta("$SEARCH/$type/top/search=${enc(query)}.json")).optJSONArray("metas") ?: JSONArray(), kind)
                 .also { memory[key] = it }
         }
     }.getOrDefault(emptyList())

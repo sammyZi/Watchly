@@ -448,6 +448,7 @@ object Profiles {
         write(_list.value.filter { it.id != id })
         Kv.wipeProfile(id)
         Stremio.forget(id)
+        Nuvio.forget(id)
         WATCH_TRACKERS.forEach { it.forget(id) }
     }
 }
@@ -954,7 +955,7 @@ object SavedStore {
         }
         _items.value = next
         // My List is the Stremio library, when an account is signed in.
-        if (list == "later") Stremio.setInLibrary(title, adding)
+        if (list == "later") { Stremio.setInLibrary(title, adding); Nuvio.setInLibrary(title, adding) }
         Kv.set(
             KEY,
             JSONArray(next.map {

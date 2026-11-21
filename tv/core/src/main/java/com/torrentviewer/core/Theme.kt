@@ -173,6 +173,13 @@ internal fun otherArt(url: String?): String? = when {
 internal fun artCandidates(url: String, fallback: String?): List<String> =
     listOfNotNull(url, fallback, otherArt(fallback ?: url)).distinct()
 
+/** A service's logo by its domain, from Google's favicon service, as the integrations show theirs. */
+@Composable
+fun ServiceLogo(domain: String, name: String, size: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier) = Artwork(
+    "https://www.google.com/s2/favicons?sz=128&domain=$domain", name,
+    modifier.size(size).clip(RoundedCornerShape(size / 4)), scale = ContentScale.Fit, fill = false,
+)
+
 /** A network image over a placeholder tinted from the name. */
 @Composable
 /** [fill]: a placeholder under the picture — skipped where the picture covers it anyway and the fill is pure GPU cost. */

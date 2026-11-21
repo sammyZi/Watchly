@@ -9,8 +9,11 @@ private val NOT_SHOWS = setOf(10767, 10763)
 
 data class CastMember(val id: Int, val name: String, val role: String?, val photo: String?)
 
-/** A title known by TMDB's id: its IMDb id, which the app goes by, is asked for only when it's opened. */
-data class TmdbCard(val id: Int, val kind: String, val title: String, val poster: String?, val year: String?)
+/**
+ * A title known by TMDB's id: its IMDb id, which the app goes by, is asked for only when it's opened.
+ * [rating] is TMDB's own score out of ten, "7.5", when it has one: in the answer already, so it costs nothing.
+ */
+data class TmdbCard(val id: Int, val kind: String, val title: String, val poster: String?, val year: String?, val rating: String? = null)
 
 /** [directors]: who made it, for their pages — a film's director, a series' creators. */
 data class TmdbTitle(val certificate: String?, val cast: List<CastMember>, val similar: List<TmdbCard>, val directors: List<CastMember> = emptyList())
@@ -28,7 +31,9 @@ private fun image(size: String, path: String?) = path?.takeIf { it.isNotBlank() 
 private fun cardOf(o: JSONObject, kind: String): TmdbCard? {
     val poster = image("w342", o.str("poster_path")) ?: return null
     val name = o.str("title") ?: o.str("name") ?: return null
-    return TmdbCard(o.optInt("id"), kind, name, poster, (o.str("release_date") ?: o.str("first_air_date"))?.take(4))
+    // A score from a handful of votes says little: none rather than a 10 from three people.
+    val rating = o.optDouble("vote_average").takeIf { it > 0 && o.optInt("vote_count") >= 50 }?.let { "%.1f".format(java.util.Locale.US, it) }
+    return TmdbCard(o.optInt("id"), kind, name, poster, (o.str("release_date") ?: o.str("first_air_date"))?.take(4), rating)
 }
 
 /** The US rating: the one set every title has. */

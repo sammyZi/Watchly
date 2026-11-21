@@ -25,6 +25,14 @@ class TmdbTitleTest {
         assertEquals(listOf(TmdbCard(1, "movie", "Batman", "https://image.tmdb.org/t/p/w342/b.jpg", "1989")), t.similar)
     }
 
+    @Test fun aCardCarriesTmdbsScoreWhenEnoughVoted() {
+        val json = """{"recommendations":{"results":[
+            {"id":1,"title":"A","poster_path":"/a.jpg","vote_average":7.46,"vote_count":900},
+            {"id":2,"title":"B","poster_path":"/b.jpg","vote_average":10.0,"vote_count":3},
+            {"id":3,"title":"C","poster_path":"/c.jpg"}]}}"""
+        assertEquals(listOf("7.5", null, null), parseTmdbTitle(json, "movie").similar.map { it.rating })
+    }
+
     @Test fun aSeriesHasItsRatingElsewhere() {
         val json = """{"content_ratings":{"results":[{"iso_3166_1":"DE","rating":"16"},{"iso_3166_1":"US","rating":"TV-MA"}]}}"""
         assertEquals("TV-MA", parseTmdbTitle(json, "tv").certificate)

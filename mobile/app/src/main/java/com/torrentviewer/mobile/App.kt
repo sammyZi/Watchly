@@ -171,6 +171,7 @@ private fun open(profile: Profile) {
     History.load()
     SavedStore.load()
     Stremio.load(profile.id, profile.isGuest)
+    com.torrentviewer.core.Nuvio.load(profile.id, profile.isGuest)
     com.torrentviewer.core.WATCH_TRACKERS.forEach { it.load(profile.id, profile.isGuest) }
     Kids.use(profile)
     if (!profile.isGuest) Kv.setGlobal(LAST_PROFILE, profile.id)

@@ -244,7 +244,7 @@ class Watch(val engine: TorrentStream) {
     private fun fromStremio(now: Item, index: Int, name: String): Item {
         val imdb = now.imdb ?: return now
         val ep = if (now.kind == "movie") null else (episodeOfFile(title?.episodes.orEmpty(), name)?.let { Ep(it.season, it.episode) } ?: parseEpisode(name) ?: return now)
-        val library = Stremio.library.value
+        val library = syncedNow()
         val at = library.pausedSeconds(imdb, ep) ?: run {
             val percent = library.pausedAt(imdb, ep) ?: return now
             val runtime = runtimeSeconds(title?.runtime).takeIf { it > 0 } ?: return now
@@ -568,6 +568,7 @@ class Watch(val engine: TorrentStream) {
         val ep = playingEp(at)
         if (at.kind != "movie" && ep == null) return
         Stremio.pause(at, ep, seconds, of)
+        Nuvio.pause(at, ep, seconds, of)
     }
 
     /** The play that has gone to Stremio, so a film is marked once however often its position is saved. */
@@ -581,6 +582,7 @@ class Watch(val engine: TorrentStream) {
         marked = playId
         val ep = if (at.kind == "movie") null else playingEp(at) ?: return
         Stremio.watched(at, ep?.season, ep?.episode)
+        Nuvio.watched(at, ep?.season, ep?.episode)
         WATCH_TRACKERS.forEach { it.watched(at, ep?.season, ep?.episode) }
     }
 

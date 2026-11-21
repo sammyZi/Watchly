@@ -8,8 +8,8 @@ import org.json.JSONObject
 /** One resource an addon serves, for these types and ids starting so; null prefixes is any id. */
 data class AddonResource(val name: String, val types: List<String>, val idPrefixes: List<String>?)
 
-/** A list an addon offers. [required] needs an extra (a genre, a search) before it lists anything; [search] takes a query. */
-data class AddonCatalog(val type: String, val id: String, val name: String, val required: Boolean, val search: Boolean)
+/** A list an addon offers. [required] needs an extra (a genre, a search) before it lists anything; [search] takes a query; [genres] can be filtered by genre. */
+data class AddonCatalog(val type: String, val id: String, val name: String, val required: Boolean, val search: Boolean, val genres: Boolean = false)
 
 /** Watchly's own kind for a Stremio type: "movie" plays the id itself — films, and live "tv" channels — the rest hold videos. */
 fun kindOfType(type: String) = if (type == "movie" || type == "tv") "movie" else "tv"
@@ -110,7 +110,8 @@ fun toAddon(url: String, m: JSONObject, on: Boolean = true): Addon? {
         val extra = c.optJSONArray("extra")?.objects().orEmpty()
         val required = extra.any { it.optBoolean("isRequired") } || c.strings("extraRequired").isNotEmpty()
         val search = extra.any { it.optString("name") == "search" } || "search" in c.strings("extraSupported")
-        AddonCatalog(type, id, c.str("name") ?: id, required, search)
+        val genres = extra.any { it.optString("name") == "genre" } || "genre" in c.strings("extraSupported")
+        AddonCatalog(type, id, c.str("name") ?: id, required, search, genres)
     }
     return if (resources.isEmpty() && catalogs.isEmpty()) null else Addon(url, name, resources, on, m.toString(), catalogs)
 }
