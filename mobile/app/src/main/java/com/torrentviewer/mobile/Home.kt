@@ -578,7 +578,8 @@ private fun Hero(pager: PagerState, titles: List<Title>, onOpen: (Title) -> Unit
         pager.animateScrollToPage((pager.settledPage + 1) % count, animationSpec = tween(650, easing = androidx.compose.animation.core.FastOutSlowInEasing))
     }
     val wide = isWide()
-    val height = if (wide) (LocalConfiguration.current.screenHeightDp * 0.82f).dp else (LocalConfiguration.current.screenWidthDp * 1.12f).dp
+    // Upright, a little taller than wide-and-a-tenth: the art had the logo, facts and buttons crowding its foot.
+    val height = if (wide) (LocalConfiguration.current.screenHeightDp * 0.82f).dp else (LocalConfiguration.current.screenWidthDp * 1.22f).dp
     Box(Modifier.fillMaxWidth().height(height)) {
         HorizontalPager(pager, Modifier.fillMaxSize(), key = { titles.getOrNull(it)?.imdb ?: it }) { page ->
             val start = titles.getOrNull(page) ?: return@HorizontalPager
@@ -632,8 +633,8 @@ private fun HeroDots(pager: PagerState, count: Int, modifier: Modifier = Modifie
             Box(
                 Modifier
                     .layout { measurable, _ ->
-                        val w = (6.dp + 20.dp * near(i)).roundToPx()
-                        val h = 5.dp.roundToPx()
+                        val w = (7.dp + 20.dp * near(i)).roundToPx()
+                        val h = 7.dp.roundToPx()
                         val placeable = measurable.measure(androidx.compose.ui.unit.Constraints.fixed(w, h))
                         layout(w, h) { placeable.place(0, 0) }
                     }
