@@ -123,8 +123,9 @@ file freed (`StartKits` in `tv/core`; see
 Played again, from Continue Watching or anywhere, its first picture comes in about a second,
 even after the app was closed. Kept starts go after 14 days unplayed or past 1 GB in all.
 
-**Look.** Poppins throughout, frosted glass for the tab bar, the top bars and the sheets
-(Haze), switching light and dark spreading out from where the screen was touched, and
+**Look.** Poppins throughout, a floating glass dock for the tabs after OpenTune's — its accent lens
+stretching to the tab you pick, shrinking to its icons while a page scrolls down, out of the way on a
+title's page — frosted glass for the top bars and the sheets (Haze), switching light and dark spreading out from where the screen was touched, and
 opening titles with a film reel unrolling the name.
 
 **Google Cast.** The Cast button in the player hands the stream to a Chromecast

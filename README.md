@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>One player for your phone, TV and PC.</b><br>
-  Bring your own sources — Stremio-compatible addons, a debrid service, or your own media server — and your Stremio account comes along.
+  Bring your own sources — Stremio-compatible addons, a debrid service, or your own media server — and your Stremio or Nuvio account comes along.
 </p>
 
 <p align="center">
@@ -40,7 +40,7 @@
 <table>
   <tr>
     <td width="33%" valign="top">🧩 <b>Any Stremio addon</b><br>Catalogues, titles, streams and subtitles from the addons you add. Tap <i>Install</i> on an addon's site and pick Watchly.</td>
-    <td width="33%" valign="top">🔄 <b>Your Stremio account</b><br>Sign in with a code — no password in Watchly. Your library, Continue Watching and addons follow you, both ways.</td>
+    <td width="33%" valign="top">🔄 <b>Your Stremio or Nuvio account</b><br>Stremio signs in with a code, Nuvio with its own email and password. Your library, Continue Watching, watched marks and addons follow you, both ways.</td>
     <td width="33%" valign="top">▶️ <b>Plays what you bring</b><br>Debrid links, your own media server, any link you paste. 4K, HDR and every format, on Media3 or VLC.</td>
   </tr>
   <tr>
@@ -61,7 +61,7 @@
   <tr>
     <td valign="top">⚡ <b>Instant resume</b><br>A film you stopped part-way keeps its start, so Continue Watching opens it in about a second — even after closing the app.</td>
     <td valign="top">🔀 <b>Change stream</b><br>Switch to another release mid-film, picked by quality, and carry on from the same second.</td>
-    <td valign="top">🎨 <b>Looks the part</b><br>Frosted glass bars, a theme change that spreads from your touch, and opening titles on a film reel.</td>
+    <td valign="top">🎨 <b>Looks the part</b><br>A floating glass dock that shrinks as you scroll, a theme change that spreads from your touch, and opening titles on a film reel.</td>
   </tr>
 </table>
 
@@ -159,8 +159,8 @@ when Android asks.
 ### ✨ First launch
 
 1. Pick a few favourite genres — the home screen leads with them.
-2. **Sign in to Stremio** (or skip). You approve on Stremio's own page; your library, Continue Watching and addons come with you.
-3. No Stremio account? Open the **Addons** tab and paste an addon's link, or tap **Install** on an addon's site and choose Watchly.
+2. **Sign in to Stremio or Nuvio** (or skip). Stremio is approved on its own page. Nuvio asks for its email and password, which go only to Nuvio; an account with several Nuvio profiles asks which one. Your library, Continue Watching and addons come with you.
+3. No account? Open **Settings → Addons** and paste an addon's link, or tap **Install** on an addon's site and choose Watchly.
 4. On the TV, **Settings → Addons → Copy addons from phone** brings every addon over with one QR scan.
 5. Subtitles work from the start: the OpenSubtitles addon is added for you.
 
@@ -183,7 +183,7 @@ Three apps, each with its own README, and the watch party relay:
 | 🎉 Watch party relay | [`party/`](docs/watch-party.md#running-your-own-relay) | Cloudflare Worker + Durable Objects |
 
 The phone and the TV share one Gradle module, `tv/core`: the addon client, the
-Stremio account sync, the players, metadata, the store and the look.
+Stremio and Nuvio account sync, the players, metadata, the store and the look.
 
 <details>
 <summary><b>🛠️ Build from source</b></summary>
@@ -215,9 +215,9 @@ features are simply left out. The TV and Windows builds read the same file.
 | | |
 |---|---|
 | 🧩 Sources | The [Stremio addon protocol](https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/protocol.md): catalogues, titles, streams and subtitles from addons you add yourself |
-| 🔄 Sync | Your [Stremio](https://www.stremio.com) account: library, Continue Watching, watched marks and addons |
+| 🔄 Sync | Your [Stremio](https://www.stremio.com) or [Nuvio](https://nuvio.tv) account ([Nuvio's public API](https://nuvio.tv/docs)): library, Continue Watching, watched marks and addons · [Simkl](https://simkl.com) and [MDBList](https://mdblist.com) for watched marks |
 | 🎞️ Players | [AndroidX Media3](https://github.com/androidx/media) with the [Jellyfin FFmpeg decoder](https://github.com/jellyfin/jellyfin-androidx-media) · [VLC / libVLC](https://www.videolan.org/vlc/libvlc.html) and [LibVLCSharp](https://github.com/videolan/libvlcsharp) |
-| 🎨 Look | [Jetpack Compose](https://developer.android.com/jetpack/compose) · [Haze](https://github.com/chrisbanes/haze) frosted glass · [Coil](https://github.com/coil-kt/coil) · [Lucide](https://lucide.dev) icons · [Poppins](https://github.com/itfoundry/Poppins) and [Anton](https://github.com/googlefonts/AntonFont) type |
+| 🎨 Look | [Jetpack Compose](https://developer.android.com/jetpack/compose) · [Haze](https://github.com/chrisbanes/haze) frosted glass · the phone's dock after [OpenTune](https://github.com/justshivv/Opentune)'s · [Coil](https://github.com/coil-kt/coil) · [Lucide](https://lucide.dev) icons · [Poppins](https://github.com/itfoundry/Poppins) and [Anton](https://github.com/googlefonts/AntonFont) type |
 | 🗂️ Titles &amp; art | [Cinemeta](https://v3-cinemeta.strem.io), Stremio's public catalogue · [TVmaze](https://www.tvmaze.com) episode stills · [TMDB](https://www.themoviedb.org) suggestions, cast, age ratings and collections |
 | ⏭️ Intros | [IntroDB](https://introdb.app) · [TheIntroDB](https://theintrodb.org) |
 | 💬 Subtitles | The [OpenSubtitles](https://www.opensubtitles.org) addon, added by default · subtitle addons you add · [SubDL](https://subdl.com) with your own free key |
@@ -238,7 +238,7 @@ endorsed or certified by TMDB.
 > following the copyright laws where you live. Please only watch what you have the right to.
 >
 > Watchly is an independent project. It is not affiliated with, endorsed by or sponsored by Stremio,
-> any addon, debrid service or metadata provider, Google, Microsoft or any studio. Names and logos of
+> Nuvio, Simkl, MDBList, any addon, debrid service or metadata provider, Google, Microsoft or any studio. Names and logos of
 > those products are trademarks of their owners and are used here only to describe compatibility.
 > Titles, posters, artwork and other metadata shown inside the apps come from the services you use
 > and belong to their respective owners.

@@ -7,9 +7,10 @@ streams and subtitles come from the Stremio-protocol addons you add under Settin
 link you paste into Search → Streams. A torrent stream goes to the torrent engine; a link plays as it is.
 Addon catalogues become home rows and are searched too. An addon site's Install button (`stremio://`)
 opens in Watchly when the installer's "Open addon Install links" box is ticked (offered only when
-Stremio doesn't already own those links). Settings → Stremio account signs in by Stremio's link code,
-with a QR for approving on a phone; the library, Continue Watching and My List then stay in step, and
-the account's addons can be imported.
+Stremio doesn't already own those links). Settings → Account signs in to Stremio by its link code,
+with a QR for approving on a phone, and to Nuvio by its email and password, sent only to Nuvio, with a
+choice of Nuvio profile; the library, Continue Watching and My List then stay in step, and each
+account's addons can be imported.
 
 | Part | Library |
 |---|---|
