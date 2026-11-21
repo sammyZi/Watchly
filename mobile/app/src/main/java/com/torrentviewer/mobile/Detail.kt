@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -138,7 +140,12 @@ fun DetailScreen(initial: Title, watch: Watch, onOrder: (com.torrentviewer.core.
     var title by remember(initial.imdb) { mutableStateOf(initial) }
     LaunchedEffect(initial.imdb) { Meta.title(initial.imdb, initial.kind)?.let { title = it } }
     // Rating, cast and what's like it. Without a key or a connection the page is as it was.
-    val tmdb by produceState<com.torrentviewer.core.TmdbTitle?>(null, initial.imdb) { value = com.torrentviewer.core.Tmdb.title(initial.imdb, initial.kind) }
+    /** TMDB has answered (or can't): till then the badge row keeps its room, so the certificate landing doesn't push the page down. */
+    var tmdbAsked by remember(initial.imdb) { mutableStateOf(false) }
+    val tmdb by produceState<com.torrentviewer.core.TmdbTitle?>(null, initial.imdb) {
+        value = com.torrentviewer.core.Tmdb.title(initial.imdb, initial.kind)
+        tmdbAsked = true
+    }
     val certificate = tmdb?.certificate
     if (com.torrentviewer.core.Kids.on && com.torrentviewer.core.tooOldForKids(certificate)) {
         TooOldForKids(title, certificate.orEmpty(), onBack)
@@ -301,12 +308,20 @@ fun DetailScreen(initial: Title, watch: Watch, onOrder: (com.torrentviewer.core.
                     ),
                 ) {
                     if (wide) TitleMark(title, Modifier.widthIn(max = 320.dp).padding(bottom = 12.dp), maxHeight = 80.dp, style = Type.display)
-                    Facts(title.copy(genres = title.genres.take(2)))
+                    // One genre upright: the runtime arriving with the full entry made two wrap to a second line, and the page jumped.
+                    Facts(title.copy(genres = title.genres.take(if (wide) 2 else 1)))
                     // On any release here, or on a connected account from another device; a series shows it per episode.
                     val finished = history.filter { it.imdb == title.imdb && it.ratio >= com.torrentviewer.core.WATCHED_AT }.maxOfOrNull { it.at }
                     val seenIt = !title.isSeries && (finished != null || title.imdb in stremio.films)
-                    if (seenIt || certificate != null) Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        certificate?.let { CertificateBadge(it) }
+                    // Its room is kept while TMDB is still being asked, and the badge fades into it.
+                    if (seenIt || certificate != null || (!tmdbAsked && com.torrentviewer.core.Tmdb.key.isNotEmpty())) Row(
+                        Modifier.padding(top = 12.dp).heightIn(min = 26.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        androidx.compose.animation.AnimatedVisibility(certificate != null, enter = androidx.compose.animation.fadeIn(tween(220))) {
+                            certificate?.let { CertificateBadge(it) }
+                        }
                         if (seenIt) WatchedBadge(finished)
                     }
                     // The list first, as someone chose its order; TMDB for any other film. A series has its seasons.
@@ -645,7 +660,7 @@ private fun LazyListScope.sources(
                     when {
                         !Addons.hasStreams -> Addons.NONE_YET
                         language != null -> "Nothing found in $language. Change the language and try again."
-                        else -> "Nothing found. Try another episode, or add another addon in the Addons tab."
+                        else -> "Nothing found. Try another episode, or add another addon in Settings → Addons."
                     },
                 )
                 hits == null && episode == null && title.isSeries -> Note("Choose an episode to see what is available.")

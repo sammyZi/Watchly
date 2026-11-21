@@ -115,6 +115,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.withContext
@@ -123,13 +135,12 @@ import com.composables.icons.lucide.R as L
 enum class Tab(val label: String, @DrawableRes val icon: Int) {
     HOME("Home", L.drawable.lucide_ic_house),
     SEARCH("Search", L.drawable.lucide_ic_search),
-    ADDONS("Addons", L.drawable.lucide_ic_puzzle),
     LIBRARY("Library", L.drawable.lucide_ic_library),
     SETTINGS("Settings", L.drawable.lucide_ic_settings),
 }
 
-/** A kids profile has no say in where streams come from. */
-private fun tabs() = Tab.entries.filter { it != Tab.ADDONS || !Kids.on }
+/** The tab bar. Addons live in Settings, above Account. */
+private fun tabs() = Tab.entries
 
 /** What is stacked over the tabs: a title, a whole shelf, or the downloads (reached from Library). */
 sealed interface Page {
@@ -513,7 +524,6 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>, barHaze: dev.chris
                     when (t) {
                         Tab.HOME -> HomeScreen(home, watch, me, onOpen = openTitle, onShelf = { pages.add(Page.Catalog(it)) }, onTop = { pages.add(Page.Top(it)) }, onProfile = { switching = true })
                         Tab.SEARCH -> SearchScreen(watch, onOpen = openTitle)
-                        Tab.ADDONS -> AddonsScreen(watch)
                         Tab.LIBRARY -> LibraryScreen(watch, me, onOpen = openTitle, onDownloads = { pages.add(Page.Downloads) })
                         Tab.SETTINGS -> SettingsScreen(watch, me, onSwitchProfile = { switching = true }, onEditHome = { home.editing = true; tab = Tab.HOME })
                     }
@@ -525,6 +535,9 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>, barHaze: dev.chris
         clearPages()
         tab = t
     }
+    // Scrolling down shrinks the dock to its icons, scrolling up brings it back in full; a tab change leaves it as it is.
+    val dockThreshold = with(androidx.compose.ui.platform.LocalDensity.current) { 48.dp.toPx() }
+    val dockScroll = remember { DockScroll(dockThreshold) }
 
     Box(Modifier.fillMaxSize()) {
         if (isWide()) {
@@ -533,13 +546,23 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>, barHaze: dev.chris
                 Box(Modifier.weight(1f).fillMaxHeight().hazeSource(barHaze)) { body() }
             }
         } else {
-            // Every page runs on under the bar, which frosts what passes behind it — a tab, and a film's page
-            // opened over one; each leaves room at its foot for the bar (LocalTabBarInset).
-            val bar = TAB_BAR_HEIGHT + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            // Every page runs on under the dock, which frosts what passes behind it, and leaves room at its foot
+            // for it (LocalTabBarInset). A title's page has the screen to itself: the dock sinks away while it is
+            // open, and that page keeps only the system bar's room.
+            val onTitle = pages.lastOrNull() is Page.Detail
+            val navBar = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            val bar = if (onTitle) navBar else DOCK_HEIGHT + DOCK_GAP * 2 + navBar
             androidx.compose.runtime.CompositionLocalProvider(LocalTabBarInset provides bar) {
-                Box(Modifier.fillMaxSize().hazeSource(barHaze)) { body() }
+                Box(Modifier.fillMaxSize().nestedScroll(dockScroll).hazeSource(barHaze)) { body() }
             }
-            TabBar(tab, choose, barHaze, Modifier.align(Alignment.BottomCenter))
+            AnimatedVisibility(
+                !onTitle,
+                Modifier.align(Alignment.BottomCenter),
+                enter = slideInVertically(androidx.compose.animation.core.spring(dampingRatio = 0.9f, stiffness = 380f)) { it } + fadeIn(tween(200)),
+                exit = slideOutVertically(tween(220)) { it } + fadeOut(tween(180)),
+            ) {
+                TabBar(tab, choose, barHaze, dockScroll.compact)
+            }
         }
 
         UpdateCard(watch, Modifier.align(Alignment.TopCenter).statusBarsPadding())
@@ -572,7 +595,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>, barHaze: dev.chris
                 onPick = { yes ->
                     pendingAddon = null
                     if (yes) AppScope.launch {
-                        watch.notes.tryEmit(runCatching { Addons.add(link) }.fold({ "Added ${it.name} — see the Addons tab" }, { it.message ?: "Couldn't add that addon" }))
+                        watch.notes.tryEmit(runCatching { Addons.add(link) }.fold({ "Added ${it.name} — see Settings → Addons" }, { it.message ?: "Couldn't add that addon" }))
                     }
                 },
                 onDismiss = { pendingAddon = null },
@@ -623,43 +646,176 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>, barHaze: dev.chris
     }
 }
 
-/** How tall the bottom tab bar is, above the system's navigation bar. */
-private val TAB_BAR_HEIGHT = 58.dp
+/** The dock's height, and the room round it: it floats this far off the screen's edges. */
+private val DOCK_HEIGHT = 64.dp
+private val DOCK_GAP = 12.dp
+private val DOCK_INSET = 6.dp
+private val LENS_SHAPE = RoundedCornerShape(26.dp)
 
 /** Room a tab's page leaves at its foot for the tab bar it runs on under; 0 where nothing is under it. */
 val LocalTabBarInset = androidx.compose.runtime.compositionLocalOf { 0.dp }
 
 /**
- * Portrait: the tabs along the bottom, the one you are on white with the TV rail's red tick — on frost:
- * the page passing under it blurred and washed with the page's own colour, as OpenTune's bars are.
+ * Portrait: OpenTune's dock (BottomChrome.kt, GPL-3.0 — see THIRD_PARTY_NOTICES.md). A glass pill floating
+ * over the page, frosted with what passes under it, lit along its top edge and casting a soft shadow. The
+ * open tab sits on a lens of the accent that stretches to a new tab rather than sliding: the edge in the
+ * direction of travel leads on a stiff spring and the far one follows on a soft one, both critically damped,
+ * so it reaches over and settles without overshooting. The icon and name ease to the accent as it arrives.
  */
 @Composable
-private fun TabBar(tab: Tab, onTab: (Tab) -> Unit, haze: dev.chrisbanes.haze.HazeState, modifier: Modifier = Modifier) {
+private fun TabBar(tab: Tab, onTab: (Tab) -> Unit, haze: dev.chrisbanes.haze.HazeState, compact: Boolean, modifier: Modifier = Modifier) {
+    val all = tabs()
+    val shown = all.indexOf(tab).coerceAtLeast(0)
+    val pill = RoundedCornerShape(percent = 50)
     val page = Ink.bg
-    Row(
-        modifier.fillMaxWidth()
-            // Rounded at the top, where it meets the page; flush with the screen's own edge below.
-            .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
-            .hazeEffect(haze) {
-                backgroundColor = page
-                tints = listOf(dev.chrisbanes.haze.HazeTint(page.copy(alpha = 0.65f)))
-                blurRadius = 22.dp
-                noiseFactor = 0.03f
-            }
-            .navigationBarsPadding().height(TAB_BAR_HEIGHT),
+    val dark = Ink.isDark
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+    // 0 the full dock, 1 shrunk to its icons: one spring every piece reads its size and place from, so a
+    // scroll that changes its mind mid-way just turns it around.
+    val fold by androidx.compose.animation.core.animateFloatAsState(
+        if (compact) 1f else 0f,
+        androidx.compose.animation.core.spring(dampingRatio = 0.9f, stiffness = 380f),
+        label = "dockFold",
+    )
+    androidx.compose.foundation.layout.BoxWithConstraints(
+        modifier.fillMaxWidth().navigationBarsPadding()
+            .padding(horizontal = DOCK_GAP + 4.dp + DOCK_SHRINK_SIDES * fold, vertical = DOCK_GAP)
+            .height(DOCK_HEIGHT - (DOCK_HEIGHT - DOCK_COMPACT_HEIGHT) * fold),
     ) {
-        tabs().forEach { t ->
-            val on = t == tab
-            Tap({ onTab(t) }, Modifier.weight(1f).fillMaxHeight(), RoundedCornerShape(0.dp)) {
-                Box {
-                    if (on) Box(Modifier.align(Alignment.TopCenter).width(22.dp).height(3.dp).clip(RoundedCornerShape(bottomStart = 2.dp, bottomEnd = 2.dp)).background(Ink.accent))
-                    Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Lc(t.icon, tint = if (on) Ink.text else Ink.faint, size = 22.dp)
-                        Text(t.label, Modifier.padding(top = 3.dp), style = Type.meta.copy(fontSize = 11.sp, color = if (on) Ink.text else Ink.faint, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium))
+        val slot = (maxWidth - DOCK_INSET * 2) / all.size
+        // Which way the last move went, so the leading edge gets the stiff spring. In slots, not dp, so the
+        // dock shrinking under it doesn't knock it off its tab.
+        var from by remember { androidx.compose.runtime.mutableIntStateOf(shown) }
+        val right = shown >= from
+        androidx.compose.runtime.SideEffect { from = shown }
+        val lead = androidx.compose.animation.core.spring<Float>(dampingRatio = 1f, stiffness = 520f)
+        val follow = androidx.compose.animation.core.spring<Float>(dampingRatio = 1f, stiffness = 170f)
+        // Read only while laying the lens out, so its stretch costs no recomposition of the dock.
+        val leftSlot = androidx.compose.animation.core.animateFloatAsState(shown.toFloat(), if (right) follow else lead, label = "lensLeft")
+        val endSlot = androidx.compose.animation.core.animateFloatAsState(shown + 1f, if (right) lead else follow, label = "lensRight")
+        val light = Color.White.copy(alpha = if (dark) 0.22f else 0.6f)
+        Box(
+            Modifier.fillMaxSize()
+                // A soft drop shadow, so the dock floats over the page.
+                .shadow(18.dp, pill, clip = false, ambientColor = Color.Black.copy(alpha = 0.35f), spotColor = Color.Black.copy(alpha = 0.45f))
+                .clip(pill)
+                .hazeEffect(haze) {
+                    backgroundColor = page
+                    tints = listOf(dev.chrisbanes.haze.HazeTint(Ink.surface.copy(alpha = 0.72f)))
+                    blurRadius = 24.dp
+                    noiseFactor = 0.03f
+                    // Blurred at half size: under this much blur it looks the same, and it is a quarter of the
+                    // work on every frame a page scrolls under the dock — what an older phone runs short of.
+                    inputScale = dev.chrisbanes.haze.HazeInputScale.Fixed(0.5f)
+                }
+                // A hairline of light along the top edge, fading down: the glass reads as lit from above.
+                .border(1.dp, androidx.compose.ui.graphics.Brush.verticalGradient(listOf(light, light.copy(alpha = 0f), light.copy(alpha = 0f))), pill)
+                .padding(DOCK_INSET),
+        ) {
+            val a = Ink.accent
+            Box(
+                Modifier
+                    .layout { measurable, constraints ->
+                        val from = (slot * leftSlot.value).roundToPx()
+                        val w = (slot * (endSlot.value - leftSlot.value)).roundToPx().coerceAtLeast(0)
+                        val placeable = measurable.measure(androidx.compose.ui.unit.Constraints.fixed(w, constraints.maxHeight))
+                        layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(from, 0) }
+                    }
+                    .clip(LENS_SHAPE)
+                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(a.copy(alpha = 0.24f), a.copy(alpha = 0.14f))))
+                    .border(1.dp, androidx.compose.ui.graphics.Brush.verticalGradient(listOf(a.copy(alpha = 0.45f), a.copy(alpha = 0.08f))), LENS_SHAPE),
+            )
+            Row(Modifier.fillMaxSize()) {
+                all.forEachIndexed { i, t ->
+                    DockItem(t, i == shown, Modifier.width(slot).fillMaxHeight(), collapse = { fold }) {
+                        if (i != shown) haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                        onTab(t)
                     }
                 }
             }
         }
+    }
+}
+
+/** One tab of the dock: its icon over its name, in the accent while open, lifted a little; pressed, it gives a little. */
+@Composable
+private fun DockItem(t: Tab, selected: Boolean, modifier: Modifier, collapse: () -> Float, onClick: () -> Unit) {
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by androidx.compose.animation.core.animateFloatAsState(
+        when {
+            pressed -> 0.9f
+            selected -> 1.06f
+            else -> 1f
+        },
+        androidx.compose.animation.core.spring(dampingRatio = 0.85f, stiffness = 320f),
+        label = "dockScale",
+    )
+    val fg by androidx.compose.animation.animateColorAsState(
+        if (selected) Ink.accent else Ink.muted,
+        tween(320, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+        label = "dockFg",
+    )
+    Column(
+        modifier.clip(LENS_SHAPE)
+            .clickable(interaction, indication = null, onClick = onClick)
+            .semantics { role = androidx.compose.ui.semantics.Role.Tab; this.selected = selected; contentDescription = t.label },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        // Shrinking, the icon drops to the middle as the name fades and sinks away.
+        Lc(t.icon, Modifier.graphicsLayer { scaleX = scale; scaleY = scale; translationY = 8.dp.toPx() * collapse() }, tint = fg, size = 23.dp)
+        // One weight either way, so the name doesn't change width as it's picked.
+        Text(
+            t.label,
+            Modifier.padding(top = 2.dp).graphicsLayer {
+                val c = collapse()
+                alpha = (1f - c * 2.5f).coerceIn(0f, 1f)
+                translationY = 6.dp.toPx() * c
+            },
+            style = Type.meta.copy(fontSize = 11.sp, color = fg, fontWeight = FontWeight.SemiBold),
+            maxLines = 1,
+        )
+    }
+}
+
+/** The dock shrunk while a page scrolls down: this tall, and this much further in from each side. */
+private val DOCK_COMPACT_HEIGHT = 54.dp
+private val DOCK_SHRINK_SIDES = 36.dp
+
+/**
+ * Scrolling a page down shrinks the dock; scrolling up brings it back. The direction has to hold for
+ * [thresholdPx] before anything changes, so a wobble mid-scroll doesn't flicker it, and only what the page
+ * really scrolled counts — a swipe at a list's end leaves it be. Nothing is consumed: the page keeps every
+ * pixel. After OpenTune's ChromeScrollConnection.
+ */
+private class DockScroll(private val thresholdPx: Float) : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+    var compact by mutableStateOf(false)
+        private set
+    private var run = 0f
+
+    fun expand() {
+        compact = false
+        run = 0f
+    }
+
+    override fun onPostScroll(
+        consumed: androidx.compose.ui.geometry.Offset,
+        available: androidx.compose.ui.geometry.Offset,
+        source: androidx.compose.ui.input.nestedscroll.NestedScrollSource,
+    ): androidx.compose.ui.geometry.Offset {
+        val dy = consumed.y
+        if (dy == 0f) return androidx.compose.ui.geometry.Offset.Zero
+        if (run * dy < 0) run = 0f
+        run += dy
+        if (run <= -thresholdPx && !compact) {
+            compact = true
+            run = 0f
+        } else if (run >= thresholdPx && compact) {
+            compact = false
+            run = 0f
+        }
+        return androidx.compose.ui.geometry.Offset.Zero
     }
 }
 

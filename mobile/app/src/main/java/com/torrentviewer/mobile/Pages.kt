@@ -198,13 +198,18 @@ private enum class HitOrder(val label: String) { BEST("Best match"), BIGGEST("Bi
  * Filters narrow either list — film or series, genre, decade and order for titles; quality
  * and size for releases. A genre with nothing typed browses that genre's shelf.
  */
+/** The last search's answer, kept past the screen leaving: opening a title from it and coming back asks nothing again. */
+private object LastSearch {
+    var key: List<Any?>? = null
+    var results: List<Title>? = null
+    var hits: List<Hit>? = null
+}
+
 @Composable
 fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
     // Off again whenever kids mode changes, so a kids profile never lands on the torrent list.
     var torrents by rememberSaveable(Kids.on) { mutableStateOf(false) }
-    var results by remember { mutableStateOf<List<Title>?>(null) }
-    var hits by remember { mutableStateOf<List<Hit>?>(null) }
     var busy by remember { mutableStateOf(false) }
     var recents by remember { mutableStateOf(Searches.load()) }
     // Filters: null is "any".
@@ -219,8 +224,19 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
     val filtered = !torrents && (kind != null || genre != null || decade != null || atLeast != null || sort != Sort.POPULAR) || torrents && (quality != null || order != HitOrder.BEST)
     /** Going by rating: browse the best of the genre, or of everything, not only what's popular this week. */
     val byRating = sort == Sort.RATING || atLeast != null
+    // Back from a title, the same search: what it found is there at once, so the grid goes back to its place
+    // rather than to an empty page that fills in from the top.
+    val searchKey = listOf<Any?>(query.trim(), torrents, genre, kind, byRating, Kids.on)
+    var results by remember { mutableStateOf(LastSearch.results.takeIf { LastSearch.key == searchKey }) }
+    var hits by remember { mutableStateOf(LastSearch.hits.takeIf { LastSearch.key == searchKey }) }
+    fun keep() {
+        LastSearch.key = searchKey
+        LastSearch.results = results
+        LastSearch.hits = hits
+    }
 
     LaunchedEffect(query, torrents, genre, kind, byRating) {
+        if (LastSearch.key == searchKey && (results != null || hits != null)) return@LaunchedEffect
         val q = query.trim()
         if (q.length < 2) {
             hits = null
@@ -233,6 +249,7 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
                 }
             } else null
             busy = false
+            keep()
             return@LaunchedEffect
         }
         delay(400)
@@ -250,6 +267,7 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
             }
         }
         busy = false
+        keep()
     }
     val browsing = query.trim().length < 2
     val titles = results?.let { list ->
@@ -625,6 +643,8 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEd
     var page by rememberSaveable { mutableStateOf<String?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
     val update by Updates.release.collectAsState()
+    val installed by Addons.list.collectAsState()
+    val addonsHint = if (installed.isEmpty()) "Add one to find streams — Watchly comes with none" else "${installed.size} installed · streams, subtitles and catalogues"
     val appContext = LocalContext.current
     BackHandler(page != null) { page = null }
     // The list keeps its own place, for coming back to; a page always opens at its top.
@@ -654,8 +674,12 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEd
                             },
                         )
                     },
+                    // A kids profile has no say in where streams come from.
+                    if (!com.torrentviewer.core.Kids.on) listOf(
+                        Entry(L.drawable.lucide_ic_puzzle, "Addons", addonsHint, "add-ons install manifest streams stremio") { page = "Addons" },
+                    ) else null,
                     listOf(
-                        Entry(L.drawable.lucide_ic_user, "Account", "Profile, Stremio, Nuvio and PIN", "lock sign in addons login") { page = "Account" },
+                        Entry(L.drawable.lucide_ic_user, "Account", "Profile, Stremio, Nuvio and PIN", "lock sign in login") { page = "Account" },
                         Entry(L.drawable.lucide_ic_users, "Switch profile", "Change to a different profile", onClick = onSwitchProfile),
                     ),
                     listOf(
@@ -711,6 +735,8 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEd
         if (page == "Legal notice") Panel { LegalText(com.torrentviewer.core.Legal.NOTICE) }
         if (page == "Privacy policy") Panel { LegalText(com.torrentviewer.core.Legal.PRIVACY) }
         if (page == "Terms and conditions") Panel { LegalText(com.torrentviewer.core.Legal.TERMS) }
+
+        if (page == "Addons") AddonsPage(watch)
 
         if (page == "Integrations") Panel {
             Text("What you finish here is marked watched on your accounts, and what they have watched shows here. You sign in on each service's own page, so your password never comes to Watchly.", Modifier.padding(bottom = 18.dp), style = Type.meta.copy(color = Ink.faint))
@@ -1234,7 +1260,7 @@ fun StremioSection(me: Profile, onLater: (() -> Unit)? = null) {
                     note = "Bringing your addons…"
                     scope.launch {
                         note = runCatching { Stremio.importAddons() }.fold(
-                            { if (it == 0) "Every addon is here already" else "Added $it addon${if (it == 1) "" else "s"} — see the Addons tab" },
+                            { if (it == 0) "Every addon is here already" else "Added $it addon${if (it == 1) "" else "s"} — see Settings → Addons" },
                             { it.message ?: "Couldn't reach Stremio" },
                         )
                     }
@@ -1387,7 +1413,7 @@ fun NuvioSection(me: Profile) {
                 note = "Bringing your addons…"
                 scope.launch {
                     note = runCatching { com.torrentviewer.core.Nuvio.importAddons() }.fold(
-                        { if (it == 0) "Every addon is here already" else "Added $it addon${if (it == 1) "" else "s"} — see the Addons tab" },
+                        { if (it == 0) "Every addon is here already" else "Added $it addon${if (it == 1) "" else "s"} — see Settings → Addons" },
                         { it.message ?: "Couldn't reach Nuvio" },
                     )
                 }
@@ -1413,11 +1439,12 @@ fun NuvioSection(me: Profile) {
 /* --------------------------------------------------------------- addons */
 
 /**
- * The Addons tab: where everything played comes from. Add one by its link (or an addon site's
- * Install button, which opens here), then switch, order or remove each. Order is the order asked.
+ * Settings → Addons: where everything played comes from. Add one by its link (or an addon site's
+ * Install button), then switch, order or remove each. Order is the order asked. Drawn inside the
+ * Settings page's own scroll, under its back and title.
  */
 @Composable
-fun AddonsScreen(watch: Watch) {
+private fun AddonsPage(watch: Watch) {
     val addons by Addons.list.collectAsState()
     var link by rememberSaveable { mutableStateOf("") }
     var adding by remember { mutableStateOf(false) }
@@ -1436,8 +1463,7 @@ fun AddonsScreen(watch: Watch) {
             adding = false
         }
     }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).imePadding().padding(horizontal = EDGE).padding(bottom = 32.dp + LocalTabBarInset.current)) {
-        Heading("Addons")
+    Column {
         Text(
             "Streams, subtitles and extra catalogues come from addons — public ones, your debrid service's, or your own media server's. Watchly comes with none.",
             Modifier.padding(bottom = 18.dp), style = Type.meta.copy(color = Ink.faint),

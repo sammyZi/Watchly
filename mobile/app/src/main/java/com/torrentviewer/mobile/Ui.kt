@@ -86,6 +86,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import androidx.compose.ui.platform.LocalConfiguration
@@ -529,6 +530,10 @@ fun BottomSheet(title: String, onDismiss: () -> Unit, content: @Composable () ->
     var shown by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { shown = true }
     val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.8f).dp
+    // Never shorter than it has been while open: picking 4K, with one release, dropped the sheet to that one
+    // row and the pills jumped down under the finger. It grows for more, and keeps its height for fewer.
+    var tallest by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    val tallestDp = with(LocalDensity.current) { tallest.toDp() }
 
     // Pulled down — by the handle, or by a list already at its top — it follows the finger,
     // and let go far enough down it closes; short of that it springs back.
@@ -567,7 +572,8 @@ fun BottomSheet(title: String, onDismiss: () -> Unit, content: @Composable () ->
     ) {
         AnimatedVisibility(shown, enter = slideInVertically(Motion.spatial()) { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
             Column(
-                Modifier.widthIn(max = 600.dp).fillMaxWidth().heightIn(max = maxHeight)
+                Modifier.widthIn(max = 600.dp).fillMaxWidth().heightIn(min = tallestDp.coerceAtMost(maxHeight), max = maxHeight)
+                    .onSizeChanged { if (it.height > tallest) tallest = it.height }
                     .graphicsLayer { translationY = offset }
                     .nestedScroll(pull)
                     .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))

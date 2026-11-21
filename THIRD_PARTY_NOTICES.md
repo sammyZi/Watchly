@@ -19,6 +19,7 @@ are at the links.
 | [JSON-java](https://github.com/stleary/JSON-java) (`org.json`) | [Public domain](https://github.com/stleary/JSON-java/blob/master/LICENSE) |
 | Google Play services Cast framework | [Android Software Development Kit License](https://developer.android.com/studio/terms) |
 | [Haze](https://github.com/chrisbanes/haze): the frosted bars and panels | [Apache 2.0](https://github.com/chrisbanes/haze/blob/main/LICENSE) |
+| [OpenTune](https://github.com/justshivv/Opentune): the phone's bottom dock and its stretching tab lens, after its `BottomChrome.kt` | [GPL 3.0](https://github.com/justshivv/Opentune/blob/main/LICENSE) |
 | [Poppins](https://github.com/itfoundry/Poppins) font, on Windows too | [SIL Open Font License 1.1](tv/core/src/main/assets/licenses/Poppins-OFL.txt) |
 | [Anton](https://github.com/googlefonts/AntonFont) font: the phone's opening titles | [SIL Open Font License 1.1](mobile/app/src/main/assets/licenses/Anton-OFL.txt) |
 | [Open Peeps](https://www.openpeeps.com) by Pablo Stanley, via [DiceBear](https://www.dicebear.com/styles/open-peeps/): the people profile icons, on Windows too | [CC0 1.0](tv/core/src/main/assets/people/LICENSE) |

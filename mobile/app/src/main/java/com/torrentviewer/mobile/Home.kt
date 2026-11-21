@@ -92,6 +92,8 @@ import com.torrentviewer.core.playedSize
 import com.torrentviewer.core.remoteArt
 import com.torrentviewer.core.TOP_SHELF
 import kotlinx.coroutines.delay
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
+import androidx.compose.ui.draw.drawBehind
 import com.composables.icons.lucide.R as L
 import dev.chrisbanes.haze.hazeEffect
 import androidx.compose.ui.layout.layout
@@ -567,10 +569,20 @@ private fun TitleRow(state: LazyListState, titles: List<Title>, onOpen: (Title) 
 @Composable
 private fun Hero(pager: PagerState, titles: List<Title>, onOpen: (Title) -> Unit) {
     val count = titles.size
-    // Moves on by itself, and waits again after every swipe.
-    LaunchedEffect(pager.settledPage, count) {
-        delay(8000)
-        if (count > 1) pager.animateScrollToPage((pager.settledPage + 1) % count)
+    // Moves on by itself, its dot filling as the time runs; a finger on it starts the wait again, and so
+    // does every swipe. Not keyed on any scroll, or moving on would cancel itself.
+    // In steps, not every frame: a fill redrawn at 60 a second kept Home drawing the whole window — the dock's
+    // blur with it — for as long as it was open, and an older phone has nothing to spare for that.
+    val dwell = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    val dragged by pager.interactionSource.collectIsDraggedAsState()
+    LaunchedEffect(pager.settledPage, count, dragged) {
+        dwell.floatValue = 0f
+        if (count <= 1 || dragged) return@LaunchedEffect
+        repeat(HERO_STEPS) { i ->
+            delay(HERO_DWELL_MS.toLong() / HERO_STEPS)
+            dwell.floatValue = (i + 1f) / HERO_STEPS
+        }
+        pager.animateScrollToPage((pager.settledPage + 1) % count, animationSpec = tween(650, easing = androidx.compose.animation.core.FastOutSlowInEasing))
     }
     val wide = isWide()
     val height = if (wide) (LocalConfiguration.current.screenHeightDp * 0.82f).dp else (LocalConfiguration.current.screenWidthDp * 1.12f).dp
@@ -606,10 +618,44 @@ private fun Hero(pager: PagerState, titles: List<Title>, onOpen: (Title) -> Unit
                 }
             }
         }
-        if (count > 1) Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            repeat(count) { i ->
-                Box(Modifier.size(if (i == pager.currentPage) 16.dp else 6.dp, 4.dp).clip(CircleShape).background(if (i == pager.currentPage) Ink.text else Ink.faint))
-            }
+        if (count > 1) HeroDots(pager, count, { dwell.floatValue }, Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp))
+    }
+}
+
+/** How long a billboard stays before the next comes in, and in how many steps its dot fills. */
+private const val HERO_DWELL_MS = 8000
+private const val HERO_STEPS = 32
+
+/**
+ * The billboard's dots, following the finger: as a swipe goes, the dot it heads for widens into a pill and
+ * the one it leaves narrows, both by how far across it is. Where the swipe is gets read only while laying
+ * them out and drawing — a swipe costs no recomposition — and the open one fills as its time runs.
+ */
+@Composable
+private fun HeroDots(pager: PagerState, count: Int, dwell: () -> Float, modifier: Modifier = Modifier) {
+    val ink = Ink.text
+    fun near(i: Int) = (1f - kotlin.math.abs(pager.currentPage + pager.currentPageOffsetFraction - i)).coerceIn(0f, 1f)
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        repeat(count) { i ->
+            Box(
+                Modifier
+                    .layout { measurable, _ ->
+                        val w = (6.dp + 20.dp * near(i)).roundToPx()
+                        val h = 5.dp.roundToPx()
+                        val placeable = measurable.measure(androidx.compose.ui.unit.Constraints.fixed(w, h))
+                        layout(w, h) { placeable.place(0, 0) }
+                    }
+                    .drawBehind {
+                        val r = androidx.compose.ui.geometry.CornerRadius(size.height / 2)
+                        drawRoundRect(ink.copy(alpha = 0.28f + 0.17f * near(i)), cornerRadius = r)
+                        if (i != pager.settledPage) return@drawBehind
+                        drawRoundRect(
+                            ink,
+                            size = androidx.compose.ui.geometry.Size(size.width * dwell().coerceIn(0f, 1f), size.height),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2),
+                        )
+                    },
+            )
         }
     }
 }
