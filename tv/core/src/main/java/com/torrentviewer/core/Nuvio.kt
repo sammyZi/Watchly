@@ -29,6 +29,12 @@ fun parseNuvioProfiles(json: String): List<NuvioProfile> = runCatching { JSONArr
     .map { NuvioProfile(it.optInt("profile_index", 1), it.str("name") ?: "Profile ${it.optInt("profile_index", 1)}", it.str("avatar_color_hex"), it.optBoolean("uses_primary_addons")) }
     .sortedBy { it.index }
 
+/** Nuvio's "too many sign-ins": it bars the whole network for a while, so how long, rounded up to the minute. */
+fun nuvioBusy(retryAfterMs: Long): String {
+    val minutes = ((retryAfterMs + 59_999) / 60_000).coerceAtLeast(1)
+    return "Nuvio has paused sign-ins from your network after too many tries — try again in $minutes minute${if (minutes == 1L) "" else "s"}."
+}
+
 /** What Nuvio's sign-in says went wrong, in its own words ("Invalid login credentials"). */
 fun nuvioError(json: String): String? = runCatching {
     JSONObject(json).let { it.str("msg") ?: it.str("error_description") ?: it.str("message") }
@@ -215,7 +221,7 @@ object Nuvio {
         val answer = try {
             Net.postJson("$API/auth/v1/token?grant_type=password", body, 20_000, quiet = true, headers = headers(null))
         } catch (e: HttpException) {
-            throw IOException(nuvioError(e.body) ?: "Nuvio answered ${e.code}")
+            throw IOException(if (e.code == 429) nuvioBusy(e.retryAfterMs) else nuvioError(e.body) ?: "Nuvio answered ${e.code}")
         }
         val s = parseNuvioSession(answer)?.let { it.copy(email = it.email ?: email.trim()) } ?: throw IOException("Nuvio sent no session")
         // Asked before anything is saved: saved, the screen turns to "signed in", and the form asking

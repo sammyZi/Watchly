@@ -644,6 +644,7 @@ public static class Profiles
         Write(Load().Where(p => p.Id != id).ToList());
         Store.WipeProfile(id);
         Stremio.Forget(id);
+        Nuvio.Forget(id);
         foreach (var t in Trackers.All) t.Forget(id);
     }
 }

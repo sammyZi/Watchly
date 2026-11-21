@@ -369,13 +369,23 @@ public static class Trackers
         if (Store.Now - refreshedAt < RefreshMs) return;
         refreshedAt = Store.Now;
         _ = Stremio.Pull();
+        _ = Nuvio.Pull();
         foreach (var t in All) t.Pull();
     }
 
     static Trackers() => Net.OnlineChanged += () => { if (Net.IsOnline) foreach (var t in All) t.Flush(); };
 
-    /// <summary>Stremio's library with what the tracking accounts say has been watched.</summary>
-    public static StremioLibrary Everywhere => All.Aggregate(Stremio.Library, (all, t) => Plus(all, t.Library));
+    /// <summary>Stremio's and Nuvio's accounts together: where films were left, the library, and what was finished.</summary>
+    public static StremioLibrary Synced => Plus(Stremio.Library, Nuvio.Library) with
+    {
+        Paused = Stremio.Library.Paused.Concat(Nuvio.Library.Paused).OrderByDescending(p => p.LeftAt).ToList(),
+        Seen = Stremio.Library.Seen.Concat(Nuvio.Library.Seen).ToList(),
+        FinishedAt = Stremio.Library.FinishedAt.Keys.Union(Nuvio.Library.FinishedAt.Keys)
+            .ToDictionary(k => k, k => Math.Max(Stremio.Library.FinishedAt.GetValueOrDefault(k), Nuvio.Library.FinishedAt.GetValueOrDefault(k))),
+    };
+
+    /// <summary>Stremio's and Nuvio's libraries with what the tracking accounts say has been watched.</summary>
+    public static StremioLibrary Everywhere => All.Aggregate(Synced, (all, t) => Plus(all, t.Library));
 
     /// <summary>Everything watched on either side; the paused and seen lists stay the first's, as only Stremio has them.</summary>
     static StremioLibrary Plus(StremioLibrary a, StremioLibrary b) => a with

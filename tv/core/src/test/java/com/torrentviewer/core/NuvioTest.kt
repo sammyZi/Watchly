@@ -65,6 +65,11 @@ class NuvioTest {
         assertTrue(nuvioBacklog(items.take(1), StremioLibrary(films = setOf("tt1"))).first.isEmpty())
     }
 
+    @Test fun busySaysHowLong() {
+        assertTrue("10 minutes" in nuvioBusy(600_000))
+        assertTrue("1 minute." in nuvioBusy(0))
+    }
+
     @Test fun profiles() {
         val p = parseNuvioProfiles("""[{"profile_index":2,"name":"Kids","avatar_color_hex":"#FF5722","uses_primary_addons":true},{"profile_index":1,"name":"Main"}]""")
         assertEquals(listOf("Main", "Kids"), p.map { it.name })

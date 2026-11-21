@@ -244,7 +244,7 @@ public sealed class DetailView : UserControl, IDisposable
         // A film left part-way on Stremio, never here, still says Resume: the release picked starts at that spot.
         var seen = picked is not null ? progress.GetValueOrDefault(picked.Id)
             : resume is { } r ? Math.Min(100, r.Position / r.Duration * 100)
-            : Stremio.Library.PausedAt(title.Imdb, null) ?? 0;
+            : Trackers.Synced.PausedAt(title.Imdb, null) ?? 0;
         var canResume = seen >= 1 && seen < EpisodeLinks.Watched;
         var wait = shell.IsOpening || saving;
         var live = best is not null && !wait;
@@ -372,7 +372,7 @@ public sealed class DetailView : UserControl, IDisposable
         if (local?.LastFileIndex is int i && local.Ratio is > 0.02 and < 0.95 && local.DurationOf(i) is double of && local.PositionOf(i) is double at
             && (ep is null || Search.ParseEpisode(local.Files?.FirstOrDefault(f => f.Index == i)?.Name) == ep))
             return Format.Left(of - at);
-        return Stremio.Library.Paused.FirstOrDefault(p => p.Imdb == title.Imdb && p.Ep == ep) is { Seconds: double s, Progress: > 0 } paused
+        return Trackers.Synced.Paused.FirstOrDefault(p => p.Imdb == title.Imdb && p.Ep == ep) is { Seconds: double s, Progress: > 0 } paused
             ? Format.Left(s / (paused.Progress / 100) - s)
             : null;
     }

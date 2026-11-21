@@ -29,9 +29,10 @@ public sealed class SettingsView : UserControl
         search = input;
         search.TextChanged += (_, _) => RenderList();
         shell.SettingsChanged += Render;
-        shell.LibraryChanged += () => { if (IsVisible) Render(); };
+        // Not while something is being typed here: a sync landing mid-word drew the page again under the viewer.
+        shell.LibraryChanged += () => { if (IsVisible && !Typing) Render(); };
         IsVisibleChanged += (_, _) => { if (IsVisible) Render(); };
-        Updates.Changed += () => Dispatcher.BeginInvoke(() => { if (IsVisible) Render(); });
+        Updates.Changed += () => Dispatcher.BeginInvoke(() => { if (IsVisible && !Typing) Render(); });
         Render();
     }
 
@@ -72,7 +73,7 @@ public sealed class SettingsView : UserControl
             });
         groups.Add(new()
         {
-            new("user", "Account", "Profile, PIN and Stremio account", "lock sign in", () => Go("Account")),
+            new("user", "Account", "Profile, PIN, Stremio and Nuvio", "lock sign in login", () => Go("Account")),
             new("users", "Switch profile", "Change to a different profile", "", shell.ShowProfiles),
         });
         groups.Add(new() { new("palette", "Appearance", "Theme and home screen genres", "light dark", () => Go("Appearance")) });
@@ -165,7 +166,11 @@ public sealed class SettingsView : UserControl
         {
             case "Account":
                 if (shell.Who is { } me) page.Children.Add(ProfileGroup(me));
+                var accounts = Ui.Text("Accounts", "TitleText", "Text", 18, FontWeights.Bold);
+                accounts.Margin = new Thickness(0, 0, 0, 12);
+                page.Children.Add(accounts);
                 page.Children.Add(StremioGroup());
+                page.Children.Add(NuvioGroup());
                 break;
             case "Appearance": Appearance(); break;
             case "Streaming":
@@ -219,23 +224,24 @@ public sealed class SettingsView : UserControl
                 }))));
         if (!S.PartyOn) return;
 
-        var link = new TextBox { Style = (Style)FindResource("Field"), MinWidth = 320 };
+        var link = new TextBox { Style = (Style)FindResource("Field"), Tag = "Paste the party link", FontSize = 15 };
         void JoinNow()
         {
             if (Party.Join(link.Text) is null) shell.Toast("That isn't a whole watch party link — copy all of it.", true);
             else shell.Toast("Joining the watch party…");
         }
         link.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) JoinNow(); };
-        var join = Ui.Button(Ui.Text("Join", "Label", "Text", 14, FontWeights.SemiBold), JoinNow, "Pill");
+        var join = Pill("Join", JoinNow, primary: true);
+        join.Margin = new Thickness(10, 0, 0, 10);
         page.Children.Add(Group("Join a party", Party.Room is { } now
             ? Row(now.Leader ? "You're leading a party" : "You're in a party", "Leave it from Watch party in the player.")
-            : new StackPanel { Children = { Row("Paste the link someone sent you", "Watchly shows what it would play and asks before it starts."), new StackPanel { Orientation = Orientation.Horizontal, Children = { link, join } } } }));
+            : new StackPanel { Children = { Row("Paste the link someone sent you", "Watchly shows what it would play and asks before it starts."), new StackPanel { Orientation = Orientation.Horizontal, Children = { Input("link", link), join } } } }));
 
-        var name = new TextBox { Style = (Style)FindResource("Field"), MinWidth = 320, Text = S.PartyName, MaxLength = 24 };
+        var name = new TextBox { Style = (Style)FindResource("Field"), Tag = shell.Who?.Name ?? "Your name", FontSize = 15, Text = S.PartyName, MaxLength = 24 };
         void SaveName() { if (name.Text.Trim() != S.PartyName) Set(S with { PartyName = name.Text.Trim() }); }
         name.LostFocus += (_, _) => SaveName();
         name.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) SaveName(); };
-        page.Children.Add(Group("Your name", new StackPanel { Children = { Row("What the others see", $"Left blank, it is the profile's name{(shell.Who is { } who ? $", {who.Name}" : "")}."), name } }));
+        page.Children.Add(Group("Your name", new StackPanel { Children = { Row("What the others see", $"Left blank, it is the profile's name{(shell.Who is { } who ? $", {who.Name}" : "")}."), Input("user", name) } }));
 
         page.Children.Add(Group("When you lead",
             new StackPanel
@@ -453,7 +459,7 @@ public sealed class SettingsView : UserControl
         var box = new StackPanel();
         if (Stremio.Connected)
         {
-            var import = Ui.Button(Ui.Text("Import addons", "Label", "Accent", 13, FontWeights.SemiBold), async () =>
+            var import = Pill("Import addons", async () =>
             {
                 shell.Toast("Bringing your addons…");
                 try
@@ -467,7 +473,7 @@ public sealed class SettingsView : UserControl
                 }
             });
             // The other way: the account's list made this PC's, for every device that signs in after.
-            var send = Ui.Button(Ui.Text("Send my addons to Stremio", "Label", "Accent", 13, FontWeights.SemiBold), async () =>
+            var send = Pill("Send my addons to Stremio", async () =>
             {
                 shell.Toast("Sending your addons…");
                 try
@@ -480,12 +486,7 @@ public sealed class SettingsView : UserControl
                     shell.Toast(e.Message, true);
                 }
             });
-            send.Margin = new Thickness(20, 0, 0, 0);
-            var signOut = Ui.Button(Ui.Text("Sign out", "Label", "Muted", 13), () => { Stremio.Disconnect(); Render(); });
-            signOut.Margin = new Thickness(20, 0, 0, 0);
-            box.Children.Add(Row($"Signed in{(Stremio.Email is { } email ? $" as {email}" : "")}",
-                "Your Stremio library and where you stopped are here, My List is your library there, and what you finish is marked watched. Addons you add or remove here change on your account too.",
-                new StackPanel { Orientation = Orientation.Horizontal, Children = { import, send, signOut } }));
+            box.Children.Add(Actions(import, send, Pill("Sign out", () => { Stremio.Disconnect(); Render(); })));
         }
         else if (shell.StremioPending is { } code)
         {
@@ -518,16 +519,198 @@ public sealed class SettingsView : UserControl
             };
             box.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 0), Children = { Qr(code.Link), words } });
         }
+        else box.Children.Add(Actions(Pill("Sign in to Stremio", () => _ = shell.ConnectStremio(), primary: true)));
+        var hint = Stremio.Connected
+            ? "Your Stremio library and where you stopped are here, My List is your library there, and what you finish is marked watched. Addons you add or remove here change on your account too."
+            : shell.Who?.IsGuest == true
+                ? "Your Stremio library, Continue Watching and addons here. As Guest it's forgotten when the app closes."
+                : "Your Stremio library, Continue Watching and addons here, kept in step both ways. You sign in on Stremio's own page — your password never comes to Watchly.";
+        var status = Stremio.Connected ? Stremio.Email is { } email ? $"Signed in as {email}" : "Signed in"
+            : shell.StremioPending is not null ? "Waiting for your approval…" : "Not signed in";
+        return AccountCard("stremio.com", "Stremio", Stremio.Connected, status, hint, box);
+    }
+
+    /// <summary>
+    /// The Account page's card for one service: its logo, its name and who is signed in under it, a line on what it
+    /// brings, then its controls — as the phone's account cards show them.
+    /// </summary>
+    static FrameworkElement AccountCard(string domain, string name, bool connected, string status, string hint, UIElement body)
+    {
+        // By its domain, from Google's favicon service, as the phone and TV show it.
+        var picture = new System.Windows.Media.Imaging.BitmapImage(new Uri($"https://www.google.com/s2/favicons?sz=128&domain={domain}"));
+        var logo = new Border { Width = 44, Height = 44, CornerRadius = new CornerRadius(11), Background = new ImageBrush(picture) { Stretch = Stretch.Uniform } };
+        var dot = new System.Windows.Shapes.Ellipse { Width = 8, Height = 8, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 1, 7, 0) };
+        dot.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, connected ? "Good" : "Faint");
+        var titles = new StackPanel
+        {
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(14, 0, 0, 0),
+            Children =
+            {
+                Ui.Text(name, "Label", "Text", 17, FontWeights.Bold),
+                new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 0), Children = { dot, Ui.Text(status, "Meta", connected ? "Text" : "Faint", 13) } },
+            },
+        };
+        var note = Ui.Text(hint, "Meta", "Faint", 13);
+        note.TextWrapping = TextWrapping.Wrap;
+        note.LineHeight = 19;
+        note.MaxWidth = 720;
+        note.HorizontalAlignment = HorizontalAlignment.Left;
+        note.Margin = new Thickness(0, 14, 0, 16);
+        var card = Ui.Card(new StackPanel { Children = { new StackPanel { Orientation = Orientation.Horizontal, Children = { logo, titles } }, note, body } }, "Surface", 14, new Thickness(22, 20, 22, 22));
+        card.Margin = new Thickness(0, 0, 0, 14);
+        return card;
+    }
+
+    /// <summary>A button of the Account page: the red one for the main action, the grey one for the rest.</summary>
+    static Button Pill(string label, Action onClick, bool primary = false)
+    {
+        var b = Ui.Button(label, onClick, primary ? "PillAccent" : "Pill");
+        b.Margin = new Thickness(0, 0, 10, 10);
+        return b;
+    }
+
+    static WrapPanel Actions(params UIElement[] buttons)
+    {
+        var row = new WrapPanel { Margin = new Thickness(0, 0, 0, -10) };
+        foreach (var b in buttons) row.Children.Add(b);
+        return row;
+    }
+
+    /// <summary>A text box of the Account page: its icon, then the field, on the raised colour.</summary>
+    static Border Input(string icon, UIElement field)
+    {
+        var glyph = Ui.Glyph(icon, 16, "Faint");
+        glyph.Margin = new Thickness(0, 0, 10, 0);
+        DockPanel.SetDock(glyph, Dock.Left);
+        var card = Ui.Card(new DockPanel { Children = { glyph, field } }, "SurfaceAlt", 8, new Thickness(14, 10, 14, 10));
+        card.Width = 340;
+        card.HorizontalAlignment = HorizontalAlignment.Left;
+        card.Margin = new Thickness(0, 0, 0, 10);
+        return card;
+    }
+
+    /// <summary>The account's Nuvio profiles while asking which one this PC watches as; null otherwise.</summary>
+    List<NuvioProfile>? nuvioChoices;
+    bool nuvioBusy;
+
+    /// <summary>
+    /// Nuvio by email and password — it has no link code — sent only to Nuvio. An account with several profiles is
+    /// asked which; signed in, its addons come across, and its library and where films were left.
+    /// </summary>
+    FrameworkElement NuvioGroup()
+    {
+        var box = new StackPanel();
+        var guestWord = shell.Who?.IsGuest == true ? " As Guest it's forgotten when the app closes." : "";
+        if (Nuvio.Connected && nuvioChoices is { } choices)
+        {
+            var ask = Ui.Text("Which Nuvio profile is this?", "Label", "Text", 15, FontWeights.SemiBold);
+            ask.Margin = new Thickness(0, 0, 0, 10);
+            box.Children.Add(ask);
+            var chips = new WrapPanel();
+            foreach (var p in choices)
+            {
+                var chip = Ui.Chip(p.Name, p.Name == Nuvio.ProfileName, () =>
+                {
+                    Nuvio.Choose(p);
+                    nuvioChoices = null;
+                    shell.Toast($"Watching as {p.Name} on Nuvio");
+                    Render();
+                }, style: "ChoiceChip");
+                chip.Margin = new Thickness(0, 0, 8, 8);
+                chips.Children.Add(chip);
+            }
+            box.Children.Add(chips);
+        }
+        else if (Nuvio.Connected)
+        {
+            var import = Pill("Import addons", async () =>
+            {
+                shell.Toast("Bringing your addons…");
+                try
+                {
+                    var n = await Nuvio.ImportAddons();
+                    shell.Toast(n == 0 ? "Every addon is here already" : $"Added {n} addon{(n == 1 ? "" : "s")} — see the Addons tab");
+                }
+                catch (Exception e)
+                {
+                    shell.Toast(e.Message, true);
+                }
+            });
+            var change = Pill("Change Nuvio profile", async () =>
+            {
+                try
+                {
+                    var all = await Nuvio.Profiles();
+                    if (all.Count > 1) { nuvioChoices = all; Render(); }
+                    else shell.Toast("This Nuvio account has one profile");
+                }
+                catch (Exception e)
+                {
+                    shell.Toast(e.Message, true);
+                }
+            });
+            box.Children.Add(Actions(import, change, Pill("Sign out", () => { Nuvio.Disconnect(); Render(); })));
+        }
         else
         {
-            box.Children.Add(Row(shell.Who?.IsGuest == true ? "Sign in to Stremio" : "Bring your Stremio library",
-                shell.Who?.IsGuest == true
-                    ? "Your Stremio library, Continue Watching and addons here. As Guest it's forgotten when the app closes."
-                    : "Your Stremio library, Continue Watching and addons here, kept in step both ways. Sign in on Stremio's own page — your password never comes to Watchly.",
-                Ui.Button(Ui.Text("Sign in to Stremio", "Label", "Accent", 13, FontWeights.SemiBold), () => _ = shell.ConnectStremio())));
+            var email = new TextBox { Style = (Style)FindResource("Field"), Tag = "Email", FontSize = 15, Text = nuvioEmail };
+            var password = new PasswordBox { Background = Brushes.Transparent, BorderThickness = new Thickness(0), FontSize = 15, VerticalContentAlignment = VerticalAlignment.Center, Password = nuvioPassword };
+            password.SetResourceReference(ForegroundProperty, "Text");
+            password.SetResourceReference(PasswordBox.CaretBrushProperty, "Accent");
+            // Kept as typed, so the page drawn again (a sync landing) doesn't empty the boxes.
+            email.TextChanged += (_, _) => nuvioEmail = email.Text;
+            password.PasswordChanged += (_, _) => nuvioPassword = password.Password;
+            // The password box shows no hint of its own: a word over it until something is typed.
+            var hintWord = Ui.Text("Password", "Label", "Faint", 15);
+            hintWord.IsHitTestVisible = false;
+            hintWord.VerticalAlignment = VerticalAlignment.Center;
+            hintWord.Margin = new Thickness(2, 0, 0, 0);
+            hintWord.Visibility = nuvioPassword.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+            password.PasswordChanged += (_, _) => hintWord.Visibility = password.Password.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+            async void SignIn()
+            {
+                if (nuvioBusy) return;
+                if (!email.Text.Contains('@') || password.Password.Length == 0) { shell.Toast("Enter your Nuvio email and password", true); return; }
+                nuvioBusy = true;
+                Render();
+                try
+                {
+                    var all = await Nuvio.SignIn(nuvioEmail, nuvioPassword);
+                    nuvioPassword = "";
+                    if (all.Count > 1) nuvioChoices = all;
+                    else shell.Toast($"Signed in to Nuvio{(Nuvio.Email is { } e ? $" as {e}" : "")}");
+                }
+                catch (Exception e)
+                {
+                    shell.Toast(e.Message, true);
+                }
+                finally
+                {
+                    nuvioBusy = false;
+                    Render();
+                }
+            }
+            email.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) password.Focus(); };
+            password.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) SignIn(); };
+            box.Children.Add(Input("user", email));
+            box.Children.Add(Input("lock", new Grid { Children = { hintWord, password } }));
+            var go = Pill(nuvioBusy ? "Signing in…" : "Sign in to Nuvio", SignIn, primary: true);
+            go.Margin = new Thickness(0, 6, 0, 0);
+            go.HorizontalAlignment = HorizontalAlignment.Left;
+            box.Children.Add(go);
         }
-        return Group("Stremio account", box);
+        var status = !Nuvio.Connected ? "Not signed in"
+            : string.Join(" · ", new[] { Nuvio.ProfileName, Nuvio.Email }.Where(s => s is not null)) is { Length: > 0 } who ? who : "Signed in";
+        var hint = Nuvio.Connected
+            ? "Where you stopped on Nuvio is in Continue Watching, My List is your Nuvio library, and what you finish is marked watched."
+            : "Your Nuvio library, Continue Watching and addons here, kept in step both ways. Your password goes only to Nuvio." + guestWord;
+        return AccountCard("nuvio.tv", "Nuvio", Nuvio.Connected, status, hint, box);
     }
+
+    /// <summary>What is typed into Nuvio's sign-in, kept across the page being drawn again.</summary>
+    string nuvioEmail = "";
+    string nuvioPassword = "";
 
     /// <summary>A link as a QR code, black on white whatever the theme, so any phone camera reads it.</summary>
     static FrameworkElement Qr(string link)
@@ -685,8 +868,14 @@ public sealed class SettingsView : UserControl
                 me.Pin is not null ? "Asked for before this profile opens. Remove it to unlock." : "Four digits, asked for before this profile opens. A lock for a shared PC — not a password.",
                 controls));
         }
-        return Group("Profile", rows);
+        var heading = Ui.Text("Profile", "TitleText", "Text", 18, FontWeights.Bold);
+        heading.Margin = new Thickness(0, 0, 0, 12);
+        var card = Ui.Card(rows, "Surface", 14, new Thickness(22, 8, 22, 8));
+        return new StackPanel { Margin = new Thickness(0, 0, 0, 28), Children = { heading, card } };
     }
+
+    /// <summary>Keyboard focus in one of this page's boxes.</summary>
+    bool Typing => IsKeyboardFocusWithin && System.Windows.Input.Keyboard.FocusedElement is TextBox or PasswordBox;
 
     static FrameworkElement Group(string title, UIElement content)
     {

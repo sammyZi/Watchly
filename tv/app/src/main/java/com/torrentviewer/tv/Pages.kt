@@ -525,7 +525,7 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
                         )
                     },
                     listOf(
-                        Entry(L.drawable.lucide_ic_user, "Account", "Profile, PIN and Stremio account", "lock sign in") { page = "Account" },
+                        Entry(L.drawable.lucide_ic_user, "Account", "Profile, PIN, Stremio and Nuvio", "lock sign in login") { page = "Account" },
                         Entry(L.drawable.lucide_ic_users, "Switch profile", "Change to a different profile", onClick = onSwitchProfile),
                     ),
                     listOf(
@@ -1144,7 +1144,7 @@ fun StremioSection(me: Profile, onLater: (() -> Unit)? = null, requester: FocusR
             note?.let { Text(it, Modifier.padding(top = 10.dp), style = Type.meta.copy(color = Ink.faint)) }
         }
     }
-    if (onLater == null) Section("Stremio account", hint, body)
+    if (onLater == null) Section("Stremio account", hint, logo = "stremio.com", content = body)
     else Column(Modifier.fillMaxWidth().background(Ink.surface, RoundedCornerShape(14.dp)).padding(24.dp)) {
         Text("Bring your Stremio library", style = Type.title.copy(fontWeight = FontWeight.Bold))
         Text(hint, Modifier.padding(top = 4.dp, bottom = 16.dp).widthIn(max = 760.dp), style = Type.meta.copy(color = Ink.faint))
@@ -1199,7 +1199,7 @@ fun NuvioSection(me: Profile) {
         me.isGuest -> "Your Nuvio library, Continue Watching and addons on this TV. As Guest it's forgotten when the app closes."
         else -> "Your Nuvio library, Continue Watching and addons on this TV, kept in step both ways. Your password goes only to Nuvio."
     }
-    Section("Nuvio account", hint) {
+    Section("Nuvio account", hint, logo = "nuvio.tv") {
         Column {
             val open = choices
             if (connected && open != null) {
@@ -1256,10 +1256,17 @@ fun NuvioSection(me: Profile) {
     }
 }
 
+/** [logo]: a service's domain, for its logo beside the title — an account's section. */
 @Composable
-private fun Section(title: String, hint: String, content: @Composable () -> Unit) {
+private fun Section(title: String, hint: String, logo: String? = null, content: @Composable () -> Unit) {
     Column(Modifier.padding(bottom = 34.dp)) {
-        Text(title, style = Type.title.copy(fontWeight = FontWeight.Bold))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            logo?.let {
+                com.torrentviewer.core.ServiceLogo(it, title, 36.dp)
+                Spacer(Modifier.width(14.dp))
+            }
+            Text(title, style = Type.title.copy(fontWeight = FontWeight.Bold))
+        }
         Text(hint, Modifier.padding(top = 4.dp, bottom = 14.dp).widthIn(max = 760.dp), style = Type.meta.copy(color = Ink.faint))
         // Right off a row's end found the section below; left still reaches the rail by the page's own key handler.
         Box(

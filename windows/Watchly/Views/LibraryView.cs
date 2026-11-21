@@ -129,7 +129,7 @@ public sealed class LibraryView : UserControl
         var q = query?.Text.Trim().ToLowerInvariant() ?? "";
         var shown = q.Length == 0 ? history : history.Where(h => Haystack(h).Contains(q)).ToList();
         // After a reinstall this PC's history is empty; what Stremio has still belongs here.
-        var fromStremio = KidsMode.Only(Stremio.Library.NotIn(shell.HistoryList)
+        var fromStremio = KidsMode.Only(Trackers.Synced.NotIn(shell.HistoryList)
             .Where(s => q.Length == 0 || s.Title.ToLowerInvariant().Contains(q))
             .Select(s => new Title { Imdb = s.Imdb, Kind = s.Kind, Name = s.Title, Year = s.Year, Poster = $"https://images.metahub.space/poster/medium/{s.Imdb}/img" }));
         var page = new StackPanel();

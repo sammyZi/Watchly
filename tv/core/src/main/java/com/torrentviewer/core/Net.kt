@@ -82,7 +82,9 @@ object Net {
             try {
                 return once(url, method, body, timeoutMs, quiet, type, headers)
             } catch (e: HttpException) {
-                if (e.code != 429 || tries >= BUSY_RETRIES) throw e
+                // Asked for longer than we'd wait: asking again sooner only lengthens the ban (Nuvio's
+                // sign-in says ten minutes, and each retry was another try against it).
+                if (e.code != 429 || tries >= BUSY_RETRIES || e.retryAfterMs > BUSY_WAIT_MAX_MS) throw e
                 tries++
                 delay(e.retryAfterMs.coerceIn(BUSY_WAIT_MS * tries, BUSY_WAIT_MAX_MS))
             }

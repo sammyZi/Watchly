@@ -135,6 +135,7 @@ public partial class MainWindow : Window
         History.Changed += items => Dispatcher.BeginInvoke(() => { HistoryList = items; LibraryChanged?.Invoke(); });
         Saved.Changed += items => Dispatcher.BeginInvoke(() => { SavedList = items; LibraryChanged?.Invoke(); });
         Stremio.Changed += () => Dispatcher.BeginInvoke(() => LibraryChanged?.Invoke());
+        Nuvio.Changed += () => Dispatcher.BeginInvoke(() => LibraryChanged?.Invoke());
         foreach (var tracker in Trackers.All) tracker.Changed += () => Dispatcher.BeginInvoke(() => LibraryChanged?.Invoke());
         Activated += (_, _) => Trackers.Refresh();
         Updates.Changed += () => Dispatcher.BeginInvoke(ShowUpdate);
@@ -241,6 +242,7 @@ public partial class MainWindow : Window
         SavedList = Saved.Load();
         Links = EpisodeLinks.Load();
         Stremio.Load(profile.Id, profile.IsGuest);
+        Nuvio.Load(profile.Id, profile.IsGuest);
         foreach (var tracker in Trackers.All) tracker.Load(profile.Id, profile.IsGuest);
         KidsMode.Use(profile);
         // Pages built for the last profile read its library; start again from Home.
@@ -570,7 +572,11 @@ public partial class MainWindow : Window
         var adding = !Saved.OnList(SavedList, title.Imdb, list);
         SavedList = Saved.Toggle(title, list);
         // My List is the Stremio library, when an account is signed in.
-        if (list == "later") Stremio.SetInLibrary(title, adding);
+        if (list == "later")
+        {
+            Stremio.SetInLibrary(title, adding);
+            Nuvio.SetInLibrary(title, adding);
+        }
     }
 
     /// <summary>
@@ -1209,7 +1215,7 @@ public partial class MainWindow : Window
     double ResumeSpot(HistoryItem target, int index, string fileName, Title? detail)
     {
         if (History.ResumeAt(HistoryList, target, index, fileName) is not double here) return FromStremio(target.Imdb, detail, fileName);
-        var there = target.Imdb is { } imdb && EpisodeOf(detail, fileName, out var ep) ? Stremio.Library.Paused.FirstOrDefault(p => p.Imdb == imdb && p.Ep == ep) : null;
+        var there = target.Imdb is { } imdb && EpisodeOf(detail, fileName, out var ep) ? Trackers.Synced.Paused.FirstOrDefault(p => p.Imdb == imdb && p.Ep == ep) : null;
         return there is { Seconds: double seconds } && there.LeftAt > target.PlayedAt(index) + SpotSlackMs ? seconds : here;
     }
 
@@ -1227,9 +1233,9 @@ public partial class MainWindow : Window
     static double FromStremio(string? imdb, Title? detail, string fileName)
     {
         if (imdb is null || !EpisodeOf(detail, fileName, out var ep)) return 0;
-        if (Stremio.Library.PausedSeconds(imdb, ep) is double seconds) return seconds;
+        if (Trackers.Synced.PausedSeconds(imdb, ep) is double seconds) return seconds;
         var minutes = System.Text.RegularExpressions.Regex.Match(detail?.Runtime ?? "", @"(\d+)\s*min", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        if (!minutes.Success || Stremio.Library.PausedAt(imdb, ep) is not double percent) return 0;
+        if (!minutes.Success || Trackers.Synced.PausedAt(imdb, ep) is not double percent) return 0;
         return int.Parse(minutes.Groups[1].Value) * 60 * percent / 100;
     }
 
@@ -1338,6 +1344,7 @@ public partial class MainWindow : Window
         if (EpisodeOf(item, index) is var (ok, ep) && ok)
         {
             Stremio.Watched(item, ep);
+            Nuvio.Watched(item, ep);
             foreach (var tracker in Trackers.All) tracker.Finished(item, ep);
         }
     }
@@ -1376,7 +1383,11 @@ public partial class MainWindow : Window
         if (of is not > 0 || item.PositionOf(index) is not double at) return;
         var r = at / of.Value;
         if (r < 0.02 || r >= Stremio.WatchedAt) return;
-        if (EpisodeOf(item, index) is var (ok, ep) && ok) Stremio.Pause(item, ep, at, of.Value);
+        if (EpisodeOf(item, index) is var (ok, ep) && ok)
+        {
+            Stremio.Pause(item, ep, at, of.Value);
+            Nuvio.Pause(item, ep, at, of.Value);
+        }
     }
     public void SaveDuration(string uri, int index, double seconds) => HistoryList = History.SetDuration(uri, index, seconds);
     public void SaveSubs(string uri, int index, List<SavedSub> subs) => HistoryList = History.SetFileSubs(uri, index, subs);

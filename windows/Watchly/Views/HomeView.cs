@@ -376,7 +376,7 @@ public sealed class HomeView : UserControl
     {
         var made = new List<(string, string, FrameworkElement)>();
         // One card per title: its newest started release or episode, while part-watched.
-        var resumable = History.LatestPerTitle(shell.HistoryList).Where(h => InProgress(h) && !Stremio.Library.FinishedSince(h)).Select(item =>
+        var resumable = History.LatestPerTitle(shell.HistoryList).Where(h => InProgress(h) && !Trackers.Synced.FinishedSince(h)).Select(item =>
         {
             var index = item.LastFileIndex!.Value;
             var duration = item.DurationOf(index);
@@ -384,7 +384,7 @@ public sealed class HomeView : UserControl
             return new ResumeTile(FromHistory(item), item, index, duration > 0 ? position / duration.Value * 100 : 0, ResumeStamp(item));
         }).ToList();
         // Left part-way somewhere this PC never saw — another device, before a reinstall: Stremio kept the spot.
-        resumable.AddRange(KidsMode.Only(Stremio.Library.Paused.Where(p => shell.HistoryList.All(h => h.Imdb != p.Imdb)), p => new Title { Imdb = p.Imdb }).DistinctBy(p => p.Imdb).Take(10).Select(p =>
+        resumable.AddRange(KidsMode.Only(Trackers.Synced.Paused.Where(p => shell.HistoryList.All(h => h.Imdb != p.Imdb)), p => new Title { Imdb = p.Imdb }).DistinctBy(p => p.Imdb).Take(10).Select(p =>
             new ResumeTile(
                 new Title { Imdb = p.Imdb, Kind = p.Kind, Name = p.Title, Year = p.Year, Poster = $"https://images.metahub.space/poster/medium/{p.Imdb}/img" },
                 new HistoryItem { Uri = $"stremio:{p.Imdb}", Title = p.Title, Imdb = p.Imdb, Kind = p.Kind },
