@@ -65,10 +65,16 @@ fun parseSimkl(json: String): StremioLibrary {
     val o = runCatching { JSONObject(json) }.getOrNull() ?: return StremioLibrary()
     val films = mutableSetOf<String>()
     val episodes = mutableMapOf<String, MutableSet<Ep>>()
+    val seen = mutableListOf<Seen>()
     for (type in listOf("movies", "shows", "anime")) o.optJSONArray(type)?.objects().orEmpty().forEach { item ->
-        val imdb = (item.optJSONObject("movie") ?: item.optJSONObject("show"))?.optJSONObject("ids")?.str("imdb") ?: return@forEach
+        val media = item.optJSONObject("movie") ?: item.optJSONObject("show")
+        val imdb = media?.optJSONObject("ids")?.str("imdb") ?: return@forEach
+        val at = item.str("last_watched_at").orEmpty()
         if (type == "movies" || item.str("anime_type") == "movie") {
-            if (item.str("status") == "completed") films += imdb
+            if (item.str("status") == "completed") {
+                films += imdb
+                media.str("title")?.let { seen += Seen(imdb, it, media.str("year"), "movie", at) }
+            }
             return@forEach
         }
         item.optJSONArray("seasons")?.objects().orEmpty().forEach { s ->
@@ -80,26 +86,42 @@ fun parseSimkl(json: String): StremioLibrary {
                 }
             }
         }
+        if (episodes[imdb].isNullOrEmpty()) return@forEach
+        media.str("title")?.let { seen += Seen(imdb, it, media.str("year"), "tv", at, furthest(episodes[imdb])) }
     }
-    return StremioLibrary(films = films, episodes = episodes)
+    return StremioLibrary(films = films, episodes = episodes, seen = seen.sortedByDescending { it.at })
 }
+
+/** A show's furthest episode watched, as Stremio's library writes it ("S01E05"). */
+internal fun furthest(eps: Set<Ep>?): String? = eps?.maxWithOrNull(compareBy({ it.season }, { it.episode }))?.let { "S%02dE%02d".format(it.season, it.episode) }
 
 /** One page of MDBList's /sync/watched, and the cursor to the next. */
 fun parseMdblist(json: String): Pair<StremioLibrary, String?> {
     val o = runCatching { JSONObject(json) }.getOrNull() ?: return StremioLibrary() to null
-    val films = o.optJSONArray("movies")?.objects().orEmpty().mapNotNull { it.optJSONObject("movie")?.optJSONObject("ids")?.str("imdb") }.toSet()
+    val seen = mutableListOf<Seen>()
+    val films = o.optJSONArray("movies")?.objects().orEmpty().mapNotNull { row ->
+        val m = row.optJSONObject("movie") ?: return@mapNotNull null
+        val imdb = m.optJSONObject("ids")?.str("imdb") ?: return@mapNotNull null
+        m.str("title")?.let { seen += Seen(imdb, it, m.str("year"), "movie", row.str("watched_at").orEmpty()) }
+        imdb
+    }.toSet()
     val episodes = mutableMapOf<String, MutableSet<Ep>>()
     o.optJSONArray("episodes")?.objects().orEmpty().forEach { row ->
         val e = row.optJSONObject("episode") ?: return@forEach
-        val imdb = e.optJSONObject("show")?.optJSONObject("ids")?.str("imdb") ?: return@forEach
+        val show = e.optJSONObject("show")
+        val imdb = show?.optJSONObject("ids")?.str("imdb") ?: return@forEach
         episodes.getOrPut(imdb) { mutableSetOf() } += Ep(e.optInt("season"), e.optInt("number"))
+        show.str("title")?.let { seen += Seen(imdb, it, show.str("year"), "tv", row.str("watched_at").orEmpty()) }
     }
-    return StremioLibrary(films = films, episodes = episodes) to o.optJSONObject("pagination")?.str("next_cursor")
+    // One row a show, its latest watch; the furthest episode is filled in once every page is in.
+    return StremioLibrary(films = films, episodes = episodes, seen = seen) to o.optJSONObject("pagination")?.str("next_cursor")
 }
 
 fun watchedJson(l: StremioLibrary): String = JSONObject()
     .put("films", JSONArray(l.films))
     .put("episodes", JSONObject(l.episodes.mapValues { (_, eps) -> JSONArray(eps.map { "${it.season}:${it.episode}" }) }))
+    // The titles too, for the Library's list of each account: a service only asked again once something moved.
+    .put("seen", JSONArray(l.seen.map { JSONObject().put("imdb", it.imdb).put("title", it.title).put("year", it.year).put("kind", it.kind).put("at", it.at).put("last", it.last) }))
     .toString()
 
 fun parseWatched(json: String?): StremioLibrary = runCatching {
@@ -109,7 +131,10 @@ fun parseWatched(json: String?): StremioLibrary = runCatching {
     val episodes = saved.keys().asSequence().associateWith { imdb ->
         saved.getJSONArray(imdb).let { a -> (0 until a.length()).map { i -> a.getString(i).split(":").let { Ep(it[0].toInt(), it[1].toInt()) } }.toSet() }
     }
-    StremioLibrary(films = films, episodes = episodes)
+    val seen = o.optJSONArray("seen")?.objects().orEmpty().mapNotNull { s ->
+        Seen(s.str("imdb") ?: return@mapNotNull null, s.str("title") ?: return@mapNotNull null, s.str("year"), s.str("kind") ?: "movie", s.str("at").orEmpty(), s.str("last"))
+    }
+    StremioLibrary(films = films, episodes = episodes, seen = seen)
 }.getOrDefault(StremioLibrary())
 
 /**
@@ -151,7 +176,8 @@ class Tracker(
     private val key = name.lowercase()
     private val queueKey = "$key-queue"
     private val libraryKey = "$key-library"
-    private val activitiesKey = "$key-activities"
+    // "2": libraries saved before the titles were kept are read again once, though nothing moved there.
+    private val activitiesKey = "$key-activities2"
 
     private fun slot(id: String) = "$key:$id"
 
@@ -328,7 +354,7 @@ val Mdblist = Tracker(
             cursor = next ?: break
         }
     }
-    all
+    all.copy(seen = all.seen.sortedByDescending { it.at }.distinctBy { it.imdb }.map { s -> if (s.kind == "tv") s.copy(last = furthest(all.episodes[s.imdb])) else s })
 }
 
 val WATCH_TRACKERS = listOf(Simkl, Mdblist)

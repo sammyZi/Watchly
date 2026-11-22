@@ -393,12 +393,14 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
 
 private enum class Shelfs(val label: String) { HISTORY("History"), LATER("My List"), FAVORITE("Favourites") }
 
+/** The History's "This phone" chip: what was played here, none of the accounts'. */
+private const val PHONE = "phone"
+
 /** Everything played (the only way back to a magnet watched once), and the two saved lists. */
 @Composable
 fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit, onDownloads: () -> Unit) {
     val downloading by Downloads.live.collectAsState()
     val stremio by Stremio.connected.collectAsState()
-    val stremioLibrary by com.torrentviewer.core.Synced.collectAsState(com.torrentviewer.core.syncedNow())
     /** Per profile; the guest is offered nothing it would lose on exit. */
     var stremioLater by remember(me.id) { mutableStateOf(me.isGuest || Kv.get(STREMIO_LATER) != null) }
     val history by History.items.collectAsState()
@@ -409,8 +411,29 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit, onDownload
     var releases by remember { mutableStateOf<List<Item>?>(null) }
     // One row per title, however many torrents it was played from: its latest one.
     val items = latestPerTitle(history)
-    // After a reinstall this phone's history is empty; what Stremio has still belongs here.
-    val fromStremio = remember(stremioLibrary, history, Kids.on, Kids.allowed) { Kids.only(stremioLibrary.notIn(history)) { Title(it.imdb, it.kind, it.title) } }
+
+    // Each signed-in account and tracker, with what it has as watched: the History's own chips pick one.
+    val accounts = listOf(
+        "Stremio" to (stremio to Stremio.library.collectAsState().value),
+        "Nuvio" to (com.torrentviewer.core.Nuvio.connected.collectAsState().value to com.torrentviewer.core.Nuvio.library.collectAsState().value),
+        com.torrentviewer.core.Simkl.name to (com.torrentviewer.core.Simkl.connected.collectAsState().value to com.torrentviewer.core.Simkl.library.collectAsState().value),
+        com.torrentviewer.core.Mdblist.name to (com.torrentviewer.core.Mdblist.connected.collectAsState().value to com.torrentviewer.core.Mdblist.library.collectAsState().value),
+        com.torrentviewer.core.AniList.NAME to (com.torrentviewer.core.AniList.connected.collectAsState().value to com.torrentviewer.core.AniList.library.collectAsState().value),
+    ).filter { (_, s) -> s.first }.map { (name, s) -> name to s.second }
+    /** null is everything; [PHONE] what was played here; else an account's name. */
+    var from by rememberSaveable(me.id) { mutableStateOf<String?>(null) }
+    if (from != null && from != PHONE && accounts.none { it.first == from }) from = null
+    val allPaused = accounts.flatMap { it.second.paused }
+    // After a reinstall this phone's history is empty; what the accounts have still belongs here. Each title once, the first account that has it.
+    val fromAccounts = remember(accounts, history, from, Kids.on, Kids.allowed) {
+        val picked = when (from) {
+            null -> accounts.flatMap { (name, lib) -> lib.notIn(history).map { it to name } }.distinctBy { it.first.imdb }
+            PHONE -> emptyList()
+            else -> accounts.find { it.first == from }?.let { (name, lib) -> lib.notIn(emptyList()).map { it to name } }.orEmpty()
+        }
+        Kids.only(picked) { Title(it.first.imdb, it.first.kind, it.first.title) }
+    }
+    val fromStremio = fromAccounts.map { it.first }
     val sources = history.groupingBy { it.titleKey }.eachCount()
     val listed = saved.filter { it.list == if (shelf == Shelfs.FAVORITE) "favorite" else "later" }.map { it.asTitle() }
 
@@ -441,18 +464,23 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit, onDownload
             }
         }
         if (shelf == Shelfs.HISTORY) {
-            if (items.isEmpty() && fromStremio.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) { Note("Nothing here yet. Anything you play turns up in this list.", Modifier.padding(top = 16.dp)) }
-            items(items, key = { it.titleKey }) { item ->
+            val local = if (from == null || from == PHONE) items else emptyList()
+            if (local.isEmpty() && fromStremio.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+                Note(if (from == null || from == PHONE) "Nothing here yet. Anything you play turns up in this list." else "Nothing watched on $from yet.", Modifier.padding(top = 16.dp))
+            }
+            items(local, key = { it.titleKey }) { item ->
                 HistoryRow(item, sources[item.titleKey] ?: 1, onPlay = {
                     // Played from more than one release: ask which, as Continue watching does.
                     val all = history.filter { it.titleKey == item.titleKey }.sortedByDescending { it.at }
                     if (all.size > 1) releases = all else watch.resume(item)
                 }, onMore = { menu = item })
             }
-            if (fromStremio.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
-                Text("From Stremio", Modifier.padding(top = 18.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
+            if (from == null && local.isNotEmpty() && fromAccounts.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+                Text("From your accounts", Modifier.padding(top = 18.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
             }
-            items(fromStremio, key = { "stremio:${it.imdb}" }) { s -> StremioRow(s) { onOpen(Title(s.imdb, s.kind, s.title, year = s.year)) } }
+            items(fromAccounts, key = { "account:${it.first.imdb}" }) { (s, source) ->
+                StremioRow(s, source, allPaused.find { it.imdb == s.imdb }) { onOpen(Title(s.imdb, s.kind, s.title, year = s.year)) }
+            }
         } else {
             if (listed.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
                 Note(if (shelf == Shelfs.LATER) "Titles you add to My List wait here." else "Titles you like collect here.", Modifier.padding(top = 16.dp))
@@ -476,6 +504,15 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit, onDownload
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Shelfs.entries.forEach { s -> Chip(s.label, s == shelf, onClick = { shelf = s }) }
+            }
+            // Whose history: this phone's, or a signed-in account's or tracker's. Only with one signed in.
+            if (shelf == Shelfs.HISTORY && accounts.isNotEmpty()) Row(
+                Modifier.padding(top = 8.dp).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Chip("All", from == null, onClick = { from = null }, compact = true)
+                Chip("This phone", from == PHONE, onClick = { from = PHONE }, compact = true)
+                accounts.forEach { (name, _) -> Chip(name, from == name, onClick = { from = name }, compact = true) }
             }
         }
     }
@@ -531,27 +568,31 @@ fun whereLeft(item: Item): String? {
 }
 
 /**
- * A title Stremio has that this phone never played — a reinstall, another device. No release to resume,
- * so it opens the title; one picked there starts where Stremio says it was paused.
+ * A title an account or tracker has as watched — [source] names it. No release to resume, so it opens
+ * the title; one picked there starts where that account says it was paused.
  */
 @Composable
-private fun StremioRow(s: com.torrentviewer.core.Seen, onOpen: () -> Unit) {
-    val paused = com.torrentviewer.core.Synced.collectAsState(com.torrentviewer.core.syncedNow()).value.paused.find { it.imdb == s.imdb }
+private fun StremioRow(s: com.torrentviewer.core.Seen, source: String, paused: com.torrentviewer.core.Paused?, onOpen: () -> Unit) {
     Tap(onOpen, Modifier.fillMaxWidth(), RoundedCornerShape(10.dp)) { pressed ->
         Row(Modifier.background(if (pressed) Ink.surface2 else Ink.surface).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.width(64.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(6.dp))) {
                 Artwork("https://images.metahub.space/poster/medium/${s.imdb}/img", s.title, Modifier.fillMaxSize())
-                paused?.let { ProgressLine((it.progress / 100).toFloat(), Modifier.align(Alignment.BottomStart), height = 3.dp) }
+                paused?.takeIf { it.progress > 0 }?.let { ProgressLine((it.progress / 100).toFloat(), Modifier.align(Alignment.BottomStart), height = 3.dp) }
             }
             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                 Text(s.title, style = Type.label.copy(fontWeight = FontWeight.SemiBold), maxLines = 2, overflow = TextOverflow.Ellipsis)
                 val state = when {
+                    // No progress: the next episode up, from AniList.
+                    paused != null && paused.progress <= 0 -> listOfNotNull("Up next", paused.ep?.let { "S${it.season}:E${it.episode}" }).joinToString("  ·  ")
                     paused != null -> listOfNotNull(s.last, "${paused.progress.toInt()}% in").joinToString("  ·  ")
                     s.kind == "movie" -> "Watched"
                     else -> s.last?.let { "Last watched $it" } ?: "Watched"
                 }
                 Text(state, Modifier.padding(top = 3.dp), style = Type.meta.copy(color = if (paused == null) Ink.good else Ink.text.copy(alpha = 0.8f)), maxLines = 1)
-                Text(listOfNotNull(s.year?.take(4), "on Stremio").joinToString("  ·  "), Modifier.padding(top = 2.dp), style = Type.meta.copy(fontSize = 12.sp, color = Ink.faint), maxLines = 1)
+                Text(
+                    listOfNotNull(s.year?.take(4), com.torrentviewer.core.isoMs(s.at)?.let { ago(it) }, "on $source").joinToString("  ·  "),
+                    Modifier.padding(top = 2.dp), style = Type.meta.copy(fontSize = 12.sp, color = Ink.faint), maxLines = 1,
+                )
             }
             Lc(L.drawable.lucide_ic_chevron_right, tint = Ink.muted, size = 20.dp)
         }

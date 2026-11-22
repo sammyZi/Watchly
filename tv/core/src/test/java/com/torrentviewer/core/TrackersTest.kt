@@ -93,6 +93,15 @@ class TrackersTest {
         assertEquals(l, parseWatched(watchedJson(l)))
         assertEquals(StremioLibrary(), parseWatched(null))
         assertEquals(StremioLibrary(), parseWatched("broken"))
+        // With the titles the Library lists by account.
+        val titled = l.copy(seen = listOf(Seen("tt3", "A Show", "2020", "tv", "2026-11-22T10:00:00.000Z", "S02E07")))
+        assertEquals(titled, parseWatched(watchedJson(titled)))
+    }
+
+    @Test fun trackersKeepTitlesForTheLibrary() {
+        val l = parseSimkl("""{"shows":[{"last_watched_at":"2026-11-01T00:00:00Z","show":{"title":"A Show","year":2020,"ids":{"imdb":"tt3"}},"seasons":[{"number":1,"episodes":[{"number":9}]},{"number":2,"episodes":[{"number":4}]}]}]}""")
+        assertEquals(listOf(Seen("tt3", "A Show", "2020", "tv", "2026-11-01T00:00:00Z", "S02E04")), l.seen)
+        assertEquals(null, furthest(emptySet()))
     }
 
     /** JSON key order is not part of the shape. */

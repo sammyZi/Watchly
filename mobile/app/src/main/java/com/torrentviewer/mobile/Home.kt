@@ -259,13 +259,14 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
     val stremio by com.torrentviewer.core.Synced.collectAsState(com.torrentviewer.core.syncedNow())
     val resumable = latestPerTitle(history).filter { inProgress(it) && !stremio.finishedSince(it) }.take(10)
     // Left part-way somewhere this phone never saw — another device, before a reinstall: Stremio kept the spot.
-    val fromStremio = com.torrentviewer.core.Kids.only(stremio.paused.filter { p -> history.none { it.imdb == p.imdb } }.distinctBy { it.imdb }) { Title(it.imdb, it.kind, it.title) }.take(10)
+    // With what is being watched on AniList: the episode after the last one marked there.
+    val everywhere by com.torrentviewer.core.WatchedEverywhere.collectAsState(stremio)
+    val fromStremio = com.torrentviewer.core.Kids.only(everywhere.paused.filter { p -> history.none { it.imdb == p.imdb } }.distinctBy { it.imdb }) { Title(it.imdb, it.kind, it.title) }.take(10)
     val watchlist = saved.filter { it.list == "later" }.map { it.asTitle() }
     var menu by remember { mutableStateOf<Item?>(null) }
     var comingAll by remember { mutableStateOf(false) }
     var releases by remember { mutableStateOf<List<Item>?>(null) }
     // Nothing already played, seen elsewhere or saved is a suggestion.
-    val everywhere by com.torrentviewer.core.WatchedEverywhere.collectAsState(stremio)
     val watched = remember(history, everywhere) { com.torrentviewer.core.watchedFilms(history, everywhere) }
     val known = remember(watched, history, saved) { watched + history.mapNotNull { it.imdb } + saved.map { it.imdb } }
     val picks = state.forYou.picks.filter { it.title.imdb !in known }.take(FOR_YOU_PICKS)
@@ -314,7 +315,9 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
                                 Tap({ onOpen(Title(p.imdb, p.kind, p.title, year = p.year)) }, Modifier.fillMaxWidth().aspectRatio(2f / 3f), RoundedCornerShape(6.dp)) {
                                     LandscapeCard(
                                         "https://images.metahub.space/poster/medium/${p.imdb}/img", p.title,
-                                        listOfNotNull(p.ep?.let { "S${it.season}:E${it.episode}" }, "${p.progress.toInt()}%").joinToString("  ·  "),
+                                        // No progress: AniList's next episode up, not a spot left part-way.
+                                        if (p.progress <= 0) listOfNotNull("Up next", p.ep?.let { "S${it.season}:E${it.episode}" }).joinToString("  ·  ")
+                                        else listOfNotNull(p.ep?.let { "S${it.season}:E${it.episode}" }, "${p.progress.toInt()}%").joinToString("  ·  "),
                                         (p.progress / 100).toFloat(),
                                     )
                                 }

@@ -654,7 +654,8 @@ fun resumeLabel(imdb: String, items: List<Item>, stremio: StremioLibrary, ep: Ep
         val i = local.lastFileIndex!!
         (local.durations[i] ?: 0.0) - (local.positions[i] ?: 0.0)
     } else {
-        val p = stremio.paused.find { it.imdb == imdb && it.ep == ep } ?: return null
+        // A spot with no progress is only the next episode up (AniList's), not something to resume.
+        val p = stremio.paused.find { it.imdb == imdb && it.ep == ep && it.progress > 0 } ?: return null
         p.seconds?.takeIf { p.progress > 0 }?.let { it / (p.progress / 100) - it }
     }
     return "Resume" + (leftSeconds?.takeIf { it > 0 }?.let { "  ·  ${left(it)}" } ?: "")
