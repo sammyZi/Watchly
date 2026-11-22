@@ -28,13 +28,21 @@ private fun Map<Int, Double>.json() = JSONObject().also { o -> forEach { (k, v) 
 /**
  * Key/value storage, with the Expo build's keys and JSON shapes so its data imports
  * as-is. Everything a viewer accumulates is namespaced by profile; the first profile
- * keeps the bare keys. The guest writes to memory only and is forgotten on exit.
+ * keeps the bare keys. The guest writes to memory only and is forgotten on exit — but for [GUEST_KEEPS].
  */
 object Kv {
     private lateinit var prefs: SharedPreferences
     private var profile = ""
     private var guest = false
     private val memory = HashMap<String, String>()
+
+    /** What the guest keeps across launches, under its own id: what it played, so Continue Watching is there next time. */
+    private val GUEST_KEEPS = setOf("torrent-history")
+
+    private fun inMemory(key: String) = guest && key !in GUEST_KEEPS
+
+    /** The guest is in use: what it signs in to would be forgotten. */
+    val isGuest get() = guest
     private lateinit var cacheDir: java.io.File
 
     fun init(context: Context) {
@@ -62,11 +70,11 @@ object Kv {
     val onBareKeys get() = profile.isEmpty()
 
     /** Per-profile. */
-    fun get(key: String): String? = at(key).let { if (guest) memory[it] else prefs.getString(it, null) }
+    fun get(key: String): String? = at(key).let { if (inMemory(key)) memory[it] else prefs.getString(it, null) }
 
     fun set(key: String, value: String?) {
         val k = at(key)
-        if (guest) {
+        if (inMemory(key)) {
             if (value == null) memory.remove(k) else memory[k] = value
             return
         }

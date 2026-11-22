@@ -171,9 +171,6 @@ private const val TOURED = "phone:toured"
 /** The date of the legal text last accepted. */
 private const val AGREED = "phone:agreed"
 
-/** Before profiles there were the bare keys; with none made, the phone keeps using them. */
-private val OWNER = Profile("", "Me", COLOURS[0])
-
 private fun open(profile: Profile) {
     // Before anything is read: every store call below goes through this profile.
     Kv.useProfile(profile.id, profile.isGuest)
@@ -189,9 +186,23 @@ private fun open(profile: Profile) {
     if (!profile.isGuest) Kv.setGlobal(LAST_PROFILE, profile.id)
 }
 
-/** Who opens without asking: the owner when there are no profiles, else the last one unless it is locked. */
+/**
+ * A sign-in asked for as the guest: a profile is made first, as the guest forgets its sign-ins on exit.
+ * Any sign-in button sets it; the shell answers with the profile editor.
+ */
+object NeedProfile {
+    var ask by mutableStateOf(false)
+
+    /** True, and the editor is on its way, when [Kv] is the guest's: the caller signs in only on false. */
+    fun first(): Boolean = Kv.isGuest.also { if (it) ask = true }
+}
+
+/**
+ * Who opens without asking: the last one, unless it is locked. None made yet: nobody, so the picker
+ * offers Guest or a new profile — the first takes the bare keys, and what was here before stays.
+ */
 private fun startProfile(list: List<Profile>): Profile? {
-    if (list.isEmpty()) return OWNER
+    if (list.isEmpty()) return null
     val last = Kv.global(LAST_PROFILE)
     return (list.find { it.id == last } ?: list.singleOrNull())?.takeIf { it.pin == null }
 }
@@ -461,26 +472,37 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>, barHaze: dev.chris
     LaunchedEffect(Unit) { Addons.seedSubtitles() }
 
     // The tour, once, on a fresh install: anyone with a library or a profile already knows the app.
+    // Decided before the profile step below, which makes a profile on a fresh install.
     var toured by remember { mutableStateOf(Kv.global(TOURED) != null || Profiles.list.value.isNotEmpty() || History.items.value.isNotEmpty()) }
+
+    // Who first, before the tour: its genres and sign-in then belong to someone. On a fresh install
+    // that opens on making a profile; back from there, Guest is still on offer.
+    val me = who
+    if (me == null || switching || NeedProfile.ask) {
+        ProfilesScreen(
+            profiles = profiles,
+            onPick = { NeedProfile.ask = false; enter(it) },
+            onCancel = when {
+                // The guest asked to sign in: back, it stays the guest, signed in to nothing.
+                NeedProfile.ask -> ({ NeedProfile.ask = false })
+                me != null -> ({ switching = false })
+                else -> null
+            },
+            onRemoved = { gone ->
+                if (who?.id == gone.id) who = startProfile(Profiles.list.value)?.also(::open)
+            },
+            create = profiles.isEmpty() || NeedProfile.ask,
+            note = if (NeedProfile.ask) "Make a profile to keep your sign-ins — Guest forgets them when the app closes." else null,
+        )
+        return
+    }
+
     if (!toured || tourAgain) {
         Onboarding {
             Kv.setGlobal(TOURED, "1")
             toured = true
             tourAgain = false
         }
-        return
-    }
-
-    val me = who
-    if (me == null || switching) {
-        ProfilesScreen(
-            profiles = profiles,
-            onPick = ::enter,
-            onCancel = if (me != null) ({ switching = false }) else null,
-            onRemoved = { gone ->
-                if (who?.id == gone.id) who = startProfile(Profiles.list.value)?.also(::open)
-            },
-        )
         return
     }
 

@@ -151,6 +151,8 @@ fun Onboarding(onDone: () -> Unit) {
     }
 
     fun connect() {
+        // Chose Guest before the tour: a profile first, which keeps the sign-in.
+        if (NeedProfile.first()) return
         note = null
         job?.cancel()
         job = scope.launch {

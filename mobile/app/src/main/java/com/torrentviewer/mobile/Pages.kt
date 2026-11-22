@@ -779,7 +779,7 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEd
                     Text(me.name, style = Type.title.copy(fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
                         when {
-                            me.isGuest -> "Guest keeps nothing — history and My List go when the app closes."
+                            me.isGuest -> "Guest keeps Continue Watching on this phone; My List and sign-ins go when the app closes."
                             profiles.isEmpty() -> "One library on this phone. Add profiles to keep a library, My List and resume points each."
                             else -> "Library, My List and resume points belong to this profile."
                         },
@@ -1258,6 +1258,8 @@ fun StremioSection(me: Profile, onLater: (() -> Unit)? = null) {
     }
 
     fun connect() {
+        // As the guest: a profile first, which keeps the sign-in.
+        if (NeedProfile.first()) return
         note = null
         job?.cancel()
         job = scope.launch {
@@ -1361,7 +1363,7 @@ fun NuvioForm(owner: String, tint: Color = Ink.text, onSignedIn: () -> Unit) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     fun go() {
-        if (busy) return
+        if (busy || NeedProfile.first()) return
         if ('@' !in email || password.isEmpty()) {
             note = "Enter your Nuvio email and password."
             return
@@ -1790,6 +1792,7 @@ private fun AniListSection() {
                 !a.available -> Unit
                 connected -> Button("Disconnect", { a.disconnect() }, compact = true)
                 else -> Button(if (waiting) "Open again" else "Connect", {
+                    if (NeedProfile.first()) return@Button
                     waiting = true
                     runCatching { browser.openUri(a.authorizeUrl) }
                 }, primary = !waiting, compact = true)
@@ -1810,6 +1813,7 @@ private fun TrackerSection(t: com.torrentviewer.core.Tracker) {
     val browser = androidx.compose.ui.platform.LocalUriHandler.current
 
     fun connect() {
+        if (NeedProfile.first()) return
         note = null
         job?.cancel()
         job = scope.launch {
@@ -1879,13 +1883,19 @@ private sealed interface ProfilesMode {
     data class Pin(val profile: Profile) : ProfilesMode
 }
 
-/** Who's watching — asked only when the phone can't tell: several profiles, or a locked one. */
+/**
+ * Who's watching — asked when the phone can't tell: none made yet, several, or a locked one. [create] opens on
+ * a new profile, with [note] saying why: a sign-in that needs one.
+ */
 @Composable
-fun ProfilesScreen(profiles: List<Profile>, onPick: (Profile) -> Unit, onCancel: (() -> Unit)?, onRemoved: (Profile) -> Unit) {
-    var mode by remember { mutableStateOf<ProfilesMode>(if (profiles.isEmpty()) ProfilesMode.Edit(null) else ProfilesMode.Pick) }
+fun ProfilesScreen(profiles: List<Profile>, onPick: (Profile) -> Unit, onCancel: (() -> Unit)?, onRemoved: (Profile) -> Unit, create: Boolean = false, note: String? = null) {
+    var mode by remember(create) { mutableStateOf<ProfilesMode>(if (create) ProfilesMode.Edit(null) else ProfilesMode.Pick) }
+    /** Asked for by a sign-in: back is the caller's, and the guest stays the guest. Otherwise back is the picker, Guest on it. */
+    val forSignIn = note != null
     BackHandler(mode != ProfilesMode.Pick || onCancel != null) {
         when {
-            mode != ProfilesMode.Pick && profiles.isNotEmpty() -> mode = ProfilesMode.Pick
+            forSignIn -> onCancel?.invoke()
+            mode != ProfilesMode.Pick -> mode = ProfilesMode.Pick
             onCancel != null -> onCancel()
         }
     }
@@ -1911,7 +1921,9 @@ fun ProfilesScreen(profiles: List<Profile>, onPick: (Profile) -> Unit, onCancel:
             )
             is ProfilesMode.Edit -> Editor(
                 m.profile,
-                canCancel = profiles.isNotEmpty() || onCancel != null,
+                // The picker is always there to go back to; for a sign-in, back to where it was asked.
+                canCancel = !forSignIn || onCancel != null,
+                note = note.takeIf { m.profile == null },
                 onSave = { name, icon, colour, kids ->
                     if (m.profile == null) onPick(Profiles.add(name, icon, colour, kids))
                     else {
@@ -1926,7 +1938,7 @@ fun ProfilesScreen(profiles: List<Profile>, onPick: (Profile) -> Unit, onCancel:
                     }
                     mode = ProfilesMode.Pick
                 },
-                onCancel = { if (profiles.isEmpty()) onCancel?.invoke() else mode = ProfilesMode.Pick },
+                onCancel = { if (forSignIn) onCancel?.invoke() else mode = ProfilesMode.Pick },
             )
             is ProfilesMode.Pin -> PinPad(m.profile, onOk = { onPick(m.profile) }, onBack = { mode = ProfilesMode.Pick })
         }
@@ -1983,7 +1995,7 @@ private fun Tile(name: String, onClick: () -> Unit, face: @Composable androidx.c
 }
 
 @Composable
-private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, String, String, Boolean) -> Unit, onDelete: () -> Unit, onCancel: () -> Unit) {
+private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, String, String, Boolean) -> Unit, onDelete: () -> Unit, onCancel: () -> Unit, note: String? = null) {
     var name by remember { mutableStateOf(profile?.name.orEmpty()) }
     var icon by remember { mutableStateOf(profile?.let { p -> p.icon?.takeIf { it.startsWith("/") } ?: personOf(p) } ?: PROFILE_ICONS[0]) }
     var colour by remember { mutableStateOf(profile?.colour ?: COLOURS[0]) }
@@ -2011,7 +2023,7 @@ private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, Strin
         Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
             Avatar(Profile("preview", name.ifBlank { "?" }, colour, icon), 110.dp)
             Text(if (profile == null) "Add a profile" else "Edit profile", Modifier.padding(top = 18.dp), style = Type.display)
-            Text(if (profile == null) "Its own library, My List and resume points." else "Change the name, the face or the colour.", Modifier.padding(top = 4.dp, bottom = 18.dp), style = Type.meta, textAlign = TextAlign.Center)
+            Text(note ?: if (profile == null) "Its own library, My List and resume points." else "Change the name, the face or the colour.", Modifier.padding(top = 4.dp, bottom = 18.dp), style = Type.meta, textAlign = TextAlign.Center)
             Field(name, { name = it.take(20) }, "Name", Modifier.fillMaxWidth())
             Text("ICON", Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 10.dp), style = Type.overline)
             FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
