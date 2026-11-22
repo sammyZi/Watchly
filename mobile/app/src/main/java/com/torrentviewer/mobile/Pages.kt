@@ -25,6 +25,8 @@ import com.torrentviewer.core.Phase
 import com.torrentviewer.core.SUB_SIZES
 import com.torrentviewer.core.langName
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -799,6 +801,17 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEd
         }
 
         if (page == "Streaming") Panel {
+        Section("Torrent engine", "What streams a torrent. A change starts with the next film.") {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                EngineOption("Watchly", !settings.nuvioEngine, { set(settings.copy(nuvioEngine = false)) }, Modifier.weight(1f)) { WatchlyLogo(32.dp) }
+                EngineOption("Nuvio", settings.nuvioEngine, { set(settings.copy(nuvioEngine = true)) }, Modifier.weight(1f)) {
+                    com.torrentviewer.core.ServiceLogo("nuvio.tv", "Nuvio", 32.dp)
+                }
+            }
+        }
+
+        // Watchly's own: Nuvio's engine keeps its own cache and starts the player at once.
+        if (!settings.nuvioEngine) {
         Section(
             "Storage for one film",
             "How much of a film may sit on this phone at once. When it fills, what you've watched is let go to make room. Auto uses the free space, keeping a few GB spare.",
@@ -812,6 +825,7 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEd
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(1, 4, 8, 16).forEach { mb -> Chip("$mb MB", settings.prepareMb == mb, onClick = { set(settings.copy(prepareMb = mb)) }) }
             }
+        }
         }
 
         Section("Extra trackers","Attach public trackers to bare magnet links so they resolve faster.") {
@@ -1338,6 +1352,40 @@ fun NuvioForm(owner: String, tint: Color = Ink.text, onSignedIn: () -> Unit) {
         )
         note?.let { Text(it, Modifier.padding(top = 10.dp), style = Type.meta.copy(color = tint.copy(alpha = 0.7f))) }
         Button(if (busy) "Signing in…" else "Sign in to Nuvio", ::go, Modifier.padding(top = 14.dp).fillMaxWidth(), icon = L.drawable.lucide_ic_log_in, primary = true)
+    }
+}
+
+/** One torrent engine to pick: its app's logo and name, the picked one ringed in the accent. */
+@Composable
+private fun EngineOption(name: String, on: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, logo: @Composable () -> Unit) {
+    val shape = RoundedCornerShape(12.dp)
+    Tap(onClick, modifier, shape) { pressed ->
+        Row(
+            Modifier.fillMaxWidth()
+                .background(Ink.text.copy(alpha = if (pressed) 0.14f else 0.07f))
+                .border(2.dp, if (on) Ink.accent else Color.Transparent, shape)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            logo()
+            // No tick: on a phone's half width it cut the name short, and the ring already says which.
+            Text(name, Modifier.padding(start = 10.dp), style = Type.label.copy(color = Ink.text, fontWeight = FontWeight.SemiBold), maxLines = 1, softWrap = false)
+        }
+    }
+}
+
+/** The app's own icon, from its adaptive layers: 108dp each with the art in the middle 72, so shown at 1.5x as a launcher crops them. */
+@Composable
+private fun WatchlyLogo(size: androidx.compose.ui.unit.Dp) {
+    Box(Modifier.size(size).clip(RoundedCornerShape(size / 4)), contentAlignment = Alignment.Center) {
+        androidx.compose.foundation.Image(
+            androidx.compose.ui.res.painterResource(R.mipmap.ic_launcher_background), null,
+            Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+        )
+        androidx.compose.foundation.Image(
+            androidx.compose.ui.res.painterResource(R.mipmap.ic_launcher_foreground), null,
+            Modifier.requiredSize(size * 1.5f),
+        )
     }
 }
 

@@ -12,6 +12,7 @@ are at the links.
 | [Jellyfin Media3 FFmpeg decoder](https://github.com/jellyfin/jellyfin-androidx-media), which includes [FFmpeg](https://ffmpeg.org) | [GPL 3.0](https://www.gnu.org/licenses/gpl-3.0.txt) |
 | [LibVLC for Android](https://code.videolan.org/videolan/vlc-android) | [LGPL 2.1](https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html) |
 | [libtorrent4j](https://github.com/aldenml/libtorrent4j), which includes [libtorrent](https://libtorrent.org) | [MIT](https://opensource.org/license/mit) · libtorrent: [BSD 3-Clause](https://github.com/arvidn/libtorrent/blob/RC_2_0/LICENSE) |
+| Nuvio Engine 0.1.6 (`lib-nuvio-engine-android`), from [NuvioTV](https://github.com/NuvioMedia/NuvioTV): the phone's optional torrent engine | [GPL 3.0](https://github.com/NuvioMedia/NuvioTV/blob/dev/LICENSE) |
 | [Jetpack Compose](https://developer.android.com/jetpack/compose), AndroidX, [Kotlin](https://kotlinlang.org) | [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) |
 | [Coil](https://github.com/coil-kt/coil) | [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) |
 | [ZXing](https://github.com/zxing/zxing) | [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) |

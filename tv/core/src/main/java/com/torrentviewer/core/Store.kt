@@ -189,6 +189,8 @@ data class Settings(
     val homeOrder: List<String> = emptyList(),
     /** Home rows this profile turned off, by key. */
     val homeHidden: List<String> = emptyList(),
+    /** The phone streams torrents on Nuvio's engine instead of Watchly's, to compare them. */
+    val nuvioEngine: Boolean = false,
 )
 
 /**
@@ -309,6 +311,7 @@ object SettingsStore {
         partySmooth = o.optBoolean("partySmooth", true),
         partyShowChat = o.optBoolean("partyShowChat", true),
         partyShowReactions = o.optBoolean("partyShowReactions", true),
+        nuvioEngine = o.optBoolean("nuvioEngine", false),
     )
 
     /** Over what is stored, not instead of it: the TV and the phone each keep fields the other never reads. */
@@ -322,6 +325,7 @@ object SettingsStore {
             .put("playbackRate", next.playbackRate.toDouble()).put("playerScale", next.playerScale).put("streamWholeFile", next.wholeFile).put("themeMode", next.themeMode).put("autoSkipIntro", next.autoSkipIntro).put("episodeAlerts", next.episodeAlerts)
             .put("partyOn", next.partyOn).put("partyName", next.partyName).put("partyAsks", next.partyAsks).put("partyHoldSec", next.partyWaitSec).put("partySmooth", next.partySmooth)
             .put("partyShowChat", next.partyShowChat).put("partyShowReactions", next.partyShowReactions)
+            .put("nuvioEngine", next.nuvioEngine)
         Kv.setGlobal("settings", o.toString())
         Kv.set(GENRES_KEY, JSONArray(next.genres).toString())
         Kv.set(HOME_ORDER_KEY, JSONArray(next.homeOrder).toString())

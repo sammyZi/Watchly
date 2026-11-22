@@ -51,6 +51,12 @@ object Services {
         engine.logFile = context.getExternalFilesDir(null)?.let { java.io.File(it, "engine.log") }
         // A film stopped part-way keeps its header, index and resume spot, so it opens at once next time.
         engine.keepStarts = true
+        // Settings → Streaming → Engine: Nuvio's streams the file instead, read at each play.
+        val app = context.applicationContext
+        engine.external = { magnet, torrent, hash, index, name ->
+            if (SettingsStore.value.value.nuvioEngine) NuvioTorrent.play(app, magnet, torrent, hash, index, name) else null
+        }
+        engine.externalStop = NuvioTorrent::stop
         com.torrentviewer.core.Party.log = { engine.note("party: $it") }
         // DHT bootstrapped while the viewer browses, not after they press Play.
         AppScope.launch(Dispatchers.IO) { engine.warmUp() }

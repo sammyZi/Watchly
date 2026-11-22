@@ -313,6 +313,13 @@ class TorrentStream(
     /** Serve the stream to the network too, so a Cast receiver can fetch it. The phone casts; the TV is the screen. */
     private val lan: Boolean = false,
 ) {
+    /** (magnet, .torrent bytes or empty, info hash, file index, name) → a URL another engine serves the file on; null streams it here. */
+    @Volatile var external: ((String, ByteArray, String, Int, String) -> String?)? = null
+    /** Ends [external]'s stream. */
+    @Volatile var externalStop: (() -> Unit)? = null
+    /** The stream playing now is [external]'s. */
+    @Volatile private var externalOn = false
+
     val progress = MutableStateFlow<Progress?>(null)
     val ready = MutableStateFlow<Ready?>(null)
     val errors = MutableSharedFlow<String>(extraBufferCapacity = 4)
@@ -574,6 +581,8 @@ class TorrentStream(
     /** @param resumeFraction how far into the file playback was left, for the start kept of it ([keepStarts]). */
     fun stop(resumeFraction: Double? = null) {
         playGen++
+        externalOn = false
+        runCatching { externalStop?.invoke() }
         val h = handle?.takeIf { it.isValid }
         handle = null
         // Where the player was reading, taken before the server's shutdown lets every reader go.
@@ -956,6 +965,13 @@ class TorrentStream(
         Vectors.byte_vector2bytes(libtorrent.write_torrent_file_buf_ex(params.swig()))
     }.getOrElse { ByteArray(0) }
 
+    /** [asTorrentFile] with [magnet]'s trackers in its announce list; empty if it cannot be. */
+    private fun torrentWithTrackers(magnet: String, ti: TorrentInfo): ByteArray = runCatching {
+        val params = AddTorrentParams.parseMagnetUri(magnet)
+        params.setTorrentInfo(ti)
+        Vectors.byte_vector2bytes(libtorrent.write_torrent_file_buf_ex(params.swig()))
+    }.getOrElse { ByteArray(0) }
+
     private fun persistMeta(hash: String, bytes: ByteArray) {
         runCatching { File(metaDir, "$hash.torrent").takeUnless { it.exists() }?.writeBytes(bytes) }
     }
@@ -1028,6 +1044,22 @@ class TorrentStream(
         }
         val files = ti.files()
         if (index < 0 || index >= files.numFiles()) throw TorrentException("No file at index $index")
+
+        // Another engine streams it instead (the phone's Nuvio engine): only the file list was ours.
+        // It gets the .torrent we already have, with the magnet's trackers, so it doesn't fetch the metadata again.
+        val hex = ti.infoHash().toHex()
+        val magnet = if (uri.startsWith("magnet:")) uri else "magnet:?xt=urn:btih:$hex"
+        external?.invoke(magnet, torrentWithTrackers(magnet, ti), hex, index, files.fileName(index))?.let { url ->
+            teardown(keep = "")
+            infoHashHex = hex
+            // The same lines as ours below, so the two engines compare in one log.
+            readyAt = startedAt
+            externalOn = true
+            if (gen == playGen) ready.value = Ready(url, files.fileName(index), emptyList())
+            log("play: ${files.fileName(index)} on the external engine, ready in ${(System.currentTimeMillis() - startedAt) / 1000}s")
+            return
+        }
+        externalOn = false
 
         // Starts unplayed too long, or past their cap, go.
         if (keepStarts) runCatching { starts.prune() }
@@ -2152,7 +2184,7 @@ class TorrentStream(
 
     /** The picture is up: the whole wait, which "ready in" stops short of when a resume has further to go. */
     fun noteStarted() {
-        if (handle != null) log("first picture ${(System.currentTimeMillis() - readyAt) / 1000}s after play")
+        if (handle != null || externalOn) log("first picture ${(System.currentTimeMillis() - readyAt) / 1000}s after play${if (externalOn) " (external engine)" else ""}")
     }
 
     private fun log(message: String) {

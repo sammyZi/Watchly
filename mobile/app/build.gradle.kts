@@ -96,4 +96,6 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.1")
     // The frosted bar over a scrolled page: Compose's own blur blurs a view itself, not what scrolls behind it.
     implementation("dev.chrisbanes.haze:haze:1.7.1")
+    // Nuvio's torrent engine, from NuvioTV's app/libs (GPL-3.0): Settings → Streaming → Torrent engine.
+    implementation(files("libs/lib-nuvio-engine-android-0.1.6.aar"))
 }
