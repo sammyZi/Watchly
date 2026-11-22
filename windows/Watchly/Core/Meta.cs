@@ -423,6 +423,79 @@ public static class Meta
     public static async Task<List<Title>> TopOf(string kind, IReadOnlyList<string> genres) =>
         genres.Count == 0 ? await LoadTop(kind) : MixTop(await Task.WhenAll(genres.Select(g => LoadTop(kind, g))), TopSize);
 
+    /// <summary>How far down Cinemeta's popular lists <see cref="PopularIds"/> reads: 50 to a page.</summary>
+    public const int PopularPages = 4;
+
+    /// <summary>
+    /// Cinemeta's most popular films or series, most popular first, as IMDb ids (tv/core Meta.popularIds): what
+    /// search ranks by, so one wanted by everyone outranks one that only shares its name. Kept a day; a page that
+    /// fails just leaves its titles out.
+    /// </summary>
+    public static Task<List<string>> PopularIds(string kind)
+    {
+        var key = $"popular-ids-{kind}";
+        var type = kind == "tv" ? "series" : "movie";
+        return Once(key, () => Remember(key, async () =>
+        {
+            var bodies = await Task.WhenAll(Enumerable.Range(0, PopularPages).Select(async page =>
+            {
+                try { return await Net.Json($"{Catalog}/{type}/top/skip={page * 50}.json", default, true); }
+                catch { return null; }
+            }));
+            var ids = bodies.SelectMany(b => (b?["metas"] as JsonArray ?? new JsonArray()).OfType<JsonObject>())
+                .Select(m => (m["imdb_id"] ?? m["id"])?.GetValue<string>()).Where(id => !string.IsNullOrEmpty(id)).Select(id => id!).Distinct().ToList();
+            if (ids.Count == 0) throw new InvalidOperationException("no popular titles");
+            return ids;
+        }), new List<string>());
+    }
+
+    static string Bare(string s)
+    {
+        var n = System.Text.RegularExpressions.Regex.Replace(s.ToLowerInvariant(), "[^a-z0-9]+", " ").Trim();
+        return n.StartsWith("the ") ? n[4..] : n;
+    }
+
+    /// <summary>
+    /// Search results, most wanted first (tv/core rankSearch). Each list comes in Cinemeta's own order, roughly by
+    /// popularity, but a film's place and a series' place say nothing about each other. So each title scores its
+    /// place in its own list (an addon's after Cinemeta's); less for being on Cinemeta's popular lists, by how high —
+    /// the strongest pull, and the same for a film and a series; and less for naming what was typed, most for the
+    /// whole name, a little more when the name doesn't hold it at all. Lowest first; ties keep films and series
+    /// alternating. Calibration knobs, all of them.
+    /// </summary>
+    public static List<Title> RankSearch(string query, IReadOnlyList<Title> films, IReadOnlyList<Title> series, IReadOnlyList<Title> addons, IReadOnlyList<string> popularFilms, IReadOnlyList<string> popularSeries)
+    {
+        var q = Bare(query);
+        var popular = new Dictionary<string, int>();
+        for (var i = 0; i < popularFilms.Count; i++) popular.TryAdd(popularFilms[i], i);
+        for (var i = 0; i < popularSeries.Count; i++) popular[popularSeries[i]] = popular.TryGetValue(popularSeries[i], out var at) ? Math.Min(at, i) : i;
+        double reach = PopularPages * 50;
+        double Score(Title t, int place)
+        {
+            var name = Bare(t.Name);
+            var match = q.Length == 0 ? 0
+                : name == q ? -3
+                : name.StartsWith(q) ? -1
+                : $" {name} ".Contains($" {q} ") ? 0
+                : name.Contains(q) ? 0.5
+                : 1.5;
+            var pull = popular.TryGetValue(t.Imdb, out var p) ? -10 * (1 - p / reach) : 0;
+            return place + match + pull;
+        }
+        // Films and series alternate, then the addons: the order ties fall back to.
+        var order = new List<(Title T, int Place)>();
+        for (var i = 0; i < Math.Max(films.Count, series.Count); i++)
+        {
+            if (i < films.Count) order.Add((films[i], i));
+            if (i < series.Count) order.Add((series[i], i));
+        }
+        for (var i = 0; i < addons.Count; i++) order.Add((addons[i], i + 3));
+        return order.DistinctBy(x => x.T.Imdb)
+            .Select((x, at) => (x.T, Score: Score(x.T, x.Place), At: at))
+            .OrderBy(x => x.Score).ThenBy(x => x.At)
+            .Select(x => x.T).ToList();
+    }
+
     public static Task<List<Title>> SearchTitles(string query, string kind)
     {
         var type = kind == "tv" ? "series" : "movie";

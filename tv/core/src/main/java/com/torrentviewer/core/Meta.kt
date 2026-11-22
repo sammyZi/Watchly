@@ -390,6 +390,40 @@ object Meta {
         }
     }.getOrDefault(emptyList())
 
+    /**
+     * Cinemeta's most popular films or series, most popular first, as IMDb ids: [POPULAR_PAGES] of its popular
+     * list, kept a day. What search ranks by, so one wanted by everyone outranks one that only shares its name.
+     * A page that fails just leaves its titles out.
+     */
+    suspend fun popularIds(kind: String): List<String> = runCatching {
+        remember("popular-ids:$kind", { raw -> JSONArray(raw).let { a -> (0 until a.length()).map(a::getString) } }, { JSONArray(it).toString() }) {
+            val type = if (kind == "tv") "series" else "movie"
+            coroutineScope {
+                (0 until POPULAR_PAGES).map { page ->
+                    async {
+                        runCatching {
+                            JSONObject(cinemeta("$CATALOG/$type/top/skip=${page * 50}.json", quiet = true))
+                                .optJSONArray("metas")?.objects().orEmpty().mapNotNull { it.str("imdb_id") ?: it.str("id") }
+                        }.getOrDefault(emptyList())
+                    }
+                }.awaitAll().flatten().distinct().also { check(it.isNotEmpty()) { "no popular titles" } }
+            }
+        }
+    }.getOrDefault(emptyList())
+
+    /**
+     * Search, most wanted first: films, series and the viewer's addon catalogues together, by [rankSearch]
+     * over Cinemeta's popular lists. Asked at once; a list that fails is just left out.
+     */
+    suspend fun searchAll(query: String, addons: Boolean = true): List<Title> = coroutineScope {
+        val films = async { search(query, "movie") }
+        val series = async { search(query, "tv") }
+        val mine = async { if (addons) searchAddons(query) else emptyList() }
+        val popular = async { popularIds("movie") to popularIds("tv") }
+        val (popularFilms, popularSeries) = popular.await()
+        rankSearch(query, films.await(), series.await(), mine.await(), popularFilms, popularSeries)
+    }
+
     /** What a torrent is, from its release name alone. Null rather than a guess. */
     suspend fun resolve(releaseName: String): Title? = coroutineScope {
         val query = searchableName(releaseName)
@@ -433,6 +467,56 @@ fun topGenres(titles: List<Title>, limit: Int = 3): List<Pair<String, String>> {
 }
 
 private fun norm(s: String) = s.lowercase().replace(Regex("[^a-z0-9]+"), " ").trim()
+
+/** How far down Cinemeta's popular lists [Meta.popularIds] reads: 50 to a page. */
+const val POPULAR_PAGES = 4
+
+/**
+ * Search results, most wanted first. Each list comes in Cinemeta's own order, roughly by popularity, but a
+ * film's place and a series' place say nothing about each other, and sorting on the name alone put an
+ * obscure exact match over the film everyone meant. So each title scores:
+ *  - its place in its own list (an addon's after Cinemeta's),
+ *  - less for being on Cinemeta's popular lists, by how high — the strongest pull, and the one that is
+ *    the same for a film and a series,
+ *  - less for naming what was typed: most for the whole name, some for its start, none for a word inside;
+ *    a little more when the name doesn't hold it at all (Cinemeta matched it on something else).
+ * Lowest first; ties keep films and series alternating. Calibration knobs, all of them.
+ */
+fun rankSearch(
+    query: String,
+    films: List<Title>,
+    series: List<Title>,
+    addons: List<Title> = emptyList(),
+    popularFilms: List<String> = emptyList(),
+    popularSeries: List<String> = emptyList(),
+): List<Title> {
+    fun bare(s: String) = norm(s).removePrefix("the ")
+    val q = bare(query)
+    val popular = HashMap<String, Int>()
+    popularFilms.forEachIndexed { i, id -> popular.putIfAbsent(id, i) }
+    popularSeries.forEachIndexed { i, id -> popular.merge(id, i, ::minOf) }
+    val reach = (POPULAR_PAGES * 50).toDouble()
+    fun score(t: Title, place: Int): Double {
+        val name = bare(t.title)
+        val match = when {
+            q.isEmpty() -> 0.0
+            name == q -> -3.0
+            name.startsWith(q) -> -1.0
+            " $name ".contains(" $q ") -> 0.0
+            q in name -> 0.5
+            else -> 1.5
+        }
+        val pull = popular[t.imdb]?.let { -10.0 * (1 - it / reach) } ?: 0.0
+        return place + match + pull
+    }
+    // Films and series alternate, then the addons: the order ties fall back to.
+    val order = (0 until maxOf(films.size, series.size)).flatMap { i -> listOfNotNull(films.getOrNull(i)?.let { it to i }, series.getOrNull(i)?.let { it to i }) } +
+        addons.mapIndexed { i, t -> t to i + 3 }
+    return order.distinctBy { it.first.imdb }
+        .mapIndexed { at, (t, place) -> Triple(t, score(t, place), at) }
+        .sortedWith(compareBy({ it.second }, { it.third }))
+        .map { it.first }
+}
 
 /**
  * The candidate that is actually the thing asked for, or nothing. Cinemeta answers

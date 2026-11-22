@@ -153,18 +153,6 @@ fun Field(
 
 /* --------------------------------------------------------------- search */
 
-/** How well a title answers what was typed; lower is better. */
-private fun relevance(title: String, query: String): Int {
-    val a = title.trim().lowercase()
-    val q = query.trim().lowercase()
-    return when {
-        a == q -> 0
-        a.startsWith(q) -> 1
-        q in a -> 2
-        else -> 3
-    }
-}
-
 /**
  * Results arrive as the letters do — the remote's keyboard is slow — and both films
  * and series are searched at once. The Torrents switch searches release names instead.
@@ -216,13 +204,8 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
         if (torrents && !Kids.on) {
             hits = searchStreams(q) { hits = it }
         } else {
-            results = coroutineScope {
-                val films = async { Meta.search(q, "movie") }
-                val series = async { Meta.search(q, "tv") }
-                // And every addon catalogue that searches, as Stremio asks them all.
-                val mine = async { Meta.searchAddons(q) }
-                Kids.only((films.await() + series.await() + mine.await()).distinctBy { it.imdb }.sortedBy { relevance(it.title, q) })
-            }
+            // Films, series and every addon catalogue that searches, as Stremio asks them all: most wanted first.
+            results = Kids.only(Meta.searchAll(q))
         }
         resultsFor = q to torrents
         busy = false

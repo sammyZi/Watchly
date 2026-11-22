@@ -170,18 +170,6 @@ fun CatalogScreen(shelf: Shelf, onOpen: (Title) -> Unit, onBack: () -> Unit) {
 
 /* --------------------------------------------------------------- search */
 
-/** How well a title answers what was typed; lower is better. */
-private fun relevance(title: String, query: String): Int {
-    val a = title.trim().lowercase()
-    val q = query.trim().lowercase()
-    return when {
-        a == q -> 0
-        a.startsWith(q) -> 1
-        q in a -> 2
-        else -> 3
-    }
-}
-
 /** "2020s"… and before 1990 one bucket; the year a title's releaseInfo starts with. */
 private val DECADES = listOf(2020 to "2020s", 2010 to "2010s", 2000 to "2000s", 1990 to "1990s", 0 to "Before 1990")
 
@@ -258,13 +246,8 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
         if (torrents && !Kids.on) {
             hits = searchStreams(q) { hits = it }
         } else {
-            results = coroutineScope {
-                val films = async { Meta.search(q, "movie") }
-                val series = async { Meta.search(q, "tv") }
-                // And every addon catalogue that searches, as Stremio asks them all.
-                val mine = async { Meta.searchAddons(q) }
-                Kids.only((films.await() + series.await() + mine.await()).distinctBy { it.imdb }.sortedBy { relevance(it.title, q) })
-            }
+            // Films, series and every addon catalogue that searches, as Stremio asks them all: most wanted first.
+            results = Kids.only(Meta.searchAll(q))
         }
         busy = false
         keep()

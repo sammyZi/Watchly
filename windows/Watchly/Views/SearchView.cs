@@ -188,16 +188,26 @@ public sealed class SearchView : UserControl
             var seriesJob = q.Length > 0 ? Meta.SearchTitles(q, "tv") : atLeast is null ? Meta.LoadCatalog("tv") : Meta.LoadTop("tv", genre);
             // And every addon catalogue that searches, as Stremio asks them all.
             var addonsJob = q.Length > 0 && !KidsMode.On ? Meta.SearchAddons(q) : Task.FromResult(new List<Title>());
+            var popularJob = q.Length > 0 ? Task.WhenAll(Meta.PopularIds("movie"), Meta.PopularIds("tv")) : null;
             var films = await filmsJob;
             var series = await seriesJob;
-            // Interleaved: looking for a show should not mean scrolling past thirty films.
-            mixed = new List<Title>();
-            for (var i = 0; i < Math.Max(films.Count, series.Count); i++)
+            if (popularJob is not null)
             {
-                if (i < films.Count) mixed.Add(films[i]);
-                if (i < series.Count) mixed.Add(series[i]);
+                // A search: most wanted first, films and series together (Meta.RankSearch).
+                var popular = await popularJob;
+                mixed = Meta.RankSearch(q, films, series, await addonsJob, popular[0], popular[1]);
             }
-            mixed = Meta.UniqueById(mixed.Concat(await addonsJob));
+            else
+            {
+                // Browsing: interleaved, so looking for a show doesn't mean scrolling past thirty films.
+                mixed = new List<Title>();
+                for (var i = 0; i < Math.Max(films.Count, series.Count); i++)
+                {
+                    if (i < films.Count) mixed.Add(films[i]);
+                    if (i < series.Count) mixed.Add(series[i]);
+                }
+                mixed = Meta.UniqueById(mixed.Concat(await addonsJob));
+            }
         }
         if (mine != latest) return;
         titles = KidsMode.Only(mixed);
