@@ -68,12 +68,24 @@ internal class StartKits(private val index: File, private val saveDir: () -> Fil
             now - k.savedAt > START_KIT_DAYS * 24 * 3600 * 1000 || total > cap || !File(saveDir(), k.name).exists()
         }
         if (gone.isEmpty()) return
-        gone.forEach { k ->
-            kits.remove(k.hash)
-            // A name another kit still uses stays: two releases may share one.
-            if (kits.values.none { it.name == k.name }) runCatching { File(saveDir(), k.name).deleteRecursively() }
-        }
+        gone.forEach(::drop)
         save()
+    }
+
+    /** Every kit whose files are there, the newest first: what Settings lists. */
+    @Synchronized
+    fun list(): List<Kit> = kits.values.filter { File(saveDir(), it.name).exists() }.sortedByDescending { it.savedAt }
+
+    /** The viewer let one go: its files and its entry. */
+    @Synchronized
+    fun remove(hash: String) {
+        kits[hash]?.let { drop(it); save() }
+    }
+
+    private fun drop(k: Kit) {
+        kits.remove(k.hash)
+        // A name another kit still uses stays: two releases may share one.
+        if (kits.values.none { it.name == k.name }) runCatching { File(saveDir(), k.name).deleteRecursively() }
     }
 
     /**

@@ -77,6 +77,20 @@ object NuvioTorrent {
     @Synchronized
     fun stop() = runBlocking { stopLocked() }
 
+    private fun cacheDir(context: Context) = File(context.cacheDir, "nuvio-engine")
+
+    /** What Nuvio's engine keeps on disk for a fast reopen. Reads files: off the main thread. */
+    fun cacheBytes(context: Context): Long =
+        engine?.stats?.value?.diskCacheUsedBytes ?: cacheDir(context).walkBottomUp().filter { it.isFile }.sumOf { it.length() }
+
+    /** Clears it, unless a film is streaming from it. */
+    @Synchronized
+    fun clearCache(context: Context) = runBlocking {
+        if (streamId != null) return@runBlocking
+        val e = engine
+        if (e != null) runCatching { e.reclaimDiskCache(0L) } else cacheDir(context).deleteRecursively()
+    }
+
     private suspend fun stopLocked() {
         poll?.cancel()
         poll = null

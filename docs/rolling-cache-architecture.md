@@ -130,7 +130,7 @@ whole-piece behaviour throughout.
    it: 11 of 60 starts in one phone's log waited 2–15 s on a piece nobody had
    asked for. An MP4 says where its index is. As soon as the file's first blocks
    are on disk, `sniff` reads its box headers (`mp4Index`):
-   - `moov` up front, as YTS makes them: 2–4 MB the player reads whole before
+   - `moov` up front, as small web encodes have it: 2–4 MB the player reads whole before
      anything else, most of it past the header the pre-roll fetched. Each piece of
      it was then a wait of its own after the player opened (one film with 512 KB
      pieces: nine, 24 s). All of it is now pre-roll (`headWant`, at most

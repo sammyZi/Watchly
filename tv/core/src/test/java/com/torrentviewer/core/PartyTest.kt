@@ -60,7 +60,7 @@ class PartyTest {
         // Its own trackers go with it: where the release's peers are.
         assertEquals("magnet:?xt=urn:btih:$hash&dn=Film&tr=udp://a:1", shareableUri("magnet:?xt=urn:btih:$hash&dn=Film&tr=udp://a:1", "Film", null))
         // A debrid link holds the host's key: the torrent behind it goes instead.
-        val fromLink = shareableUri("https://torrentio.strem.fun/resolve/torbox/SECRETKEY/$hash/1/Film.mkv", "Film", null)!!
+        val fromLink = shareableUri("https://addon.example/resolve/torbox/SECRETKEY/$hash/1/Film.mkv", "Film", null)!!
         assertTrue(fromLink.startsWith("magnet:?xt=urn:btih:$hash&dn=Film"))
         assertFalse(fromLink.contains("SECRETKEY"))
         assertTrue(shareableUri("/data/imports/abc.torrent", "Film", hash)!!.startsWith("magnet:?xt=urn:btih:$hash&dn=Film"))

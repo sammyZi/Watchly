@@ -235,7 +235,7 @@ data class Hit(
     val direct get() = !external && isDirectLink(uri)
 }
 
-/** The info hash a debrid link names in its path (Torrentio's ".../resolve/torbox/<key>/<hash>/..."), if any. */
+/** The info hash a debrid link names in its path (".../resolve/<service>/<key>/<hash>/..."), if any. */
 fun linkHash(link: String): String? =
     link.substringBefore('?').split('/').firstOrNull { Regex("^[0-9a-fA-F]{40}$").matches(it) }?.lowercase()
 
@@ -269,7 +269,7 @@ private val UNIT = mapOf("kb" to 1024.0, "mb" to 1024.0 * 1024, "gb" to 1024.0 *
  * An addon's streams, every shape the Stremio protocol has: a torrent by `infoHash` (with its
  * `fileIdx` and `sources` trackers), a `url` that plays as it is (with any `proxyHeaders`), and a
  * `ytId` or `externalUrl` handed to another app. The numbers most addons give sit inside the display
- * text — "name\n👤 84 💾 51.3 GB ⚙️ 1337x" — and `behaviorHints` carry the file's real name and size.
+ * text — "name\n👤 84 💾 51.3 GB ⚙️ source" — and `behaviorHints` carry the file's real name and size.
  * ponytail: archive (`rarUrls`…) and `nzbUrl` streams are skipped; few addons send them yet.
  */
 fun toStreamHits(streams: JSONArray, kind: String, addon: String = "", addonUrl: String = ""): List<Hit> = streams.objects().mapNotNull { s ->
@@ -283,7 +283,7 @@ fun toStreamHits(streams: JSONArray, kind: String, addon: String = "", addonUrl:
     val first = text.lineSequence().firstOrNull()?.trim().orEmpty()
     val name = hints?.str("filename") ?: first.ifEmpty { label }
     if (name.isEmpty()) return@mapNotNull null
-    // Torrentio and the like name the one file they found and put the release on the first line:
+    // Many addons name the one file they found and put the release on the first line:
     // "Show.S01.1080p" over "Show.S01E01.mkv" is a season pack, whatever the file says.
     val release = first.takeIf { it.isNotEmpty() && it != name && scopeOf(it) != Scope.EPISODE } ?: name
     val size = hints?.optLong("videoSize")?.takeIf { it > 0 }

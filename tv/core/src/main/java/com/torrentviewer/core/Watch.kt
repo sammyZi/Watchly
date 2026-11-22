@@ -355,8 +355,8 @@ class Watch(val engine: TorrentStream) {
     }
 
     /**
-     * Resume on an addon's debrid link whose addon is gone — Torrentio with TorBox removed for plain
-     * Torrentio: the link only asks that service again ("no active subscription"). The same release
+     * Resume on an addon's debrid link whose addon is gone — the addon re-added without its debrid
+     * key: the link only asks that service again ("no active subscription"). The same release
      * (the info hash in the link) from peers instead, from the same spot; the dead link's row goes.
      */
     private suspend fun fromPeers(old: Item, hash: String) {
@@ -584,6 +584,7 @@ class Watch(val engine: TorrentStream) {
         Stremio.watched(at, ep?.season, ep?.episode)
         Nuvio.watched(at, ep?.season, ep?.episode)
         WATCH_TRACKERS.forEach { it.watched(at, ep?.season, ep?.episode) }
+        AniList.watched(at, ep?.season, ep?.episode)
     }
 
     fun saveDuration(seconds: Double) = item?.let { History.setDuration(it.uri, playingIndex, seconds) }

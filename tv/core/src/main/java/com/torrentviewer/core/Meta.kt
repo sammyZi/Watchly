@@ -54,7 +54,7 @@ data class Title(
     /** 16:9 art for a landscape card; MetaHub carries a background for nearly every IMDb id. */
     val wide get() = backdrop ?: poster?.takeIf { !imdb.startsWith("tt") } ?: "https://images.metahub.space/background/medium/$imdb/img"
 
-    /** Cinemeta files anime under "Animation"; nyaa answers nothing for a Western cartoon anyway. */
+    /** Cinemeta files anime under "Animation"; an anime source answers nothing for a Western cartoon anyway. */
     val isAnime get() = genres.any { it == ANIME_GENRE || it == "Animation" }
 
     /** One Piece's thousand episodes in arc "seasons": listed by the number everyone knows them by instead. */

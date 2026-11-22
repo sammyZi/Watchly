@@ -348,7 +348,8 @@ fun refreshWatched() {
     Stremio.pull()
     Nuvio.pull()
     WATCH_TRACKERS.forEach { it.pull() }
+    AniList.pull()
 }
 
 /** Stremio's and Nuvio's libraries with what the tracking accounts say has been watched. */
-val WatchedEverywhere: Flow<StremioLibrary> = combine(Synced, Simkl.library, Mdblist.library) { a, b, c -> a + b + c }
+val WatchedEverywhere: Flow<StremioLibrary> = combine(Synced, Simkl.library, Mdblist.library, AniList.library) { a, b, c, d -> a + b + c + d }

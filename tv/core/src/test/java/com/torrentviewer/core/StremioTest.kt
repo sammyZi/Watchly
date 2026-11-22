@@ -105,10 +105,10 @@ class StremioTest {
             JSONObject("""{"transportUrl":"https://subs.example/manifest.json","flags":{},"manifest":{"id":"s","x":1}}"""),
         )
         fun mine(url: String, id: String) = toAddon(url, JSONObject("""{"id":"$id","name":"$id","resources":["stream"],"types":["movie"]}"""))!!
-        // Here: subtitles kept, Torrentio added, YouTube removed — in this order.
-        val next = mirrored(account, listOf(mine("https://torrentio.example/c=1", "t"), mine("https://subs.example", "s")))
+        // Here: subtitles kept, a streams addon added, YouTube removed — in this order.
+        val next = mirrored(account, listOf(mine("https://streams.example/c=1", "t"), mine("https://subs.example", "s")))
         assertEquals(
-            listOf("https://v3-cinemeta.strem.io/manifest.json", "http://127.0.0.1:11470/local-addon/manifest.json", "https://torrentio.example/c=1/manifest.json", "https://subs.example/manifest.json"),
+            listOf("https://v3-cinemeta.strem.io/manifest.json", "http://127.0.0.1:11470/local-addon/manifest.json", "https://streams.example/c=1/manifest.json", "https://subs.example/manifest.json"),
             next.map { it.getString("transportUrl") },
         )
         // What the account had is sent back exactly; the new one is a whole entry Stremio can read.

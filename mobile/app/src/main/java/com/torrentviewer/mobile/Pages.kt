@@ -726,6 +726,7 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEd
         if (page == "Integrations") Panel {
             Text("What you finish here is marked watched on your accounts, and what they have watched shows here. You sign in on each service's own page, so your password never comes to Watchly.", Modifier.padding(bottom = 18.dp), style = Type.meta.copy(color = Ink.faint))
             com.torrentviewer.core.WATCH_TRACKERS.forEach { TrackerSection(it) }
+            AniListSection()
         }
 
         if (page == "Account") Column {
@@ -827,6 +828,8 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEd
             }
         }
         }
+
+        KeptForReopen()
 
         Section("Extra trackers","Attach public trackers to bare magnet links so they resolve faster.") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1355,6 +1358,58 @@ fun NuvioForm(owner: String, tint: Color = Ink.text, onSignedIn: () -> Unit) {
     }
 }
 
+/**
+ * What sits on the phone so films reopen at once: Watchly's kept start of each film stopped part-way, by
+ * its title and size, and Nuvio's engine's own cache. Each can go, or all of them.
+ */
+@Composable
+private fun KeptForReopen() {
+    val context = LocalContext.current.applicationContext
+    val scope = rememberCoroutineScope()
+    var kept by remember { mutableStateOf(emptyList<com.torrentviewer.core.KeptStart>()) }
+    var nuvio by remember { mutableStateOf(0L) }
+    suspend fun reload() = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        kept = Services.engine.keptStarts()
+        nuvio = NuvioTorrent.cacheBytes(context)
+    }
+    fun clear(work: () -> Unit) = scope.launch {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { work() }
+        // Nuvio's figure is sampled about once a second.
+        delay(1200)
+        reload()
+    }
+    LaunchedEffect(Unit) { reload() }
+    // A film's title from the history, where it was played from; its file name otherwise.
+    val history by History.items.collectAsState()
+    val titles = remember(history) { history.mapNotNull { i -> com.torrentviewer.core.magnetHash(i.uri)?.let { it to i.title } }.toMap() }
+    val total = kept.sumOf { it.bytes } + nuvio
+
+    Section(
+        "Kept for a fast reopen",
+        if (total == 0L) "Nothing kept. A film you stop part-way keeps its start here, so it opens at once next time."
+        else "A film you stop part-way keeps its start here, so it opens at once next time. ${bytes(total)} in all.",
+    ) {
+        kept.forEach { k ->
+            KeptRow(titles[k.hash] ?: k.name, "${bytes(k.bytes)}  ·  ${if (k.playing) "playing now" else "left ${ago(k.savedAt)}"}", onClear = if (k.playing) null else ({ clear { Services.engine.clearStart(k.hash) } }))
+        }
+        if (nuvio > 0) KeptRow("Nuvio engine's cache", bytes(nuvio), onClear = { clear { NuvioTorrent.clearCache(context) } })
+        if (kept.count { !it.playing } + (if (nuvio > 0) 1 else 0) > 1) {
+            Button("Clear all", { clear { Services.engine.clearStarts(); NuvioTorrent.clearCache(context) } }, Modifier.padding(top = 8.dp), icon = L.drawable.lucide_ic_trash_2)
+        }
+    }
+}
+
+@Composable
+private fun KeptRow(title: String, detail: String, onClear: (() -> Unit)?) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = Type.label.copy(color = Ink.text), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(detail, style = Type.meta.copy(color = Ink.faint))
+        }
+        onClear?.let { Tap(it, shape = CircleShape) { Lc(L.drawable.lucide_ic_trash_2, Modifier.padding(10.dp), tint = Ink.muted, size = 20.dp) } }
+    }
+}
+
 /** One torrent engine to pick: its app's logo and name, the picked one ringed in the accent. */
 @Composable
 private fun EngineOption(name: String, on: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, logo: @Composable () -> Unit) {
@@ -1659,6 +1714,51 @@ private fun SettingsList(groups: List<List<Entry>>, query: String) {
 }
 
 /** A tracking account: its logo, and Connect, which opens its own page with the code filled in. */
+/**
+ * AniList, for anime: as the trackers above, but approved on AniList's own page, which comes back to the
+ * app by a link. Its token lasts a year; signing out here leaves it on AniList until removed there.
+ */
+@Composable
+private fun AniListSection() {
+    val a = com.torrentviewer.core.AniList
+    val connected by a.connected.collectAsState()
+    val user by a.user.collectAsState()
+    var waiting by remember { mutableStateOf(false) }
+    val browser = androidx.compose.ui.platform.LocalUriHandler.current
+    LaunchedEffect(connected) { if (connected) waiting = false }
+
+    Column(Modifier.padding(bottom = 18.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Artwork(
+                "https://www.google.com/s2/favicons?sz=64&domain=${a.SITE}", a.NAME,
+                Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)), scale = androidx.compose.ui.layout.ContentScale.Fit, fill = false,
+            )
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text(a.NAME, style = Type.body.copy(fontWeight = FontWeight.SemiBold))
+                Text(
+                    when {
+                        !a.available -> "Not set up in this build"
+                        connected -> user?.let { "Connected as $it" } ?: "Connected"
+                        waiting -> "Waiting for your approval…"
+                        else -> "Anime only · not connected"
+                    },
+                    style = Type.meta.copy(color = if (connected) Ink.good else Ink.faint),
+                )
+            }
+            when {
+                !a.available -> Unit
+                connected -> Button("Disconnect", { a.disconnect() }, compact = true)
+                else -> Button(if (waiting) "Open again" else "Connect", {
+                    waiting = true
+                    runCatching { browser.openUri(a.authorizeUrl) }
+                }, primary = !waiting, compact = true)
+            }
+        }
+        if (waiting && !connected) Text("Approve Watchly on AniList's page; it brings you back here.", Modifier.padding(top = 8.dp), style = Type.meta.copy(color = Ink.faint))
+        if (connected) Text("To take Watchly's access away on AniList too, remove it under Settings → Apps there.", Modifier.padding(top = 8.dp), style = Type.meta.copy(color = Ink.faint))
+    }
+}
+
 @Composable
 private fun TrackerSection(t: com.torrentviewer.core.Tracker) {
     val connected by t.connected.collectAsState()

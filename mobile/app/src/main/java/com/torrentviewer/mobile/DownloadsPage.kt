@@ -88,7 +88,10 @@ fun DownloadsScreen(watch: Watch, onBack: () -> Unit) {
         if (live.isEmpty() && finished.isEmpty()) item {
             Note("Nothing downloaded yet. Download from a title's page, and it plays here without a connection.")
         }
-        if (live.isNotEmpty()) item { Label("Downloading") }
+        if (live.isNotEmpty()) item {
+            val total = live.sumOf { it.total }
+            Label(if (total > 0) "Downloading  ·  ${bytes(live.sumOf { it.done })} of ${bytes(total)}" else "Downloading")
+        }
         items(live, key = { "live-" + it.job.uri }) { row ->
             ActiveRow(
                 row,
@@ -223,9 +226,9 @@ private fun ActiveRow(row: LiveDownload, onPause: () -> Unit, onResume: () -> Un
                     style = Type.meta.copy(fontSize = 12.sp, color = if (row.state == DlState.FAILED) Ink.danger else Ink.muted),
                     maxLines = 2,
                 )
+                // The sizes on a line of their own: after the episode count they ran off the end, cut to "· 0".
                 if (row.total > 0) Text(
                     listOfNotNull(
-                        if (pack) "$savedCount of ${wanted.size} episodes saved" else null,
                         "${bytes(row.done)} of ${bytes(row.total)}",
                         // At the rate it is going now: it moves with the swarm, and is only said while there is a rate.
                         if (row.state == DlState.DOWNLOADING && row.speed > 0) left((row.total - row.done).toDouble() / row.speed) else null,
@@ -256,6 +259,11 @@ private fun ActiveRow(row: LiveDownload, onPause: () -> Unit, onResume: () -> Un
             Tap({ open = !open }, Modifier.fillMaxWidth().padding(top = 6.dp), RoundedCornerShape(6.dp)) {
                 Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Episodes  ·  ${wanted.size} of ${row.files.size} chosen", Modifier.weight(1f), style = Type.meta.copy(color = Ink.text, fontWeight = FontWeight.SemiBold))
+                    Text(
+                        "$savedCount of ${wanted.size} saved",
+                        Modifier.padding(end = 6.dp),
+                        style = Type.meta.copy(fontSize = 12.sp, color = if (wanted.isNotEmpty() && savedCount == wanted.size) Ink.good else Ink.faint),
+                    )
                     Lc(if (open) L.drawable.lucide_ic_chevron_up else L.drawable.lucide_ic_chevron_down, tint = Ink.muted, size = 18.dp)
                 }
             }
@@ -317,7 +325,7 @@ private fun SeasonGroup(
                 Row(Modifier.padding(vertical = 8.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(season?.let { if (it == 0) "Specials" else "Season $it" } ?: "Other files", Modifier.weight(1f), style = Type.label.copy(fontWeight = FontWeight.SemiBold))
                     Text(
-                        if (chosen.isEmpty()) "Skipped" else "$saved of ${chosen.size} saved",
+                        if (chosen.isEmpty()) "Skipped" else "$saved of ${chosen.size} saved  ·  ${bytes(chosen.sumOf { it.size })}",
                         Modifier.padding(end = 6.dp),
                         style = Type.meta.copy(fontSize = 12.sp, color = if (chosen.isNotEmpty() && saved == chosen.size) Ink.good else Ink.faint),
                     )
@@ -329,7 +337,7 @@ private fun SeasonGroup(
     }
 }
 
-/** An episode in a pack: a circle to keep or skip it, its tag, a thin bar, and where it stands. */
+/** An episode in a pack: a circle to keep or skip it, its tag and size, a thin bar, and where it stands. */
 @Composable
 private fun EpisodeLine(f: DlFile, isNext: Boolean, onToggle: () -> Unit) {
     val ep = parseEpisode(f.name)?.let { "S${it.season}:E${it.episode}" } ?: f.name
@@ -352,7 +360,10 @@ private fun EpisodeLine(f: DlFile, isNext: Boolean, onToggle: () -> Unit) {
                 size = 20.dp,
             )
         }
-        Text(ep, Modifier.width(64.dp).padding(start = 4.dp), style = Type.meta.copy(color = if (f.wanted) Ink.text else Ink.faint, fontWeight = FontWeight.SemiBold), maxLines = 1)
+        Column(Modifier.width(72.dp).padding(start = 4.dp)) {
+            Text(ep, style = Type.meta.copy(color = if (f.wanted) Ink.text else Ink.faint, fontWeight = FontWeight.SemiBold), maxLines = 1)
+            if (f.size > 0) Text(bytes(f.size), style = Type.meta.copy(fontSize = 11.sp, color = Ink.faint), maxLines = 1)
+        }
         Box(Modifier.weight(1f).padding(horizontal = 8.dp)) {
             if (f.wanted && !f.saved) ProgressLine(pct / 100f, height = 3.dp)
         }
@@ -363,7 +374,7 @@ private fun EpisodeLine(f: DlFile, isNext: Boolean, onToggle: () -> Unit) {
                 isNext -> "$pct%  ·  next"
                 else -> "$pct%"
             },
-            Modifier.width(84.dp),
+            Modifier.width(76.dp),
             style = Type.meta.copy(fontSize = 12.sp, color = if (f.saved) Ink.good else Ink.faint, textAlign = TextAlign.End),
             maxLines = 1,
         )

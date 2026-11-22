@@ -28,7 +28,7 @@ class ResumeTest {
 
     @Test fun anMp4SaysWhereItsIndexIs() {
         val ftyp = box("ftyp", 32) + ByteArray(24)
-        // Up front, as YTS makes them: all of it, before the player can do anything.
+        // Up front, as small web encodes have it: all of it, before the player can do anything.
         assertEquals(0L until 3_000_032L, mp4Index(ftyp + box("moov", 3_000_000) + ByteArray(64), 2_000_000_000))
         // After the media: from where the media ends.
         assertEquals(1_000_040L until 1_004_000L, mp4Index(ftyp + box("free", 8) + box("mdat", 1_000_000) + ByteArray(64), 1_004_000))

@@ -186,7 +186,7 @@ class LibTest {
         assertEquals(3, tracked.fileIdx)
         assertTrue(tracked.uri.contains("t.example"))
 
-        // Torrentio's shape: the pack on the first line, the episode file it found in behaviorHints.
+        // A common addon shape: the pack on the first line, the episode file it found in behaviorHints.
         // It's a season pack, by the pack's name; the file's name stays for playing.
         val packed = toStreamHits(
             JSONArray().put(

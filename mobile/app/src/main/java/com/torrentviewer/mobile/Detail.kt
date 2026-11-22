@@ -324,6 +324,7 @@ fun DetailScreen(initial: Title, watch: Watch, onOrder: (com.torrentviewer.core.
                         }
                         if (seenIt) WatchedBadge(finished)
                     }
+                    if (title.isAnime) AniListRow(title.imdb, if (title.isSeries) season else null)
                     // The list first, as someone chose its order; TMDB for any other film. A series has its seasons.
                     val inOrder by produceState(com.torrentviewer.core.WatchOrders.of(title.imdb), title.imdb) {
                         if (value == null && !title.isSeries) value = com.torrentviewer.core.Tmdb.orderOf(title.imdb)
@@ -583,9 +584,12 @@ fun DetailScreen(initial: Title, watch: Watch, onOrder: (com.torrentviewer.core.
                     else "No season $s pack in ${langName(lang)} — change the language and try again, or download the episodes one by one.",
 Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
                 else -> LazyColumn {
+                    // An addon's size is the one episode file it pointed into the pack: the season is about that many times it.
+                    val eps = title.episodes.count { it.season == s }
                     items(packs.take(MAX_SOURCES), key = { "pack-" + it.id }) { hit ->
+                        val season = if (hit.perFileSize && hit.size > 0 && eps > 1) "about ${bytes(hit.size * eps)} for $eps episodes" else null
                         // Under the pack's own name, not the one episode file the addon pointed into it.
-                        Source(hit.copy(name = hit.release), Modifier.padding(start = EDGE, end = EDGE, bottom = 8.dp), onDownload = { keepSeason(hit, s) }) { keepSeason(hit, s) }
+                        Source(hit.copy(name = hit.release), Modifier.padding(start = EDGE, end = EDGE, bottom = 8.dp), sizeLabel = season, onDownload = { keepSeason(hit, s) }) { keepSeason(hit, s) }
                     }
                 }
             }
@@ -787,11 +791,71 @@ private const val HEAVY_MBPS = 40.0
 private const val TOO_HEAVY_MBPS = 80.0
 
 /**
+ * An anime's AniList line: its score, studio and when the next episode airs, and how far along the viewer's
+ * AniList list is, for the season on show. A tap opens it on AniList. Nothing while it loads or isn't known there.
+ */
+@Composable
+private fun AniListRow(imdb: String, season: Int?) {
+    val info by produceState<com.torrentviewer.core.AniList.Info?>(null, imdb, season) {
+        value = runCatching { com.torrentviewer.core.AniList.info(imdb, season) }.getOrNull()
+    }
+    val connected by com.torrentviewer.core.AniList.connected.collectAsState()
+    val browser = androidx.compose.ui.platform.LocalUriHandler.current
+    androidx.compose.animation.AnimatedVisibility(info != null, enter = androidx.compose.animation.fadeIn(tween(220)) + androidx.compose.animation.expandVertically()) {
+        val i = info ?: return@AnimatedVisibility
+        val facts = listOfNotNull(
+            i.score?.let { "$it%" },
+            i.studio,
+            when {
+                i.nextEpisode != null && i.nextAt != null -> "Episode ${i.nextEpisode} ${airsIn(i.nextAt ?: 0)}"
+                i.status == "FINISHED" -> i.episodes?.let { "$it episodes" } ?: "Finished"
+                i.status == "NOT_YET_RELEASED" -> "Not out yet"
+                else -> null
+            },
+        )
+        val list = when {
+            !connected -> null
+            i.listStatus == "COMPLETED" -> "Completed on your list"
+            (i.progress ?: 0) > 0 -> "On your list · ${i.progress}${i.episodes?.let { " of $it" }.orEmpty()} watched"
+            i.listStatus != null -> "On your list"
+            else -> null
+        }
+        Tap({ runCatching { browser.openUri(i.url) } }, Modifier.padding(top = 12.dp).fillMaxWidth(), RoundedCornerShape(10.dp)) { pressed ->
+            Row(
+                Modifier.fillMaxWidth().background(Ink.text.copy(alpha = if (pressed) 0.12f else 0.06f)).padding(horizontal = 12.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Artwork(
+                    "https://www.google.com/s2/favicons?sz=64&domain=${com.torrentviewer.core.AniList.SITE}", "AniList",
+                    Modifier.size(22.dp).clip(RoundedCornerShape(5.dp)), scale = androidx.compose.ui.layout.ContentScale.Fit, fill = false,
+                )
+                Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+                    Text(facts.ifEmpty { listOf("AniList") }.joinToString("  ·  "), style = Type.meta.copy(color = Ink.text, fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    list?.let { Text(it, style = Type.meta.copy(fontSize = 12.sp, color = if (i.listStatus == "COMPLETED") Ink.good else Ink.faint), maxLines = 1) }
+                }
+                Lc(L.drawable.lucide_ic_external_link, tint = Ink.muted, size = 16.dp)
+            }
+        }
+    }
+}
+
+/** "in 3d", "in 5h", "in 20m", "today" — when an episode airs. */
+private fun airsIn(at: Long, now: Long = System.currentTimeMillis()): String {
+    val mins = (at - now) / 60_000
+    return when {
+        mins <= 0 -> "out now"
+        mins < 60 -> "in ${mins}m"
+        mins < 1440 -> "in ${mins / 60}h"
+        else -> "in ${mins / 1440}d"
+    }
+}
+
+/**
  * One release: what it is, how big, and how well it will stream — in words, not a seed count.
  * With [runtimeSeconds], a release too big to stream as it plays says what it needs.
  */
 @Composable
-fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0, onDownload: (() -> Unit)? = null, onClick: () -> Unit) {
+fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0, sizeLabel: String? = null, onDownload: (() -> Unit)? = null, onClick: () -> Unit) {
     val grade = health(hit.seeders)
     // Cached on TorBox: it plays from TorBox's servers, so the swarm's health says nothing.
     val torbox by TorBox.key.collectAsState()
@@ -830,7 +894,7 @@ fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0
                     // A film's scope is "Episode" only by default — it says nothing there.
                     listOfNotNull(
                         hit.scope.label.takeIf { hit.kind == "tv" || hit.scope != Scope.EPISODE },
-                        bytes(hit.size).takeIf { hit.size > 0 },
+                        sizeLabel ?: bytes(hit.size).takeIf { hit.size > 0 },
                         "${hit.seeders} seeds".takeIf { !hit.direct && !hit.external },
                         hit.addon.ifEmpty { null },
                     ).joinToString("  ·  "),

@@ -62,7 +62,7 @@ public sealed partial class PlayerView
         // The torrent's own trackers with it, where its peers are.
         var trackers = request.Torrent?.AnnounceUrls.SelectMany(tier => tier).Where(t => t.StartsWith("udp:") || t.StartsWith("http"));
         var uri = Party.ShareableUri(request.HistoryUri ?? request.Link, request.Torrent?.Name ?? file, hash, trackers);
-        // And the working public trackers this PC adds itself: an old release's own (YTS's) are mostly dead,
+        // And the working public trackers this PC adds itself: an old release's own are mostly dead,
         // and a guest given only those found a handful of peers. Fitted to the relay's message again after.
         if (uri is not null) uri = Party.ShareableUri(TitleText.WithTrackers(uri), request.Torrent?.Name ?? file, null);
         return uri is null ? null : new PartyMedia(uri, file, request.MetaTitle ?? request.Title, request.Imdb, request.Kind, null);

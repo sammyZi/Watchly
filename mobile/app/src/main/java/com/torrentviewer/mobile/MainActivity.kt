@@ -42,6 +42,8 @@ object Services {
         Profiles.load()
         com.torrentviewer.core.Simkl.clientId = BuildConfig.SIMKL_CLIENT_ID
         com.torrentviewer.core.Mdblist.clientId = BuildConfig.MDBLIST_CLIENT_ID
+        com.torrentviewer.core.AniList.clientId = BuildConfig.ANILIST_CLIENT_ID
+        com.torrentviewer.core.AniList.dir = context.filesDir
         com.torrentviewer.core.Tmdb.key = BuildConfig.TMDB_KEY
         com.torrentviewer.core.Party.server = BuildConfig.PARTY_URL
         // 6882: the TV (6881) and the Windows app (51413) may share the router.
@@ -89,7 +91,8 @@ class MainActivity : FragmentActivity() {
         // The page before the first frame, so a light theme never opens on a flash of dark.
         val systemDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         applyTheme(darkFor(SettingsStore.value.value.themeMode, systemDark))
-        incoming.value = intent?.data
+        // AniList's sign-in coming back is not something to open.
+        if (!com.torrentviewer.core.AniList.signIn(intent?.dataString)) incoming.value = intent?.data
         setContent {
             androidx.compose.foundation.layout.Box {
                 App(Services.watch, incoming)
@@ -101,7 +104,7 @@ class MainActivity : FragmentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        incoming.value = intent.data
+        if (!com.torrentviewer.core.AniList.signIn(intent.dataString)) incoming.value = intent.data
     }
 
     override fun onResume() {

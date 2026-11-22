@@ -228,7 +228,7 @@ public static class Addons
     /// Would <paramref name="link"/> — a stream an addon handed over, a debrid one with the viewer's key in it —
     /// still come from an addon that is added and on? By <paramref name="manifest"/> when it was kept; else
     /// (entries from before it was) an addon on the link's host whose own link holds every key-like part of
-    /// the link's path. Torrentio with TorBox swapped for plain Torrentio is the same host without that key: no.
+    /// the link's path. The same addon re-added without its debrid key is the same host without that key: no.
     /// </summary>
     public static bool StillServes(string link, string? manifest)
     {

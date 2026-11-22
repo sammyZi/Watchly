@@ -454,6 +454,7 @@ object Profiles {
         Stremio.forget(id)
         Nuvio.forget(id)
         WATCH_TRACKERS.forEach { it.forget(id) }
+        AniList.forget(id)
     }
 }
 

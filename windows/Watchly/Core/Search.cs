@@ -264,7 +264,7 @@ public static class Search
         TitleText.WithTrackers($"magnet:?xt=urn:btih:{hash}&dn={Uri.EscapeDataString(name)}"
             + string.Concat((trackers ?? Enumerable.Empty<string>()).Select(t => "&tr=" + Uri.EscapeDataString(t))));
 
-    /// <summary>The info hash a debrid link names in its path (Torrentio's ".../resolve/torbox/&lt;key&gt;/&lt;hash&gt;/..."), if any.</summary>
+    /// <summary>The info hash a debrid link names in its path (".../resolve/&lt;service&gt;/&lt;key&gt;/&lt;hash&gt;/..."), if any.</summary>
     public static string? LinkHash(string link) =>
         link.Split('?')[0].Split('/').FirstOrDefault(IsHash)?.ToLowerInvariant();
 
@@ -329,7 +329,7 @@ public static class Search
     /// An addon's streams, every shape the Stremio protocol has: a torrent by <c>infoHash</c> (with its
     /// <c>fileIdx</c> and <c>sources</c> trackers), a <c>url</c> that plays as it is (with any <c>proxyHeaders</c>),
     /// and a <c>ytId</c> or <c>externalUrl</c> handed to the browser. The numbers most addons give sit inside the
-    /// display text — "name\n👤 84 💾 51.3 GB ⚙️ 1337x" — and <c>behaviorHints</c> carry the file's real name and size.
+    /// display text — "name\n👤 84 💾 51.3 GB ⚙️ source" — and <c>behaviorHints</c> carry the file's real name and size.
     /// ponytail: archive (rarUrls…) and nzbUrl streams are skipped; few addons send them yet.
     /// </summary>
     public static List<Hit> ToStreamHits(JsonArray streams, string kind, string addon = "", string addonUrl = "")
@@ -353,7 +353,7 @@ public static class Search
             var first = text.Split('\n')[0].Trim();
             var name = Str(hints?["filename"]) is { Length: > 0 } file ? file : first.Length > 0 ? first : label;
             if (name.Length == 0) continue;
-            // Torrentio and the like name the one file they found and put the release on the first line:
+            // Many addons name the one file they found and put the release on the first line:
             // "Show.S01.1080p" over "Show.S01E01.mkv" is a season pack, whatever the file says.
             var release = first.Length > 0 && first != name && ScopeOf(first) != "episode" ? first : "";
             var size = (long)Num(hints?["videoSize"]);

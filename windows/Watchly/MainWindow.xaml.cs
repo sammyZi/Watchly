@@ -941,7 +941,7 @@ public partial class MainWindow : Window
         var fresh = HistoryList.First(h => h.Uri == next.Uri);
         if (Search.IsDirectLink(fresh.Uri))
         {
-            // A debrid link from an addon since removed — Torrentio with TorBox swapped for plain Torrentio — only
+            // A debrid link from an addon since removed — the addon re-added without its debrid key — only
             // asks that service again ("no active subscription"): the same release (the hash in the link) from
             // peers instead. Its spot carries over, as between any two releases of a title.
             if (Search.LinkHash(fresh.Uri) is { } hash && !Addons.StillServes(fresh.Uri, fresh.Addon))

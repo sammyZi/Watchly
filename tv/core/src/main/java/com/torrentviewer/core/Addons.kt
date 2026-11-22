@@ -228,7 +228,7 @@ object Addons {
      * Would [link] — a stream an addon handed over, a debrid one with the viewer's key in it — still
      * come from an addon that is added and on? By [manifest] when it was kept; else (entries from before
      * it was) an addon on the link's host whose own link holds every key-like part of [link]'s path.
-     * Torrentio with TorBox swapped for plain Torrentio is the same host without that key: no.
+     * The same addon re-added without its debrid key is the same host without that key: no.
      */
     fun stillServes(link: String, manifest: String?): Boolean {
         val on = _list.value.filter { it.on }

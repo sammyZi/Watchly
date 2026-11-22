@@ -56,4 +56,6 @@ of their content is part of this repository, and it belongs to its respective ow
 | [IntroDB](https://introdb.app), [TheIntroDB](https://theintrodb.org) | Intro timings for Skip intro |
 | [SubDL](https://subdl.com) | Subtitles, with your own key |
 | [OpenSubtitles](https://www.opensubtitles.org) addon (Stremio) | Subtitles, through the addon added by default |
+| [AniList](https://anilist.co) ([API](https://docs.anilist.co)) | Anime scores, studios and airing times on the phone, and watched marks with your own account |
+| [anime-lists](https://github.com/Fribb/anime-lists) by Fribb | Which AniList entry is which IMDb title and season |
 | [Cloudflare Workers](https://workers.cloudflare.com) | The watch party relay, passing messages it can't read |

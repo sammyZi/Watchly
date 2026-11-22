@@ -64,6 +64,13 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="watchly" android:host="party" />
             </intent-filter>
+            <!-- AniList's approval page hands the sign-in back here: watchly://anilist#access_token=… -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="watchly" android:host="anilist" />
+            </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

@@ -284,6 +284,9 @@ data class Progress(
     val state: String,
 )
 
+/** A film's kept start ([StartKits]), as Settings lists it. [playing]: in the session now, so it can't be cleared. */
+data class KeptStart(val hash: String, val name: String, val bytes: Long, val savedAt: Long, val playing: Boolean)
+
 /** [lanUrl]: the stream addressed for a Cast receiver, when the engine serves the network. */
 data class Ready(val url: String, val name: String, val subtitleFiles: List<String>, val lanUrl: String? = null, val headers: Map<String, String> = emptyMap())
 
@@ -477,6 +480,25 @@ class TorrentStream(
         set(value) {
             starts.cap = value
         }
+
+    /** Every film's kept start, the newest first. Reads files: off the main thread. */
+    fun keptStarts(): List<KeptStart> = runCatching {
+        val playing = playingHash()
+        starts.list().map { KeptStart(it.hash, it.name, it.bytes, it.savedAt, it.hash == playing) }
+    }.getOrDefault(emptyList())
+
+    /** Lets one film's kept start go, unless it is playing: its files are in the session. */
+    fun clearStart(hash: String) {
+        if (hash != playingHash()) runCatching { starts.remove(hash) }
+    }
+
+    /** Every kept start but the playing film's. */
+    fun clearStarts() {
+        val playing = playingHash()
+        runCatching { starts.list().filter { it.hash != playing }.forEach { starts.remove(it.hash) } }
+    }
+
+    private fun playingHash(): String? = infoHashHex?.takeIf { handle?.isValid == true }
     private val metaDir: File get() = File(cacheRoot, "meta").apply { mkdirs() }
     private val peersDir: File get() = File(cacheRoot, "peers").apply { mkdirs() }
     private val importDir: File get() = File(cacheRoot, "imported").apply { mkdirs() }
@@ -1752,7 +1774,7 @@ class TorrentStream(
 
     /**
      * Once the file's first blocks are on disk: is it an MP4, and where is its index ([mp4Index])?
-     * Up front, as YTS makes them, it is 2–4MB the player reads whole before anything else — past the
+     * Up front, as small web encodes have it, it is 2–4MB the player reads whole before anything else — past the
      * header the pre-roll fetched, so each piece of it was a wait of its own after the player opened
      * (Parasite, 512KB pieces: nine of them, 24s). Now it is all pre-roll, and the tail is left alone.
      * At the end, the pre-roll fetches from exactly where it starts: Obsession waited 15s on the
