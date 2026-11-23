@@ -200,6 +200,10 @@ public sealed class SearchView : UserControl
             else
             {
                 // Browsing: interleaved, so looking for a show doesn't mean scrolling past thirty films.
+                // Cinemeta's film lists carry some series too (Cyberpunk: Edgerunners): those go from the films,
+                // or the film's copy came first, was the one kept, and opened with no seasons.
+                var shows = series.Select(s => s.Imdb).ToHashSet();
+                films = films.Where(f => !shows.Contains(f.Imdb)).ToList();
                 mixed = new List<Title>();
                 for (var i = 0; i < Math.Max(films.Count, series.Count); i++)
                 {

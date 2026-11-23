@@ -436,7 +436,8 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
             Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = EDGE, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("WATCHLY", Modifier.weight(1f), style = Type.title.copy(color = Ink.accent, fontWeight = FontWeight.Black, letterSpacing = 2.sp))
                 // Joining takes the code the leader shared: right here, not three screens into Settings.
-                if (com.torrentviewer.core.Party.available && settings.partyOn && !com.torrentviewer.core.Kids.on) {
+                // Not while in one: a second code walked out of the party you were in without a word.
+                if (com.torrentviewer.core.Party.available && settings.partyOn && !com.torrentviewer.core.Kids.on && com.torrentviewer.core.Party.room == null) {
                     HeaderTile(L.drawable.lucide_ic_users, "Join a watch party", solid, { joiningParty = true })
                     Spacer(Modifier.width(10.dp))
                 }

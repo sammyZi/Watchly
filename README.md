@@ -54,7 +54,7 @@
     <td valign="top">🧭 <b>Watch orders</b><br>Franchises film by film, in release or story order, with what's up next.</td>
   </tr>
   <tr>
-    <td valign="top">🎉 <b>Watch party</b><br>Watch together across phones, TVs and PCs anywhere, kept in step. Share a link — no account, end-to-end encrypted.</td>
+    <td valign="top">🎉 <b>Watch party</b><br>Watch together across phones, TVs and PCs anywhere, kept in step. Share an 8-character code — no account, end-to-end encrypted.</td>
     <td valign="top">💬 <b>Chat and reactions</b><br>Talk and react over the film, see who's watching and who's still loading, and ask the host to pause.</td>
     <td valign="top">🎚️ <b>Your own copy</b><br>Join with the host's source, or pick your own release of the same film. It stays in step either way.</td>
   </tr>
@@ -62,6 +62,11 @@
     <td valign="top">⚡ <b>Instant resume</b><br>A film you stopped part-way keeps its start, so Continue Watching opens it in about a second — even after closing the app.</td>
     <td valign="top">🔀 <b>Change stream</b><br>Switch to another release mid-film, picked by quality, and carry on from the same second.</td>
     <td valign="top">🎨 <b>Looks the part</b><br>A floating glass dock that shrinks as you scroll, a theme change that spreads from your touch, and opening titles on a film reel.</td>
+  </tr>
+  <tr>
+    <td valign="top">🔔 <b>Notifications</b><br>New episodes, finished downloads, updates and your AniList notifications in one place, behind the bell on the phone's Home.</td>
+    <td valign="top">🌸 <b>AniList for anime</b><br>What you finish is marked there and what you watch there comes back, on every app, with its score and the next episode's air date on the page.</td>
+    <td valign="top">⚠️ <b>Plays smooth, or says so</b><br>A release this device can't decode in hardware, like AV1 in 4K on an older phone, is marked <i>Choppy here</i> before you pick it.</td>
   </tr>
 </table>
 
@@ -166,9 +171,17 @@ when Android asks.
 
 ### 🎉 Watch party
 
-Start a film and press the player's **party** button, then send the link. Friends open it on a phone,
-TV or PC, see what's on, and choose **Join the party**, or **Pick my own source** for a release that
-suits their connection. More in [docs/watch-party.md](docs/watch-party.md).
+Start a film and press the player's **party** button, then send the 8-character code it shows
+(like `K7Q2-M9XD`). Friends type it in on a phone, TV or PC:
+
+| App | Where to join |
+|---|---|
+| 📱 Phone | The **party** button at the top of Home, beside the bell |
+| 📺 TV | **Join a party** in the side rail, under the tabs |
+| 🪟 Windows | **Join party** at the foot of the left rail |
+
+They see what's on before anything plays, then choose **Join the party**, or **Pick my own source** for
+a release that suits their connection. More in [docs/watch-party.md](docs/watch-party.md).
 
 <a name="the-apps"></a>
 <h2><img src="https://img.shields.io/badge/The_apps-3ECF8E?style=for-the-badge" alt="The apps" height="34"></h2>
@@ -215,7 +228,7 @@ features are simply left out. The TV and Windows builds read the same file.
 | | |
 |---|---|
 | 🧩 Sources | The [Stremio addon protocol](https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/protocol.md): catalogues, titles, streams and subtitles from addons you add yourself |
-| 🔄 Sync | Your [Stremio](https://www.stremio.com) or [Nuvio](https://nuvio.tv) account ([Nuvio's public API](https://nuvio.tv/docs)): library, Continue Watching, watched marks and addons · [Simkl](https://simkl.com) and [MDBList](https://mdblist.com) for watched marks · [AniList](https://anilist.co) for anime, on the phone |
+| 🔄 Sync | Your [Stremio](https://www.stremio.com) or [Nuvio](https://nuvio.tv) account ([Nuvio's public API](https://nuvio.tv/docs)): library, Continue Watching, watched marks and addons · [Simkl](https://simkl.com) and [MDBList](https://mdblist.com) for watched marks · [AniList](https://anilist.co) for anime, with [Fribb's anime-lists](https://github.com/Fribb/anime-lists) tying it to IMDb |
 | 🎞️ Players | [AndroidX Media3](https://github.com/androidx/media) with the [Jellyfin FFmpeg decoder](https://github.com/jellyfin/jellyfin-androidx-media) · [VLC / libVLC](https://www.videolan.org/vlc/libvlc.html) and [LibVLCSharp](https://github.com/videolan/libvlcsharp) |
 | 🎨 Look | [Jetpack Compose](https://developer.android.com/jetpack/compose) · [Haze](https://github.com/chrisbanes/haze) frosted glass · the phone's dock after [OpenTune](https://github.com/justshivv/Opentune)'s · [Coil](https://github.com/coil-kt/coil) · [Lucide](https://lucide.dev) icons · [Poppins](https://github.com/itfoundry/Poppins) and [Anton](https://github.com/googlefonts/AntonFont) type |
 | 🗂️ Titles &amp; art | [Cinemeta](https://v3-cinemeta.strem.io), Stremio's public catalogue · [TVmaze](https://www.tvmaze.com) episode stills · [TMDB](https://www.themoviedb.org) suggestions, cast, age ratings and collections |

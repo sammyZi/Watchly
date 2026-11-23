@@ -26,6 +26,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -62,7 +64,13 @@ fun JoinPartyScreen(me: Profile, onDismiss: () -> Unit) {
         onDismiss()
     }
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.92f)), contentAlignment = Alignment.Center) {
-        Column(Modifier.width(620.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(
+            Modifier.width(620.dp)
+                // While it is up the remote stays in it, as in the TV's sheets: left from the box went to the rail behind.
+                .focusProperties { onExit = { cancelFocusChange() } }
+                .focusGroup(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
             Row(horizontalArrangement = Arrangement.spacedBy((-16).dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(76.dp).clip(CircleShape)) { Avatar(me, 76.dp) }
                 repeat(2) { Seat() }

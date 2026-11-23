@@ -581,7 +581,8 @@ fun BottomSheet(title: String?, onDismiss: () -> Unit, content: @Composable () -
         AnimatedVisibility(shown, enter = slideInVertically(Motion.spatial()) { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
             Column(
                 Modifier.widthIn(max = 600.dp).fillMaxWidth().heightIn(min = tallestDp.coerceAtMost(maxHeight), max = maxHeight)
-                    .onSizeChanged { if (it.height > tallest) tallest = it.height }
+                    // Not while the keyboard is up: its room counted, and the sheet stayed keyboard-tall once it went.
+                    .onSizeChanged { if (keyboard == 0.dp && it.height > tallest) tallest = it.height }
                     .graphicsLayer { translationY = offset }
                     .nestedScroll(pull)
                     .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))

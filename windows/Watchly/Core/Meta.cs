@@ -181,7 +181,8 @@ public static class Meta
     /// none of them knows.
     /// </summary>
     public static Task<Title?> LoadTitle(string imdb, string kind) =>
-        Once<Title?>($"title-{kind}-{imdb}", () => Remember($"title-{kind}-{imdb}", async () =>
+        // "title2": what was kept under "title" may be a stub film for a series (see FromAddons).
+        Once<Title?>($"title2-{kind}-{imdb}", () => Remember($"title2-{kind}-{imdb}", async () =>
         {
             if (await FromAddons(imdb, kind) is { } mine) return mine;
             if (!imdb.StartsWith("tt")) return null;
@@ -222,7 +223,12 @@ public static class Meta
                 // Kept under the id it was asked by: History, My List and the page all know it so.
                 meta["imdb_id"] = id;
                 var real = S(meta["type"]) ?? type;
-                if (ToTitles(new JsonArray(meta.DeepClone()), Addons.KindOfType(real), true, true, real).FirstOrDefault() is { } t) return t;
+                if (ToTitles(new JsonArray(meta.DeepClone()), Addons.KindOfType(real), true, true, real).FirstOrDefault() is not { } t) continue;
+                // A series asked for comes back only as a series with its episodes: an addon that wouldn't answer it
+                // as one, asked again as a film, gave a stub film of the same id, and the page had no seasons.
+                var series = t.Kind == "tv";
+                if ((kind == "tv" && !series) || (series && t.Episodes.Count == 0)) continue;
+                return t;
             }
         return null;
     }
