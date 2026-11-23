@@ -151,6 +151,7 @@ sealed interface Page {
     data class WatchOrder(val order: com.torrentviewer.core.WatchOrder) : Page
     data class Person(val id: Int, val name: String) : Page
     data class Top(val kind: String) : Page
+    data object Notifications : Page
 }
 
 private fun keyOf(index: Int, page: Page) = when (page) {
@@ -161,6 +162,7 @@ private fun keyOf(index: Int, page: Page) = when (page) {
     is Page.WatchOrder -> "order:$index:${page.order.id}"
     is Page.Person -> "person:$index:${page.id}"
     is Page.Top -> "top:$index"
+    Page.Notifications -> "notifications:$index"
 }
 
 /** The profile opened last on this phone, so a phone with one owner never asks. */
@@ -182,6 +184,7 @@ private fun open(profile: Profile) {
     com.torrentviewer.core.Nuvio.load(profile.id, profile.isGuest)
     com.torrentviewer.core.WATCH_TRACKERS.forEach { it.load(profile.id, profile.isGuest) }
     com.torrentviewer.core.AniList.load(profile.id, profile.isGuest)
+    Inbox.load()
     Kids.use(profile)
     if (!profile.isGuest) Kv.setGlobal(LAST_PROFILE, profile.id)
 }
@@ -471,6 +474,12 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>, barHaze: dev.chris
     // After the terms: nothing is asked of GitHub until they are accepted.
     val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
     LaunchedEffect(Unit) { com.torrentviewer.core.Updates.check(appContext, BuildConfig.VERSION_NAME, "Watchly-phone-", BuildConfig.DEBUG) }
+    // A new version, kept in the notification center too: the card at the top can be put off.
+    val release by com.torrentviewer.core.Updates.release.collectAsState()
+    LaunchedEffect(release, who) {
+        val r = release ?: return@LaunchedEffect
+        if (who != null) Inbox.add(Note("update:${r.version}", "Update available", "Watchly ${r.version} · ${com.torrentviewer.core.bytes(r.size)} · tap to download", System.currentTimeMillis(), null))
+    }
     // Subtitles from OpenSubtitles out of the box, through Stremio's addon.
     LaunchedEffect(Unit) { Addons.seedSubtitles() }
 
@@ -532,6 +541,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>, barHaze: dev.chris
                     is Page.Catalog -> CatalogScreen(top.shelf, onOpen = openTitle, onBack = ::pop)
                     Page.Downloads -> DownloadsScreen(watch, onBack = ::pop)
                     Page.WatchOrders -> WatchOrdersScreen(onOpen = openOrder, onBack = ::pop)
+                    Page.Notifications -> NotificationsScreen(watch, onLink = { incoming.value = android.net.Uri.parse(it) }, onBack = ::pop)
                     is Page.WatchOrder -> WatchOrderScreen(top.order, onOpen = openTitle, onBack = ::pop)
                 }
             }
@@ -548,7 +558,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>, barHaze: dev.chris
             ) { t ->
                 holder.SaveableStateProvider(t.name) {
                     when (t) {
-                        Tab.HOME -> HomeScreen(home, watch, me, onOpen = openTitle, onShelf = { pages.add(Page.Catalog(it)) }, onTop = { pages.add(Page.Top(it)) }, onProfile = { switching = true })
+                        Tab.HOME -> HomeScreen(home, watch, me, onOpen = openTitle, onShelf = { pages.add(Page.Catalog(it)) }, onTop = { pages.add(Page.Top(it)) }, onProfile = { switching = true }, onNotifications = { pages.add(Page.Notifications) })
                         Tab.SEARCH -> SearchScreen(watch, onOpen = openTitle)
                         Tab.LIBRARY -> LibraryScreen(watch, me, onOpen = openTitle, onDownloads = { pages.add(Page.Downloads) })
                         Tab.SETTINGS -> SettingsScreen(watch, me, onSwitchProfile = { switching = true }, onEditHome = { home.editing = true; tab = Tab.HOME })

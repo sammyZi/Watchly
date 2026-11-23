@@ -42,6 +42,20 @@ internal fun episodesOf(cours: List<Cour>, id: Int, progress: Int): List<Int> {
     return emptyList()
 }
 
+/**
+ * The list ties some recap films to their series' own IMDb title (My Hero Academia's, tt5626028): taken as
+ * a film, the series opened as one — Cinemeta answers a film with no episodes, and no addon has it. A film
+ * sharing a title with a series is left out; it has no page of its own here.
+ */
+internal fun usable(entries: List<AniEntry>): List<AniEntry> {
+    val series = entries.filter { it.isSeries }.mapTo(HashSet()) { it.imdb }
+    return entries.filterNot { it.isFilm && it.imdb in series }
+}
+
+/** An airing notification's words: AniList sends them in pieces ("Episode ", " of ", " aired.") to put the number and title between. */
+internal fun airingText(contexts: List<String>, episode: Int, title: String): String =
+    if (contexts.size >= 3) "${contexts[0]}$episode${contexts[1]}$title${contexts[2]}" else "Episode $episode of $title aired."
+
 /** The token AniList hands back in a sign-in link's fragment ("…#access_token=…&expires_in=…"), and when it runs out. */
 internal fun tokenFromRedirect(link: String, now: Long = System.currentTimeMillis()): TrackerTokens? {
     val fields = link.substringAfter('#', "").split('&').mapNotNull { p -> p.split('=', limit = 2).takeIf { it.size == 2 }?.let { it[0] to java.net.URLDecoder.decode(it[1], "UTF-8") } }.toMap()
@@ -124,6 +138,7 @@ object AniList {
         infos.clear()
         _user.value = name
         _connected.value = next != null
+        _unread.value = 0
         if (!guest) Secrets.put(slot(profile), next?.let { JSONObject().put("access", it.access).put("expires", it.expires).put("user", id).put("name", name).toString() })
         if (next == null) {
             _library.value = StremioLibrary()
@@ -219,8 +234,9 @@ object AniList {
             }
             ?: cache?.takeIf { it.exists() }?.let { f -> runCatching { f.readLines().mapNotNull(::entryOf) }.getOrNull() }
             ?: return false
-        byImdb = entries.groupBy { it.imdb }
-        byId = entries.associateBy { it.id }
+        val usable = usable(entries)
+        byImdb = usable.groupBy { it.imdb }
+        byId = usable.associateBy { it.id }
         Log.i("anilist", "mapping: ${entries.size} entries${if (fresh != null) ", kept" else ""}")
         return true
     }
@@ -384,6 +400,66 @@ object AniList {
         )
     }
 
+    /* --------------------------------------------------------------- notifications */
+
+    /**
+     * One of AniList's own notifications: an episode aired, a follow, a like or reply, a title changed.
+     * [imdb] (and [kind], [season]) when the mapping ties it to a title here, so it opens that page; else [url] on AniList.
+     */
+    data class Notice(val id: Int, val text: String, val at: Long, val url: String, val imdb: String?, val kind: String?, val season: Int?, val poster: String?)
+
+    private val _unread = MutableStateFlow(0)
+    /** AniList's own count of unread notifications, asked with each [pull]. */
+    val unread: StateFlow<Int> = _unread
+
+    private const val MEDIA = "media{id siteUrl title{english romaji} coverImage{medium}}"
+    private const val PERSON = "user{name siteUrl}"
+
+    /** The latest 30, newest first. [read] marks them read there too, as AniList's own page does on opening. */
+    suspend fun notices(read: Boolean): List<Notice> {
+        if (tokens == null) return emptyList()
+        mapping()
+        val social = listOf("Following", "ActivityMessage", "ActivityMention", "ActivityReply", "ActivityReplySubscribed", "ActivityLike", "ActivityReplyLike")
+            .joinToString(" ") { "... on ${it}Notification{id type context createdAt $PERSON${if (it == "Following") "" else " activityId"}}" }
+        val threads = listOf("ThreadCommentMention", "ThreadCommentReply", "ThreadCommentSubscribed", "ThreadCommentLike", "ThreadLike")
+            .joinToString(" ") { "... on ${it}Notification{id type context createdAt $PERSON thread{siteUrl}}" }
+        val media = listOf("RelatedMediaAddition", "MediaDataChange", "MediaMerge").joinToString(" ") { "... on ${it}Notification{id type context createdAt $MEDIA}" }
+        val query = "query(\$r:Boolean){Page(perPage:30){notifications(resetNotificationCount:\$r){" +
+            "... on AiringNotification{id type episode contexts createdAt $MEDIA} $social $threads $media " +
+            "... on MediaDeletionNotification{id type context createdAt deletedMediaTitle}}}}"
+        val rows = gql(query, JSONObject().put("r", read)).getJSONObject("Page").optJSONArray("notifications")?.objects().orEmpty()
+        if (read) _unread.value = 0
+        return rows.mapNotNull(::noticeOf)
+    }
+
+    private fun noticeOf(n: JSONObject): Notice? {
+        val id = n.optInt("id").takeIf { it > 0 } ?: return null
+        val m = n.optJSONObject("media")
+        val title = m?.optJSONObject("title")?.let { it.str("english") ?: it.str("romaji") }
+        val who = n.optJSONObject("user")
+        val context = n.str("context").orEmpty()
+        val text = when {
+            n.has("contexts") -> airingText(n.optJSONArray("contexts")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty(), n.optInt("episode"), title ?: "a show")
+            who != null -> (who.str("name") ?: "Someone") + context
+            title != null -> title + context
+            n.has("deletedMediaTitle") -> n.str("deletedMediaTitle").orEmpty() + context
+            else -> return null
+        }.trim()
+        val entry = m?.optInt("id")?.let { byId[it] }
+        val url = n.optJSONObject("thread")?.str("siteUrl")
+            ?: n.optInt("activityId").takeIf { it > 0 }?.let { "https://anilist.co/activity/$it" }
+            ?: who?.str("siteUrl") ?: m?.str("siteUrl") ?: "https://anilist.co/notifications"
+        return Notice(
+            id, text, n.optLong("createdAt") * 1000, url, entry?.imdb,
+            entry?.let { if (it.isFilm) "movie" else "tv" }, entry?.season?.takeIf { it >= 0 && entry.isSeries },
+            m?.optJSONObject("coverImage")?.str("medium"),
+        )
+    }
+
+    private suspend fun countUnread() {
+        _unread.value = runCatching { gql("query{Viewer{unreadNotificationCount}}", JSONObject()).getJSONObject("Viewer").optInt("unreadNotificationCount") }.getOrDefault(_unread.value)
+    }
+
     /* --------------------------------------------------------------- watched there → here */
 
     /**
@@ -393,6 +469,7 @@ object AniList {
     fun pull() {
         if (tokens == null || userId == 0) return
         val owner = profile
+        AppScope.launch { countUnread() }
         AppScope.launch {
             runCatching {
                 if (!mapping()) return@runCatching

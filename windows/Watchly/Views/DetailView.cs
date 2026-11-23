@@ -841,6 +841,9 @@ public sealed class DetailView : UserControl, IDisposable
         meta.Margin = new Thickness(0, 2, 0, 0);
         var lines = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { name, meta } };
         if (hit.IsTorrent && TorBox.IsCached(hit.Id)) lines.Children.Add(Ui.Text("Instant · TorBox", "Meta", "Good", 12, FontWeights.SemiBold));
+        // Video the graphics card here can't decode (AV1 on an older card): in software it drops frames.
+        if (Decoders.Choppy(hit.Release.Length > 0 ? hit.Release : hit.Name) is { } choppy)
+            lines.Children.Add(Ui.Text($"Choppy here ({choppy}) — this PC's graphics can't decode it", "Meta", "Danger", 12, FontWeights.SemiBold));
         dock.Children.Add(lines);
 
         var row = Ui.Button(Ui.Card(dock, "Surface", 8, new Thickness(14, 11, 8, 11)), () => Start(captured, false), "Row");

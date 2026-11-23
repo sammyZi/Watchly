@@ -56,9 +56,14 @@ object EpisodeAlerts {
             Kv.init(context)
             SettingsStore.load()
             Profiles.load()
-            if (!SettingsStore.value.value.episodeAlerts || needsPermission(context)) return Result.success()
+            if (!SettingsStore.value.value.episodeAlerts) return Result.success()
             val alerts = runCatching { NewEpisodes.alerts() }.getOrElse { return Result.retry() }
-            if (alerts.isEmpty()) return Result.success()
+            // The notification center has them whether or not Android may show them.
+            alerts.forEach { a ->
+                val e = a.episode
+                Inbox.addFor(a.profile, Note("ep:${a.title.imdb}:${e.season}:${e.episode}", a.title.title, "New episode: " + text(a), System.currentTimeMillis(), link(a).toString()))
+            }
+            if (alerts.isEmpty() || needsPermission(context)) return Result.success()
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && nm.getNotificationChannel(CHANNEL) == null) {
                 nm.createNotificationChannel(NotificationChannel(CHANNEL, "New episodes", NotificationManager.IMPORTANCE_DEFAULT))
@@ -69,14 +74,12 @@ object EpisodeAlerts {
                 val id = (a.profile + a.title.imdb).hashCode()
                 // To the show's page at that season. Each its own: one shared intent opened the app's start
                 // and nothing more, and with one request code every alert would open the last one's show.
-                val link = android.net.Uri.Builder().scheme("watchly").authority(TITLE_LINK_HOST).appendPath(a.title.imdb)
-                    .appendQueryParameter("kind", "tv").appendQueryParameter("s", e.season.toString()).appendQueryParameter("name", a.title.title).build()
                 val open = context.packageManager.getLaunchIntentForPackage(context.packageName)?.let {
-                    it.data = link
+                    it.data = link(a)
                     it.addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
                     PendingIntent.getActivity(context, id, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
                 }
-                val text = (if (a.count > 1) "${a.count} new episodes, the latest is " else "") + "S${e.season}:E${e.episode}" + (e.name.takeIf { it.isNotBlank() && !it.startsWith("Episode") }?.let { " · $it" } ?: "")
+                val text = text(a)
                 val who = if (named) Profiles.list.value.find { it.id == a.profile }?.name else null
                 val note = NotificationCompat.Builder(context, CHANNEL)
                     .setSmallIcon(android.R.drawable.ic_media_play)
@@ -91,5 +94,13 @@ object EpisodeAlerts {
             }
             return Result.success()
         }
+
+        private fun text(a: NewEpisodes.Alert): String {
+            val e = a.episode
+            return (if (a.count > 1) "${a.count} new episodes, the latest is " else "") + "S${e.season}:E${e.episode}" + (e.name.takeIf { it.isNotBlank() && !it.startsWith("Episode") }?.let { " · $it" } ?: "")
+        }
+
+        private fun link(a: NewEpisodes.Alert) = android.net.Uri.Builder().scheme("watchly").authority(TITLE_LINK_HOST).appendPath(a.title.imdb)
+            .appendQueryParameter("kind", "tv").appendQueryParameter("s", a.episode.season.toString()).appendQueryParameter("name", a.title.title).build()
     }
 }

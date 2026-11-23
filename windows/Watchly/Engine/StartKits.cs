@@ -105,6 +105,12 @@ public static class StartKits
         }
     }
 
+    /// <summary>The kept starts left after <see cref="Prune"/>, by their folder's name (the hash, lower case).</summary>
+    public static HashSet<string> Hashes()
+    {
+        lock (Gate) return Load().Select(k => k.Hash.ToLowerInvariant()).ToHashSet();
+    }
+
     /// <summary>MonoTorrent's fast-resume file for a hash, once the engine has said where those live.</summary>
     public static Func<string, string?> ResumeFile = _ => null;
 

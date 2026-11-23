@@ -31,8 +31,34 @@ static class VlcLibrary
 {
     // No metadata lookups on the internet and no Lua scripts (which do such lookups): what is
     // played stays on this machine. The Lua plugin isn't shipped either — see Watchly.csproj.
-    static readonly string[] Args = { "--no-video-title-show", "--no-osd", "--quiet", "--no-metadata-network-access", "--no-lua" };
+    // --verbose=1: warnings and errors reach Listen below. Under --quiet a 4K film froze and lost its sound with
+    // the buffer full and nothing in the log to say whether the decoder, the audio output or the stream was at fault.
+    static readonly string[] Args = { "--no-video-title-show", "--no-osd", "--verbose=1", "--no-metadata-network-access", "--no-lua" };
     static readonly System.Collections.Concurrent.ConcurrentDictionary<int, Lazy<LibVLC>> sized = new();
+
+    /// <summary>When each VLC warning was last written, and how many came since: "picture is too late" comes by the hundred.</summary>
+    static readonly Dictionary<string, (long At, int Since)> heard = new();
+
+    /// <summary>libVLC's warnings and errors into the log, each kind at most every 5 s with a count of the rest.</summary>
+    static void Listen(LibVLC lib) => lib.Log += (_, e) =>
+    {
+        if (e.Level < LogLevel.Warning) return;
+        var key = $"{e.Module}: {e.Message}";
+        // Numbers in a message (a timestamp, a delay) would make every line a kind of its own.
+        var kind = System.Text.RegularExpressions.Regex.Replace(key, @"-?\d+", "#");
+        var now = Environment.TickCount64;
+        string? line = null;
+        lock (heard)
+        {
+            if (!heard.TryGetValue(kind, out var h) || now - h.At > 5000)
+            {
+                line = h.Since > 0 ? $"vlc {key} (and {h.Since} more like it)" : $"vlc {key}";
+                heard[kind] = (now, 0);
+            }
+            else heard[kind] = (h.At, h.Since + 1);
+        }
+        if (line is not null) Log.Player(line);
+    };
 
     public static readonly Lazy<LibVLC> Instance = new(() =>
     {
@@ -42,6 +68,7 @@ static class VlcLibrary
         var args = Args.ToList();
         if (!File.Exists(Path.Combine(plugins, "plugins.dat"))) args.Add("--reset-plugins-cache");
         var made = new LibVLC(args.ToArray());
+        Listen(made);
         Log.Player($"libVLC ready in {clock.ElapsedMilliseconds} ms");
         return made;
     });
@@ -53,7 +80,9 @@ static class VlcLibrary
     public static LibVLC For(int subRel) => sized.GetOrAdd(subRel, rel => new(() =>
     {
         _ = Instance.Value;
-        return new LibVLC(Args.Append($"--freetype-rel-fontsize={rel}").ToArray());
+        var lib = new LibVLC(Args.Append($"--freetype-rel-fontsize={rel}").ToArray());
+        Listen(lib);
+        return lib;
     })).Value;
 
     public static void Warm() => _ = Task.Run(() => Instance.Value);

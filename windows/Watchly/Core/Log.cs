@@ -30,9 +30,17 @@ public static class Log
 
     static readonly StreamWriter? File = Open();
 
+    /// <summary>The run before this one's log: a crash and its restart wiped what it said otherwise.</summary>
+    public static readonly string PreviousPath = Path.Combine(Path.GetTempPath(), "watchly.previous.log");
+
     static StreamWriter? Open()
     {
-        try { return new StreamWriter(new FileStream(FilePath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true }; }
+        try
+        {
+            // Only while nothing holds it: a second Watchly opening would move the live one's log away.
+            try { System.IO.File.Move(FilePath, PreviousPath, overwrite: true); } catch { }
+            return new StreamWriter(new FileStream(FilePath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true };
+        }
         catch { return null; } // a second Watchly holds it
     }
 

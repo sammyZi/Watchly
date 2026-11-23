@@ -605,6 +605,7 @@ fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0
     val instant = !hit.direct && torbox.isNotEmpty() && hit.id.lowercase() in cached
     // A pack's size is many episodes; only a single file's size over the runtime is a bitrate.
     val mbps = if (runtimeSeconds > 0 && hit.size > 0 && (hit.scope == Scope.EPISODE || hit.perFileSize)) hit.size * 8 / runtimeSeconds / 1_000_000 else 0.0
+    val choppy = androidx.compose.runtime.remember(hit.release) { com.torrentviewer.core.Decoders.choppy(hit.release) }
     val tint = when (grade) {
         Health.FAST, Health.GOOD -> Ink.good
         Health.WEAK -> Ink.warn
@@ -649,6 +650,8 @@ fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0
                         style = Type.meta.copy(color = if (focused) Color.Black.copy(alpha = 0.7f) else if (mbps >= TOO_HEAVY_MBPS) Ink.danger else Ink.warn),
                     )
                 }
+                // Video this TV can only decode in software (no hardware AV1, or past its size): it drops frames.
+                choppy?.let { Text("Choppy here ($it)", style = Type.meta.copy(color = if (focused) Color.Black.copy(alpha = 0.7f) else Ink.danger)) }
             }
         }
     }

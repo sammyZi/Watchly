@@ -48,6 +48,10 @@ public partial class App : Application
             Log.Error("app", "Unobserved task exception", args.Exception);
             args.SetObserved();
         };
+        // On a thread of its own (a library's pool work, as MonoTorrent's peer exchange crashed): the app goes
+        // whatever is done here, but its last line says why, in the log kept as watchly.previous.log.
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+            Log.Error("app", "Fatal: the app is closing", args.ExceptionObject as Exception);
 
         // A magnet, a .torrent, or an addon site's Install link (the installer registers stremio://).
         // And a watch party invite (watchly://party/…, the installer registers watchly://).

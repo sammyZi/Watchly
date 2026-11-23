@@ -864,6 +864,8 @@ fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0
     val instant = !hit.direct && torbox.isNotEmpty() && hit.id.lowercase() in cached
     // A pack's size is many episodes; only a single file's size over the runtime is a bitrate.
     val mbps = if (runtimeSeconds > 0 && hit.size > 0 && (hit.scope == Scope.EPISODE || hit.perFileSize)) hit.size * 8 / runtimeSeconds / 1_000_000 else 0.0
+    // Video this phone can only decode in software (4K AV1 on a phone without AV1 hardware): it drops frames.
+    val choppy = remember(hit.release) { com.torrentviewer.core.Decoders.choppy(hit.release) }
     val tint = when (grade) {
         Health.FAST, Health.GOOD -> Ink.good
         Health.WEAK -> Ink.warn
@@ -910,6 +912,7 @@ fun Source(hit: Hit, modifier: Modifier = Modifier, runtimeSeconds: Double = 0.0
                 )
                 if (instant) Text("TorBox", style = Type.meta.copy(fontSize = 11.sp, color = Ink.faint))
                 if (mbps >= HEAVY_MBPS) Text("Needs ${mbps.toInt()} Mb/s", style = Type.meta.copy(fontSize = 11.sp, color = if (mbps >= TOO_HEAVY_MBPS) Ink.danger else Ink.warn))
+                choppy?.let { Text("Choppy here ($it)", style = Type.meta.copy(fontSize = 11.sp, color = Ink.danger)) }
             }
             // The download engine is a torrent client; a link is streamed only.
             if (onDownload != null && !hit.direct && !hit.external) Tap(onDownload, Modifier.padding(start = 4.dp), CircleShape) { Lc(L.drawable.lucide_ic_download, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp) }

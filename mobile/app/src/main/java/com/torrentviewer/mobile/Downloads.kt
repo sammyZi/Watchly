@@ -582,6 +582,7 @@ object Downloads {
                     saved = saved + i
                     val label = if (job.files.size > 1) parseEpisode(fs.fileName(i))?.let { e -> "${job.titleName?.substringBefore(" · ") ?: ti.name()} · S%02dE%02d".format(e.season, e.episode) } ?: fs.fileName(i) else job.label
                     writeFinished(listOf(Finished(fs.fileName(i), size, System.currentTimeMillis(), dest.path, job.poster, label, job.imdb, job.kind)) + _finished.value.filter { it.path != dest.path })
+                    Inbox.add(Note("dl:${dest.path}", "Download finished", label, System.currentTimeMillis(), DOWNLOADS_LINK))
                 } catch (e: Exception) {
                     Log.w(TAG, "copy failed: ${e.message}")
                 }

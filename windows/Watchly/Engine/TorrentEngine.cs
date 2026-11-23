@@ -37,6 +37,59 @@ public sealed class TorrentEngine
 
     readonly ClientEngine engine;
 
+    /// <summary>
+    /// The phone's start-up sweep: everything in the stream cache but the kept starts goes, and with it the fast-resume
+    /// files of torrents no longer here. Only a clean close removed a stream's files, so a crash, a kill, an update's
+    /// restart or a shutdown past its 3 s left gigabytes behind for good — the folder had to be emptied by hand — and
+    /// their fast-resume still claimed pieces gone from the disk. A queued download's resume file stays: its data is
+    /// in the download folder.
+    /// </summary>
+    static void SweepStreamCache()
+    {
+        StartKits.Prune();
+        var kept = StartKits.Hashes();
+        long freed = 0;
+        var gone = 0;
+        if (Directory.Exists(Paths.StreamCache))
+            foreach (var entry in Directory.EnumerateFileSystemEntries(Paths.StreamCache))
+            {
+                var name = Path.GetFileName(entry).ToLowerInvariant();
+                if (name == "starts.json" || kept.Contains(name)) continue;
+                try
+                {
+                    if (Directory.Exists(entry))
+                    {
+                        freed += new DirectoryInfo(entry).EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => f.Length);
+                        Directory.Delete(entry, true);
+                    }
+                    else
+                    {
+                        freed += new FileInfo(entry).Length;
+                        File.Delete(entry);
+                    }
+                    gone++;
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    Log.Warn("stream", $"sweep: {name} stays ({e.Message})");
+                }
+            }
+
+        var resumes = Path.Combine(Paths.EngineCache, "fastresume");
+        var downloading = Store.Load("torrent-active-download", new List<DownloadJob>())
+            .Select(j => TitleText.HashOf(j.Uri)?.ToLowerInvariant()).OfType<string>().ToHashSet();
+        var stale = 0;
+        if (Directory.Exists(resumes))
+            foreach (var file in Directory.EnumerateFiles(resumes, "*.fresume"))
+            {
+                var hash = Path.GetFileNameWithoutExtension(file).ToLowerInvariant();
+                if (kept.Contains(hash) || downloading.Contains(hash)) continue;
+                try { File.Delete(file); stale++; }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            }
+        if (gone > 0 || stale > 0) Log.Stream($"sweep: {gone} left behind in the stream cache, {Format.Bytes(freed)} freed; {stale} stale fast-resume file(s)");
+    }
+
     /// <summary>The DHT cache is read when the first torrent starts; adding one waits for it (briefly).</summary>
     readonly Task dhtSeeded;
 
@@ -50,6 +103,8 @@ public sealed class TorrentEngine
     {
         Directory.CreateDirectory(Paths.EngineCache);
         Directory.CreateDirectory(MetaDir);
+        // Before any torrent is added: nothing of the stream cache's is in use yet.
+        SweepStreamCache();
         var settings = new EngineSettingsBuilder
         {
             CacheDirectory = Paths.EngineCache,
@@ -369,7 +424,10 @@ public sealed class TorrentEngine
         CreateContainingDirectory = false,
         MaximumConnections = 250,
         AllowDht = true,
-        AllowPeerExchange = true,
+        // Off: MonoTorrent 3.0.2's PeerExchangeManager adds to a Queue from several pool threads at once, and on a
+        // big swarm (a 4K remux, 150 seeds connecting) the queue broke mid-resize — ArgumentException in
+        // Queue.SetCapacity, on a pool thread nothing can catch, and the app was gone. Trackers and DHT find the peers.
+        AllowPeerExchange = false,
     }.ToSettings();
 
     /// <summary>

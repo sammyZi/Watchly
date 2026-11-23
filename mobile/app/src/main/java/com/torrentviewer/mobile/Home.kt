@@ -190,7 +190,7 @@ fun posterWidth() = if (isWide()) 156.dp else 120.dp
 private val CARD_GAP = 12.dp
 
 @Composable
-fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> Unit, onShelf: (Shelf) -> Unit, onTop: (String) -> Unit, onProfile: () -> Unit) {
+fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> Unit, onShelf: (Shelf) -> Unit, onTop: (String) -> Unit, onProfile: () -> Unit, onNotifications: () -> Unit) {
     val history by History.items.collectAsState()
     val saved by SavedStore.items.collectAsState()
     val settings by SettingsStore.value.collectAsState()
@@ -434,7 +434,8 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
             )
             Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = EDGE, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("WATCHLY", Modifier.weight(1f), style = Type.title.copy(color = Ink.accent, fontWeight = FontWeight.Black, letterSpacing = 2.sp))
-                if (!isWide()) Tap(onProfile, shape = RoundedCornerShape(9.dp)) { Avatar(who, 40.dp) }
+                NotificationBell(solid, onNotifications)
+                if (!isWide()) Tap(onProfile, Modifier.padding(start = 12.dp), shape = RoundedCornerShape(9.dp)) { Avatar(who, 40.dp) }
             }
         }
         if (!online) {

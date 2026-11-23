@@ -111,6 +111,7 @@ class MainActivity : FragmentActivity() {
         super.onResume()
         preferHighRefreshRate()
         com.torrentviewer.core.refreshWatched()
+        Inbox.load()
     }
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
