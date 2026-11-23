@@ -44,6 +44,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -922,7 +923,8 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEd
         }
 
         Section("Languages", "A matching track comes on by itself when a video opens; picking one yourself wins. Online subtitle search looks in the subtitle language.") {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Flowing: side by side, "Subtitles: English" had no room left and showed as "Subtitles:".
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Chip("Audio: " + if (settings.audioLang.isEmpty()) "file's default" else langName(settings.audioLang), settings.audioLang.isNotEmpty(), onClick = { picking = "audio" })
                 Chip("Subtitles: " + if (settings.subLang.isEmpty()) "off" else langName(settings.subLang), settings.subLang.isNotEmpty(), onClick = { picking = "subs" })
             }
@@ -1433,9 +1435,9 @@ private fun KeptForReopen() {
         reload()
     }
     LaunchedEffect(Unit) { reload() }
-    // A film's title from the history, where it was played from; its file name otherwise.
+    // A film as the history has it, where it was played from: its name, poster and how far in.
     val history by History.items.collectAsState()
-    val titles = remember(history) { history.mapNotNull { i -> com.torrentviewer.core.magnetHash(i.uri)?.let { it to i.title } }.toMap() }
+    val played = remember(history) { history.mapNotNull { i -> com.torrentviewer.core.magnetHash(i.uri)?.lowercase()?.let { it to i } }.toMap() }
     val total = kept.sumOf { it.bytes } + nuvio
 
     Section(
@@ -1443,24 +1445,58 @@ private fun KeptForReopen() {
         if (total == 0L) "Nothing kept. A film you stop part-way keeps its start here, so it opens at once next time."
         else "A film you stop part-way keeps its start here, so it opens at once next time. ${bytes(total)} in all.",
     ) {
-        kept.forEach { k ->
-            KeptRow(titles[k.hash] ?: k.name, "${bytes(k.bytes)}  ·  ${if (k.playing) "playing now" else "left ${ago(k.savedAt)}"}", onClear = if (k.playing) null else ({ clear { Services.engine.clearStart(k.hash) } }))
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            kept.forEach { k ->
+                val item = played[k.hash.lowercase()]
+                // The history's name ("The Matrix"); else the release's, with its scaffolding cut ("The.Matrix.1999.1080p…").
+                val name = item?.titleName ?: com.torrentviewer.core.searchableName(k.name).ifBlank { k.name }
+                val facts = listOfNotNull(com.torrentviewer.core.yearOf(k.name), com.torrentviewer.core.quality(k.name)).joinToString("  ·  ")
+                KeptRow(
+                    name, facts, item?.poster, item?.ratio?.takeIf { it > 0.01 },
+                    if (k.playing) "Playing now" else "${bytes(k.bytes)}  ·  left ${ago(k.savedAt)}", k.playing,
+                    onClear = if (k.playing) null else ({ clear { Services.engine.clearStart(k.hash) } }),
+                )
+            }
+            if (nuvio > 0) KeptRow("Nuvio engine's cache", "Its own store, apart from Watchly's", null, null, bytes(nuvio), false, icon = L.drawable.lucide_ic_hard_drive, onClear = { clear { NuvioTorrent.clearCache(context) } })
         }
-        if (nuvio > 0) KeptRow("Nuvio engine's cache", bytes(nuvio), onClear = { clear { NuvioTorrent.clearCache(context) } })
         if (kept.count { !it.playing } + (if (nuvio > 0) 1 else 0) > 1) {
-            Button("Clear all", { clear { Services.engine.clearStarts(); NuvioTorrent.clearCache(context) } }, Modifier.padding(top = 8.dp), icon = L.drawable.lucide_ic_trash_2)
+            Button("Clear all", { clear { Services.engine.clearStarts(); NuvioTorrent.clearCache(context) } }, Modifier.padding(top = 12.dp), icon = L.drawable.lucide_ic_trash_2, compact = true)
         }
     }
 }
 
+/**
+ * One film kept: its poster, its name and year and quality, how far in it was left as a bar, and what it
+ * takes and when — or Playing now, in the accent, while it is on (and can't go yet).
+ */
 @Composable
-private fun KeptRow(title: String, detail: String, onClear: (() -> Unit)?) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(title, style = Type.label.copy(color = Ink.text), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(detail, style = Type.meta.copy(color = Ink.faint))
+private fun KeptRow(title: String, facts: String, poster: String?, ratio: Double?, detail: String, live: Boolean, icon: Int = L.drawable.lucide_ic_film, onClear: (() -> Unit)?) {
+    val shape = RoundedCornerShape(12.dp)
+    Row(Modifier.fillMaxWidth().clip(shape).background(Ink.text.copy(alpha = 0.05f)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(width = 44.dp, height = 64.dp).clip(RoundedCornerShape(8.dp)).background(Ink.text.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
+            if (poster != null) coil3.compose.AsyncImage(poster, null, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+            else Lc(icon, tint = Ink.faint, size = 20.dp)
         }
-        onClear?.let { Tap(it, shape = CircleShape) { Lc(L.drawable.lucide_ic_trash_2, Modifier.padding(10.dp), tint = Ink.muted, size = 20.dp) } }
+        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+            Text(title, style = Type.label.copy(color = Ink.text, fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (facts.isNotEmpty()) Text(facts, Modifier.padding(top = 2.dp), style = Type.meta.copy(color = Ink.muted), maxLines = 1)
+            ratio?.let { r ->
+                Row(Modifier.padding(top = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f).height(3.dp).clip(CircleShape).background(Ink.text.copy(alpha = 0.12f))) {
+                        Box(Modifier.fillMaxWidth(r.toFloat().coerceIn(0f, 1f)).fillMaxHeight().background(Ink.accent))
+                    }
+                    Text("${(r * 100).toInt()}%", Modifier.padding(start = 8.dp), style = Type.meta.copy(color = Ink.faint, fontSize = 11.sp))
+                }
+            }
+            Text(detail, Modifier.padding(top = 5.dp), style = Type.meta.copy(color = if (live) Ink.accent else Ink.faint, fontWeight = if (live) FontWeight.SemiBold else FontWeight.Normal), maxLines = 1)
+        }
+        onClear?.let {
+            Tap(it, Modifier.size(38.dp), CircleShape) {
+                Box(Modifier.fillMaxSize().background(Ink.text.copy(alpha = 0.07f)), contentAlignment = Alignment.Center) {
+                    Lc(L.drawable.lucide_ic_trash_2, tint = Ink.muted, size = 18.dp)
+                }
+            }
+        }
     }
 }
 

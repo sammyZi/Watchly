@@ -128,7 +128,7 @@ public sealed partial class PlayerView
         {
             // The code, and where to type it; a room from an older link has none, and copies that link.
             Clipboard.SetText(r.Code is { } code
-                ? $"Join my watch party for {request.MetaTitle ?? request.Title} in Watchly — code {Party.ShowCode(code)}\n(Settings → Watch party → Join with a code)"
+                ? $"Join my watch party for {request.MetaTitle ?? request.Title} in Watchly — code {Party.ShowCode(code)}\n(Join party, on the left of Watchly's window)"
                 : $"Watch {request.MetaTitle ?? request.Title} with me on Watchly: {r.Link}");
             ShowHud(r.Code is { } c ? $"Party code {Party.ShowCode(c)} copied — send it to your friends" : "Invite link copied — paste it to your friends", 3000);
         }

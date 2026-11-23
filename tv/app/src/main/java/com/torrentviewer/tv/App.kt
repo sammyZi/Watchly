@@ -182,6 +182,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     }
     var switching by remember { mutableStateOf(false) }
     var tab by remember { mutableStateOf(Tab.HOME) }
+    var joiningParty by remember { mutableStateOf(false) }
     var stops by remember { mutableStateOf(emptyList<Stop>()) }
     val open = { stop: Stop -> stops = stops + stop }
     val openTitle = { t: Title -> open(Stop.Film(t)) }
@@ -413,7 +414,11 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         }
         FocusRingLayer(focusRing)
         }
-        if (top == null) NavRail(tab, who!!, rail, page, onTab = { tab = it }, onProfile = { switching = true }, haze = pageHaze, onOpen = { railOpen = it })
+        val settingsNow by com.torrentviewer.core.SettingsStore.value.collectAsState()
+        // Joining by code, from the rail: not three pages into Settings.
+        val canJoin = Party.available && settingsNow.partyOn && !com.torrentviewer.core.Kids.on && Party.room == null
+        if (top == null) NavRail(tab, who!!, rail, page, onTab = { tab = it }, onProfile = { switching = true }, haze = pageHaze, onOpen = { railOpen = it }, onJoin = if (canJoin) ({ joiningParty = true }) else null)
+        if (joiningParty) JoinPartyScreen(who!!) { joiningParty = false }
 
         if (watch.phase == Phase.INSPECTING) Opening(watch)
 
@@ -484,7 +489,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
  * opens with labels only while the remote is in it.
  */
 @Composable
-private fun NavRail(tab: Tab, who: Profile, current: FocusRequester, page: FocusRequester, onTab: (Tab) -> Unit, onProfile: () -> Unit, haze: dev.chrisbanes.haze.HazeState? = null, onOpen: (Boolean) -> Unit = {}) {
+private fun NavRail(tab: Tab, who: Profile, current: FocusRequester, page: FocusRequester, onTab: (Tab) -> Unit, onProfile: () -> Unit, haze: dev.chrisbanes.haze.HazeState? = null, onOpen: (Boolean) -> Unit = {}, onJoin: (() -> Unit)? = null) {
     var focused by remember { mutableStateOf(false) }
     /** Snapping shut to hand focus to the page: the open rail lies over the page's
      *  first column, so focus search from it found nothing to the right. */
@@ -584,6 +589,23 @@ private fun NavRail(tab: Tab, who: Profile, current: FocusRequester, page: Focus
                     }
                     // The red tick on the page you are on.
                     if (on && !focused) Box(Modifier.align(Alignment.CenterStart).width(3.dp).height(20.dp).clip(RoundedCornerShape(2.dp)).background(Ink.accent))
+                }
+            }
+            // Under the pages, apart from them: an action, not a place. The page it opens takes focus itself.
+            onJoin?.let { join ->
+                Box(Modifier.padding(vertical = 8.dp, horizontal = 12.dp).fillMaxWidth().height(1.dp).background(Ink.stroke))
+                Focusable(onClick = { join(); leave() }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), scale = 1f, ring = false) { focused ->
+                    val tint = if (focused) Color.Black else Ink.accent
+                    Row(
+                        Modifier.background(if (focused) Color.White else Color.Transparent).height(44.dp).fillMaxWidth().padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Lc(L.drawable.lucide_ic_users, tint = tint, size = 21.dp)
+                        if (open) {
+                            Spacer(Modifier.width(16.dp))
+                            Text("Join a party", style = Type.label.copy(color = if (focused) Color.Black else Ink.text, fontWeight = FontWeight.SemiBold))
+                        }
+                    }
                 }
             }
             Spacer(Modifier.weight(1.4f))

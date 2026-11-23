@@ -356,6 +356,58 @@ public partial class MainWindow : Window
             tabParts[key] = (text, glyph, tick, plate);
             if (key == "addons") addonsTab = button;
         }
+
+        // Under the tabs, apart from them: an action, not a place. Joining by code, not three pages into Settings.
+        var joinGlyph = new Icon { Kind = "users", Size = 22, HorizontalAlignment = HorizontalAlignment.Center };
+        joinGlyph.SetResourceReference(Controls.Icon.ForegroundProperty, "Accent");
+        var joinText = new TextBlock { Text = "Join party", FontSize = 11, Margin = new Thickness(0, 3, 0, 0), HorizontalAlignment = HorizontalAlignment.Center, FontWeight = FontWeights.SemiBold };
+        joinText.SetResourceReference(TextBlock.ForegroundProperty, "Text");
+        var rule = new Border { Height = 1, Margin = new Thickness(18, 10, 18, 10) };
+        rule.SetResourceReference(Border.BackgroundProperty, "Stroke");
+        joinTab = new Button
+        {
+            Style = (Style)FindResource("Row"),
+            Height = 58,
+            Margin = new Thickness(7, 1, 7, 1),
+            Tag = 12,
+            Content = new StackPanel { Children = { joinGlyph, joinText }, VerticalAlignment = VerticalAlignment.Center },
+            ToolTip = "Join a watch party with its code",
+        };
+        joinTab.Click += (_, _) => ShowJoinCode();
+        joinRule = rule;
+        TabButtons.Children.Add(rule);
+        TabButtons.Children.Add(joinTab);
+    }
+
+    Button? joinTab;
+    Border? joinRule;
+    JoinCodeView? joinCode;
+
+    /// <summary>The code dialog, over everything; once a code takes, the invite's own screen follows.</summary>
+    public void ShowJoinCode()
+    {
+        if (Party.Room is { } now) { Toast(now.Leader ? "You're leading a party — end it from Watch party in the player." : "You're in a party — leave it from Watch party in the player."); return; }
+        if (joinCode is not null) return;
+        joinCode = new JoinCodeView(Who, CloseJoinCode);
+        Grid.SetColumnSpan(joinCode, 2);
+        Panel.SetZIndex(joinCode, 90);
+        Root.Children.Add(joinCode);
+        Motion.Enter(joinCode, 0, 0, Motion.Fast);
+    }
+
+    void CloseJoinCode()
+    {
+        if (joinCode is null) return;
+        Root.Children.Remove(joinCode);
+        joinCode = null;
+    }
+
+    /// <summary>Shown while a party can be joined from here: party on, not a kids profile.</summary>
+    void ShowJoinTab()
+    {
+        var shown = Settings.PartyOn && !KidsMode.On ? Visibility.Visible : Visibility.Collapsed;
+        if (joinTab is not null) joinTab.Visibility = shown;
+        if (joinRule is not null) joinRule.Visibility = shown;
     }
 
     Button? addonsTab;
@@ -383,6 +435,7 @@ public partial class MainWindow : Window
         }
         // A kids profile has no say in where streams come from.
         if (addonsTab is not null) addonsTab.Visibility = KidsMode.On ? Visibility.Collapsed : Visibility.Visible;
+        ShowJoinTab();
         foreach (var (k, v) in tabViews) v.Visibility = k == key ? Visibility.Visible : Visibility.Collapsed;
         if (arriving) Motion.Enter(view, 12, 0, 220);
         foreach (var (k, parts) in tabParts)
@@ -465,6 +518,7 @@ public partial class MainWindow : Window
     public void GoBack()
     {
         if (ConfirmLayer.Visibility == Visibility.Visible) { CloseConfirm(); return; }
+        if (joinCode is not null) { CloseJoinCode(); return; }
         if (PlayerHost.Content is PlayerView player) { player.RequestExit(); return; }
         if (Layers.Children.Count > 0) CloseLayer((FrameworkElement)Layers.Children[^1]);
     }
@@ -566,6 +620,8 @@ public partial class MainWindow : Window
         if (themeChanged) Theme.Apply(next.ThemeMode);
         // Not made yet, it reads the saved limits when it is: nothing to start the network for now.
         if (limitsChanged && TorrentEngine.Started) _ = TorrentEngine.Instance.ApplyLimits(next);
+        // Watch party turned on or off: the rail's Join with it.
+        ShowJoinTab();
         SettingsChanged?.Invoke();
     }
 

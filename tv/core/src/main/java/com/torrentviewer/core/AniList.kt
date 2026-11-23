@@ -88,6 +88,8 @@ object AniList {
     val library: StateFlow<StremioLibrary> = _library
 
     private var profile = ""
+    /** A profile is in use: [load] has run. */
+    private var loaded = false
     private var guest = false
     private var tokens: TrackerTokens? = null
     private var userId = 0
@@ -103,6 +105,7 @@ object AniList {
     /** On every profile switch, like the other trackers. After Kv has the profile. */
     fun load(id: String, isGuest: Boolean) {
         profile = id
+        loaded = true
         guest = isGuest
         val saved = if (isGuest) null else Secrets.get(slot(id))?.let { runCatching { JSONObject(it) }.getOrNull() }
         tokens = saved?.let { TrackerTokens(it.getString("access"), null, it.getLong("expires")) }?.takeIf { it.expires > System.currentTimeMillis() }
@@ -145,7 +148,9 @@ object AniList {
     fun signIn(link: String?): Boolean {
         if (link == null || !link.startsWith("watchly://anilist")) return false
         val t = tokenFromRedirect(link) ?: return true.also { Log.w("anilist", "sign-in: no token in the link back (${link.substringBefore('#')}…)") }
-        if (profile.isEmpty()) pending = t else adopt(t)
+        // Not the profile's id: the first profile's is "" (it keeps the bare keys), so its sign-ins were all held
+        // back for a profile that had long been loaded, and AniList's page stayed at "Waiting for your approval".
+        if (!loaded) pending = t else adopt(t)
         return true
     }
 
