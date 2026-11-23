@@ -87,7 +87,7 @@ public sealed class SettingsView : UserControl
         });
         groups.Add(new()
         {
-            new("link", "Integrations", "Simkl and MDBList", "tracking watched sync", () => Go("Integrations")),
+            new("link", "Integrations", "Simkl, MDBList and AniList", "tracking watched sync anime anilist", () => Go("Integrations")),
             new("key", "Services", "SubDL and TorBox keys", "subtitles api", () => Go("Services")),
         });
         groups.Add(new()
@@ -224,10 +224,10 @@ public sealed class SettingsView : UserControl
                 }))));
         if (!S.PartyOn) return;
 
-        var link = new TextBox { Style = (Style)FindResource("Field"), Tag = "Paste the party link", FontSize = 15 };
+        var link = new TextBox { Style = (Style)FindResource("Field"), Tag = "Party code, like K7Q2-M9XD", FontSize = 15 };
         void JoinNow()
         {
-            if (Party.Join(link.Text) is null) shell.Toast("That isn't a whole watch party link — copy all of it.", true);
+            if (Party.Join(link.Text) is null) shell.Toast("That isn't a party code — it's 8 letters and numbers, like K7Q2-M9XD.", true);
             else shell.Toast("Joining the watch party…");
         }
         link.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) JoinNow(); };
@@ -235,7 +235,7 @@ public sealed class SettingsView : UserControl
         join.Margin = new Thickness(10, 0, 0, 10);
         page.Children.Add(Group("Join a party", Party.Room is { } now
             ? Row(now.Leader ? "You're leading a party" : "You're in a party", "Leave it from Watch party in the player.")
-            : new StackPanel { Children = { Row("Paste the link someone sent you", "Watchly shows what it would play and asks before it starts."), new StackPanel { Orientation = Orientation.Horizontal, Children = { Input("link", link), join } } } }));
+            : new StackPanel { Children = { Row("Join with a code", "The 8-character code the leader shares (an older invite link works too). Watchly shows what it would play and asks before it starts."), new StackPanel { Orientation = Orientation.Horizontal, Children = { Input("link", link), join } } } }));
 
         var name = new TextBox { Style = (Style)FindResource("Field"), Tag = shell.Who?.Name ?? "Your name", FontSize = 15, Text = S.PartyName, MaxLength = 24 };
         void SaveName() { if (name.Text.Trim() != S.PartyName) Set(S with { PartyName = name.Text.Trim() }); }
@@ -280,6 +280,24 @@ public sealed class SettingsView : UserControl
         hint.Margin = new Thickness(0, 0, 0, 12);
         page.Children.Add(hint);
         foreach (var t in Trackers.All) page.Children.Add(TrackerRow(t));
+        page.Children.Add(AniListRow());
+    }
+
+    /// <summary>AniList, for anime: Connect opens AniList's own page, which hands the sign-in back to Watchly by a watchly://anilist link.</summary>
+    FrameworkElement AniListRow()
+    {
+        var logo = new Border
+        {
+            Width = 38, Height = 38, CornerRadius = new CornerRadius(10),
+            Background = new ImageBrush(new System.Windows.Media.Imaging.BitmapImage(new Uri($"https://www.google.com/s2/favicons?sz=64&domain={AniList.Site}"))) { Stretch = Stretch.Uniform },
+            Margin = new Thickness(0, 0, 14, 0),
+        };
+        DockPanel.SetDock(logo, Dock.Left);
+        UIElement? action = !AniList.Available ? null
+            : AniList.Connected ? Ui.Action("Disconnect", "x", () => { AniList.Disconnect(); Render(); })
+            : Ui.Action("Connect", "link", () => { Ui.Open(AniList.AuthorizeUrl); shell.Toast("Approve Watchly on AniList's page — it brings you back here."); }, primary: true);
+        var row = Row(AniList.Name, !AniList.Available ? "Not set up in this build" : AniList.Connected ? (AniList.User is { } u ? $"Connected as {u}" : "Connected") : "Anime only · not connected", action);
+        return new DockPanel { Children = { logo, row } };
     }
 
     async void Connect(Tracker t)

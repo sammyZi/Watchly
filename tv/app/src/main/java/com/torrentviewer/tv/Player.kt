@@ -1182,8 +1182,14 @@ private fun PartyPanel(room: Room, heldFor: List<String>, onGoOn: () -> Unit, on
                     Modifier.padding(bottom = 14.dp),
                     style = Type.meta.copy(color = if (room.connected) faint else Ink.warn),
                 )
-                Qr(room.link, 200.dp)
-                Text("Scan with a phone to join — it opens Watchly.", Modifier.padding(top = 8.dp, bottom = 16.dp), style = Type.meta.copy(color = faint))
+                // The code first: typed into Watchly on any phone, TV or PC, it is the room and its key.
+                room.code?.let { code ->
+                    Text("PARTY CODE", style = Type.overline.copy(color = faint))
+                    Text(Party.showCode(code), Modifier.padding(top = 2.dp), style = Type.display.copy(color = Color.White, fontWeight = FontWeight.Bold, letterSpacing = 3.sp))
+                    Text("Join with it in Watchly: Settings → Watch party.", Modifier.padding(top = 4.dp, bottom = 14.dp), style = Type.meta.copy(color = faint))
+                }
+                Qr(room.link, if (room.code != null) 140.dp else 200.dp)
+                Text(if (room.code != null) "Or scan with a phone." else "Scan with a phone to join — it opens Watchly.", Modifier.padding(top = 8.dp, bottom = 16.dp), style = Type.meta.copy(color = faint))
                 if (heldFor.isNotEmpty()) {
                     Text("Waiting for ${heldFor.joinToString()}", Modifier.padding(bottom = 8.dp), style = Type.meta.copy(color = Ink.warn))
                     if (room.leader) TvButton("Go on without them", onGoOn, Modifier.padding(bottom = 10.dp))

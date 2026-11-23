@@ -201,6 +201,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         Stremio.load(profile.id, profile.isGuest)
         com.torrentviewer.core.Nuvio.load(profile.id, profile.isGuest)
         com.torrentviewer.core.WATCH_TRACKERS.forEach { it.load(profile.id, profile.isGuest) }
+        com.torrentviewer.core.AniList.load(profile.id, profile.isGuest)
         Kids.use(profile)
         // Rows loaded for the last profile: a kids profile must not inherit a grown-up's, nor the reverse.
         if (who?.kids != profile.kids) {

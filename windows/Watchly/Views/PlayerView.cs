@@ -576,7 +576,7 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
         {
             if (id < 0 || player.SpuDescription.Any(t => t.Id == id))
             {
-                if (player.Spu != id) player.SetSpu(id);
+                if (player.Spu != id) SetSub(id);
                 return;
             }
             await Task.Delay(150);
@@ -606,12 +606,41 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
 
     static string SizeName(string key) => char.ToUpperInvariant(key[0]) + key[1..];
 
+    /// <summary>A subtitle track (-1: off), with the audio checked after: see <see cref="KeepAudio"/>.</summary>
+    void SetSub(int id)
+    {
+        try { player.SetSpu(id); } catch { }
+        KeepAudio("a subtitle change");
+    }
+
+    int SafeAudio()
+    {
+        try { return player.AudioTrack; } catch { return -1; }
+    }
+
+    /// <summary>
+    /// The sound went in a watch party as subtitles came on and the guest sped up to catch up: libVLC can drop its
+    /// audio track on a rate change or a track switch. Checked a moment after: dropped, the track it had is put back.
+    /// </summary>
+    void KeepAudio(string why)
+    {
+        var had = SafeAudio();
+        if (had < 0) return;
+        var on = player;
+        _ = Task.Delay(600).ContinueWith(_ => Ui(() =>
+        {
+            if (on != player || SafeAudio() >= 0) return;
+            Log.Player($"audio: dropped after {why} (track {had}) — putting it back");
+            try { player.SetAudioTrack(had); } catch { }
+        }));
+    }
+
     void AddSlave(string path, bool select)
     {
         if (!addedSlaves.Add(path))
         {
             // Picked again: switch to the track it already is, rather than load it twice.
-            if (select && slaveTracks.TryGetValue(path, out var id) && player.Spu != id) player.SetSpu(id);
+            if (select && slaveTracks.TryGetValue(path, out var id) && player.Spu != id) SetSub(id);
             return;
         }
         var label = externalSubs.FirstOrDefault(s => s.Path.Equals(path, StringComparison.OrdinalIgnoreCase))?.Label
@@ -647,7 +676,7 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
             slaveTracks[path] = added;
             if (select)
             {
-                if (player.Spu != added) player.SetSpu(added);
+                if (player.Spu != added) SetSub(added);
                 ShowHud($"Subtitles: {label}");
             }
             else if (picking) Render();
@@ -1260,7 +1289,7 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
         if (currentId < 0)
         {
             var first = tracks[0];
-            player.SetSpu(first.Id);
+            SetSub(first.Id);
             ShowHud($"Subtitles: {FriendlySub(first.Name, first.Id)}");
         }
         else
@@ -1269,12 +1298,12 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
             if (idx >= 0 && idx < tracks.Count - 1)
             {
                 var next = tracks[idx + 1];
-                player.SetSpu(next.Id);
+                SetSub(next.Id);
                 ShowHud($"Subtitles: {FriendlySub(next.Name, next.Id)}");
             }
             else
             {
-                player.SetSpu(-1);
+                SetSub(-1);
                 ShowHud("Subtitles: Off");
             }
         }
@@ -1291,13 +1320,13 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
         }
         if (player.Spu >= 0)
         {
-            player.SetSpu(-1);
+            SetSub(-1);
             ShowHud("Subtitles: Off");
         }
         else
         {
             var first = tracks[0];
-            player.SetSpu(first.Id);
+            SetSub(first.Id);
             ShowHud($"Subtitles: {FriendlySub(first.Name, first.Id)}");
         }
         Render();
@@ -2611,13 +2640,13 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
     {
         var subs = new StackPanel { Width = 280 };
         subs.Children.Add(SheetTitle("SUBTITLES"));
-        subs.Children.Add(Option("Off", player.Spu < 0, () => { player.SetSpu(-1); picking = false; ShowHud("Subtitles: Off"); Render(); }));
+        subs.Children.Add(Option("Off", player.Spu < 0, () => { SetSub(-1); picking = false; ShowHud("Subtitles: Off"); Render(); }));
         var tracks = player.SpuDescription.Where(t => t.Id >= 0).ToList();
         foreach (var t in tracks)
         {
             var id = t.Id;
             var label = FriendlySub(t.Name, id);
-            subs.Children.Add(Option(label, player.Spu == id, () => { player.SetSpu(id); picking = false; ShowHud($"Subtitles: {label}"); Render(); }));
+            subs.Children.Add(Option(label, player.Spu == id, () => { SetSub(id); picking = false; ShowHud($"Subtitles: {label}"); Render(); }));
         }
         if (tracks.Count == 0)
         {

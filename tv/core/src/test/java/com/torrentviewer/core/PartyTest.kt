@@ -56,6 +56,21 @@ class PartyTest {
         assertNull(Party.parseInvite("watchly://party/$id"))
     }
 
+    @Test fun aCodeMakesTheSameRoomEverywhere() {
+        // Worked out apart (Node's crypto), as the Windows app must get it too.
+        val (id, key) = Party.codeRoom("K7Q2M9XD")
+        assertEquals("e9e833c3a13563ecc82c0d7065532ea2", id)
+        assertEquals("f0a0796ae2f350ded8a331dc2dd3a700", hex(key))
+        // Typed any way: case, a dash or spaces, and I/L/O read as 1/1/0.
+        assertEquals("K7Q2M9XD", Party.codeOf(" k7q2-m9xd "))
+        assertEquals("K7Q2M91D", Party.codeOf("K7Q2 M9ID"))
+        assertEquals("1000AAAA", Party.codeOf("lOOO aaaa"))
+        assertNull(Party.codeOf("K7Q2M9X"))
+        assertNull(Party.codeOf("K7Q2M9XU"))
+        assertEquals("K7Q2-M9XD", Party.showCode("K7Q2M9XD"))
+        assertEquals(Party.CODE_LENGTH, Party.newCode().length)
+    }
+
     @Test fun onlyTorrentsAreShared() {
         // Its own trackers go with it: where the release's peers are.
         assertEquals("magnet:?xt=urn:btih:$hash&dn=Film&tr=udp://a:1", shareableUri("magnet:?xt=urn:btih:$hash&dn=Film&tr=udp://a:1", "Film", null))

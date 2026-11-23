@@ -646,6 +646,7 @@ public static class Profiles
         Stremio.Forget(id);
         Nuvio.Forget(id);
         foreach (var t in Trackers.All) t.Forget(id);
+        AniList.Forget(id);
     }
 }
 

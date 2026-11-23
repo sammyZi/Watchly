@@ -222,6 +222,8 @@ private const val STARVE_MS = 2_000L
  * zone flipped every couple of seconds. Calibration knob: longer holds a recovering swarm back.
  */
 private const val NARROW_HOLD_MS = 10_000L
+/** The longest the player is kept waiting for the release's own subtitle files once the film could open. Calibration knob. */
+private const val SUBS_WAIT_MS = 5_000L
 
 private const val REMOVE_WAIT_MS = 4_000
 
@@ -406,6 +408,10 @@ class TorrentStream(
      */
     private val partial = ConcurrentHashMap<Long, ConcurrentHashMap<Int, BitSet>>()
     private var subtitleFiles = emptyList<String>()
+    /** The pieces holding [subtitleFiles]: always wanted. */
+    private var subPieces = emptySet<Int>()
+    /** When the player could have opened but for the subtitle files; see [SUBS_WAIT_MS]. */
+    private var subsWaitFrom = 0L
     /** Video + matching sidecar subs — the only files whose pieces are wanted. */
     private var wantedFiles = intArrayOf()
 
@@ -1153,6 +1159,13 @@ class TorrentStream(
             (subDir == dir || (dir.isNotEmpty() && subDir.startsWith("$dir/"))) && (name == stem || name.startsWith("$stem."))
         }
         subtitleFiles = subHits.map { File(saveDir, files.filePath(it)).absolutePath }
+        // Their pieces, fetched whatever the zone: a release's .srt shares its first with the end of the film,
+        // which an MP4 with its index up front never reads, and that piece went unasked for.
+        subPieces = subHits.flatMap { i ->
+            val size = files.fileSize(i)
+            if (size <= 0) emptyList() else (ti.mapFile(i, 0, 1).piece()..ti.mapFile(i, size - 1, 1).piece()).toList()
+        }.toSet()
+        subsWaitFrom = 0L
         wantedFiles = (listOf(index) + subHits).toIntArray()
         val priorities = Array(files.numFiles()) { Priority.IGNORE }
         wantedFiles.forEach { priorities[it] = Priority.DEFAULT }
@@ -1541,7 +1554,12 @@ class TorrentStream(
             )
         }
 
-        if (!announcedReady && isReady) {
+        // The release's own subtitle files are handed over as files, read once when the player opens: wait for
+        // them, but only so long — a slow swarm shouldn't hold the film for its subtitles.
+        if (isReady && subsWaitFrom == 0L) subsWaitFrom = clock
+        val subsIn = subPieces.all { runCatching { h.havePiece(it) }.getOrDefault(true) } || clock - subsWaitFrom > SUBS_WAIT_MS
+        if (!announcedReady && isReady && subsIn) {
+            if (subPieces.isNotEmpty()) log("subtitles: ${if (subPieces.all { runCatching { h.havePiece(it) }.getOrDefault(true) }) "in" else "not in yet — the player opens without them"}")
             announcedReady = true
             val path = File(saveDir, ti.files().filePath(fileIndex))
             val size = ti.files().fileSize(fileIndex)
@@ -1743,7 +1761,7 @@ class TorrentStream(
         for (p in firstPiece..lastPiece) {
             if (p >= prios.size) break
             prios[p] = when {
-                p >= tail || zones.any { p in it } -> Priority.DEFAULT
+                p in subPieces || p >= tail || zones.any { p in it } -> Priority.DEFAULT
                 spare.any { p in it } || behind.any { p in it } -> Priority.LOW
                 whole -> Priority.LOW
                 else -> Priority.IGNORE
@@ -2046,6 +2064,7 @@ class TorrentStream(
         zoneRushedTail = false
         zoneWhole = false
         subtitleFiles = emptyList()
+        subPieces = emptySet()
         wantedFiles = intArrayOf()
         handle = null
         info = null

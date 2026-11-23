@@ -23,7 +23,14 @@ import kotlin.concurrent.thread
  * ponytail: plain HTTP on the home network, as any TV's own pairing page is; TLS would need a
  * certificate the phone trusts.
  */
-class KeyDrop(private val what: String, private val fromApp: String? = null, private val everything: Boolean = false, private val onKey: suspend (String) -> String) {
+class KeyDrop(
+    private val what: String,
+    private val fromApp: String? = null,
+    private val everything: Boolean = false,
+    /** What the phone app is asked to send instead of its addons ("anilist"): its link says so. */
+    private val asks: String? = null,
+    private val onKey: suspend (String) -> String,
+) {
     private val token = ByteArray(12).also(SecureRandom()::nextBytes).joinToString("") { "%02x".format(it) }
     @Volatile private var server: ServerSocket? = null
     @Volatile private var address = ""
@@ -84,7 +91,7 @@ class KeyDrop(private val what: String, private val fromApp: String? = null, pri
         what.replaceFirstChar { it.uppercase() },
         (note?.let { "<p class=note>${escape(it)}</p>" } ?: "") +
             (fromApp?.let {
-                """<a class=app href="watchly://tv-addons?to=${java.net.URLEncoder.encode(address, "UTF-8")}${if (everything) "&all=1" else ""}">$it</a>""" +
+                """<a class=app href="watchly://tv-addons?to=${java.net.URLEncoder.encode(address, "UTF-8")}${if (everything) "&all=1" else ""}${asks?.let { a -> "&what=$a" }.orEmpty()}">$it</a>""" +
                     "<p><small>Opens Watchly on this phone, which asks before it sends anything.</small></p>"
             } ?: "") +
             """<form method=post action="/$token"><label for=k>${if (fromApp != null) "Or paste" else "Paste"} your $what, then Save. It goes straight to the TV.</label>""" +

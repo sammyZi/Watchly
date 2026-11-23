@@ -76,7 +76,9 @@ public partial class App : Application
     /// <summary>What Watchly opens from outside: a magnet or .torrent, an addon's stremio:// link, a watch party invite.</summary>
     static bool Opens(string a) => TitleText.IsTorrentSource(a)
         || a.StartsWith("stremio://", StringComparison.OrdinalIgnoreCase)
-        || a.StartsWith("watchly://party", StringComparison.OrdinalIgnoreCase);
+        || a.StartsWith("watchly://party", StringComparison.OrdinalIgnoreCase)
+        // AniList's approval page hands the sign-in back as watchly://anilist#access_token=….
+        || a.StartsWith("watchly://anilist", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>One per Windows account: the pipe's name, and the mutex that says a Watchly is open.</summary>
     static readonly string Pipe = $"Watchly-{Environment.UserName}";

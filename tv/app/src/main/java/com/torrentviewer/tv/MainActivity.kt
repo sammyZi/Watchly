@@ -28,6 +28,8 @@ object Services {
         Profiles.load()
         com.torrentviewer.core.Simkl.clientId = BuildConfig.SIMKL_CLIENT_ID
         com.torrentviewer.core.Mdblist.clientId = BuildConfig.MDBLIST_CLIENT_ID
+        // No client id: the TV is signed in to AniList from the phone, which has AniList's page.
+        com.torrentviewer.core.AniList.dir = context.filesDir
         com.torrentviewer.core.Tmdb.key = BuildConfig.TMDB_KEY
         com.torrentviewer.core.Party.server = BuildConfig.PARTY_URL
         com.torrentviewer.core.ArtFadeMs = 0

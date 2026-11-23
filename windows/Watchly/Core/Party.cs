@@ -28,7 +28,7 @@ public sealed record PartyAsk(string From, string What, double Pos);
 public sealed record PartyMember(string Id, string Name, bool Leader, string Status, DateTime Seen, bool Me = false);
 
 /// <summary>A party left, to rejoin: Leader if this PC led it, Ended if its leader ended it.</summary>
-public sealed record LastParty(string Id, string Key, bool Leader, bool Ended, PartyMedia? Media = null, bool Own = false);
+public sealed record LastParty(string Id, string Key, bool Leader, bool Ended, PartyMedia? Media = null, bool Own = false, string? Code = null);
 
 /// <summary>A line in the party's chat; From null is the room's own ("Sam joined").</summary>
 public sealed record ChatLine(string? From, string Text, DateTime At, bool Mine = false);
@@ -65,21 +65,35 @@ public static class Party
     public const int ChatMax = 300;
     public static readonly string[] Reactions = { "😂", "😮", "😱", "❤️", "👏", "🔥" };
 
-    /// <summary>How fast a guest <paramref name="drift"/> seconds behind (negative: ahead) plays at to close the gap.</summary>
+    /// <summary>
+    /// How fast a guest <paramref name="drift"/> seconds behind (negative: ahead) plays at to close the gap — in
+    /// steps of <see cref="NudgeStep"/>. libVLC restarts its audio on every rate change, and a rate a hair different
+    /// each tick (the phone's smooth curve) cut the sound out in a party; Media3 on the phone takes it smoothly.
+    /// </summary>
     public static float CatchUpRate(double drift, float rate) =>
-        Math.Abs(drift) < DeadzoneSeconds ? rate : (float)(rate * (1 + Math.Clamp(drift / 4, -Nudge, Nudge)));
+        Math.Abs(drift) < DeadzoneSeconds ? rate : (float)(rate * (1 + Math.Round(Math.Clamp(drift / 4, -Nudge, Nudge) / NudgeStep) * NudgeStep));
 
+    /// <summary>The catch-up speed's step: 2%, so a catch-up is a few rate changes, not one every tick. Calibration knob.</summary>
+    public const double NudgeStep = 0.02;
+
+    /// <summary>A new room, by a new code: the code is what's shared, and it alone makes the room's id and key.</summary>
     public static Room Host(PartyMedia? film = null)
     {
-        var r = new Room(Hex(RandomNumberGenerator.GetBytes(16)), RandomNumberGenerator.GetBytes(16), leader: true) { Film = film };
+        var code = NewCode();
+        var (id, key) = CodeRoom(code);
+        var r = new Room(id, key, leader: true) { Film = film, Code = code };
         Enter(r);
         return r;
     }
 
-    /// <summary>From the invite (https://…/j/&lt;id&gt;#&lt;key&gt; or watchly://party/&lt;id&gt;?k=&lt;key&gt;); null if it isn't one.</summary>
+    /// <summary>
+    /// From a party code ("K7Q2-M9XD", typed any way) or an older invite link (https://…/j/&lt;id&gt;#&lt;key&gt; or
+    /// watchly://party/&lt;id&gt;?k=&lt;key&gt;); null if it is neither.
+    /// </summary>
     public static Room? Join(string link)
     {
-        if (ParseInvite(link) is not { } invite) return null;
+        var code = CodeOf(link);
+        if ((code is not null ? FromCode(code) : ParseInvite(link)) is not { } invite) return null;
         if (Room?.Id == invite.Id) return Room;
         // A leader opening its own invite is back in its own party as its leader, not a guest of it.
         if (Last is { Leader: true } own && own.Id == invite.Id)
@@ -87,9 +101,47 @@ public static class Party
             Rejoin();
             return Room;
         }
-        var r = new Room(invite.Id, Convert.FromHexString(invite.Key), leader: false);
+        var r = new Room(invite.Id, Convert.FromHexString(invite.Key), leader: false) { Code = code };
         Enter(r);
         return r;
+    }
+
+    /// <summary>Crockford's base32: no I, L, O or U, so nothing is misread off a TV or said over the phone. The phone's.</summary>
+    const string CodeAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    public const int CodeLength = 8;
+    /// <summary>Rounds of SHA-256 a code is stretched by: a room id seen in the relay's logs can't be walked back to its key.</summary>
+    const int Stretch = 100_000;
+
+    /// <summary>Eight characters, 40 bits: about a trillion parties.</summary>
+    internal static string NewCode() => new(Enumerable.Range(0, CodeLength).Select(_ => CodeAlphabet[RandomNumberGenerator.GetInt32(CodeAlphabet.Length)]).ToArray());
+
+    static (string Id, string Key) FromCode(string code)
+    {
+        var (id, key) = CodeRoom(code);
+        return (id, Hex(key));
+    }
+
+    /// <summary>"K7Q2-M9XD".</summary>
+    public static string ShowCode(string code) => $"{code[..4]}-{code[4..]}";
+
+    /// <summary>A code as typed: any case, spaces or dashes, and I/L for 1 and O for 0, as Crockford reads them. Null if it isn't one.</summary>
+    public static string? CodeOf(string typed)
+    {
+        var s = new string(Regex.Replace(typed.Trim().ToUpperInvariant(), @"[\s-]", "").Select(c => c switch { 'I' or 'L' => '1', 'O' => '0', _ => c }).ToArray());
+        return s.Length == CodeLength && s.All(c => CodeAlphabet.Contains(c)) ? s : null;
+    }
+
+    /// <summary>
+    /// The room's id and key from its code alone: every app gets the same pair (tv/core Party.codeRoom), and the
+    /// relay sees the id only. Both come from one stretched value, so the id gives the code away no faster than the key.
+    /// </summary>
+    public static (string Id, byte[] Key) CodeRoom(string code)
+    {
+        var h = SHA256.HashData(Encoding.UTF8.GetBytes("watchly-party:" + code));
+        for (var i = 0; i < Stretch; i++) h = SHA256.HashData(h);
+        var id = Hex(SHA256.HashData(Encoding.UTF8.GetBytes("room").Concat(h).ToArray())[..16]);
+        var key = SHA256.HashData(Encoding.UTF8.GetBytes("key").Concat(h).ToArray())[..16];
+        return (id, key);
     }
 
     /// <summary>
@@ -102,7 +154,7 @@ public static class Party
         if (Room is { } r)
         {
             Log.Info("party", r.Leader ? "ended the party" : ended ? "the leader ended the party" : "left the party");
-            if (r.Accepted) Last = new LastParty(r.Id, r.KeyHex, r.Leader, ended, r.LastTold?.Media, r.OwnSource);
+            if (r.Accepted) Last = new LastParty(r.Id, r.KeyHex, r.Leader, ended, r.LastTold?.Media, r.OwnSource, r.Code);
         }
         Room?.Close();
         Room = null;
@@ -121,7 +173,7 @@ public static class Party
     public static void Rejoin()
     {
         if (Last is not { } l) return;
-        var r = new Room(l.Id, Convert.FromHexString(l.Key), l.Leader) { Accepted = true, OwnSource = l.Own, Film = l.Media };
+        var r = new Room(l.Id, Convert.FromHexString(l.Key), l.Leader) { Accepted = true, OwnSource = l.Own, Film = l.Media, Code = l.Code };
         Enter(r);
         // A leader's film, open again: a room with nothing on was why Reopen seemed to do nothing.
         if (l.Leader && l.Media is { } m) Reopen(m);
@@ -254,6 +306,8 @@ public sealed class Room
     }
     /// <summary>Leader: the film the invite is for, from the start — LastTold is only set once the player has said something.</summary>
     public PartyMedia? Film { get; set; }
+    /// <summary>What's shared to join: the room and key are made from it. Null for a room joined by an older link.</summary>
+    public string? Code { get; set; }
     internal string KeyHex => Party.Hex(key);
     /// <summary>A guest who has seen what the party plays and said yes (or is rejoining); a leader's own party is accepted.</summary>
     public bool Accepted { get; set; }

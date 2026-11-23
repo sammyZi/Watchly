@@ -371,6 +371,7 @@ public static class Trackers
         _ = Stremio.Pull();
         _ = Nuvio.Pull();
         foreach (var t in All) t.Pull();
+        AniList.Pull();
     }
 
     static Trackers() => Net.OnlineChanged += () => { if (Net.IsOnline) foreach (var t in All) t.Flush(); };
@@ -384,8 +385,18 @@ public static class Trackers
             .ToDictionary(k => k, k => Math.Max(Stremio.Library.FinishedAt.GetValueOrDefault(k), Nuvio.Library.FinishedAt.GetValueOrDefault(k))),
     };
 
-    /// <summary>Stremio's and Nuvio's libraries with what the tracking accounts say has been watched.</summary>
-    public static StremioLibrary Everywhere => All.Aggregate(Synced, (all, t) => Plus(all, t.Library));
+    /// <summary>
+    /// Stremio's and Nuvio's libraries with what the tracking accounts say has been watched, and AniList's shows
+    /// being watched as up next (a spot with no progress: the episode after the last one marked there).
+    /// </summary>
+    public static StremioLibrary Everywhere
+    {
+        get
+        {
+            var all = Plus(All.Aggregate(Synced, (l, t) => Plus(l, t.Library)), AniList.Library);
+            return all with { Paused = all.Paused.Concat(AniList.Library.Paused).OrderByDescending(p => p.LeftAt).ToList() };
+        }
+    }
 
     /// <summary>Everything watched on either side; the paused and seen lists stay the first's, as only Stremio has them.</summary>
     static StremioLibrary Plus(StremioLibrary a, StremioLibrary b) => a with

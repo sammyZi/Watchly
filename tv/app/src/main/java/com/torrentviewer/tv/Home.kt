@@ -220,7 +220,9 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit, onTop: (
     val stremio by com.torrentviewer.core.Synced.collectAsState(com.torrentviewer.core.syncedNow())
     val resumable = latestPerTitle(history).filter { inProgress(it) && !stremio.finishedSince(it) }.take(8)
     // Left part-way somewhere this TV never saw — another device, before a reinstall: Stremio kept the spot.
-    val fromStremio = Kids.only(stremio.paused.filter { p -> history.none { it.imdb == p.imdb } }.distinctBy { it.imdb }) { Title(it.imdb, it.kind, it.title) }.take(8)
+    // With what is being watched on AniList: the episode after the last one marked there.
+    val everywhereNow by WatchedEverywhere.collectAsState(stremio)
+    val fromStremio = Kids.only(everywhereNow.paused.filter { p -> history.none { it.imdb == p.imdb } }.distinctBy { it.imdb }) { Title(it.imdb, it.kind, it.title) }.take(8)
     val resuming = resumable.isNotEmpty() || fromStremio.isNotEmpty()
     var releases by remember { mutableStateOf<List<Item>?>(null) }
     val watchlist = saved.filter { it.list == "later" }.map { it.asTitle() }
@@ -687,7 +689,9 @@ private fun ResumeRow(state: HomeState, items: List<Item>, fromStremio: List<Pau
             ) { focused ->
                 LandscapeCard(
                     "https://images.metahub.space/background/medium/${p.imdb}/img", p.title, focused,
-                    listOfNotNull(p.ep?.let { "S${it.season}:E${it.episode}" }, "${p.progress.toInt()}%").joinToString("  ·  "),
+                    // No progress: AniList's next episode up, not a spot left part-way.
+                    if (p.progress <= 0) listOfNotNull("Up next", p.ep?.let { "S${it.season}:E${it.episode}" }).joinToString("  ·  ")
+                    else listOfNotNull(p.ep?.let { "S${it.season}:E${it.episode}" }, "${p.progress.toInt()}%").joinToString("  ·  "),
                     (p.progress / 100).toFloat(),
                 )
             }

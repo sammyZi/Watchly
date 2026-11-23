@@ -522,7 +522,7 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
                         if (Kids.on) null else Entry(L.drawable.lucide_ic_puzzle, "Addons", "Where streams and subtitles come from", "stremio debrid") { page = "Addons" },
                     ),
                     listOfNotNull(
-                        Entry(L.drawable.lucide_ic_link, "Integrations", "Simkl and MDBList", "tracking watched sync") { page = "Integrations" },
+                        Entry(L.drawable.lucide_ic_link, "Integrations", "Simkl, MDBList and AniList", "tracking watched sync anime anilist") { page = "Integrations" },
                         Entry(L.drawable.lucide_ic_key, "Services", "SubDL and TorBox keys", "subtitles api") { page = "Services" },
                         // Overwrites the profile's library: a kids profile can't.
                         if (Kids.on) null else Entry(L.drawable.lucide_ic_smartphone, "Copy from phone", "Settings, lists and history from Watchly on your phone", "qr scan transfer backup restore sync") { page = "Copy from phone" },
@@ -559,6 +559,7 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
                 style = Type.meta.copy(color = Ink.faint),
             )
             WATCH_TRACKERS.forEach { TrackerSection(it) }
+            AniListSection()
         }
 
         if (page == "Account") {
@@ -681,12 +682,23 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
         Section(
             "Join a watch party",
             if (inParty != null) "You're in a party now. Leave it from the party button in the player."
-            else "Someone sent you a watch party link? Scan the code with your phone and paste the link there. The TV asks before it plays anything.",
+            else "Type the 8-character code the leader shares. An older invite link? Scan the code below with your phone and paste it there. The TV asks before it plays anything.",
         ) {
             // A Column: the section's own Box laid the button over the QR it opens.
             Column {
-                if (inParty == null) PhoneKey("watch party link", label = "Paste the link from your phone") { link ->
-                    if (Party.join(link) == null) "That isn't a whole watch party link — copy all of it." else "Joining — look at the TV."
+                if (inParty == null) {
+                    var code by remember { mutableStateOf("") }
+                    var said by remember { mutableStateOf<String?>(null) }
+                    Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Field(code, { code = it.take(12); said = null }, "K7Q2-M9XD", Modifier.widthIn(max = 260.dp).fillMaxWidth())
+                        TvButton("Join", {
+                            said = if (Party.join(code) == null) "That isn't a party code — it's 8 letters and numbers, like K7Q2-M9XD." else "Joining — look at the TV."
+                        }, icon = L.drawable.lucide_ic_users, primary = true)
+                    }
+                    said?.let { Text(it, Modifier.padding(top = 8.dp), style = Type.meta.copy(color = Ink.faint)) }
+                    PhoneKey("watch party link", label = "Paste the link from your phone") { link ->
+                        if (Party.join(link) == null) "That isn't a whole watch party link — copy all of it." else "Joining — look at the TV."
+                    }
                 } else TvButton("Leave the party", { Party.leave() }, Modifier.padding(top = 12.dp), icon = L.drawable.lucide_ic_log_out)
             }
         }
@@ -853,6 +865,36 @@ private fun SettingsList(groups: List<List<Entry>>, query: String, first: FocusR
 }
 
 /** A tracking account: its logo, and Connect, which puts up a QR of its own page with the code filled in. */
+/**
+ * AniList, for anime. The TV has no browser for AniList's page, so the phone signs it in: the QR opens Watchly
+ * on the phone, which asks, then sends its own AniList sign-in over the home network.
+ */
+@Composable
+private fun AniListSection() {
+    val a = com.torrentviewer.core.AniList
+    val connected by a.connected.collectAsState()
+    val user by a.user.collectAsState()
+    Column(Modifier.padding(bottom = 30.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Artwork(
+                "https://www.google.com/s2/favicons?sz=64&domain=${a.SITE}", a.NAME,
+                Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)), scale = androidx.compose.ui.layout.ContentScale.Fit, fill = false,
+            )
+            Column(Modifier.width(360.dp).padding(horizontal = 16.dp)) {
+                Text(a.NAME, style = Type.title.copy(fontWeight = FontWeight.Bold))
+                Text(
+                    if (connected) user?.let { "Connected as $it" } ?: "Connected" else "Anime only · signed in from your phone",
+                    style = Type.meta.copy(color = if (connected) Ink.good else Ink.faint),
+                )
+            }
+            if (connected) TvButton("Disconnect", { a.disconnect() }, icon = L.drawable.lucide_ic_link)
+        }
+        if (!connected) PhoneKey("AniList sign-in", label = "Sign in with phone", fromApp = "Send AniList sign-in from Watchly on this phone", asks = "anilist") { text ->
+            a.signInFrom(text)
+        }
+    }
+}
+
 @Composable
 private fun TrackerSection(t: Tracker) {
     val connected by t.connected.collectAsState()
@@ -981,7 +1023,7 @@ private const val STREMIO_LATER = "stremio:later"
  * page's button that has the phone app send what it has instead.
  */
 @Composable
-private fun PhoneKey(what: String, several: Boolean = false, label: String = "Paste from phone", fromApp: String? = null, everything: Boolean = false, onKey: suspend (String) -> String) {
+private fun PhoneKey(what: String, several: Boolean = false, label: String = "Paste from phone", fromApp: String? = null, everything: Boolean = false, asks: String? = null, onKey: suspend (String) -> String) {
     var open by remember { mutableStateOf(false) }
     // One button that changes its label, not a button swapped for another: a focused button taken
     // away left focus nowhere, and the page sent it back to the top.
@@ -992,7 +1034,7 @@ private fun PhoneKey(what: String, several: Boolean = false, label: String = "Pa
     var address by remember { mutableStateOf<String?>(null) }
     var tried by remember { mutableStateOf(false) }
     DisposableEffect(Unit) {
-        val drop = KeyDrop(what, fromApp, everything) {
+        val drop = KeyDrop(what, fromApp, everything, asks) {
             onKey(it).also { if (!several) open = false }
         }
         address = drop.open()

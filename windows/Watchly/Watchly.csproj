@@ -62,6 +62,8 @@
     <SubdlKey>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(SubdlEnv)')), '(?:EXPO_PUBLIC_)?SUBDL_KEY=(\S+)').Groups[1].Value)</SubdlKey>
     <SimklClientId>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(SubdlEnv)')), 'SIMKL_CLIENT_ID=(\S+)').Groups[1].Value)</SimklClientId>
     <MdblistClientId>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(SubdlEnv)')), 'MDBLIST_CLIENT_ID=(\S+)').Groups[1].Value)</MdblistClientId>
+    <!-- AniList's client id, public as the phone's: its redirect is watchly://anilist, which the installer registers. -->
+    <AnilistClientId>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(SubdlEnv)')), 'ANILIST_CLIENT_ID=(\S+)').Groups[1].Value)</AnilistClientId>
     <TmdbKey>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(SubdlEnv)')), 'TMDB_KEY=(\S+)').Groups[1].Value)</TmdbKey>
     <!-- The watch party relay (party/, a Cloudflare Worker); blank hides the feature. -->
     <PartyUrl>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(SubdlEnv)')), 'PARTY_URL=(\S+)').Groups[1].Value)</PartyUrl>
@@ -71,6 +73,7 @@
     <AssemblyMetadata Include="SubdlKey" Value="$(SubdlKey)" />
     <AssemblyMetadata Include="SimklClientId" Value="$(SimklClientId)" />
     <AssemblyMetadata Include="MdblistClientId" Value="$(MdblistClientId)" />
+    <AssemblyMetadata Include="AnilistClientId" Value="$(AnilistClientId)" />
     <AssemblyMetadata Include="TmdbKey" Value="$(TmdbKey)" />
   </ItemGroup>
 

@@ -162,6 +162,21 @@ object AniList {
     /** Signs out here. The token itself only goes from AniList's own settings, under Apps. */
     fun disconnect() = save(null)
 
+    /**
+     * This sign-in, to hand to a TV on the home network: it has no browser for AniList's page. The phone
+     * sends it only once its viewer says yes. Null when not signed in.
+     */
+    fun shareable(): String? = tokens?.let { JSONObject().put("anilist", it.access).put("expires", it.expires).toString() }
+
+    /** A sign-in sent over from a phone ([shareable]): what to tell the phone, as the TV's page shows it. */
+    fun signInFrom(json: String): String {
+        val o = runCatching { JSONObject(json.trim()) }.getOrNull()
+        val access = o?.str("anilist") ?: return "That isn't an AniList sign-in — send it from Watchly on the phone."
+        val expires = o.optLong("expires").takeIf { it > System.currentTimeMillis() } ?: return "That AniList sign-in has run out — sign in again on the phone."
+        adopt(TrackerTokens(access, null, expires))
+        return "Signing the TV in to AniList — you can close this page."
+    }
+
     /* --------------------------------------------------------------- the API */
 
     private suspend fun gql(query: String, vars: JSONObject, token: String? = tokens?.access): JSONObject {

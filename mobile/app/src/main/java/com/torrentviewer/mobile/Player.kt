@@ -677,8 +677,9 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
     }
 
     /**
-     * Shares the film's artwork with the link and nothing else: the link as the text, the poster as the picture.
-     * With no art to be had (offline, no poster) it is the link alone.
+     * Shares the film's artwork with the party code: the code and where to type it as the text, the poster as
+     * the picture. With no art to be had (offline, no poster) it is the text alone. A room from an older link has
+     * no code, and shares that link.
      */
     fun invite(r: com.torrentviewer.core.Room) {
         val film = r.film ?: watch.partyMedia()
@@ -694,7 +695,10 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                     }.getOrNull()
                 }
             }
-            val send = android.content.Intent(android.content.Intent.ACTION_SEND).putExtra(android.content.Intent.EXTRA_TEXT, r.link)
+            val text = r.code?.let { c ->
+                "Join my watch party${film?.title?.let { " for $it" }.orEmpty()} in Watchly — code ${Party.showCode(c)}\n(Settings → Watch party → Join with a code)"
+            } ?: r.link
+            val send = android.content.Intent(android.content.Intent.ACTION_SEND).putExtra(android.content.Intent.EXTRA_TEXT, text)
             if (uri != null) {
                 send.setType("image/jpeg").putExtra(android.content.Intent.EXTRA_STREAM, uri)
                 send.clipData = android.content.ClipData.newRawUri("", uri)
@@ -713,10 +717,11 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
         panel = Panel.PARTY
     }
 
+    /** The party starts and its panel shows the code; sharing is the Invite button's, when it's wanted. */
     fun startParty() {
         val media = watch.partyMedia()
         if (room != null || media == null) return
-        invite(Party.host(media))
+        Party.host(media)
     }
 
     /* ------------------------------------------------------------ effects */
@@ -1638,7 +1643,7 @@ private fun StartPartyPanel(film: String, onStart: () -> Unit, onDismiss: () -> 
                 Lc(L.drawable.lucide_ic_users, tint = Color.White.copy(alpha = 0.6f), size = 44.dp)
                 Text("Watch $film together", Modifier.padding(top = 18.dp), style = Type.title.copy(color = Color.White, fontWeight = FontWeight.SemiBold), textAlign = TextAlign.Center)
                 Text(
-                    "Start a party and send the link. Everyone who opens it plays the film in step with you, with chat and reactions. No account, and only play, pause and the spot are shared — encrypted.",
+                    "Start a party and share its code. Everyone who joins with it plays the film in step with you, with chat and reactions. No account, and only play, pause and the spot are shared — encrypted.",
                     Modifier.padding(top = 8.dp).widthIn(max = 340.dp),
                     style = Type.meta.copy(color = Color.White.copy(alpha = 0.7f)),
                     textAlign = TextAlign.Center,
@@ -1699,6 +1704,20 @@ private fun PartyPanel(
                     PanelIcon(L.drawable.lucide_ic_user_plus, "Invite", onInvite)
                     PanelIcon(L.drawable.lucide_ic_log_out, if (room.leader) "End party" else "Leave", onLeave)
                     PanelIcon(L.drawable.lucide_ic_x, "Close", onDismiss)
+                }
+                // The code is how others join: typed into Watchly, it is the room and its key. A tap copies it.
+                room.code?.let { code ->
+                    val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+                    Tap({ clip.setText(androidx.compose.ui.text.AnnotatedString(Party.showCode(code))) }, Modifier.padding(top = 8.dp).fillMaxWidth(), RoundedCornerShape(10.dp)) { pressed ->
+                        Row(
+                            Modifier.fillMaxWidth().background(Color.White.copy(alpha = if (pressed) 0.16f else 0.08f)).padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("Party code", Modifier.weight(1f), style = Type.meta.copy(color = faint, fontSize = 12.sp))
+                            Text(Party.showCode(code), style = Type.title.copy(color = Color.White, fontWeight = FontWeight.Bold, letterSpacing = 2.sp))
+                            Lc(L.drawable.lucide_ic_copy, Modifier.padding(start = 10.dp), tint = faint, size = 16.dp)
+                        }
+                    }
                 }
 
                 if (heldFor.isNotEmpty()) Row(

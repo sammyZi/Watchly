@@ -105,11 +105,20 @@ object Party {
     /** …and the viewer hasn't turned it off. */
     val enabled get() = available && SettingsStore.value.value.partyOn
 
-    fun host(film: PartyMedia? = null): Room = Room(randomHex(16), random(16), leader = true).also { it.film = film; enter(it) }
+    /** A new room, by a new code: the code is what's shared, and it alone makes the room's id and key. */
+    fun host(film: PartyMedia? = null): Room {
+        val code = newCode()
+        val (id, key) = codeRoom(code)
+        return Room(id, key, leader = true).also { it.code = code; it.film = film; enter(it) }
+    }
 
-    /** From the invite (https://…/j/<id>#<key> or watchly://party/<id>?k=<key>); null if it isn't one. */
+    /**
+     * From a party code ("K7Q2-M9XD", typed any way) or an older invite link (https://…/j/<id>#<key> or
+     * watchly://party/<id>?k=<key>); null if it is neither.
+     */
     fun join(link: String): Room? {
-        val (id, key) = parseInvite(link) ?: return null
+        val code = codeOf(link)
+        val (id, key) = code?.let { c -> codeRoom(c).let { (i, k) -> i to hex(k) } } ?: parseInvite(link) ?: return null
         if (room?.id == id) return room
         // A leader opening its own invite — from the chat it was sent to — is back in its own party, as its
         // leader: joining it as a guest left the room with no one playing anything.
@@ -117,7 +126,38 @@ object Party {
             rejoin()
             return room
         }
-        return Room(id, hex(key), leader = false).also(::enter)
+        return Room(id, hex(key), leader = false).also { it.code = code; enter(it) }
+    }
+
+    /** Crockford's base32: no I, L, O or U, so nothing is misread off a TV or said over the phone. */
+    private const val CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+    const val CODE_LENGTH = 8
+
+    /** Eight characters, 40 bits: about a trillion parties, shown as "K7Q2-M9XD". */
+    internal fun newCode(): String = String(CharArray(CODE_LENGTH) { CODE_ALPHABET[rng.nextInt(CODE_ALPHABET.length)] })
+
+    fun showCode(code: String) = code.chunked(4).joinToString("-")
+
+    /** A code as typed: any case, spaces or dashes, and I/L for 1 and O for 0, as Crockford reads them. Null if it isn't one. */
+    internal fun codeOf(typed: String): String? {
+        val s = typed.trim().uppercase().replace(Regex("[\\s-]"), "").map { when (it) { 'I', 'L' -> '1'; 'O' -> '0'; else -> it } }.joinToString("")
+        return s.takeIf { it.length == CODE_LENGTH && it.all { c -> c in CODE_ALPHABET } }
+    }
+
+    /** Rounds of SHA-256 a code is stretched by: a room id seen in the relay's logs can't be walked back to its key. */
+    private const val STRETCH = 100_000
+
+    /**
+     * The room's id and key, made from its code alone — every app gets the same pair, and the relay sees the id only.
+     * Both come from one stretched value: from the id alone a code is as slow to find as from the key.
+     */
+    internal fun codeRoom(code: String): Pair<String, ByteArray> {
+        val sha = java.security.MessageDigest.getInstance("SHA-256")
+        var h = sha.digest("watchly-party:$code".toByteArray())
+        repeat(STRETCH) { h = sha.digest(h) }
+        val id = hex(sha.digest("room".toByteArray() + h).copyOf(16))
+        val key = sha.digest("key".toByteArray() + h).copyOf(16)
+        return id to key
     }
 
     /**
@@ -128,7 +168,7 @@ object Party {
     fun leave(ended: Boolean = false) {
         room?.let {
             log(if (it.leader) "ended the party" else if (ended) "the leader ended the party" else "left the party")
-            if (it.accepted) last = LastParty(it.id, it.keyHex, it.leader, ended, it.lastTold?.media, it.ownSource)
+            if (it.accepted) last = LastParty(it.id, it.keyHex, it.leader, ended, it.lastTold?.media, it.ownSource, it.code)
         }
         room?.close()
         room = null
@@ -140,7 +180,7 @@ object Party {
     fun rejoin() {
         val l = last ?: return
         last = null
-        enter(Room(l.id, hex(l.key), l.leader).also { it.accepted = true; it.ownSource = l.own; it.film = l.media })
+        enter(Room(l.id, hex(l.key), l.leader).also { it.accepted = true; it.ownSource = l.own; it.film = l.media; it.code = l.code })
         // A leader's film, open again — the room with nothing on was why Reopen seemed to do nothing.
         if (l.leader) l.media?.let(reopen)
     }
@@ -172,9 +212,11 @@ object Party {
  * A party left, to rejoin: [leader] if this one led it, [ended] if its leader ended it, and [media] what
  * a leader was playing — Reopen opens the room and that film again, or it would be a room with nothing on.
  */
-data class LastParty(val id: String, val key: String, val leader: Boolean, val ended: Boolean, val media: PartyMedia? = null, val own: Boolean = false)
+data class LastParty(val id: String, val key: String, val leader: Boolean, val ended: Boolean, val media: PartyMedia? = null, val own: Boolean = false, val code: String? = null)
 
 class Room internal constructor(val id: String, private val key: ByteArray, val leader: Boolean) {
+    /** What's shared to join: the room and key are made from it. Null for a room joined by an older link. */
+    var code: String? = null
     /**
      * The invite. A leader's carries the film's imdb id and name after the `?`, so a chat app's preview of it
      * shows the film's art (the page sets it as og:image); the key stays after the `#`, which no server sees.

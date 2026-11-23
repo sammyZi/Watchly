@@ -85,6 +85,8 @@ public sealed partial class PlayerView
     {
         if (disposed) return;
         try { player.SetRate(r); } catch { }
+        Log.Player($"party: speed {r:0.00}");
+        KeepAudio("a speed change");
     }
 
     void IPartyPlayer.PartyShowRate(float r)
@@ -124,12 +126,15 @@ public sealed partial class PlayerView
     {
         try
         {
-            Clipboard.SetText($"Watch {request.MetaTitle ?? request.Title} with me on Watchly: {r.Link}");
-            ShowHud("Invite link copied — paste it to your friends", 3000);
+            // The code, and where to type it; a room from an older link has none, and copies that link.
+            Clipboard.SetText(r.Code is { } code
+                ? $"Join my watch party for {request.MetaTitle ?? request.Title} in Watchly — code {Party.ShowCode(code)}\n(Settings → Watch party → Join with a code)"
+                : $"Watch {request.MetaTitle ?? request.Title} with me on Watchly: {r.Link}");
+            ShowHud(r.Code is { } c ? $"Party code {Party.ShowCode(c)} copied — send it to your friends" : "Invite link copied — paste it to your friends", 3000);
         }
         catch
         {
-            ShowHud("Couldn't copy the invite link", 2400);
+            ShowHud("Couldn't copy the invite", 2400);
         }
     }
 
@@ -157,7 +162,7 @@ public sealed partial class PlayerView
         }, "Bare", "Start a watch party");
         start.HorizontalAlignment = HorizontalAlignment.Left;
         start.Margin = new Thickness(0, 20, 0, 0);
-        var words = WText("Start a party and send the link. Everyone who opens it plays the film in step with you, with chat and reactions. No account, and only play, pause and the spot are shared — encrypted.", 12, White(0xb0));
+        var words = WText("Start a party and send its code. Everyone who joins with it plays the film in step with you, with chat and reactions. No account, and only play, pause and the spot are shared — encrypted.", 12, White(0xb0));
         words.TextWrapping = TextWrapping.Wrap;
         words.Margin = new Thickness(0, 8, 0, 0);
         return SheetBox(new StackPanel
@@ -195,7 +200,7 @@ public sealed partial class PlayerView
         body.Children.Add(head);
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 4) };
-        buttons.Children.Add(Pill("copy", "Copy invite link", () => CopyInvite(r)));
+        buttons.Children.Add(Pill("copy", r.Code is { } code ? $"Code {Party.ShowCode(code)}" : "Copy invite link", () => CopyInvite(r)));
         buttons.Children.Add(Pill("x", r.Leader ? "End party" : "Leave", () =>
         {
             partyOpen = false;

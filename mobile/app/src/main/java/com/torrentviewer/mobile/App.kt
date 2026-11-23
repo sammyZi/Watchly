@@ -371,6 +371,8 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>, barHaze: dev.chris
     var sendTo by remember { mutableStateOf<String?>(null) }
     /** The TV asked for the whole library and settings, not just the addons. */
     var sendAll by remember { mutableStateOf(false) }
+    /** The TV asked for this phone's AniList sign-in: it has no browser for AniList's own page. */
+    var sendAniList by remember { mutableStateOf(false) }
     /** A stremio:// link that wants to add an addon, until the viewer says yes or no. */
     var pendingAddon by remember { mutableStateOf<String?>(null) }
 
@@ -405,6 +407,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>, barHaze: dev.chris
         if (raw.startsWith("watchly://tv-addons", ignoreCase = true)) {
             sendTo = tvDropUrl(raw) ?: return@LaunchedEffect watch.fail("That isn't a Watchly TV on your home network.")
             sendAll = uri.getQueryParameter("all") == "1"
+            sendAniList = uri.getQueryParameter("what") == "anilist"
             return@LaunchedEffect
         }
         if (raw.startsWith("watchly://party", ignoreCase = true)) {
@@ -630,10 +633,17 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>, barHaze: dev.chris
             val all = sendAll
             val n = Addons.list.value.size
             val tv = to.substringAfter("//").substringBefore(':')
-            // "" cancels, "*" is everything, "addons" the addon list alone; the rest are Backup.GROUPS' labels.
+            val aniUser = com.torrentviewer.core.AniList.user.collectAsState().value
+            val aniOn = com.torrentviewer.core.AniList.connected.collectAsState().value
+            // "" cancels, "*" is everything, "addons" the addon list alone, "anilist" this sign-in; the rest are Backup.GROUPS' labels.
             Sheet(
-                title = if (all) "What should the TV copy?" else "Copy your addons to the TV?",
-                options = if (all) {
+                title = if (sendAniList) "Sign the TV in to AniList?" else if (all) "What should the TV copy?" else "Copy your addons to the TV?",
+                options = if (sendAniList) {
+                    listOf(
+                        Option("anilist", if (aniOn) "Send your AniList sign-in" else "Not signed in to AniList on this phone", if (aniOn) listOfNotNull(aniUser, tv).joinToString(" · ") else "Connect it in Settings → Integrations first"),
+                        Option("", "Cancel"),
+                    )
+                } else if (all) {
                     Backup.GROUPS.keys.map { Option(it, it, "Replaces the TV's, for this profile") } +
                         Option("*", "Everything", "All of the above") + Option("", "Cancel")
                 } else {
@@ -646,8 +656,10 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>, barHaze: dev.chris
                 onPick = { pick ->
                     sendTo = null
                     sendAll = false
+                    sendAniList = false
                     val body = when {
                         pick.isEmpty() || pick == "addons" && n == 0 -> null
+                        pick == "anilist" -> com.torrentviewer.core.AniList.shareable()
                         pick == "addons" -> Addons.linksJson()
                         pick == "*" -> Backup.export()
                         else -> Backup.export(only = Backup.GROUPS[pick])
@@ -663,7 +675,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>, barHaze: dev.chris
                             .onFailure { watch.notes.tryEmit("Couldn't reach the TV — is the phone on the same Wi-Fi?") }
                     }
                 },
-                onDismiss = { sendTo = null; sendAll = false },
+                onDismiss = { sendTo = null; sendAll = false; sendAniList = false },
             )
         }
     }

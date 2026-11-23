@@ -137,6 +137,7 @@ public partial class MainWindow : Window
         Stremio.Changed += () => Dispatcher.BeginInvoke(() => LibraryChanged?.Invoke());
         Nuvio.Changed += () => Dispatcher.BeginInvoke(() => LibraryChanged?.Invoke());
         foreach (var tracker in Trackers.All) tracker.Changed += () => Dispatcher.BeginInvoke(() => LibraryChanged?.Invoke());
+        AniList.Changed += () => Dispatcher.BeginInvoke(() => LibraryChanged?.Invoke());
         Activated += (_, _) => Trackers.Refresh();
         Updates.Changed += () => Dispatcher.BeginInvoke(ShowUpdate);
         if (agreed) Updates.Check();
@@ -244,6 +245,7 @@ public partial class MainWindow : Window
         Stremio.Load(profile.Id, profile.IsGuest);
         Nuvio.Load(profile.Id, profile.IsGuest);
         foreach (var tracker in Trackers.All) tracker.Load(profile.Id, profile.IsGuest);
+        AniList.Load(profile.Id, profile.IsGuest);
         KidsMode.Use(profile);
         // Pages built for the last profile read its library; start again from Home.
         // ponytail: the old tab views stay subscribed to the shell's events; switching is rare, unhook them if it ever shows.
@@ -623,8 +625,9 @@ public partial class MainWindow : Window
         var stremio = Trackers.Everywhere;
         foreach (var (imdb, eps) in stremio.Episodes)
             foreach (var (s, e) in eps) Record($"{imdb}:{s}:{e}", 1, 1);
+        // Not AniList's up next (no progress): that episode hasn't been started.
         foreach (var p in stremio.Paused)
-            if (p.Ep is { } ep) Record($"{p.Imdb}:{ep.Season}:{ep.Episode}", p.Progress, 100);
+            if (p.Ep is { } ep && p.Progress > 0) Record($"{p.Imdb}:{ep.Season}:{ep.Episode}", p.Progress, 100);
         return @out;
     }
 
@@ -698,6 +701,8 @@ public partial class MainWindow : Window
     /// <summary>A magnet or .torrent from outside — the command line or a drop — or an addon site's stremio:// Install link.</summary>
     void OpenIncoming(string source)
     {
+        // AniList's sign-in coming back: not something to open.
+        if (AniList.SignIn(source)) { Toast("Signing in to AniList…"); return; }
         // A magnet is anything at all: a kids profile plays only what it can browse to.
         if (KidsMode.On) { Toast("A kids profile can't open torrents or addons from other apps.", true); return; }
         if (source.StartsWith("watchly://party", StringComparison.OrdinalIgnoreCase))
@@ -1346,6 +1351,7 @@ public partial class MainWindow : Window
             Stremio.Watched(item, ep);
             Nuvio.Watched(item, ep);
             foreach (var tracker in Trackers.All) tracker.Finished(item, ep);
+            AniList.Finished(item, ep);
         }
     }
 
