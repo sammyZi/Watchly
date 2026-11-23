@@ -225,6 +225,10 @@ object Meta {
     }.getOrDefault(emptyList())
 
     private suspend fun shelf(kind: String, genre: String?): List<Title> = runCatching {
+        // Kitsu's catalogue is series: asked for as films too (Search's anime filter, films and series), the same
+        // anime came back labelled films, won the de-duplication, and opened as film pages with no seasons.
+        // Before the cache, as what was kept under that key is that list.
+        if (genre == ANIME_GENRE && kind != "tv") return@runCatching emptyList()
         remember("shelf:$kind:${genre.orEmpty()}", ::titlesFrom, ::titlesJson) {
             if (genre?.startsWith(ADDON_SHELF) == true) {
                 val (addon, list) = Addons.shelf(genre) ?: error("addon gone")
@@ -299,7 +303,8 @@ object Meta {
      * none of them knows.
      */
     suspend fun title(imdb: String, kind: String): Title? = runCatching {
-        remember("title:$kind:$imdb", { titlesFrom(it).first() }, { titlesJson(listOf(it)) }) {
+        // "title2": what was kept under "title" may be such a stub film for a series.
+        remember("title2:$kind:$imdb", { titlesFrom(it).first() }, { titlesJson(listOf(it)) }) {
             fromAddons(imdb, kind)?.let { return@remember it }
             require(imdb.startsWith("tt")) { "no meta addon for $imdb" }
             val type = if (kind == "tv") "series" else "movie"
@@ -322,7 +327,12 @@ object Meta {
             // Kept under the id it was asked by: History, My List and the page all know it so.
             meta.put("imdb_id", id)
             val real = meta.str("type") ?: type
-            return toTitles(JSONArray().put(meta), kindOfType(real), withEpisodes = true, anyId = true, type = real).firstOrNull() ?: continue
+            val got = toTitles(JSONArray().put(meta), kindOfType(real), withEpisodes = true, anyId = true, type = real).firstOrNull() ?: continue
+            // A series asked for comes back only as a series with its episodes. An addon that wouldn't answer it as
+            // one, asked again as a film, gave a stub film of the same id — and every anime opened as a film page,
+            // sources and no seasons. Cinemeta, or the next addon, has the series.
+            if ((kind == "tv" && !got.isSeries) || (got.isSeries && got.episodes.isEmpty())) continue
+            return got
         }
         return null
     }

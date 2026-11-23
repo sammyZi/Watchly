@@ -42,6 +42,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -389,4 +391,129 @@ fun JoinPartyScreen(room: Room) {
             }
         }
     }
+}
+
+/**
+ * A party code typed in, and Join: Home's party sheet and Settings both. [onJoined] once it took, so the
+ * sheet can close; the invite's own screen comes up over everything from there.
+ */
+@Composable
+fun JoinCode(onJoined: () -> Unit = {}) {
+    var code by remember { mutableStateOf("") }
+    var said by remember { mutableStateOf<String?>(null) }
+    fun join() {
+        if (Party.join(code) == null) {
+            said = "That isn't a party code — it's 8 letters and numbers, like K7Q2-M9XD."
+            return
+        }
+        said = "Joining — the party's film shows in a moment."
+        code = ""
+        onJoined()
+    }
+    Column {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Capitals as it is typed, the number row on top (Gboard shows it for a password's keyboard; the
+            // code still shows): codes are letters and digits, written as the leader's screen shows them.
+            Field(
+                code, { code = it.uppercase().take(12); said = null }, "K7Q2-M9XD", Modifier.weight(1f), onSubmit = ::join,
+                leading = L.drawable.lucide_ic_users, action = androidx.compose.ui.text.input.ImeAction.Go,
+                keyboard = androidx.compose.ui.text.input.KeyboardType.Password, capitals = true,
+            )
+            Button("Join", ::join, primary = true, compact = true)
+        }
+        said?.let { Text(it, Modifier.padding(top = 8.dp), style = Type.meta.copy(color = Ink.faint)) }
+    }
+}
+
+/**
+ * Home's party button: the code the leader shared, a letter to a slot, without going through Settings.
+ * The keyboard comes up with it, in capitals with the number row; eight typed, Join is lit.
+ */
+@Composable
+fun JoinPartySheet(me: com.torrentviewer.core.Profile, onDismiss: () -> Unit) = BottomSheet(null, onDismiss) {
+    var code by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    val full = code.length == PARTY_CODE_SLOTS
+    fun join() {
+        if (!full) return run { error = "The code is $PARTY_CODE_SLOTS letters and numbers." }
+        if (Party.join(code) == null) return run { error = "That isn't a watch party code." }
+        onDismiss()
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = EDGE).padding(bottom = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        // You, and the room the party has for the others.
+        // Overlapping, and centred as a group: a negative gap, where an offset left the row's room on the right.
+        Row(horizontalArrangement = Arrangement.spacedBy((-14).dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(64.dp).clip(CircleShape)) { com.torrentviewer.core.Avatar(me, 64.dp) }
+            repeat(2) { SeatFree(Modifier) }
+        }
+        Text("Join a watch party", Modifier.padding(top = 18.dp), style = Type.title.copy(fontWeight = FontWeight.Bold, fontSize = 24.sp))
+        Text("Enter the $PARTY_CODE_SLOTS-character code your friend shared.", Modifier.padding(top = 6.dp), style = Type.meta.copy(color = Ink.muted), textAlign = TextAlign.Center)
+        // One box to type in, drawn as the slots: the cursor is the slot next to be filled.
+        androidx.compose.foundation.text.BasicTextField(
+            code,
+            { typed ->
+                code = typed.uppercase().filter { it.isLetterOrDigit() }.take(PARTY_CODE_SLOTS)
+                error = null
+            },
+            Modifier.padding(top = 26.dp).fillMaxWidth().focusRequester(focus),
+            singleLine = true,
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                androidx.compose.ui.text.input.KeyboardCapitalization.Characters, autoCorrectEnabled = false,
+                keyboardType = androidx.compose.ui.text.input.KeyboardType.Password, imeAction = androidx.compose.ui.text.input.ImeAction.Go,
+            ),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onAny = { join() }),
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.Transparent),
+            decorationBox = { inner ->
+                Box {
+                    // The real text, unseen: the slots show it.
+                    Box(Modifier.alpha(0f)) { inner() }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+                        repeat(PARTY_CODE_SLOTS) { i ->
+                            if (i == PARTY_CODE_SLOTS / 2) Text("–", Modifier.padding(horizontal = 4.dp, vertical = 10.dp), style = Type.title.copy(color = Ink.faint))
+                            CodeSlot(code.getOrNull(i), next = i == code.length, wrong = error != null, Modifier.weight(1f).padding(horizontal = 3.dp))
+                        }
+                    }
+                }
+            },
+        )
+        Text(error ?: " ", Modifier.padding(top = 12.dp), style = Type.meta.copy(color = Ink.danger), textAlign = TextAlign.Center)
+        Button("Join", ::join, Modifier.padding(top = 14.dp).fillMaxWidth().alpha(if (full) 1f else 0.45f), icon = L.drawable.lucide_ic_users, primary = true)
+        Text("Only play, pause and where you are are shared, encrypted. You'll see what's on before anything plays.", Modifier.padding(top = 18.dp), style = Type.meta.copy(color = Ink.faint), textAlign = TextAlign.Center)
+        Text("To host, start a party from the player.", Modifier.padding(top = 10.dp), style = Type.meta.copy(color = Ink.faint), textAlign = TextAlign.Center)
+    }
+}
+
+/** A party code's length, as the leader's screen shows it (K7Q2-M9XD). */
+private const val PARTY_CODE_SLOTS = 8
+
+/** One letter of the code over its line: the next to fill is lit, all of them red while the code is wrong. */
+@Composable
+private fun CodeSlot(char: Char?, next: Boolean, wrong: Boolean, modifier: Modifier) {
+    val line = when {
+        wrong -> Ink.danger
+        next -> Ink.text
+        char != null -> Ink.muted
+        else -> Ink.stroke
+    }
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(char?.toString() ?: "", style = Type.title.copy(fontWeight = FontWeight.Bold, fontSize = 26.sp), maxLines = 1)
+        Box(Modifier.padding(top = 6.dp).fillMaxWidth().height(if (next) 3.dp else 2.dp).clip(RoundedCornerShape(2.dp)).background(line))
+    }
+}
+
+/** A seat still free in the party: a dashed ring with a plus. */
+@Composable
+private fun SeatFree(modifier: Modifier) {
+    val ring = Ink.muted
+    Box(
+        modifier.size(64.dp).drawBehind {
+            drawCircle(
+                ring, radius = size.minDimension / 2 - 1.dp.toPx(),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(1.5.dp.toPx(), pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 5.dp.toPx()))),
+            )
+        },
+        contentAlignment = Alignment.Center,
+    ) { Lc(L.drawable.lucide_ic_plus, tint = ring, size = 22.dp) }
 }

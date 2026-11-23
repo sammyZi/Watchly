@@ -33,11 +33,6 @@ class AniListTest {
         assertNull(tokenFromRedirect("watchly://anilist#error=access_denied"))
     }
 
-    @Test fun aRecapFilmOnTheSeriesTitleIsLeftOut() {
-        val got = usable(listOf(AniEntry("tt5626028", 21459, 1, "TV"), AniEntry("tt5626028", 169402, 0, "MOVIE"), AniEntry("tt1517268", 5, -1, "MOVIE")))
-        assertEquals(listOf(21459, 5), got.map { it.id })
-    }
-
     @Test fun anAiringNoticeReadsWhole() {
         assertEquals("Episode 5 of Frieren aired.", airingText(listOf("Episode ", " of ", " aired."), 5, "Frieren"))
         assertEquals("Episode 5 of Frieren aired.", airingText(emptyList(), 5, "Frieren"))

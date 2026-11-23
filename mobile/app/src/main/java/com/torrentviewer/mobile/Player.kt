@@ -696,7 +696,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                 }
             }
             val text = r.code?.let { c ->
-                "Join my watch party${film?.title?.let { " for $it" }.orEmpty()} in Watchly — code ${Party.showCode(c)}\n(Settings → Watch party → Join with a code)"
+                "Join my watch party${film?.title?.let { " for $it" }.orEmpty()} in Watchly — code ${Party.showCode(c)}\n(the party button at the top of Home)"
             } ?: r.link
             val send = android.content.Intent(android.content.Intent.ACTION_SEND).putExtra(android.content.Intent.EXTRA_TEXT, text)
             if (uri != null) {

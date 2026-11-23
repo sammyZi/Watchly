@@ -42,16 +42,6 @@ internal fun episodesOf(cours: List<Cour>, id: Int, progress: Int): List<Int> {
     return emptyList()
 }
 
-/**
- * The list ties some recap films to their series' own IMDb title (My Hero Academia's, tt5626028): taken as
- * a film, the series opened as one — Cinemeta answers a film with no episodes, and no addon has it. A film
- * sharing a title with a series is left out; it has no page of its own here.
- */
-internal fun usable(entries: List<AniEntry>): List<AniEntry> {
-    val series = entries.filter { it.isSeries }.mapTo(HashSet()) { it.imdb }
-    return entries.filterNot { it.isFilm && it.imdb in series }
-}
-
 /** An airing notification's words: AniList sends them in pieces ("Episode ", " of ", " aired.") to put the number and title between. */
 internal fun airingText(contexts: List<String>, episode: Int, title: String): String =
     if (contexts.size >= 3) "${contexts[0]}$episode${contexts[1]}$title${contexts[2]}" else "Episode $episode of $title aired."
@@ -234,9 +224,8 @@ object AniList {
             }
             ?: cache?.takeIf { it.exists() }?.let { f -> runCatching { f.readLines().mapNotNull(::entryOf) }.getOrNull() }
             ?: return false
-        val usable = usable(entries)
-        byImdb = usable.groupBy { it.imdb }
-        byId = usable.associateBy { it.id }
+        byImdb = entries.groupBy { it.imdb }
+        byId = entries.associateBy { it.id }
         Log.i("anilist", "mapping: ${entries.size} entries${if (fresh != null) ", kept" else ""}")
         return true
     }

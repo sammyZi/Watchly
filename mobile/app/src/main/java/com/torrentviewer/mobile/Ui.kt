@@ -50,6 +50,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -363,6 +366,8 @@ fun Field(
     /** The words' colour, and the fill's: white on the tour, which is dark whatever the theme. */
     tint: Color = Ink.text,
     keyboard: KeyboardType = if (digits) KeyboardType.NumberPassword else KeyboardType.Text,
+    /** The keyboard opens in capitals and suggests nothing: a code, as the party's. */
+    capitals: Boolean = false,
 ) {
     var focused by remember { mutableStateOf(false) }
     val focus = androidx.compose.ui.platform.LocalFocusManager.current
@@ -386,7 +391,8 @@ fun Field(
                 textStyle = Type.label.copy(color = tint, fontSize = 16.sp, letterSpacing = if (secret) 8.sp else 0.sp, textAlign = align),
                 cursorBrush = SolidColor(Ink.accent),
                 visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
-                keyboardOptions = KeyboardOptions(keyboardType = keyboard, imeAction = action),
+                keyboardOptions = if (capitals) KeyboardOptions(androidx.compose.ui.text.input.KeyboardCapitalization.Characters, autoCorrectEnabled = false, keyboardType = keyboard, imeAction = action)
+                else KeyboardOptions(keyboardType = keyboard, imeAction = action),
                 keyboardActions = KeyboardActions(onAny = {
                     onSubmit()
                     if (action == ImeAction.Done) focus.clearFocus()
@@ -522,10 +528,12 @@ fun Modifier.glass(haze: dev.chrisbanes.haze.HazeState?, tint: Color, alpha: Flo
 
 /** The frame every sheet shares: scrim, rounded top, a grab handle and a heading — frosted over a page that offers it. */
 @Composable
-fun BottomSheet(title: String, onDismiss: () -> Unit, content: @Composable () -> Unit) {
+fun BottomSheet(title: String?, onDismiss: () -> Unit, content: @Composable () -> Unit) {
     val haze = LocalPageHaze.current
     val surface = Ink.surface
     val tabBar = LocalTabBarInset.current
+    // The keyboard, while it is up: a sheet with a box to type in (Home's party code) sat under it, the box hidden.
+    val keyboard = WindowInsets.ime.asPaddingValues().calculateBottomPadding()
     BackHandler(onBack = onDismiss)
     var shown by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { shown = true }
@@ -590,7 +598,14 @@ fun BottomSheet(title: String, onDismiss: () -> Unit, content: @Composable () ->
                     .clickable(remember { MutableInteractionSource() }, indication = null) {}
                     // Over a tab's page the tab bar is drawn on top of the sheet: its last options ended up under the
                     // bar (Search's "Series only"). The bar's height includes the navigation bar's.
-                    .then(if (tabBar > 0.dp) Modifier.padding(bottom = tabBar) else Modifier.navigationBarsPadding()).padding(bottom = 10.dp),
+                    // Up, the keyboard covers both, so it is what the sheet stands on.
+                    .then(
+                        when {
+                            keyboard > 0.dp -> Modifier.padding(bottom = keyboard)
+                            tabBar > 0.dp -> Modifier.padding(bottom = tabBar)
+                            else -> Modifier.navigationBarsPadding()
+                        },
+                    ).padding(bottom = 10.dp),
             ) {
                 Column(
                     Modifier.fillMaxWidth().draggable(
@@ -600,7 +615,9 @@ fun BottomSheet(title: String, onDismiss: () -> Unit, content: @Composable () ->
                     ),
                 ) {
                     Box(Modifier.align(Alignment.CenterHorizontally).padding(top = 10.dp).size(36.dp, 4.dp).clip(CircleShape).background(Ink.stroke))
-                    Text(title, Modifier.padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 8.dp), style = Type.title.copy(fontWeight = FontWeight.Bold), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    // Null: the sheet draws its own heading (Home's party code, centred).
+                    if (title != null) Text(title, Modifier.padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 8.dp), style = Type.title.copy(fontWeight = FontWeight.Bold), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    else Spacer(Modifier.height(14.dp))
                 }
                 content()
             }

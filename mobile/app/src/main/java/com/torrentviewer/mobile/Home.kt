@@ -195,6 +195,7 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
     val saved by SavedStore.items.collectAsState()
     val settings by SettingsStore.value.collectAsState()
     val online by Net.online.collectAsState()
+    var joiningParty by remember { mutableStateOf(false) }
 
     // Shelves inferred from what has been watched: the lead pick says so.
     LaunchedEffect(history.size, saved.size, online) {
@@ -434,6 +435,11 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
             )
             Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = EDGE, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("WATCHLY", Modifier.weight(1f), style = Type.title.copy(color = Ink.accent, fontWeight = FontWeight.Black, letterSpacing = 2.sp))
+                // Joining takes the code the leader shared: right here, not three screens into Settings.
+                if (com.torrentviewer.core.Party.available && settings.partyOn && !com.torrentviewer.core.Kids.on) {
+                    HeaderTile(L.drawable.lucide_ic_users, "Join a watch party", solid, { joiningParty = true })
+                    Spacer(Modifier.width(10.dp))
+                }
                 NotificationBell(solid, onNotifications)
                 if (!isWide()) Tap(onProfile, Modifier.padding(start = 12.dp), shape = RoundedCornerShape(9.dp)) { Avatar(who, 40.dp) }
             }
@@ -467,6 +473,7 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
     }
 
     releases?.let { all -> ReleasesSheet(all, watch) { releases = null } }
+    if (joiningParty) JoinPartySheet(who) { joiningParty = false }
     if (state.editing) BottomSheet("Edit Home", { state.editing = false }) { HomeEditor(order.map { it to byKey.getValue(it).name }, settings) }
     if (comingAll) BottomSheet("Upcoming", { comingAll = false }) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = EDGE, vertical = 4.dp)) {

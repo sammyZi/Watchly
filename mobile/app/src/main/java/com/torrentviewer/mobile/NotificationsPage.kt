@@ -52,24 +52,14 @@ import com.torrentviewer.core.ago
 /** One line of the notification center, from either source. */
 private data class Line(val key: String, val title: String?, val text: String, val at: Long, val fromAniList: Boolean, val icon: Int, val image: String?, val unread: Boolean, val open: () -> Unit)
 
-/**
- * The bell on Home, beside the avatar and shaped like it: a glass tile over the art ([solid] 0) that turns
- * the page's own surface as the bar fills in (1), with a count while either source has something unseen.
- */
+/** The bell on Home, with a count while either source has something unseen. */
 @Composable
 fun NotificationBell(solid: Float, onClick: () -> Unit) {
     val items by Inbox.items.collectAsState()
     val readAt by Inbox.readAt.collectAsState()
     val aniUnread by AniList.unread.collectAsState()
     val count = aniUnread + items.count { it.at > readAt }
-    val fill = androidx.compose.ui.graphics.lerp(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.38f), Ink.surface2, solid)
-    val tint = androidx.compose.ui.graphics.lerp(androidx.compose.ui.graphics.Color.White, Ink.text, solid)
-    Box(Modifier.size(40.dp).semantics { contentDescription = if (count > 0) "Notifications, $count new" else "Notifications" }) {
-        Tap(onClick, Modifier.matchParentSize(), RoundedCornerShape(9.dp)) {
-            Box(Modifier.matchParentSize().background(fill), contentAlignment = Alignment.Center) {
-                Lc(L.drawable.lucide_ic_bell, tint = tint, size = 20.dp)
-            }
-        }
+    HeaderTile(L.drawable.lucide_ic_bell, if (count > 0) "Notifications, $count new" else "Notifications", solid, onClick) {
         if (count > 0) Box(
             Modifier.align(Alignment.TopEnd).offset(x = 5.dp, y = (-5).dp).height(18.dp).widthIn(min = 18.dp)
                 .clip(CircleShape).background(Ink.accent).padding(horizontal = 5.dp),
@@ -77,6 +67,24 @@ fun NotificationBell(solid: Float, onClick: () -> Unit) {
         ) {
             Text(if (count > 9) "9+" else "$count", style = Type.meta.copy(color = androidx.compose.ui.graphics.Color.White, fontWeight = FontWeight.Bold, fontSize = 10.sp, lineHeight = 10.sp))
         }
+    }
+}
+
+/**
+ * One of Home's header buttons, shaped like the avatar beside them: a glass tile over the art ([solid] 0)
+ * that turns the page's own surface as the bar fills in (1). [extra] draws over it, a badge say.
+ */
+@Composable
+fun HeaderTile(icon: Int, description: String, solid: Float, onClick: () -> Unit, extra: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit = {}) {
+    val fill = androidx.compose.ui.graphics.lerp(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.38f), Ink.surface2, solid)
+    val tint = androidx.compose.ui.graphics.lerp(androidx.compose.ui.graphics.Color.White, Ink.text, solid)
+    Box(Modifier.size(40.dp).semantics { contentDescription = description }) {
+        Tap(onClick, Modifier.matchParentSize(), RoundedCornerShape(9.dp)) {
+            Box(Modifier.matchParentSize().background(fill), contentAlignment = Alignment.Center) {
+                Lc(icon, tint = tint, size = 20.dp)
+            }
+        }
+        extra()
     }
 }
 

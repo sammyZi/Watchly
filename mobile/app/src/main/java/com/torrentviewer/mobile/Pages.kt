@@ -235,7 +235,14 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
             results = if (!torrents && g != null) {
                 busy = true
                 coroutineScope {
-                    Kids.only(listOf("movie", "tv").filter { kind == null || it == kind }.map { k -> async { Meta.catalog(k, g) } }.flatMap { it.await() }.distinctBy { it.imdb })
+                    val films = async { if (kind == null || kind == "movie") Meta.catalog("movie", g) else emptyList() }
+                    val series = async { if (kind == null || kind == "tv") Meta.catalog("tv", g) else emptyList() }
+                    // Turn about, so films and series both lead: one after the other, the series only began past
+                    // every film. Cinemeta's film lists carry some series too (Cyberpunk: Edgerunners): those go from
+                    // the films, or the film's copy could come first and open with no seasons.
+                    val shows = series.await()
+                    val ids = shows.mapTo(HashSet()) { it.imdb }
+                    Kids.only(com.torrentviewer.core.interleave(listOf(shows, films.await().filter { it.imdb !in ids })))
                 }
             } else null
             busy = false
@@ -953,18 +960,8 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEd
         }
         if (settings.partyOn) {
 
-        Section("Join with a code", "The 8-character code the leader shares from the player's party panel.") {
-            var code by remember { mutableStateOf("") }
-            var said by remember { mutableStateOf<String?>(null) }
-            fun join() {
-                said = if (com.torrentviewer.core.Party.join(code) == null) "That isn't a party code — it's 8 letters and numbers, like K7Q2-M9XD." else "Joining — the party's film shows in a moment."
-                if (said?.startsWith("Joining") == true) code = ""
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Field(code, { code = it.take(12); said = null }, "K7Q2-M9XD", Modifier.weight(1f), onSubmit = ::join)
-                Button("Join", ::join, primary = true, compact = true)
-            }
-            said?.let { Text(it, Modifier.padding(top = 8.dp), style = Type.meta.copy(color = Ink.faint)) }
+        Section("Join with a code", "The 8-character code the leader shares from the player's party panel. Home's party button takes it too.") {
+            JoinCode()
         }
 
         Section("Your name", "What the others see when you join or ask for something. Left blank, it is the profile's name, ${me.name}.") {
