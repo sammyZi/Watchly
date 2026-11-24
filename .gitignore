@@ -23,6 +23,8 @@ dist/
 windows/**/bin/
 windows/**/obj/
 windows/installer/Output/
+# WPF's temporary project during a build; an interrupted build leaves it behind.
+windows/**/*_wpftmp.csproj
 *.pfx
 
 # The phone screenshots the README images are made from, as captured: kept locally, not in git.
