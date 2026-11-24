@@ -66,7 +66,7 @@ fun NotificationBell(solid: Float, onClick: () -> Unit, haze: dev.chrisbanes.haz
                 .clip(CircleShape).background(Ink.accent).padding(horizontal = 5.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text(if (count > 9) "9+" else "$count", style = Type.meta.copy(color = androidx.compose.ui.graphics.Color.White, fontWeight = FontWeight.Bold, fontSize = 10.sp, lineHeight = 10.sp))
+            Text(if (count > 9) "9+" else "$count", style = Type.meta.copy(color = Ink.onAccent, fontWeight = FontWeight.Bold, fontSize = 10.sp, lineHeight = 10.sp))
         }
     }
 }

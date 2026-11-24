@@ -296,8 +296,9 @@ fun DetailScreen(initial: Title, watch: Watch, onOrder: (com.torrentviewer.core.
         LazyColumn(state = list, contentPadding = PaddingValues(bottom = 32.dp + LocalTabBarInset.current), modifier = Modifier.fillMaxSize().hazeSource(haze)) {
             item(key = "head") {
                 if (!wide) {
-                    // Taller than square, poster-like: at 1:1 the art read cut short over the title.
-                    Box(Modifier.fillMaxWidth().aspectRatio(0.8f)) {
+                    // A touch taller than square, poster-like (at 1:1 the art read cut short over the title), but
+                    // short enough that My List, Like and Download show under the buttons without a scroll.
+                    Box(Modifier.fillMaxWidth().aspectRatio(0.95f)) {
                         Artwork(title.wide, title.title, Modifier.fillMaxSize().bottomScrim(0.6f), fill = false)
                         TitleMark(title, Modifier.align(Alignment.BottomStart).padding(horizontal = EDGE).widthIn(max = 260.dp), maxHeight = 72.dp, style = Type.display)
                     }

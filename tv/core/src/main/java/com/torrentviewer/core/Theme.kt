@@ -55,6 +55,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -126,6 +128,8 @@ object Ink {
     val danger get() = p.danger
     /** Netflix's red, lit for a TV across the room; an app may set its own before it composes (the phone's is deeper). */
     var accent by mutableStateOf(Color(0xFFE50914))
+    /** Text and icons on the accent: dark on a pale one (the phone lets you pick white), else white. */
+    val onAccent get() = if (accent.luminance() > 0.5f) Color(0xFF141414) else Color.White
     val imdb = Color(0xFFF5C518)
     val focus = Color.White
 }
@@ -395,12 +399,16 @@ fun Modifier.glow(colors: List<Color>, cx: Float, cy: Float) = drawBehind {
 /** Film grain on a surface, under its content: after `.background(…)`. None on AMOLED black, which it would grey. */
 fun Modifier.grain() = drawBehind { if (!Ink.pureBlack) drawRect(grainBrush) }
 
-/** [glow]'s colours for the accent: a deep base, the red itself, and a warm light rising in it. */
-fun accentGlow() = listOf(
-    androidx.compose.ui.graphics.lerp(Ink.accent, Color.Black, 0.45f),
-    Ink.accent,
-    androidx.compose.ui.graphics.lerp(Ink.accent, Color(0xFFFF8A4C), 0.6f),
-)
+/** [glow]'s colours for the accent: a deep base, the colour itself, and a warmer light rising in it (orange in the red). */
+fun accentGlow(): List<Color> {
+    val hsv = FloatArray(3).also { android.graphics.Color.colorToHSV(Ink.accent.toArgb(), it) }
+    val light = Color(android.graphics.Color.HSVToColor(floatArrayOf((hsv[0] + 25f) % 360f, hsv[1] * 0.75f, 1f)))
+    return listOf(
+        androidx.compose.ui.graphics.lerp(Ink.accent, Color.Black, 0.45f),
+        Ink.accent,
+        androidx.compose.ui.graphics.lerp(Ink.accent, light, 0.6f),
+    )
+}
 
 /** Fine black-and-white noise, at most 22/255 opaque, tiled. */
 private val grainBrush: androidx.compose.ui.graphics.ShaderBrush by lazy {

@@ -1,5 +1,6 @@
 package com.torrentviewer.mobile
 
+import com.torrentviewer.core.Ink
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
@@ -39,7 +40,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 private const val NAME = "WATCHLY"
-private val RED = Color(0xFFE50914)
+private val RED get() = Ink.accent
 private val INK = Color(0xFF0B0B0C)
 private val ANTON = FontFamily(Font(R.font.anton_regular))
 

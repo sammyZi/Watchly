@@ -1255,7 +1255,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                 )
                 Spacer(Modifier.width(10.dp))
                 if (room?.leader == true) Tap(wp::goOnWithout, shape = RoundedCornerShape(8.dp)) {
-                    Text("Go on", Modifier.background(Ink.accent).padding(horizontal = 14.dp, vertical = 9.dp), style = Type.label.copy(color = Color.White, fontWeight = FontWeight.Bold))
+                    Text("Go on", Modifier.background(Ink.accent).padding(horizontal = 14.dp, vertical = 9.dp), style = Type.label.copy(color = Ink.onAccent, fontWeight = FontWeight.Bold))
                 }
             }
         }
@@ -1285,8 +1285,8 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                     }
                     if (wp.leaderState?.asks != false) Tap(wp::everyone, shape = RoundedCornerShape(10.dp)) {
                         Row(Modifier.background(Ink.accent).padding(horizontal = 16.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Lc(L.drawable.lucide_ic_users, tint = Color.White, size = 18.dp)
-                            Text("  Everyone", style = Type.label.copy(color = Color.White, fontWeight = FontWeight.Bold))
+                            Lc(L.drawable.lucide_ic_users, tint = Ink.onAccent, size = 18.dp)
+                            Text("  Everyone", style = Type.label.copy(color = Ink.onAccent, fontWeight = FontWeight.Bold))
                         }
                     }
                 }
@@ -1303,7 +1303,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
             Text("  On your own", style = Type.meta.copy(color = Color.White))
             Spacer(Modifier.width(10.dp))
             Tap(wp::catchUp, shape = CircleShape) {
-                Text("Catch up", Modifier.background(Ink.accent).padding(horizontal = 14.dp, vertical = 8.dp), style = Type.label.copy(color = Color.White, fontWeight = FontWeight.Bold))
+                Text("Catch up", Modifier.background(Ink.accent).padding(horizontal = 14.dp, vertical = 8.dp), style = Type.label.copy(color = Ink.onAccent, fontWeight = FontWeight.Bold))
             }
         }
 
@@ -1326,7 +1326,7 @@ private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: 
                     Text("No", Modifier.padding(horizontal = 12.dp, vertical = 9.dp), style = Type.label.copy(color = Color.White.copy(alpha = 0.7f)))
                 }
                 Tap({ wp.ask = null; wp.allow(a) }, shape = RoundedCornerShape(8.dp)) {
-                    Text("Allow", Modifier.background(Ink.accent).padding(horizontal = 14.dp, vertical = 9.dp), style = Type.label.copy(color = Color.White, fontWeight = FontWeight.Bold))
+                    Text("Allow", Modifier.background(Ink.accent).padding(horizontal = 14.dp, vertical = 9.dp), style = Type.label.copy(color = Ink.onAccent, fontWeight = FontWeight.Bold))
                 }
             }
         }

@@ -92,8 +92,7 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Services.init(applicationContext)
-        // The TV's red glares at arm's length on a phone screen: a deeper one.
-        Ink.accent = Color(0xFFB81D24)
+        Ink.accent = accentOf(SettingsStore.value.value.accent)
         // The page before the first frame, so a light theme never opens on a flash of dark.
         val systemDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         applyTheme(darkFor(SettingsStore.value.value.themeMode, systemDark))

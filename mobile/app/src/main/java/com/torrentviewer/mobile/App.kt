@@ -209,6 +209,11 @@ private fun startProfile(list: List<Profile>): Profile? {
     return (list.find { it.id == last } ?: list.singleOrNull())?.takeIf { it.pin == null }
 }
 
+/** The TV's red glares at arm's length on a phone screen: a deeper one, unless another colour was picked. */
+val PHONE_RED = Color(0xFFB81D24)
+
+fun accentOf(argb: Int) = if (argb == 0) PHONE_RED else Color(argb)
+
 fun darkFor(mode: String, systemDark: Boolean) = when (mode) {
     "light" -> false
     "dark" -> true
@@ -256,6 +261,7 @@ fun App(watch: Watch, incoming: MutableState<Uri?>) {
             old = null
         }
     }
+    Ink.accent = accentOf(settings.accent)
     // By the palette in use, so Material's colours change in the same frame as the page's.
     val scheme = if (Ink.isDark) darkColorScheme(primary = Ink.accent, background = Ink.bg, surface = Ink.surface) else lightColorScheme(primary = Ink.accent, background = Ink.bg, surface = Ink.surface)
     MaterialTheme(colorScheme = scheme) {
@@ -531,9 +537,23 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>, barHaze: dev.chris
     LaunchedEffect(ownSourceFor) { ownSourceFor?.let { openTitle(it); ownSourceFor = null } }
     val openOrder: (com.torrentviewer.core.WatchOrder) -> Unit = { pages.add(Page.WatchOrder(it)) }
     val body: @Composable () -> Unit = {
-        val top = pages.lastOrNull()
+      // A page opening — a title's, mostly — fades up from just under full size; going back, it shrinks away over the one under it.
+      AnimatedContent(
+        pages.lastIndex to pages.lastOrNull(),
+        transitionSpec = {
+            val grow = tween<Float>(300, easing = androidx.compose.animation.core.FastOutSlowInEasing)
+            if (targetState.first > initialState.first) {
+                (fadeIn(tween(220)) + androidx.compose.animation.scaleIn(grow, initialScale = 0.94f)) togetherWith fadeOut(tween(200))
+            } else {
+                (fadeIn(tween(220)) togetherWith (fadeOut(tween(220)) + androidx.compose.animation.scaleOut(grow, targetScale = 0.94f)))
+                    .apply { targetContentZIndex = -1f }
+            }
+        },
+        contentKey = { (i, p) -> p?.let { keyOf(i, it) } },
+        label = "pages",
+      ) { (index, top) ->
         if (top != null) {
-            holder.SaveableStateProvider(keyOf(pages.lastIndex, top)) {
+            holder.SaveableStateProvider(keyOf(index, top)) {
                 when (top) {
                     is Page.Detail -> DetailScreen(top.title, watch, onOrder = openOrder, onOpen = openTitle, onPerson = { pages.add(Page.Person(it.id, it.name)) }, onBack = ::pop, startSeason = top.season)
                     is Page.Person -> PersonScreen(top.id, top.name, onOpen = openTitle, onBack = ::pop)
@@ -566,6 +586,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>, barHaze: dev.chris
                 }
             }
         }
+      }
     }
     val choose: (Tab) -> Unit = { t ->
         clearPages()

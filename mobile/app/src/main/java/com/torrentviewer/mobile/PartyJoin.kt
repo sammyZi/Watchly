@@ -198,7 +198,7 @@ fun RejoinBar(last: com.torrentviewer.core.LastParty, top: Boolean, haze: dev.ch
                 )
             }
             Tap({ Party.rejoin() }, shape = RoundedCornerShape(10.dp)) {
-                Text(if (last.leader) "Reopen" else "Rejoin", Modifier.background(Ink.accent).padding(horizontal = 16.dp, vertical = 10.dp), style = Type.label.copy(color = white, fontWeight = FontWeight.Bold))
+                Text(if (last.leader) "Reopen" else "Rejoin", Modifier.background(Ink.accent).padding(horizontal = 16.dp, vertical = 10.dp), style = Type.label.copy(color = Ink.onAccent, fontWeight = FontWeight.Bold))
             }
             Tap({ Party.last = null }, Modifier.padding(start = 4.dp), CircleShape) {
                 Lc(L.drawable.lucide_ic_x, Modifier.padding(8.dp), tint = white.copy(alpha = 0.7f), size = 18.dp)

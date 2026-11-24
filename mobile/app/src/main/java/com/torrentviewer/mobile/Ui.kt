@@ -196,7 +196,7 @@ fun Button(
             },
             Motion.effects(), label = "bg",
         )
-        val fg = if (primary) Color.White else tint
+        val fg = if (primary) Ink.onAccent else tint
         Row(
             // The primary one — Play, Watch — a grainy red glow, a shade deeper while pressed; the rest a flat tint.
             (if (primary) Modifier.glow(accentGlow(), 0.85f, 1.1f).background(Color.Black.copy(alpha = if (pressed) 0.18f else 0f)) else Modifier.background(bg))
@@ -241,7 +241,7 @@ fun Chip(label: String, on: Boolean, onClick: () -> Unit, modifier: Modifier = M
             },
             tween(350), label = "chipBg",
         )
-        val fg by animateColorAsState(if (on) Color.White else Ink.muted, tween(350), label = "chipFg")
+        val fg by animateColorAsState(if (on) Ink.onAccent else Ink.muted, tween(350), label = "chipFg")
         Row(
             Modifier.background(bg).height(if (compact) 32.dp else 36.dp).animateContentSize(spring(dampingRatio = 0.8f, stiffness = 500f))
                 .padding(horizontal = if (compact) 11.dp else 16.dp),
@@ -695,7 +695,7 @@ fun TitleCard(
             badge?.let {
                 Text(
                     it, Modifier.align(Alignment.TopStart).padding(6.dp).wrapContentSize(Alignment.TopStart).background(Ink.accent, RoundedCornerShape(5.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
-                    style = Type.meta.copy(fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold), maxLines = 1,
+                    style = Type.meta.copy(fontSize = 10.sp, color = Ink.onAccent, fontWeight = FontWeight.Bold), maxLines = 1,
                 )
             }
             progress?.let { ProgressLine(it, Modifier.align(Alignment.BottomStart)) }

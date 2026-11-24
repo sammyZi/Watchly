@@ -71,6 +71,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -629,7 +631,7 @@ private fun HistoryRow(item: Item, releases: Int, onPlay: () -> Unit, onMore: ()
                 )
             }
             Box(Modifier.size(38.dp).clip(CircleShape).background(Ink.accent), contentAlignment = Alignment.Center) {
-                Lc(L.drawable.lucide_ic_play, tint = Color.White, size = 18.dp)
+                Lc(L.drawable.lucide_ic_play, tint = Ink.onAccent, size = 18.dp)
             }
             Tap(onMore, shape = CircleShape) { Lc(L.drawable.lucide_ic_ellipsis_vertical, Modifier.padding(8.dp), tint = Ink.muted, size = 20.dp) }
         }
@@ -1926,6 +1928,73 @@ private fun TrackerSection(t: com.torrentviewer.core.Tracker) {
     }
 }
 
+/** The accents on offer, as stored ARGB; 0 is the phone's own red. */
+private val ACCENTS = listOf(
+    "White" to 0xFFF5F5F5.toInt(), "Crimson" to 0, "Ocean" to 0xFF1E88E5.toInt(), "Violet" to 0xFF9C3FB8.toInt(),
+    "Emerald" to 0xFF43A047.toInt(), "Amber" to 0xFFFF8F00.toInt(), "Rose" to 0xFFE8336B.toInt(),
+)
+
+/** Custom, then the presets, three to a row; Custom opens hue, strength and brightness sliders under the grid. */
+@Composable
+private fun AccentPicker(current: Int, onPick: (Int) -> Unit) {
+    val custom = ACCENTS.none { it.second == current }
+    var editing by remember { mutableStateOf(false) }
+    // The custom colour as hue, saturation, value; a soft pink until one is made.
+    val hsv = remember { FloatArray(3).also { android.graphics.Color.colorToHSV(if (custom) current else 0xFFF77FA8.toInt(), it) } }
+    var h by remember { mutableFloatStateOf(hsv[0]) }
+    var s by remember { mutableFloatStateOf(hsv[1]) }
+    var v by remember { mutableFloatStateOf(hsv[2]) }
+    val mixed = android.graphics.Color.HSVToColor(floatArrayOf(h, s, v))
+    val tiles = listOf(Triple("Custom", mixed, custom)) + ACCENTS.map { (name, argb) -> Triple(name, argb, argb == current) }
+    // Inside a settings card, which draws the rounded surface.
+    Column(Modifier.padding(8.dp)) {
+        tiles.chunked(3).forEach { row ->
+            Row {
+                row.forEach { (name, argb, on) ->
+                    val color = accentOf(argb)
+                    Tap({
+                        if (name == "Custom") {
+                            editing = !editing || !on
+                            onPick(mixed)
+                        } else {
+                            editing = false
+                            onPick(argb)
+                        }
+                    }, Modifier.weight(1f), RoundedCornerShape(12.dp)) {
+                        Column(Modifier.padding(vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            val ring = if (color.luminance() > 0.8f) Ink.muted else color
+                            Box(
+                                Modifier.size(56.dp).border(2.dp, if (on) ring else Color.Transparent, CircleShape).padding(5.dp)
+                                    .clip(CircleShape).background(color).border(1.dp, Ink.stroke, CircleShape),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                val mark = if (on) L.drawable.lucide_ic_check else if (name == "Custom") L.drawable.lucide_ic_pencil else null
+                                mark?.let { Lc(it, tint = if (color.luminance() > 0.5f) Color(0xFF141414) else Color.White, size = 20.dp) }
+                            }
+                            Text(name, Modifier.padding(top = 8.dp), style = Type.meta.copy(color = if (on) Ink.text else Ink.muted, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium))
+                        }
+                    }
+                }
+                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+        if (editing) Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            // Saved when the finger lifts, not on every frame of the drag.
+            listOf(
+                Triple("Hue", h / 360f) { x: Float -> h = x * 360f },
+                Triple("Strength", s) { x: Float -> s = x },
+                Triple("Brightness", v) { x: Float -> v = x },
+            ).forEach { (label, value, change) ->
+                Text(label, style = Type.meta.copy(color = Ink.faint))
+                androidx.compose.material3.Slider(
+                    value, change, onValueChangeFinished = { onPick(android.graphics.Color.HSVToColor(floatArrayOf(h, s, v))) },
+                    colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = Color(mixed), activeTrackColor = Color(mixed), inactiveTrackColor = Ink.surface2),
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun Section(title: String, hint: String, content: @Composable () -> Unit) {
     Column(Modifier.padding(bottom = 22.dp)) {
@@ -1963,6 +2032,10 @@ private fun AppearancePage(settings: Settings, set: (Settings) -> Unit, onEditHo
         }
         RowDivider()
         SwitchRow("AMOLED Black", "Use pure black backgrounds for OLED screens.", settings.amoled) { set(settings.copy(amoled = it)) }
+    }
+
+    SettingsGroup("Accent colour", "The colour of buttons, highlights and progress bars, in place of the red.") {
+        AccentPicker(settings.accent) { set(settings.copy(accent = it)) }
     }
 
     SettingsGroup("Home screen") {

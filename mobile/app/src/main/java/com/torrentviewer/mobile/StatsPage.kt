@@ -57,7 +57,7 @@ fun StatsBanner(onOpen: () -> Unit) {
     Tap(onOpen, Modifier.padding(bottom = 12.dp).fillMaxWidth(), RoundedCornerShape(18.dp)) {
         Row(Modifier.fillMaxWidth().background(Ink.surface).padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(42.dp).clip(CircleShape).background(Ink.accent), contentAlignment = Alignment.Center) {
-                Lc(L.drawable.lucide_ic_chart_no_axes_column, tint = Color.White, size = 20.dp)
+                Lc(L.drawable.lucide_ic_chart_no_axes_column, tint = Ink.onAccent, size = 20.dp)
             }
             Column(Modifier.padding(start = 14.dp).weight(1f)) {
                 Text("Your stats", style = Type.label.copy(fontWeight = FontWeight.Bold))

@@ -183,7 +183,7 @@ fun Onboarding(onDone: () -> Unit) {
         )
 
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = EDGE, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("WATCHLY", Modifier.weight(1f), style = Type.title.copy(color = Color(0xFFE50914), fontWeight = FontWeight.Black, letterSpacing = 2.sp))
+            Text("WATCHLY", Modifier.weight(1f), style = Type.title.copy(color = Ink.accent, fontWeight = FontWeight.Black, letterSpacing = 2.sp))
             // Skip past the genres keeps the home screen as it was; past sign-in, into the app.
             if (step > WELCOME) Tap({ if (step == GENRES_STEP) step = SIGN_IN else { job?.cancel(); onDone() } }, shape = RoundedCornerShape(8.dp)) {
                 Text("Skip", Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = Type.label.copy(color = Color.White.copy(alpha = 0.85f)))
@@ -215,7 +215,7 @@ fun Onboarding(onDone: () -> Unit) {
                                 val on = g in picked
                                 // The tour's own pills: white on the dark page, whatever the phone's theme. Picked, the colour
                                 // cross-fades and a tick grows in, the pill widening smoothly round it, as Settings' chips do.
-                                val bg by androidx.compose.animation.animateColorAsState(if (on) Color(0xFFE50914) else Color(0xFF2A2A2E), tween(350), label = "genre")
+                                val bg by androidx.compose.animation.animateColorAsState(if (on) Ink.accent else Color(0xFF2A2A2E), tween(350), label = "genre")
                                 Tap({ picked = if (on) picked - g else picked + g }, shape = CircleShape) {
                                     Row(
                                         // Solid, not see-through: a poster behind a pill made its word unreadable.
