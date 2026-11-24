@@ -66,7 +66,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -592,7 +591,7 @@ fun BottomSheet(title: String?, onDismiss: () -> Unit, content: @Composable () -
                             backgroundColor = surface
                             tints = listOf(dev.chrisbanes.haze.HazeTint(surface.copy(alpha = 0.72f)))
                             blurRadius = 24.dp
-                            noiseFactor = 0.03f
+                            noiseFactor = if (Ink.pureBlack) 0f else 0.03f
                         },
                     )
                     // Taps on the sheet stay on the sheet.

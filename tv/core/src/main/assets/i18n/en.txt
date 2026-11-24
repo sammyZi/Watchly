@@ -1,0 +1,1271 @@
+Asking your addons…
+{} asks to pause
+{} asks to play
+Download season {}
+Everyone is waiting while yours loads
+Just me
+On your own
+Playing on {}
+Skip intro
+The film streams on this phone. Only play, pause and the spot are shared — encrypted, no account.
+Waiting for {}
+Waiting for {} to load
+Waiting for you and {}
+You'd be the first to join
+Switchable once nothing is downloading or playing.
+{} of {} watched
+{} watched
+{} new
+{} invited you to a watch party
+{} episodes
+{} titles
+{} releases
+{} seeds
+{} of {} saved
+{} seconds earlier
+{} seconds later
+{} franchises, in the right order
+{} new episodes
+{} installed · streams, subtitles and catalogues
+{} min left
+{}h {}m left
+{}m left
+{} audio gaps
+{} so far · finding more…
+1 new episode
+A film, or a link to play
+A free key from subdl.com adds its subtitles to Find subtitles. It stays encrypted on this phone.
+A kids profile can't open torrents or addons from other apps.
+A matching track comes on by itself when a video opens; picking one yourself wins. Online subtitle search looks in the subtitle language.
+A notification when a series you watch or have in My List has a new episode out. Checked twice a day.
+Account
+Accounts
+Action
+Add addon
+Add an addon
+Add one to find streams for every film and episode. Without any, only links you paste in Search will play.
+Add one to find streams — Watchly comes with none
+Add profile
+Add profiles
+Add this addon?
+Add to calendar
+Added {} addon
+Added {} addons
+Added {}
+Added {} — see Settings → Addons
+Adding…
+Addons
+Adventure
+All
+All caught up
+All genres
+All of the above
+All time
+All watched
+Allow
+Allow at once
+Allow background downloads
+Allow notifications
+Already in sync.
+Animals
+Animation
+Anime
+Anime only · not connected
+Any
+Any genre
+Any language
+Any network
+Any quality
+Any rating
+Any year
+Appearance
+Approve Watchly on AniList's page; it brings you back here.
+Approve on the page that opened, or open it again. Code {}
+As a guest, a small gap to the leader closes by playing up to 8% faster or slower, which you won't hear. Off, the player jumps to the leader instead.
+Ask me
+Asked for before this profile opens. Remove it to unlock.
+Asking AniList…
+Attach public trackers to bare magnet links so they resolve faster.
+Audio
+Audio & subtitles
+Audio language
+Audio: {}
+Automatically
+Awards
+Back
+Back up
+Backup
+Backup saved
+Battery saving can slow or stop downloads with the screen off. Let Watchly run in the background to keep them going.
+Because you watched {}
+Because you watched…
+Before 1990
+Before you start
+Best fit
+Best match
+Biggest
+Bitrate
+Box behind
+Bring your Stremio library
+Bring your library, Continue Watching and addons from Stremio or Nuvio. They stay in step both ways.
+Bringing your addons…
+Browse trending films, series and anime, and play them from the addons and servers you choose. Watchly comes with none.
+Buffer
+Buffer before playing
+Built into the video: use − and +.
+CHOOSE AN ICON
+Can't reach the party yet
+Cancel
+Cast
+Casting needs Wi-Fi — there is no address to hand the TV.
+Catch up
+Change
+Change Nuvio profile
+Change PIN
+Change stream
+Change the name, the face or the colour.
+Change to a different profile
+Chat
+Chat messages
+Check for updates
+Check this phone's connection. Watchly keeps trying.
+Checking TorBox
+Checking the key…
+Choose an episode to see what is available.
+Choppy here ({})
+Clear
+Clear all
+Clear everything you have played?
+Close
+Code copied
+Collection data from TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.
+Comedy
+Completed on your list
+Connect
+Connect it in Settings → Integrations first
+Connected
+Connected as {}
+Connected — waiting for the host to play something
+Connecting to the party…
+Continue
+Continue Watching
+Continue with {}
+Continue with Nuvio
+Continue with Stremio
+Copied
+Copy your addons to the TV?
+Couldn't add that addon
+Couldn't add that torrent
+Couldn't connect to that device.
+Couldn't fetch that subtitle
+Couldn't load that picture.
+Couldn't reach {}.
+Couldn't reach AniList
+Couldn't reach Nuvio
+Couldn't reach Nuvio.
+Couldn't reach Stremio
+Couldn't reach Stremio.
+Couldn't reach the TV — is the phone on the same Wi-Fi?
+Couldn't read that file
+Couldn't read that file.
+Couldn't restore that backup
+Couldn't start that download
+Couldn't start the download
+Couldn't write the backup: {}
+Creators
+Crime
+Crime Series
+Current PIN
+Dark
+Delete {}?
+Delete from this phone
+Delete profile
+Details
+Direct
+Director
+Disconnect
+Documentaries
+Documentary
+Don't wait
+Done
+Download
+Download {}: pick a release
+Download ahead
+Download finished
+Download season
+Download: pick a release
+Downloading
+Downloading {} — see Downloads
+Downloading season {} of {} — see Downloads
+Downloading the next 5 minutes
+Downloading the whole file
+Downloading. Tap the notification when it's done to install.
+Downloads
+Drama
+Drama Series
+Earlier
+Edit Home
+Edit profile
+Email
+Email and password
+End of episode
+End party
+Ends at {}
+Ends at {} if you resume now
+Enjoying Watchly?
+Enter four digits for the new PIN
+Enter the 8-character code your friend shared.
+Enter the current PIN first
+Enter the current PIN to remove it
+Enter your Nuvio email and password.
+Enter your PIN to open this profile.
+Episode
+Episode {}
+Episode {} {}
+Episode number
+Episodes
+Every addon is here already
+Every title, addons and stream search included.
+Everything
+Extra trackers
+Failed
+Family films and series only. No addons, stream search or links from other apps — give your own profile a PIN so it stays that way.
+Fantasy
+Fastest
+Fastest takes pieces from wherever the swarm has them. In order fills each file from the start, so you can watch it while it downloads — but it is slower.
+Favourite genres
+Favourites
+File
+Files already saved stay on this phone
+Film
+Film {} of {}
+Films
+Films & series
+Films only
+Find a watch order
+Find subtitles
+Find subtitles online…
+Finding {}…
+Finding peers
+Finding peers and reading the file list
+Finding peers…
+Finding sources…
+Finding the room and asking the host what's on.
+Finish or stop downloads and playback first.
+Finished
+Four digits, asked for before this profile opens. A lock for a shared phone — not a password.
+Frames
+Free and open source — a star helps others find it
+From URL
+From phone
+From your accounts
+Genre
+Genres on the home screen
+Get started
+Go on
+Guest
+Guest keeps Continue Watching on this phone; My List and sign-ins go when the app closes.
+Guests' requests
+Habits
+History
+History, resume points, lists, settings, searches and intro marks as one file. Downloads are not in it — they are files on this phone.
+Home
+Home screen rows
+Horror
+Hours watched, favourites and streaks
+How much of a film may sit on this phone at once. When it fills, what you've watched is let go to make room. Auto uses the free space, keeping a few GB spare.
+How much of your watching was each genre. A title counts in each of its genres.
+I accept
+IMDb {}+
+IMDb rating
+Ignore
+Import addons
+In My List
+In order
+Instant
+Integrations
+Invite
+It's free and open source. A star on GitHub helps others find it.
+Its host has left, or ended it. Ask them for a new link.
+Its own library, My List and resume points.
+Its own store, apart from Watchly's
+Join
+Join a watch party
+Join the party
+Join with a code
+Joining the watch party…
+Joining — the party's film shows in a moment.
+Jump to {}
+Just for you, or ask the leader to pause for everyone?
+Just for you, or ask the leader to play for everyone?
+Keep downloading
+Keep it
+Keep this open — the film shows here as soon as they start it.
+Kept for a fast reopen
+Kids profile
+Known for
+Language: {}
+Languages
+Larger starts slower but is steadier on a weak swarm.
+Last watched {}
+Leave
+Legal notice
+Library
+Library, My List and resume points belong to this profile.
+Light
+Light or dark pages, or whichever the phone is set to. The player stays dark either way.
+Like
+Liked
+Link to an image
+Loading
+Loading…
+Lock
+Longest streak
+Make a profile to keep your sign-ins — Guest forgets them when the app closes.
+Manage
+Manage profiles
+Media3 hands a file it can't play to VLC by itself. VLC from the start plays the most formats and full ASS subtitle styling.
+Message
+Mini player
+More
+More {}
+More like this
+Most watched
+Move rows up or down, or switch them off. Each profile keeps its own.
+Movies, shows, anime
+My List
+Mystery
+NEXT EPISODE
+Needs {} Mb/s
+Network
+Network, order and storage
+New Episodes
+New PIN
+New episode alerts
+New episode: {}
+New episodes
+New episodes of shows you follow, finished downloads and updates show here
+Next 5 minutes
+Next episode
+Next up: {}
+No
+No addons on this phone yet
+No addons yet
+No app here can open that link
+No audio tracks reported yet.
+No installed addon matches.
+No notifications yet
+No one else yet — tap the invite button above.
+No other line near that moment. Tap just as someone starts speaking.
+No other player on this phone can open it.
+No other release found.
+No peers answered. The torrent may be dead, or the network is blocking BitTorrent.
+No releases for “{}”
+No releases match the filters
+No season {} pack found yet — download the episodes one by one.
+No settings match
+No sources
+No sources found for {}.
+No video in this torrent
+No watch order by that name
+None
+None in {}.
+Normal
+Not connected
+Not for this profile
+Not now
+Not out yet
+Not set up in this build
+Not signed in
+Not signed in to AniList on this phone
+Not started
+Not working
+Not working: {}
+Nothing downloaded yet. Download from a title's page, and it plays here without a connection.
+Nothing found for “{}”
+Nothing found in {}. Change the language and try again.
+Nothing found in this language
+Nothing found. Try another episode, or add another addon in Settings → Addons.
+Nothing here yet. Anything you play turns up in this list.
+Nothing kept. A film you stop part-way keeps its start here, so it opens at once next time.
+Nothing matches the filters
+Nothing on this shelf right now.
+Nothing rated that high here.
+Nothing to choose from.
+Nothing watched on {} yet.
+Notifications
+Notifications are turned off for Watchly, so alerts can't show yet.
+Notifications, {} new
+Now playing
+Nuvio engine's cache
+ON THE PICTURE
+Off
+Off, the player has no party button and invite links are turned away. Turning it off leaves any party you're in.
+On
+On the picture
+On your list
+One library on this phone. Add profiles to keep a library, My List and resume points each.
+Only a torrent can be watched together — this one is a file or a plain link.
+Only add addons you trust: it chooses what you are offered to play.
+Only play, pause and where you are are shared, encrypted. You'll see what's on before anything plays.
+Only the genres picked here get rows on the home screen. Leave all off to build it from what you have watched.
+Only the leader can pause the party — or pause just for you, and catch up after.
+Only the leader can play the party — or play just for you, and catch up after.
+Only the people in this party see it, and it's gone when the party ends.
+Open Stremio
+Open Stremio again
+Open again
+Open in another player
+Opening the film…
+Opening…
+Opens app
+Or tap Install on an addon's site and pick Watchly.
+Or tap here when someone speaks
+Order
+Original
+Other files
+Our terms have changed
+PIN removed
+PIN set for {}
+Party code
+Password
+Paste an addon link first
+Paste your SubDL key first
+Paste your TorBox key first
+Pause
+Pause in {} min
+Paused
+Paused  ·  {}%
+People
+People · {}
+Phone
+Pick a few — your home screen leads with them. Change them any time in Settings.
+Pick my own source
+Picked for you
+Picture
+Play
+Play {}
+Playback
+Playback speed
+Player
+Player, languages and subtitles
+Playing now
+Popular Series
+Previous
+Privacy policy
+Profile PIN
+Profile name
+Profile, Stremio, Nuvio and PIN
+Quality
+Reactions
+Reading…
+Recent searches
+Reconnecting…
+Rejoin
+Rejoin to be there when it starts again
+Rejoin to watch together again
+Release language
+Release order
+Releases TorBox has cached say Instant, and play from its servers — no peers to wait for, seek anywhere. Anything else streams from the swarm as before.
+Remove PIN
+Remove from Continue Watching
+Remove from Library
+Remove key
+Reopen
+Reopen it — everyone's link still works
+Replaces the TV's, for this profile
+Reset to default
+Restored {} parts of the library
+Resume
+Resume {}
+Resume points and downloaded subtitles go too
+Reviews
+Reviews of {}
+SD card
+Save
+Save or restore your library
+Save to the SD card's app folder instead of the phone. Files there go if the app is uninstalled.
+Saved
+Saved, encrypted on this phone — Find subtitles searches SubDL too. Enter another to replace it.
+Say hello
+Sci-Fi
+Search
+Search installed addons
+Search settings
+Searching…
+Season {}
+Season {} packs
+See all
+See the first-run tour again
+Send
+Send {} addon
+Send {} addons
+Send my addons to Stremio
+Send your AniList sign-in
+Sending to the TV…
+Sending your addons…
+Sent to the TV
+Series
+Series only
+Services
+Set PIN
+Settings
+Show
+Show all
+Show all {} episodes
+Show the button
+Sign in
+Sign in and approve on the page that opened — this notices by itself. Code {}
+Sign in to Nuvio
+Sign in to Stremio
+Sign out
+Sign the TV in to AniList?
+Signed in
+Signed in as {}
+Signing in…
+Signs in on Stremio's own page
+Simkl, MDBList and AniList
+Size
+Size, colour and a box behind the words. Media3 shows a change on the next line; VLC from the next video.
+Skip
+Skip for now
+Skipped
+Skipped intro
+Sleep timer
+Sleep timer off
+Sleep timer — paused
+Smallest
+Smooth catch-up
+Sources
+Specials
+Speed ({})
+Star on GitHub
+Start a party and share its code. Everyone who joins with it plays the film in step with you, with chat and reactions. No account, and only play, pause and the spot are shared — encrypted.
+Start a watch party
+Start one with the people button at the top of the player, and send the link. Everyone streams the film on their own device; only play, pause and the spot are shared, encrypted, with no account.
+Start over
+Starting playback
+Starting playback  ·  from {}
+Stats
+Still finding sources…
+Stop after this episode
+Stop and delete what has arrived
+Stop casting
+Stop downloading {}?
+Storage for one film
+Storage, buffer and trackers
+Story order
+Streaming
+Streams
+Streams, subtitles and extra catalogues come from addons — public ones, your debrid service's, or your own media server's. Watchly comes with none.
+Stremio code
+Stretch
+SubDL and TorBox keys
+SubDL key
+SubDL key removed
+SubDL key saved
+Subtitle language
+Subtitle search failed
+Subtitle style
+Subtitles
+Subtitles synced: {}
+Subtitles: {}
+Swarm
+Switch profile
+Switching stream…
+Switching to VLC to bring subtitles earlier
+Switching to VLC — the built-in player can't play this video
+Synced. Subtitles now show {}.
+System
+Tap to install
+Terms and conditions
+That code ran out — sign in again for a new one.
+That code ran out — try again.
+That didn't go through — connect again for a new code.
+That isn't a Watchly TV on your home network.
+That isn't a party code — it's 8 letters and numbers, like K7Q2-M9XD.
+That isn't a watch party code.
+That magnet link could not be parsed
+That one is a link and streams only. Pick a torrent to download.
+That version is no longer the latest
+That watch party has closed.
+That watch party link is incomplete.
+That's not the PIN
+That's not the PIN. Try again.
+The 8-character code the leader shares from the player's party panel. Home's party button takes it too.
+The code is 8 letters and numbers.
+The file's default
+The host
+The leader sets the speed in a watch party
+The next {} days of the series you follow and the films you saved.
+The rules for using Watchly
+The watch party has ended
+Theme
+Language, theme, home screen genres and rows
+Watchly's words in your language. Titles and descriptions come from the catalogues as they are.
+This Nuvio account has one profile
+This build of Watchly has no watch party.
+This phone
+This product uses the TMDB API but is not endorsed or certified by TMDB.
+This torrent holds no video.
+This watch party is closed
+This week
+Thriller
+Thrillers
+Timing
+Titles
+Titles you add to My List wait here.
+Titles you like collect here.
+To host, start a party from the player.
+To take Watchly's access away on AniList too, remove it under Settings → Apps there.
+Today
+Top on IMDb
+Top results
+TorBox key removed
+TorBox key saved
+Torrent engine
+Trending Movies
+UP NEXT
+Uninstall
+Uninstalled {}
+Up next
+Upcoming
+Update
+Update available
+Use
+Use mobile data
+Version {} · built {}
+Version {}  ·  {}
+Video
+Wait for slow connections
+Waiting for Wi-Fi
+Waiting for Wi-Fi  ·  {}%
+Waiting for your approval…
+Watch
+Watch {} together
+Watch order
+Watch orders
+Watch party
+Watch party is turned off — turn it on in Settings → Watch party.
+Watch something, and your stats start here.
+Watched
+Watching
+Watching on their own
+Watchly is a media player only
+Welcome tour
+What do you like?
+What should the TV copy?
+What shows over the film while the party panel is shut. Off, chat still collects in the panel — a dot on the party button says there is something new.
+What stays here and what is sent
+What streams a torrent. A change starts with the next film.
+What the others see when you join or ask for something. Left blank, it is the profile's name, {}.
+What you finish here is marked watched on your accounts, and what they have watched shows here. You sign in on each service's own page, so your password never comes to Watchly.
+When you lead a party and a guest asks to pause, play or jump. Ignored, their buttons tell them only you control it.
+When you lead, the film pauses for anyone whose stream stops to load and plays on when they are through — for this long at most. Go on, on the banner, stops waiting at any time.
+Where an episode's intro is known, jump past it by itself instead of showing the Skip intro button. Once per episode — seek back to watch it.
+Where you stopped on Nuvio is in Continue Watching, My List is your Nuvio library, and what you finish is marked watched.
+Which Nuvio profile is this?
+Which file?
+White
+Who's watching?
+Whole file
+Wi-Fi only
+Wi-Fi only holds a download on mobile data — it waits, and carries on when Wi-Fi is back. Use mobile data on a waiting download to let that one through.
+With a torbox.app API key, releases TorBox has cached play from its servers instead of from peers. The key is under Settings on torbox.app, and stays encrypted on this phone.
+With every release it was played from
+Year
+Yellow
+You ended your watch party
+You have version {}
+You left the watch party
+You watch most on
+You're offline — showing what was saved
+You're watching
+Your Nuvio library, Continue Watching and addons here, kept in step both ways. Your password goes only to Nuvio.
+Your Nuvio library, Continue Watching and addons here. As Guest it's forgotten when the app closes.
+Your Nuvio library, Continue Watching and addons. Your password goes only to Nuvio.
+Your Stremio library, Continue Watching and addons here, kept in step both ways. Sign in on Stremio's own page — your password never comes to Watchly.
+Your Stremio library, Continue Watching and addons here. As Guest it's forgotten when the app closes.
+Your SubDL API key
+Your TorBox API key
+Your genres
+Your library
+Your media player
+Your name
+Your name, guests' requests and waiting
+Your stats
+Your watch party
+Zoom to fill
+about {} for {} episodes
+at the end of this episode
+invited you to watch together
+more coming
+out now
+this film
+this month
+watched this year
+day streak
+days streak
+✓ Signed in to Stremio — your library and where you stopped are below
+{} paused
+{} pressed play
+{} jumped to {}
+{} set the speed to {}
+{} joined
+{} left the party
+{} ended the party
+Asked to pause for everyone
+Asked to play
+Asked to jump to {} for everyone
+Catching up with the party
+Only the leader controls this party
+Watching on your own — Catch up any time
+Went on without {}
+{}d ago
+{}h ago
+{}m ago
+just now
+Tomorrow
+Popular
+Top rated
+Newest
+Family
+Family films
+Family series
+Romance
+War
+Western
+Sport
+Live TV
+Complete series
+Season pack
+You're on the latest version
+Couldn't check for updates
+Couldn't download the update
+The update didn't download properly. Try again.
+Couldn't reach {}
+Couldn't find {} — check the link and your connection
+Couldn't open that torrent.
+Couldn't start that stream.
+No addon at that link — check it
+Not an addon manifest
+That isn't an addon link
+Playback could not start
+This file could not be played
+No decoder for this audio
+No decoder for this video
+No seeds
+Out of storage space. The stream has been stopped and its files cleared.
+Out of storage space. The stream has been stopped.
+The torrent engine lost this stream. Please try again.
+This torrent's metadata went stale. Open it again.
+TorBox didn't accept the API key.
+TorBox is still preparing this torrent. Try again in a minute.
+TorBox stopped — streaming from peers instead.
+TorBox wouldn't add this torrent.
+That backup is empty
+That file is gone — it may have been deleted or the card removed.
+Subtitle {}
+Track {}
+History and resume points
+My List, searches and home genres
+Settings and addons
+English
+Spanish
+French
+German
+Italian
+Portuguese
+Portuguese (Brazil)
+Russian
+Turkish
+Arabic
+Hindi
+Bengali
+Tamil
+Telugu
+Malayalam
+Indonesian
+Japanese
+Korean
+Chinese
+Dutch
+Polish
+Swedish
+Greek
+Hebrew
+Persian
+Thai
+Vietnamese
+Romanian
+Croatian
+Serbian
+Bosnian
+Language
+App language
+Device language
+Auto
+AMOLED Black
+Use pure black backgrounds for OLED screens.
+Home screen
+{} picked
+{} languages
+Science Fiction
+Biography
+Music
+Musical
+Kids
+News
+Reality-TV
+Action & Adventure
+Sci-Fi & Fantasy
+On your own — Catch up is on the bar
+A free key from subdl.com adds its subtitles to Find subtitles. It stays encrypted on this TV.
+Add a profile
+Add an addon by its link — a public one, your debrid service's, or your own media server's. Watchly comes with none.
+Added
+Added {}.
+AniList sign-in
+Anime only · signed in from your phone
+Another release of {}, kept in step
+As a guest, a small gap to the leader closes by playing up to 8% faster or slower. Off, the player jumps instead.
+Back {} s
+Brings this profile's history, resume points, lists, searches, addons and every setting from Watchly on your phone, replacing what is here. The SubDL and TorBox keys stay put — they are not sent.
+Buffering  ·  {}  ·  {} peers
+Cancel the update
+Catch up with the party
+Chat messages and reactions over the film while the party panel is shut.
+Checking…
+Collection
+Copy addons from phone
+Copy all addons from Watchly on this phone
+Copy everything from Watchly on this phone
+Copy from phone
+Couldn't add that addon.
+Down
+Downloading update
+Downloading version {}  ·  {}%
+Enter 4 digits
+Enter a key
+Enter the {}-character code your friend shared.
+Every addon is here already.
+Everyone
+Everything you have played, with where you stopped.
+Finding peers  ·  {} DHT nodes
+Forget it
+Forward {} s
+Four digits, asked for before this profile opens. A lock for a shared TV — not a password.
+From Stremio
+Go back
+Go on without them
+Guest keeps nothing — history and My List go when the app closes.
+Hide this row
+How much of a film may sit on this TV at once. When it fills, what you've watched is let go to make room. Auto uses the free space, keeping a few GB spare.
+Join a party
+Join and watch {}
+Join one, and how yours runs
+Join with it in Watchly: Settings → Watch party.
+Joining — look at the TV.
+Leave all off to build the home screen from what you have watched.
+Leave the party
+Media3 keeps 4K smooth with subtitles on, and hands a file it can't play to VLC by itself. VLC from the start plays the most formats and full ASS styling, but a weak TV can drop frames each time a subtitle changes.
+Move down
+Move up
+Name
+No app on this TV can open that link
+No one else yet — scan the code to invite.
+No sources found for {}
+None in {}
+Not that
+Nothing found. Try another episode, or add another addon under Settings → Addons.
+Nothing here
+Nuvio account
+Off, the player has no party button and links from your phone are turned away. Turning it off leaves any party you're in.
+On their own
+Or scan with a phone.
+Paste from phone
+Paste it first.
+Paste the link from your phone
+Play starts the best one. Or pick a version here — size, quality, language.
+Player and skip intro
+Previous episode
+Profile
+Profile, PIN, Stremio and Nuvio
+Rejoin the party
+Rejoin the watch party
+Rejoin to watch together again.
+Remove
+Reopen it — the link everyone has still works.
+Reopen the party
+Reset Home to default
+Row
+Save key
+Saved, encrypted on this TV — Find subtitles searches SubDL too. Enter another to replace it.
+Say hello. Only the people in this party see it.
+Scan with a phone to join — it opens Watchly.
+Scan with your phone's camera and approve, or enter this code on {}
+Scan with your phone's camera, paste your {} on the page that opens, and tap Save. Your phone needs to be on the same Wi-Fi as the TV.
+Send AniList sign-in from Watchly on this phone
+Settings, lists and history from Watchly on your phone
+Show QR code
+Show all {} sources
+Show this row
+Sign in with phone
+Sources for S{}:E{}
+Speed {}
+Starring
+Start a party and share the link or QR code. Everyone who opens it plays the film in step with you, with chat and reactions. No account, and only play, pause and the spot are shared — encrypted.
+Starting playback  ·  {}  ·  {} peers
+Stats for nerds
+Stremio account
+That didn't read.
+That didn't work.
+That isn't a whole watch party link — copy all of it.
+That list didn't read.
+The TV isn't on a network a phone can reach.
+The code is {} letters and numbers.
+The watch party has ended — Rejoin is in Settings → Watch party.
+This Nuvio account has one profile.
+This page notices by itself once you've approved.
+Top IMDb {} in your genres
+Top {} on IMDb
+movies
+series
+TorBox key
+Type a link
+Type the 8-character code the leader shares. An older invite link? Scan the code below with your phone and paste it there. The TV asks before it plays anything.
+Type the code
+Up
+Use link
+Version {}  ·  {}%
+Version {} is ready — see Settings
+Watch party · {}
+Watching as {} — switch
+What the others see. Left blank, it is the profile's name, {}.
+What you finish here is marked watched on your accounts, and what they have watched shows here. You sign in on your phone, so your password never comes to Watchly.
+When you lead a party and a guest asks to pause, play or jump.
+When you lead, the film pauses for anyone whose stream stops to load, for this long at most.
+Where an episode's intro is known, jump past it by itself instead of showing the Skip intro button. Once per episode — rewind to watch it.
+Where streams and subtitles come from
+With a torbox.app API key, releases TorBox has cached play from its servers instead of from peers. The key is under Settings on torbox.app, and stays encrypted on this TV.
+You
+You're in a party now. Leave it from the party button in the player.
+Your Nuvio library, Continue Watching and addons on this TV, kept in step both ways. Your password goes only to Nuvio.
+Your Nuvio library, Continue Watching and addons on this TV. As Guest it's forgotten when the app closes.
+Your Stremio library, Continue Watching and addons on this TV, kept in step both ways. You sign in on your phone — no password on the TV.
+Your Stremio library, Continue Watching and addons on this TV. As Guest it's forgotten when the app closes.
+Your addons
+{} releases for “{}”
+{} s in the player
+Language and home screen genres
+Language, theme and home screen genres
+A PIN is four digits
+A free key from subdl.com adds its subtitles to Find subtitles. It stays encrypted on this PC.
+A new message shows over the film for a moment while the party panel is shut.
+A small gap to the leader closes by playing up to 8% faster or slower. Off, the player jumps instead.
+API key saved
+Add
+Add public trackers
+Added to the download already running
+Added {} — see the Addons tab
+Ahead
+All {}
+All · {}
+AniList refused it
+Approve Watchly on AniList's page — it brings you back here.
+Ask it later
+Ask it sooner
+Ask your addons for a film by name, or paste a link to play it as it is — a video on your own media server, or a magnet. You can also drop a .torrent file or a magnet link anywhere on this window.
+Audio & Subtitles
+Audio Track {}
+Average bitrate
+Back (Esc)
+Back 10 seconds (←)
+Back to the full player (P)
+Bare magnet links resolve much faster than over DHT alone
+Bigger subtitles
+Browser
+Buffering
+Buffering {}%
+Cache, history and saved torrent info
+Change folder
+Channels
+Chat messages on the picture
+Check the connection and try again.
+Check the connection — it loads again when you are back online.
+Check this PC's connection. Watchly keeps trying.
+Checking TorBox…
+Checking files
+Choppy here ({}) — this PC's graphics can't decode it
+Clear artwork and title cache
+Clear recent searches
+Clear saved torrent info
+Clear saved torrent info?
+Clear watch history
+Clear watch history?
+Code {}
+Codec
+Colour
+Confirm
+Connections
+Content bitrate
+Continue watching
+Copy invite link
+Copy link
+Copy magnet link
+Copy the code
+Corrupted
+Could not load this page
+Could not load this shelf
+Could not start: {}
+Couldn't copy the invite
+Couldn't load that picture
+Couldn't open {}
+Couldn't reach the clipboard — try again
+Creator
+Creators: {}
+Crop
+Delete
+Delete download?
+Delete downloads?
+Delete files after stopping
+Director: {}
+Discontinuities
+Dismiss
+Display
+Displayed
+Download a torrent
+Download every episode
+Download every video
+Download folder
+Download season {} from this release
+Download speed limit
+Download this release
+Download {} Mb/s
+Downloading only the next 5 minutes
+Downloading — see the Downloads tab
+Downloads go to your downloads folder, resume where they left off after a restart, and play in VLC's engine — every format and audio track is supported.
+Downloads you start live here until you delete them. Paste a magnet link above to download any torrent.
+End ({})
+Enter a search term and press Search
+Enter your Nuvio email and password
+Ep {}
+Exit full screen
+F: Fullscreen · P: Mini player · I: Stats · Space: Play/Pause · ←/→: 10s · ↑/↓: Vol · A: Audio · S: Subs · [: Slower · ]: Faster
+Family films and series only. No addons, stream search or links — give your own profile a PIN so it stays that way.
+Fast
+Good
+Weak
+Fetching
+Film {}
+Films and series
+Find your key at torbox.app
+Finding releases…
+Finding season {} packs…
+Folder, speed limits and seeding
+Forward 10 seconds (→)
+Four digits, asked for before this profile opens. A lock for a shared PC — not a password.
+Frame rate
+From PC
+Full screen
+Fullscreen
+Get a free key at subdl.com
+Hashing
+Hide
+How it works
+How storage works here
+In your Stremio library, or paused on another device or before this PC — open one to play it from where Stremio says you were.
+Input bitrate
+Instant · TorBox
+Invite link copied — paste it to your friends
+Join a watch party with its code
+Join party
+Keep seeding when done
+Keep the cache small; turn off to re-watch without re-downloading
+Keyboard shortcuts
+Leave it from Watch party in the player.
+Leave room for everything else on the connection
+Leechers
+Link
+Link copied
+Links stream only — there is no torrent here to download.
+Local file
+Locked
+Logout
+Lost buffers
+Lost frames
+Louder (↑)
+Magnet link copied
+Match Windows, or lock light or dark
+Metadata
+Move rows up or down, or hide them. Each profile keeps its own.
+Muted
+Next 5 min
+No SubDL key — add yours in Settings
+No addons to ask yet. Add one under Settings → Addons, or paste a link.
+No audio tracks detected
+No episode {}
+No favourites yet
+No matches
+No one else yet — copy the invite link and send it.
+No pack for season {} — download its episodes one by one below.
+No season {} pack in {} — change the language and try again, or download its episodes one by one below.
+No streams for that.
+No streams found for {}
+No subtitle inside that download
+No subtitles available
+No subtitles found
+No subtitles found. Use More → Find subtitles to search online.
+Not in this build
+Not now (Esc)
+Not signed in to Nuvio
+Not signed in to Stremio
+Nothing here yet
+Nothing in your library matches “{}”.
+Nothing matches that.
+Nothing rated that high here
+Nothing saved for later
+Nothing saved yet
+Nothing saved — torrents you open are remembered here so they open faster next time
+Nothing stored
+Nothing to clear
+Open
+Open in browser
+Open shelf
+Open the page again
+Open title
+Open title page
+Opening
+Opens in the browser
+Or click Install on an addon's site. Links are kept encrypted for this Windows account.
+Party code {} copied — send it to your friends
+Party code, like K7Q2-M9XD
+Pick a few and the home page opens with them
+Pick a picture
+Pick a release to download
+Pieces
+Play / pause (Space)
+Play last file
+Playback stalled — waiting for data
+Played buffers
+Popular right now
+Posters, plots and shelves load fresh next time
+Quieter (↓)
+Reactions float up over the film.
+Reactions on the picture
+Read
+Reading torrent
+Reading torrent…
+Rejoin watch party
+Releases TorBox has cached say Instant and play from its servers — no peers to wait for. Anything else streams from the swarm as before.
+Remove from history
+Remove from history?
+Reopen watch party
+Resolution
+SAVED
+Save a copy
+Save fully, then open
+Saved torrent info cleared
+Saved, encrypted on this PC — Find subtitles searches SubDL too. Enter another to replace it.
+Saving to {}
+Say hello. Only the people in this party see it, and it's gone when the party ends.
+Search by title…
+Search titles and files
+Seeders
+Send (Enter)
+Share a finished download until you stop it on the Downloads tab
+Show fewer episodes
+Show in folder
+Signed out
+Signed out of Nuvio
+Signing in to AniList…
+Skip intros
+Skip intros automatically
+Smaller subtitles
+Someone
+Sources  ·  {}
+Special {}
+Speed ({}x)
+Speed {}x
+Start (0:00)
+Start a party and send its code. Everyone who joins with it plays the film in step with you, with chat and reactions. No account, and only play, pause and the spot are shared — encrypted.
+Starting
+Starting download…
+Startup speed
+Stop
+Stop download?
+Storage
+Stream
+Stream dropped — picking it back up
+Stremio said no
+Stremio sent no addons
+Stremio sent no code
+Stremio sent nothing
+SubDL refused the request
+SubDL rejected the key
+Subtitle size: {}
+Subtitles: Off
+That didn't go through — connect again for a new code
+That is not a magnet link or a .torrent
+That subtitle download is too large
+That subtitle link isn't a secure web address
+The 8-character code the leader shares (an older invite link works too). Watchly shows what it would play and asks before it starts.
+The film pauses for anyone whose stream stops to load, for this long at most.
+The stream keeps dropping
+The update needs your go-ahead to install
+This copy of Watchly was built without the watch party relay.
+Title
+Title cache cleared
+TorBox API key
+TorBox didn't start — trying peers. If this won't play either, this release's video may not suit this PC: try another.
+TorBox's answer made no sense.
+Torrents will need to fetch their file lists from the swarm again the next time you open them. Watch history and downloads stay.
+Torrents you stream show up here with every file they contain, each with its own resume point.
+Trackers and how the cache works
+Try a lower rating, or another genre.
+Uninstall {}
+Unlimited
+Unlock controls
+Unlocked
+Up next in {}s
+Upload
+Upload speed limit
+Video {}
+Video {} Mb/s
+Viewer
+Volume
+Volume {}%
+Watch as pieces arrive
+Watch later
+Watch parties
+Watching as {} on Nuvio
+Watching as {}
+Watchly · movies and series, ready when you are. You are responsible for what you watch and download.
+What the others see
+What the swarm gets back while you download
+When a guest asks to pause, play or jump.
+When you lead
+When you watch
+Where an episode's intro is known, jump past it instead of showing the Skip intro button. Once per episode — seek back to watch it.
+Where should downloads go?
+Whole file (download)
+Windowed
+With a torbox.app API key, releases TorBox has cached play from its servers instead of from peers. Stored encrypted for this Windows account.
+You're in a party
+You're in a party — leave it from Watch party in the player.
+You're leading a party
+You're leading a party — end it from Watch party in the player.
+Your Stremio library and where you stopped are here, My List is your library there, and what you finish is marked watched. Addons you add or remove here change on your account too.
+Your Stremio library, Continue Watching and addons here, kept in step both ways. You sign in on Stremio's own page — your password never comes to Watchly.
+{} item(s) and their resume points will be deleted.
+{}s left
+{} chosen — these lead the home page
+{} will be removed from this list and from disk.
+{} — and the {} releases it was played from
+{} now asks for a PIN
+{} — switch profile
+{}% into ep. 1
+{} playable · {} files — how do you want to open it?
+{} will be removed. Finished files stay; unfinished ones are deleted.
+{} is rated {}. Switch to a grown-up's profile to watch it.
+🔒  The film streams on this PC. Only play, pause and the spot are shared — encrypted, no account.

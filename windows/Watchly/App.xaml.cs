@@ -34,7 +34,11 @@ public partial class App : Application
         }
 
         Log.Info("app", "Watchly starting up...");
-        Theme.Apply(AppSettings.Load().ThemeMode);
+        var settings = AppSettings.Load();
+        Theme.Apply(settings.ThemeMode);
+        // The words, before the first window: every TextBlock is translated as it loads.
+        I18n.Use(settings.Language ?? "");
+        Controls.Words.Start();
 
         DispatcherUnhandledException += (_, args) =>
         {

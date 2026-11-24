@@ -1,0 +1,1271 @@
+Menanyakan add-on kamu…
+{1} minta dijeda
+{1} minta diputar
+Unduh musim {1}
+Semua menunggu punyamu dimuat
+Hanya aku
+Sendiri
+Diputar di {1}
+Lewati intro
+Film di-stream di ponsel ini. Hanya putar, jeda, dan posisinya yang dibagikan — terenkripsi, tanpa akun.
+Menunggu {1}
+Menunggu {1} selesai memuat
+Menunggu kamu dan {1}
+Kamu akan jadi yang pertama bergabung
+Bisa diubah saat tidak ada yang diunduh atau diputar.
+{1} dari {2} ditonton
+{1} ditonton
+{1} baru
+{1} mengundangmu nonton bareng
+{1} episode
+{1} judul
+{1} rilis
+{1} seed
+{1} dari {2} tersimpan
+{1} detik lebih awal
+{1} detik lebih lambat
+{1} waralaba, dalam urutan yang benar
+{1} episode baru
+{1} terpasang · stream, subtitle, dan katalog
+Sisa {1} mnt
+Sisa {1} j {2} mnt
+Sisa {1} mnt
+{1} jeda audio
+{1} sejauh ini · mencari lagi…
+1 episode baru
+Film, atau tautan untuk diputar
+Kunci gratis dari subdl.com menambahkan subtitlenya ke Cari subtitle. Kunci tetap terenkripsi di ponsel ini.
+Profil anak tidak bisa membuka torrent atau add-on dari aplikasi lain.
+Trek yang cocok aktif sendiri saat video dibuka; kalau kamu pilih sendiri, pilihanmu yang dipakai. Pencarian subtitle online mencari dalam bahasa subtitle.
+Notifikasi saat serial yang kamu tonton atau ada di Daftarku punya episode baru. Dicek dua kali sehari.
+Akun
+Akun
+Aksi
+Tambah add-on
+Tambahkan add-on
+Tambahkan satu untuk mencari stream bagi setiap film dan episode. Tanpa add-on, hanya tautan yang kamu tempel di Cari yang bisa diputar.
+Tambahkan satu untuk mencari stream — Watchly tidak menyertakan satu pun
+Tambah profil
+Tambah profil
+Tambahkan add-on ini?
+Tambahkan ke kalender
+{1} add-on ditambahkan
+{1} add-on ditambahkan
+{1} ditambahkan
+{1} ditambahkan — lihat Pengaturan → Add-on
+Menambahkan…
+Add-on
+Petualangan
+Semua
+Semua sudah ditonton
+Semua genre
+Semua di atas
+Sepanjang waktu
+Semua ditonton
+Izinkan
+Izinkan sekarang
+Izinkan unduhan di latar belakang
+Izinkan notifikasi
+Sudah sinkron.
+Hewan
+Animasi
+Anime
+Hanya anime · tidak terhubung
+Apa saja
+Genre apa saja
+Bahasa apa saja
+Jaringan apa saja
+Kualitas apa saja
+Rating apa saja
+Tahun apa saja
+Tampilan
+Setujui Watchly di halaman AniList; kamu akan dikembalikan ke sini.
+Setujui di halaman yang terbuka, atau buka lagi. Kode {1}
+Sebagai tamu, selisih kecil dengan pemimpin ditutup dengan memutar hingga 8% lebih cepat atau lambat, tanpa terdengar. Jika mati, pemutar langsung melompat ke posisi pemimpin.
+Tanya aku
+Diminta sebelum profil ini dibuka. Hapus untuk membuka kunci.
+Menanyakan AniList…
+Tambahkan tracker publik ke tautan magnet tanpa tracker agar lebih cepat ditemukan.
+Audio
+Audio & subtitle
+Bahasa audio
+Audio: {1}
+Otomatis
+Penghargaan
+Kembali
+Cadangkan
+Cadangan
+Cadangan disimpan
+Penghemat baterai bisa memperlambat atau menghentikan unduhan saat layar mati. Biarkan Watchly berjalan di latar belakang agar tetap berlanjut.
+Karena kamu menonton {1}
+Karena kamu menonton…
+Sebelum 1990
+Sebelum mulai
+Paling pas
+Paling cocok
+Terbesar
+Bitrate
+Kotak di belakang
+Bawa pustaka Stremio-mu
+Bawa pustaka, Lanjut nonton, dan add-on dari Stremio atau Nuvio. Tetap sinkron dua arah.
+Membawa add-on kamu…
+Jelajahi film, serial, dan anime yang sedang tren, lalu putar dari add-on dan server pilihanmu. Watchly tidak menyertakan satu pun.
+Buffer
+Buffer sebelum diputar
+Menyatu di video: pakai − dan +.
+PILIH IKON
+Belum bisa menjangkau sesi
+Batal
+Transmisi
+Transmisi butuh Wi-Fi — tidak ada alamat untuk diberikan ke TV.
+Susul
+Ubah
+Ganti profil Nuvio
+Ubah PIN
+Ganti stream
+Ubah nama, wajah, atau warna.
+Ganti ke profil lain
+Obrolan
+Pesan obrolan
+Periksa pembaruan
+Periksa koneksi ponsel ini. Watchly terus mencoba.
+Memeriksa TorBox
+Memeriksa kunci…
+Pilih episode untuk melihat yang tersedia.
+Tersendat di sini ({1})
+Hapus
+Hapus semua
+Hapus semua yang pernah kamu putar?
+Tutup
+Kode disalin
+Data koleksi dari TMDB. Produk ini memakai API TMDB tetapi tidak didukung atau disertifikasi oleh TMDB.
+Komedi
+Selesai di daftarmu
+Hubungkan
+Hubungkan dulu di Pengaturan → Integrasi
+Terhubung
+Terhubung sebagai {1}
+Terhubung — menunggu host memutar sesuatu
+Menghubungkan ke sesi…
+Lanjutkan
+Lanjut nonton
+Lanjutkan dengan {1}
+Lanjutkan dengan Nuvio
+Lanjutkan dengan Stremio
+Disalin
+Salin add-on kamu ke TV?
+Tidak bisa menambahkan add-on itu
+Tidak bisa menambahkan torrent itu
+Tidak bisa terhubung ke perangkat itu.
+Tidak bisa mengambil subtitle itu
+Tidak bisa memuat gambar itu.
+Tidak bisa menjangkau {1}.
+Tidak bisa menjangkau AniList
+Tidak bisa menjangkau Nuvio
+Tidak bisa menjangkau Nuvio.
+Tidak bisa menjangkau Stremio
+Tidak bisa menjangkau Stremio.
+Tidak bisa menjangkau TV — apakah ponsel di Wi-Fi yang sama?
+Tidak bisa membaca file itu
+Tidak bisa membaca file itu.
+Tidak bisa memulihkan cadangan itu
+Tidak bisa memulai unduhan itu
+Tidak bisa memulai unduhan
+Tidak bisa menulis cadangan: {1}
+Kreator
+Kriminal
+Serial kriminal
+PIN saat ini
+Gelap
+Hapus {1}?
+Hapus dari ponsel ini
+Hapus profil
+Detail
+Langsung
+Sutradara
+Putuskan
+Dokumenter
+Dokumenter
+Jangan tunggu
+Selesai
+Unduh
+Unduh {1}: pilih rilis
+Unduh lebih dulu
+Unduhan selesai
+Unduh musim
+Unduh: pilih rilis
+Mengunduh
+Mengunduh {1} — lihat Unduhan
+Mengunduh musim {1} dari {2} — lihat Unduhan
+Mengunduh 5 menit berikutnya
+Mengunduh seluruh file
+Mengunduh. Ketuk notifikasi saat selesai untuk memasang.
+Unduhan
+Drama
+Serial drama
+Sebelumnya
+Edit Beranda
+Edit profil
+Email
+Email dan kata sandi
+Akhir episode
+Akhiri sesi
+Selesai pukul {1}
+Selesai pukul {1} jika dilanjutkan sekarang
+Suka Watchly?
+Masukkan empat angka untuk PIN baru
+Masukkan kode 8 karakter yang dibagikan temanmu.
+Masukkan PIN saat ini dulu
+Masukkan PIN saat ini untuk menghapusnya
+Masukkan email dan kata sandi Nuvio kamu.
+Masukkan PIN untuk membuka profil ini.
+Episode
+Episode {1}
+Episode {1} {2}
+Nomor episode
+Episode
+Semua add-on sudah ada
+Semua judul, add-on, dan pencarian stream.
+Semuanya
+Tracker tambahan
+Gagal
+Hanya film dan serial keluarga. Tanpa add-on, pencarian stream, atau tautan dari aplikasi lain — beri PIN pada profilmu sendiri agar tetap begitu.
+Fantasi
+Tercepat
+Tercepat mengambil potongan dari mana pun swarm memilikinya. Berurutan mengisi tiap file dari awal, jadi bisa ditonton sambil diunduh — tapi lebih lambat.
+Genre favorit
+Favorit
+File
+File yang sudah tersimpan tetap di ponsel ini
+Film
+Film {1} dari {2}
+Film
+Film & serial
+Hanya film
+Cari urutan tonton
+Cari subtitle
+Cari subtitle online…
+Mencari {1}…
+Mencari peer
+Mencari peer dan membaca daftar file
+Mencari peer…
+Mencari sumber…
+Mencari ruangan dan menanyakan host apa yang diputar.
+Selesaikan atau hentikan dulu unduhan dan pemutaran.
+Selesai
+Empat angka yang diminta sebelum profil ini dibuka. Kunci untuk ponsel bersama — bukan kata sandi.
+Frame
+Gratis dan open source — bintang membantu orang lain menemukannya
+Dari URL
+Dari ponsel
+Dari akunmu
+Genre
+Genre di layar beranda
+Mulai
+Lanjut
+Tamu
+Tamu menyimpan Lanjut nonton di ponsel ini; Daftarku dan login hilang saat aplikasi ditutup.
+Permintaan tamu
+Kebiasaan
+Riwayat
+Riwayat, titik lanjut, daftar, pengaturan, pencarian, dan tanda intro dalam satu file. Unduhan tidak termasuk — itu file di ponsel ini.
+Beranda
+Baris layar beranda
+Horor
+Jam ditonton, favorit, dan rentetan
+Seberapa banyak film boleh ada di ponsel ini sekaligus. Saat penuh, yang sudah ditonton dilepas untuk memberi ruang. Otomatis memakai ruang kosong, menyisakan beberapa GB.
+Seberapa banyak tontonanmu dari tiap genre. Satu judul dihitung di setiap genrenya.
+Saya setuju
+IMDb {1}+
+Rating IMDb
+Abaikan
+Impor add-on
+Di Daftarku
+Berurutan
+Instan
+Integrasi
+Undang
+Gratis dan open source. Bintang di GitHub membantu orang lain menemukannya.
+Host-nya pergi atau mengakhirinya. Minta tautan baru.
+Pustaka, Daftarku, dan titik lanjut sendiri.
+Penyimpanan sendiri, terpisah dari Watchly
+Gabung
+Gabung nonton bareng
+Gabung ke sesi
+Gabung dengan kode
+Bergabung ke nonton bareng…
+Bergabung — film sesi akan muncul sebentar lagi.
+Lompat ke {1}
+Hanya untukmu, atau minta pemimpin menjeda untuk semua?
+Hanya untukmu, atau minta pemimpin memutar untuk semua?
+Lanjut mengunduh
+Simpan
+Biarkan ini terbuka — film muncul di sini begitu mereka memulainya.
+Disimpan agar cepat dibuka lagi
+Profil anak
+Dikenal lewat
+Bahasa: {1}
+Bahasa
+Lebih besar mulai lebih lambat tapi lebih stabil di swarm yang lemah.
+Terakhir ditonton {1}
+Keluar
+Pemberitahuan hukum
+Pustaka
+Pustaka, Daftarku, dan titik lanjut milik profil ini.
+Terang
+Halaman terang atau gelap, atau mengikuti ponsel. Pemutar tetap gelap.
+Suka
+Disukai
+Tautan ke gambar
+Memuat
+Memuat…
+Kunci
+Rentetan terpanjang
+Buat profil untuk menyimpan login — Tamu melupakannya saat aplikasi ditutup.
+Kelola
+Kelola profil
+Media3 menyerahkan sendiri file yang tidak bisa diputarnya ke VLC. VLC sejak awal memutar format terbanyak dan gaya subtitle ASS lengkap.
+Pesan
+Pemutar mini
+Lainnya
+{1} lainnya
+Serupa
+Paling banyak ditonton
+Pindahkan baris ke atas atau ke bawah, atau matikan. Tiap profil menyimpan miliknya.
+Film, serial, anime
+Daftarku
+Misteri
+EPISODE BERIKUTNYA
+Butuh {1} Mb/s
+Jaringan
+Jaringan, urutan, dan penyimpanan
+Episode Baru
+PIN baru
+Peringatan episode baru
+Episode baru: {1}
+Episode baru
+Episode baru dari acara yang kamu ikuti, unduhan selesai, dan pembaruan muncul di sini
+5 menit berikutnya
+Episode berikutnya
+Berikutnya: {1}
+Tidak
+Belum ada add-on di ponsel ini
+Belum ada add-on
+Tidak ada aplikasi di sini yang bisa membuka tautan itu
+Belum ada trek audio.
+Tidak ada add-on terpasang yang cocok.
+Belum ada notifikasi
+Belum ada orang lain — ketuk tombol undang di atas.
+Tidak ada baris lain di dekat momen itu. Ketuk tepat saat seseorang mulai bicara.
+Tidak ada pemutar lain di ponsel ini yang bisa membukanya.
+Tidak ada rilis lain.
+Tidak ada peer yang merespons. Torrent mungkin mati, atau jaringan memblokir BitTorrent.
+Tidak ada rilis untuk “{1}”
+Tidak ada rilis yang cocok dengan filter
+Belum ada paket musim {1} — unduh episodenya satu per satu.
+Tidak ada pengaturan yang cocok
+Tidak ada sumber
+Tidak ada sumber untuk {1}.
+Tidak ada video di torrent ini
+Tidak ada urutan tonton dengan nama itu
+Tidak ada
+Tidak ada dalam {1}.
+Normal
+Tidak terhubung
+Bukan untuk profil ini
+Nanti saja
+Belum rilis
+Belum diatur di build ini
+Belum masuk
+Belum masuk ke AniList di ponsel ini
+Belum dimulai
+Tidak berfungsi
+Tidak berfungsi: {1}
+Belum ada unduhan. Unduh dari halaman judul, dan akan diputar di sini tanpa koneksi.
+Tidak ada hasil untuk “{1}”
+Tidak ada hasil dalam {1}. Ganti bahasa lalu coba lagi.
+Tidak ada hasil dalam bahasa ini
+Tidak ada hasil. Coba episode lain, atau tambahkan add-on lain di Pengaturan → Add-on.
+Belum ada apa-apa. Apa pun yang kamu putar muncul di daftar ini.
+Tidak ada yang disimpan. Film yang kamu hentikan di tengah menyimpan awalnya di sini, agar langsung terbuka lain kali.
+Tidak ada yang cocok dengan filter
+Rak ini sedang kosong.
+Tidak ada yang rating-nya setinggi itu di sini.
+Tidak ada pilihan.
+Belum ada yang ditonton pada {1}.
+Notifikasi
+Notifikasi Watchly mati, jadi peringatan belum bisa muncul.
+Notifikasi, {1} baru
+Sedang diputar
+Cache mesin Nuvio
+DI ATAS GAMBAR
+Mati
+Jika mati, pemutar tidak punya tombol sesi dan tautan undangan ditolak. Mematikannya membuatmu keluar dari sesi yang sedang diikuti.
+Aktif
+Di atas gambar
+Di daftarmu
+Satu pustaka di ponsel ini. Tambahkan profil agar masing-masing punya pustaka, Daftarku, dan titik lanjut.
+Hanya torrent yang bisa ditonton bareng — ini file atau tautan biasa.
+Tambahkan hanya add-on tepercaya: merekalah yang memilih apa yang ditawarkan untuk diputar.
+Hanya putar, jeda, dan posisimu yang dibagikan, terenkripsi. Kamu akan melihat apa yang diputar sebelum dimulai.
+Hanya genre yang dipilih di sini yang mendapat baris di beranda. Matikan semua untuk menyusunnya dari tontonanmu.
+Hanya pemimpin yang bisa menjeda sesi — atau jeda untuk dirimu saja dan susul nanti.
+Hanya pemimpin yang bisa memutar sesi — atau putar untuk dirimu saja dan susul nanti.
+Hanya orang di sesi ini yang melihatnya, dan hilang saat sesi berakhir.
+Buka Stremio
+Buka Stremio lagi
+Buka lagi
+Buka di pemutar lain
+Membuka film…
+Membuka…
+Membuka aplikasi
+Atau ketuk Pasang di situs add-on dan pilih Watchly.
+Atau ketuk di sini saat seseorang bicara
+Urutan
+Asli
+File lain
+Ketentuan kami berubah
+PIN dihapus
+PIN diatur untuk {1}
+Kode sesi
+Kata sandi
+Tempel tautan add-on dulu
+Tempel kunci SubDL kamu dulu
+Tempel kunci TorBox kamu dulu
+Jeda
+Jeda dalam {1} mnt
+Dijeda
+Dijeda  ·  {1}%
+Orang
+Orang · {1}
+Ponsel
+Pilih beberapa — layar berandamu dimulai dengan ini. Ubah kapan saja di Pengaturan.
+Pilih sumber sendiri
+Dipilih untukmu
+Gambar
+Putar
+Putar {1}
+Pemutaran
+Kecepatan putar
+Pemutar
+Pemutar, bahasa, dan subtitle
+Sedang diputar
+Serial populer
+Sebelumnya
+Kebijakan privasi
+PIN profil
+Nama profil
+Profil, Stremio, Nuvio, dan PIN
+Kualitas
+Reaksi
+Membaca…
+Pencarian terbaru
+Menyambung ulang…
+Gabung lagi
+Gabung lagi agar ada saat dimulai kembali
+Gabung lagi untuk nonton bareng lagi
+Bahasa rilis
+Urutan rilis
+Rilis yang ada di cache TorBox bertanda Instan dan diputar dari servernya — tanpa menunggu peer, bisa lompat ke mana saja. Sisanya di-stream dari swarm seperti biasa.
+Hapus PIN
+Hapus dari Lanjut nonton
+Hapus dari pustaka
+Hapus kunci
+Buka lagi
+Buka lagi — tautan semua orang masih berfungsi
+Menggantikan milik TV, untuk profil ini
+Kembalikan ke bawaan
+{1} bagian pustaka dipulihkan
+Lanjutkan
+Lanjutkan {1}
+Titik lanjut dan subtitle yang diunduh ikut terhapus
+Ulasan
+Ulasan {1}
+Kartu SD
+Simpan
+Simpan atau pulihkan pustakamu
+Simpan ke folder aplikasi di kartu SD, bukan ponsel. File di sana hilang jika aplikasi dicopot.
+Tersimpan
+Tersimpan, terenkripsi di ponsel ini — Cari subtitle juga mencari di SubDL. Masukkan yang lain untuk menggantinya.
+Sapa
+Fiksi ilmiah
+Cari
+Cari add-on terpasang
+Cari pengaturan
+Mencari…
+Musim {1}
+Paket musim {1}
+Lihat semua
+Lihat tur awal lagi
+Kirim
+Kirim {1} add-on
+Kirim {1} add-on
+Kirim add-on saya ke Stremio
+Kirim login AniList kamu
+Mengirim ke TV…
+Mengirim add-on kamu…
+Terkirim ke TV
+Serial
+Hanya serial
+Layanan
+Atur PIN
+Pengaturan
+Tampilkan
+Tampilkan semua
+Tampilkan semua {1} episode
+Tampilkan tombol
+Masuk
+Masuk dan setujui di halaman yang terbuka — ini akan tahu sendiri. Kode {1}
+Masuk ke Nuvio
+Masuk ke Stremio
+Keluar akun
+Masukkan TV ke AniList?
+Sudah masuk
+Masuk sebagai {1}
+Sedang masuk…
+Masuk di halaman Stremio sendiri
+Simkl, MDBList, dan AniList
+Ukuran
+Ukuran, warna, dan kotak di belakang teks. Media3 menampilkan perubahan di baris berikutnya; VLC dari video berikutnya.
+Lewati
+Lewati dulu
+Dilewati
+Intro dilewati
+Timer tidur
+Timer tidur mati
+Timer tidur — dijeda
+Terkecil
+Susul perlahan
+Sumber
+Spesial
+Kecepatan ({1})
+Bintang di GitHub
+Mulai sesi dan bagikan kodenya. Semua yang bergabung menonton film bersamaan denganmu, dengan obrolan dan reaksi. Tanpa akun, dan hanya putar, jeda, dan posisinya yang dibagikan — terenkripsi.
+Mulai nonton bareng
+Mulai dengan tombol orang di atas pemutar, lalu kirim tautannya. Setiap orang men-stream film di perangkatnya sendiri; hanya putar, jeda, dan posisinya yang dibagikan, terenkripsi, tanpa akun.
+Mulai ulang
+Memulai pemutaran
+Memulai pemutaran  ·  dari {1}
+Statistik
+Masih mencari sumber…
+Berhenti setelah episode ini
+Hentikan dan hapus yang sudah masuk
+Hentikan transmisi
+Hentikan unduhan {1}?
+Penyimpanan untuk satu film
+Penyimpanan, buffer, dan tracker
+Urutan cerita
+Streaming
+Stream
+Stream, subtitle, dan katalog tambahan berasal dari add-on — publik, dari layanan debrid-mu, atau server media milikmu. Watchly tidak menyertakan satu pun.
+Kode Stremio
+Regangkan
+Kunci SubDL dan TorBox
+Kunci SubDL
+Kunci SubDL dihapus
+Kunci SubDL disimpan
+Bahasa subtitle
+Pencarian subtitle gagal
+Gaya subtitle
+Subtitle
+Subtitle disinkronkan: {1}
+Subtitle: {1}
+Swarm
+Ganti profil
+Mengganti stream…
+Beralih ke VLC untuk memajukan subtitle
+Beralih ke VLC — pemutar bawaan tidak bisa memutar video ini
+Tersinkron. Subtitle sekarang muncul {1}.
+Sistem
+Ketuk untuk memasang
+Syarat dan ketentuan
+Kode itu kedaluwarsa — masuk lagi untuk kode baru.
+Kode itu kedaluwarsa — coba lagi.
+Itu tidak berhasil — hubungkan lagi untuk kode baru.
+Itu bukan TV Watchly di jaringan rumahmu.
+Itu bukan kode sesi — kodenya 8 huruf dan angka, seperti K7Q2-M9XD.
+Itu bukan kode nonton bareng.
+Tautan magnet itu tidak bisa dibaca
+Itu tautan dan hanya bisa di-stream. Pilih torrent untuk diunduh.
+Versi itu sudah bukan yang terbaru
+Nonton bareng itu sudah ditutup.
+Tautan nonton bareng itu tidak lengkap.
+Itu bukan PIN-nya
+Itu bukan PIN-nya. Coba lagi.
+Kode 8 karakter yang dibagikan pemimpin dari panel sesi di pemutar. Tombol sesi di Beranda juga menerimanya.
+Kodenya 8 huruf dan angka.
+Bawaan file
+Host
+Pemimpin mengatur kecepatan di nonton bareng
+{1} hari ke depan dari serial yang kamu ikuti dan film yang kamu simpan.
+Aturan penggunaan Watchly
+Nonton bareng telah berakhir
+Tema
+Bahasa, tema, genre, dan baris beranda
+Watchly dalam bahasamu. Judul dan deskripsi berasal dari katalog apa adanya.
+Akun Nuvio ini punya satu profil
+Build Watchly ini tidak punya nonton bareng.
+Ponsel ini
+Produk ini memakai API TMDB tetapi tidak didukung atau disertifikasi oleh TMDB.
+Torrent ini tidak berisi video.
+Nonton bareng ini sudah ditutup
+Minggu ini
+Thriller
+Thriller
+Waktu
+Judul
+Judul yang kamu tambahkan ke Daftarku menunggu di sini.
+Judul yang kamu sukai terkumpul di sini.
+Untuk jadi host, mulai sesi dari pemutar.
+Untuk mencabut akses Watchly di AniList juga, hapus di sana lewat Settings → Apps.
+Hari ini
+Teratas di IMDb
+Hasil teratas
+Kunci TorBox dihapus
+Kunci TorBox disimpan
+Mesin torrent
+Film tren
+BERIKUTNYA
+Copot
+{1} dicopot
+Berikutnya
+Segera hadir
+Perbarui
+Pembaruan tersedia
+Gunakan
+Gunakan data seluler
+Versi {1} · dibuat {2}
+Versi {1}  ·  {2}
+Video
+Tunggu koneksi lambat
+Menunggu Wi-Fi
+Menunggu Wi-Fi  ·  {1}%
+Menunggu persetujuanmu…
+Tonton
+Tonton {1} bareng
+Urutan tonton
+Urutan tonton
+Nonton bareng
+Nonton bareng dimatikan — aktifkan di Pengaturan → Nonton bareng.
+Tonton sesuatu, dan statistikmu dimulai di sini.
+Ditonton
+Menonton
+Menonton sendiri
+Watchly hanyalah pemutar media
+Tur sambutan
+Kamu suka apa?
+Apa yang harus disalin TV?
+Yang tampil di atas film saat panel sesi tertutup. Jika mati, obrolan tetap terkumpul di panel — titik di tombol sesi menandakan ada yang baru.
+Yang tetap di sini dan yang dikirim
+Yang men-stream torrent. Perubahan berlaku mulai film berikutnya.
+Yang dilihat orang lain saat kamu bergabung atau meminta sesuatu. Jika kosong, ini nama profil, {1}.
+Yang kamu selesaikan di sini ditandai ditonton di akunmu, dan yang sudah kamu tonton di sana muncul di sini. Kamu masuk di halaman tiap layanan, jadi kata sandimu tidak pernah sampai ke Watchly.
+Saat kamu memimpin sesi dan tamu minta jeda, putar, atau lompat. Jika diabaikan, tombolnya memberi tahu bahwa hanya kamu yang mengendalikan.
+Saat kamu memimpin, film dijeda untuk siapa pun yang stream-nya berhenti memuat dan lanjut saat mereka siap — paling lama selama ini. Lanjut, di spanduk, berhenti menunggu kapan saja.
+Jika intro episode diketahui, lewati sendiri alih-alih menampilkan tombol Lewati intro. Sekali per episode — mundur untuk menontonnya.
+Posisi terakhirmu di Nuvio ada di Lanjut nonton, Daftarku adalah pustaka Nuvio-mu, dan yang kamu selesaikan ditandai ditonton.
+Profil Nuvio yang mana ini?
+File yang mana?
+Putih
+Siapa yang menonton?
+Seluruh file
+Hanya Wi-Fi
+Hanya Wi-Fi menahan unduhan di data seluler — menunggu, lalu lanjut saat Wi-Fi kembali. Gunakan data seluler pada unduhan yang menunggu untuk meloloskannya.
+Dengan kunci API torbox.app, rilis yang ada di cache TorBox diputar dari servernya, bukan dari peer. Kuncinya ada di Settings di torbox.app, dan tetap terenkripsi di ponsel ini.
+Dengan setiap rilis yang pernah dipakai memutarnya
+Tahun
+Kuning
+Kamu mengakhiri nonton bareng
+Kamu memakai versi {1}
+Kamu keluar dari nonton bareng
+Kamu paling sering menonton pada
+Kamu offline — menampilkan yang tersimpan
+Kamu menonton
+Pustaka Nuvio, Lanjut nonton, dan add-on kamu di sini, sinkron dua arah. Kata sandimu hanya dikirim ke Nuvio.
+Pustaka Nuvio, Lanjut nonton, dan add-on kamu di sini. Sebagai Tamu, dilupakan saat aplikasi ditutup.
+Pustaka Nuvio, Lanjut nonton, dan add-on kamu. Kata sandimu hanya dikirim ke Nuvio.
+Pustaka Stremio, Lanjut nonton, dan add-on kamu di sini, sinkron dua arah. Masuk di halaman Stremio sendiri — kata sandimu tidak pernah sampai ke Watchly.
+Pustaka Stremio, Lanjut nonton, dan add-on kamu di sini. Sebagai Tamu, dilupakan saat aplikasi ditutup.
+Kunci API SubDL kamu
+Kunci API TorBox kamu
+Genre kamu
+Pustakamu
+Pemutar mediamu
+Namamu
+Namamu, permintaan tamu, dan menunggu
+Statistikmu
+Nonton bareng kamu
+Perbesar untuk mengisi
+sekitar {1} untuk {2} episode
+di akhir episode ini
+mengundangmu nonton bareng
+segera ada lagi
+sudah tayang
+film ini
+bulan ini
+ditonton tahun ini
+hari beruntun
+hari beruntun
+✓ Masuk ke Stremio — pustakamu dan posisi terakhirmu ada di bawah
+{1} menjeda
+{1} menekan putar
+{1} lompat ke {2}
+{1} mengatur kecepatan ke {2}
+{1} bergabung
+{1} keluar dari sesi
+{1} mengakhiri sesi
+Diminta jeda untuk semua
+Diminta putar
+Diminta lompat ke {1} untuk semua
+Menyusul sesi
+Hanya pemimpin yang mengendalikan sesi ini
+Menonton sendiri — susul kapan saja
+Dilanjutkan tanpa {1}
+{1} hr lalu
+{1} j lalu
+{1} mnt lalu
+baru saja
+Besok
+Populer
+Rating tertinggi
+Terbaru
+Keluarga
+Film keluarga
+Serial keluarga
+Romantis
+Perang
+Western
+Olahraga
+TV langsung
+Serial lengkap
+Paket musim
+Kamu memakai versi terbaru
+Tidak bisa memeriksa pembaruan
+Tidak bisa mengunduh pembaruan
+Pembaruan tidak terunduh dengan benar. Coba lagi.
+Tidak bisa menjangkau {1}
+Tidak bisa menemukan {1} — periksa tautan dan koneksimu
+Tidak bisa membuka torrent itu.
+Tidak bisa memulai stream itu.
+Tidak ada add-on di tautan itu — periksa
+Bukan manifes add-on
+Itu bukan tautan add-on
+Pemutaran tidak bisa dimulai
+File ini tidak bisa diputar
+Tidak ada dekoder untuk audio ini
+Tidak ada dekoder untuk video ini
+Tidak ada seed
+Penyimpanan habis. Stream dihentikan dan filenya dihapus.
+Penyimpanan habis. Stream dihentikan.
+Mesin torrent kehilangan stream ini. Silakan coba lagi.
+Metadata torrent ini sudah usang. Buka lagi.
+TorBox tidak menerima kunci API.
+TorBox masih menyiapkan torrent ini. Coba lagi dalam semenit.
+TorBox berhenti — streaming dari peer.
+TorBox menolak menambahkan torrent ini.
+Cadangan itu kosong
+File itu sudah tidak ada — mungkin dihapus atau kartunya dilepas.
+Subtitle {1}
+Trek {1}
+Riwayat dan titik lanjut
+Daftarku, pencarian, dan genre beranda
+Pengaturan dan add-on
+Inggris
+Spanyol
+Prancis
+Jerman
+Italia
+Portugis
+Portugis (Brasil)
+Rusia
+Turki
+Arab
+Hindi
+Bengali
+Tamil
+Telugu
+Malayalam
+Indonesia
+Jepang
+Korea
+Mandarin
+Belanda
+Polandia
+Swedia
+Yunani
+Ibrani
+Persia
+Thai
+Vietnam
+Rumania
+Kroasia
+Serbia
+Bosnia
+Bahasa
+Bahasa aplikasi
+Bahasa perangkat
+Otomatis
+Hitam AMOLED
+Gunakan latar hitam pekat untuk layar OLED.
+Layar beranda
+{1} dipilih
+{1} bahasa
+Fiksi ilmiah
+Biografi
+Musik
+Musikal
+Anak-anak
+Berita
+Reality TV
+Aksi & Petualangan
+Fiksi ilmiah & Fantasi
+Sendiri — Susul ada di bilah
+Kunci gratis dari subdl.com menambahkan subtitlenya ke Cari subtitle. Kunci tetap terenkripsi di TV ini.
+Tambah profil
+Tambahkan add-on lewat tautannya — publik, dari layanan debrid-mu, atau server media milikmu. Watchly tidak menyertakan satu pun.
+Ditambahkan
+{1} ditambahkan.
+Login AniList
+Hanya anime · masuk dari ponselmu
+Rilis lain dari {1}, tetap sinkron
+Sebagai tamu, selisih kecil dengan pemimpin ditutup dengan memutar hingga 8% lebih cepat atau lambat. Jika mati, pemutar melompat.
+Mundur {1} dtk
+Membawa riwayat, titik lanjut, daftar, pencarian, add-on, dan semua pengaturan profil ini dari Watchly di ponselmu, menggantikan yang ada di sini. Kunci SubDL dan TorBox tetap — tidak dikirim.
+Buffering  ·  {1}  ·  {2} peer
+Batalkan pembaruan
+Susul sesi
+Pesan obrolan dan reaksi di atas film saat panel sesi tertutup.
+Memeriksa…
+Koleksi
+Salin add-on dari ponsel
+Salin semua add-on dari Watchly di ponsel ini
+Salin semuanya dari Watchly di ponsel ini
+Salin dari ponsel
+Tidak bisa menambahkan add-on itu.
+Bawah
+Mengunduh pembaruan
+Mengunduh versi {1}  ·  {2}%
+Masukkan 4 angka
+Masukkan kunci
+Masukkan kode {1} karakter yang dibagikan temanmu.
+Semua add-on sudah ada.
+Semua orang
+Semua yang pernah kamu putar, beserta posisi terakhirnya.
+Mencari peer  ·  {1} node DHT
+Lupakan
+Maju {1} dtk
+Empat angka yang diminta sebelum profil ini dibuka. Kunci untuk TV bersama — bukan kata sandi.
+Dari Stremio
+Kembali
+Lanjut tanpa mereka
+Tamu tidak menyimpan apa pun — riwayat dan Daftarku hilang saat aplikasi ditutup.
+Sembunyikan baris ini
+Seberapa banyak film boleh ada di TV ini sekaligus. Saat penuh, yang sudah ditonton dilepas untuk memberi ruang. Otomatis memakai ruang kosong, menyisakan beberapa GB.
+Gabung sesi
+Gabung dan tonton {1}
+Gabung ke satu sesi, dan cara sesimu berjalan
+Gabung dengannya di Watchly: Pengaturan → Nonton bareng.
+Bergabung — lihat ke TV.
+Matikan semua untuk menyusun layar beranda dari tontonanmu.
+Keluar dari sesi
+Media3 menjaga 4K tetap lancar dengan subtitle aktif, dan menyerahkan sendiri file yang tidak bisa diputarnya ke VLC. VLC sejak awal memutar format terbanyak dan gaya ASS lengkap, tapi TV yang lemah bisa kehilangan frame setiap subtitle berganti.
+Pindah ke bawah
+Pindah ke atas
+Nama
+Tidak ada aplikasi di TV ini yang bisa membuka tautan itu
+Belum ada orang lain — pindai kode untuk mengundang.
+Tidak ada sumber untuk {1}
+Tidak ada dalam {1}
+Bukan itu
+Tidak ada hasil. Coba episode lain, atau tambahkan add-on lain di Pengaturan → Add-on.
+Tidak ada apa-apa di sini
+Akun Nuvio
+Jika mati, pemutar tidak punya tombol sesi dan tautan dari ponselmu ditolak. Mematikannya membuatmu keluar dari sesi yang sedang diikuti.
+Sendiri
+Atau pindai dengan ponsel.
+Tempel dari ponsel
+Tempel dulu.
+Tempel tautan dari ponselmu
+Putar memulai yang terbaik. Atau pilih versi di sini — ukuran, kualitas, bahasa.
+Pemutar dan lewati intro
+Episode sebelumnya
+Profil
+Profil, PIN, Stremio, dan Nuvio
+Gabung lagi ke sesi
+Gabung lagi ke nonton bareng
+Gabung lagi untuk nonton bareng lagi.
+Hapus
+Buka lagi — tautan yang dimiliki semua orang masih berfungsi.
+Buka lagi sesinya
+Kembalikan Beranda ke bawaan
+Baris
+Simpan kunci
+Tersimpan, terenkripsi di TV ini — Cari subtitle juga mencari di SubDL. Masukkan yang lain untuk menggantinya.
+Sapa. Hanya orang di sesi ini yang melihatnya.
+Pindai dengan ponsel untuk bergabung — ini membuka Watchly.
+Pindai dengan kamera ponsel dan setujui, atau masukkan kode ini di {1}
+Pindai dengan kamera ponsel, tempel {1} di halaman yang terbuka, lalu ketuk Simpan. Ponselmu harus di Wi-Fi yang sama dengan TV.
+Kirim login AniList dari Watchly di ponsel ini
+Pengaturan, daftar, dan riwayat dari Watchly di ponselmu
+Tampilkan kode QR
+Tampilkan semua {1} sumber
+Tampilkan baris ini
+Masuk dengan ponsel
+Sumber untuk S{1}:E{2}
+Kecepatan {1}
+Pemeran
+Mulai sesi dan bagikan tautan atau kode QR-nya. Semua yang membukanya menonton film bersamaan denganmu, dengan obrolan dan reaksi. Tanpa akun, dan hanya putar, jeda, dan posisinya yang dibagikan — terenkripsi.
+Memulai pemutaran  ·  {1}  ·  {2} peer
+Statistik untuk yang penasaran
+Akun Stremio
+Tidak terbaca.
+Tidak berhasil.
+Itu bukan tautan nonton bareng yang utuh — salin semuanya.
+Daftar itu tidak terbaca.
+TV tidak berada di jaringan yang bisa dijangkau ponsel.
+Kodenya {1} huruf dan angka.
+Nonton bareng telah berakhir — Gabung lagi ada di Pengaturan → Nonton bareng.
+Akun Nuvio ini punya satu profil.
+Halaman ini akan tahu sendiri setelah kamu menyetujui.
+{1} IMDb teratas di genre kamu
+{1} teratas di IMDb
+film
+serial
+Kunci TorBox
+Ketik tautan
+Ketik kode 8 karakter yang dibagikan pemimpin. Tautan undangan lama? Pindai kode di bawah dengan ponsel dan tempel di sana. TV bertanya sebelum memutar apa pun.
+Ketik kode
+Atas
+Pakai tautan
+Versi {1}  ·  {2}%
+Versi {1} siap — lihat Pengaturan
+Nonton bareng · {1}
+Menonton sebagai {1} — ganti
+Yang dilihat orang lain. Jika kosong, ini nama profil, {1}.
+Yang kamu selesaikan di sini ditandai ditonton di akunmu, dan yang sudah kamu tonton di sana muncul di sini. Kamu masuk lewat ponsel, jadi kata sandimu tidak pernah sampai ke Watchly.
+Saat kamu memimpin sesi dan tamu minta jeda, putar, atau lompat.
+Saat kamu memimpin, film dijeda untuk siapa pun yang stream-nya perlu memuat, paling lama selama ini.
+Jika intro episode diketahui, lewati sendiri alih-alih menampilkan tombol Lewati intro. Sekali per episode — mundurkan untuk menontonnya.
+Asal stream dan subtitle
+Dengan kunci API torbox.app, rilis yang ada di cache TorBox diputar dari servernya, bukan dari peer. Kuncinya ada di Settings di torbox.app, dan tetap terenkripsi di TV ini.
+Kamu
+Kamu sedang di sebuah sesi. Keluar lewat tombol sesi di pemutar.
+Pustaka Nuvio, Lanjut nonton, dan add-on kamu di TV ini, sinkron dua arah. Kata sandimu hanya dikirim ke Nuvio.
+Pustaka Nuvio, Lanjut nonton, dan add-on kamu di TV ini. Sebagai Tamu, dilupakan saat aplikasi ditutup.
+Pustaka Stremio, Lanjut nonton, dan add-on kamu di TV ini, sinkron dua arah. Kamu masuk lewat ponsel — tanpa kata sandi di TV.
+Pustaka Stremio, Lanjut nonton, dan add-on kamu di TV ini. Sebagai Tamu, dilupakan saat aplikasi ditutup.
+Add-on kamu
+{1} rilis untuk “{2}”
+{1} dtk di pemutar
+Bahasa dan genre beranda
+Bahasa, tema, dan genre beranda
+PIN terdiri dari empat angka
+Kunci gratis dari subdl.com menambahkan subtitlenya ke Cari subtitle. Kunci tetap terenkripsi di PC ini.
+Pesan baru tampil sesaat di atas film saat panel sesi tertutup.
+Selisih kecil dengan pemimpin ditutup dengan memutar hingga 8% lebih cepat atau lambat. Jika mati, pemutar melompat.
+Kunci API disimpan
+Tambah
+Tambahkan tracker publik
+Ditambahkan ke unduhan yang sedang berjalan
+{1} ditambahkan — lihat tab Add-on
+Di depan
+Semua {1}
+Semua · {1}
+AniList menolaknya
+Setujui Watchly di halaman AniList — kamu akan dikembalikan ke sini.
+Tanya nanti
+Tanya lebih cepat
+Minta film ke add-on kamu berdasarkan nama, atau tempel tautan untuk memutarnya apa adanya — video di server media milikmu, atau magnet. Kamu juga bisa menjatuhkan file .torrent atau tautan magnet di mana saja di jendela ini.
+Audio & Subtitle
+Trek audio {1}
+Bitrate rata-rata
+Kembali (Esc)
+Mundur 10 detik (←)
+Kembali ke pemutar penuh (P)
+Tautan magnet tanpa tracker jauh lebih cepat ditemukan daripada hanya lewat DHT
+Subtitle lebih besar
+Browser
+Buffering
+Buffering {1}%
+Cache, riwayat, dan info torrent tersimpan
+Ganti folder
+Saluran
+Pesan obrolan di atas gambar
+Periksa koneksi lalu coba lagi.
+Periksa koneksi — akan dimuat lagi saat kamu kembali online.
+Periksa koneksi PC ini. Watchly terus mencoba.
+Memeriksa TorBox…
+Memeriksa file
+Tersendat di sini ({1}) — grafis PC ini tidak bisa mendekodenya
+Hapus cache gambar dan judul
+Hapus pencarian terbaru
+Hapus info torrent tersimpan
+Hapus info torrent tersimpan?
+Hapus riwayat tontonan
+Hapus riwayat tontonan?
+Kode {1}
+Codec
+Warna
+Konfirmasi
+Koneksi
+Bitrate konten
+Lanjut nonton
+Salin tautan undangan
+Salin tautan
+Salin tautan magnet
+Salin kode
+Rusak
+Tidak bisa memuat halaman ini
+Tidak bisa memuat rak ini
+Tidak bisa memulai: {1}
+Tidak bisa menyalin undangan
+Tidak bisa memuat gambar itu
+Tidak bisa membuka {1}
+Tidak bisa mengakses papan klip — coba lagi
+Kreator
+Kreator: {1}
+Potong
+Hapus
+Hapus unduhan?
+Hapus unduhan-unduhan?
+Hapus file setelah dihentikan
+Sutradara: {1}
+Diskontinuitas
+Tutup
+Tampilan
+Ditampilkan
+Unduh torrent
+Unduh semua episode
+Unduh semua video
+Folder unduhan
+Unduh musim {1} dari rilis ini
+Batas kecepatan unduh
+Unduh rilis ini
+Unduh {1} Mb/s
+Hanya mengunduh 5 menit berikutnya
+Mengunduh — lihat tab Unduhan
+Unduhan masuk ke folder unduhanmu, lanjut dari posisi terakhir setelah mulai ulang, dan diputar di mesin VLC — semua format dan trek audio didukung.
+Unduhan yang kamu mulai tetap di sini sampai kamu menghapusnya. Tempel tautan magnet di atas untuk mengunduh torrent apa pun.
+Akhir ({1})
+Ketik kata kunci lalu tekan Cari
+Masukkan email dan kata sandi Nuvio
+Ep {1}
+Keluar dari layar penuh
+F: Layar penuh · P: Pemutar mini · I: Statistik · Spasi: Putar/Jeda · ←/→: 10 dtk · ↑/↓: Volume · A: Audio · S: Subtitle · [: Lebih lambat · ]: Lebih cepat
+Hanya film dan serial keluarga. Tanpa add-on, pencarian stream, atau tautan — beri PIN pada profilmu sendiri agar tetap begitu.
+Cepat
+Bagus
+Lemah
+Mengambil
+Film {1}
+Film dan serial
+Temukan kuncimu di torbox.app
+Mencari rilis…
+Mencari paket musim {1}…
+Folder, batas kecepatan, dan seeding
+Maju 10 detik (→)
+Empat angka yang diminta sebelum profil ini dibuka. Kunci untuk PC bersama — bukan kata sandi.
+Frame rate
+Dari PC
+Layar penuh
+Layar penuh
+Dapatkan kunci gratis di subdl.com
+Hashing
+Sembunyikan
+Cara kerjanya
+Cara kerja penyimpanan di sini
+Di pustaka Stremio-mu, atau dijeda di perangkat lain atau sebelum PC ini — buka satu untuk memutarnya dari posisi yang dicatat Stremio.
+Bitrate masuk
+Instan · TorBox
+Tautan undangan disalin — tempel untuk teman-temanmu
+Gabung nonton bareng dengan kodenya
+Gabung
+Tetap seeding setelah selesai
+Jaga cache tetap kecil; matikan untuk menonton ulang tanpa mengunduh lagi
+Pintasan keyboard
+Keluar lewat Nonton bareng di pemutar.
+Sisakan ruang untuk hal lain di koneksi
+Leecher
+Tautan
+Tautan disalin
+Tautan hanya di-stream — tidak ada torrent di sini untuk diunduh.
+File lokal
+Terkunci
+Keluar
+Buffer hilang
+Frame hilang
+Lebih keras (↑)
+Tautan magnet disalin
+Ikuti Windows, atau kunci terang atau gelap
+Metadata
+Pindahkan baris ke atas atau ke bawah, atau sembunyikan. Tiap profil menyimpan miliknya.
+Bisu
+5 mnt berikutnya
+Tidak ada kunci SubDL — tambahkan milikmu di Pengaturan
+Belum ada add-on untuk ditanya. Tambahkan satu di Pengaturan → Add-on, atau tempel tautan.
+Tidak ada trek audio terdeteksi
+Tidak ada episode {1}
+Belum ada favorit
+Tidak ada yang cocok
+Belum ada orang lain — salin tautan undangan dan kirimkan.
+Tidak ada paket untuk musim {1} — unduh episodenya satu per satu di bawah.
+Tidak ada paket musim {1} dalam {2} — ganti bahasa dan coba lagi, atau unduh episodenya satu per satu di bawah.
+Tidak ada stream untuk itu.
+Tidak ada stream untuk {1}
+Tidak ada subtitle di unduhan itu
+Tidak ada subtitle
+Subtitle tidak ditemukan
+Subtitle tidak ditemukan. Pakai Lainnya → Cari subtitle untuk mencari online.
+Tidak ada di build ini
+Nanti saja (Esc)
+Belum masuk ke Nuvio
+Belum masuk ke Stremio
+Belum ada apa-apa di sini
+Tidak ada di pustakamu yang cocok dengan “{1}”.
+Tidak ada yang cocok.
+Tidak ada yang rating-nya setinggi itu di sini
+Tidak ada yang disimpan untuk nanti
+Belum ada yang disimpan
+Tidak ada yang disimpan — torrent yang kamu buka diingat di sini agar lebih cepat terbuka lain kali
+Tidak ada yang tersimpan
+Tidak ada yang perlu dihapus
+Buka
+Buka di browser
+Buka rak
+Buka halaman lagi
+Buka judul
+Buka halaman judul
+Membuka
+Terbuka di browser
+Atau klik Pasang di situs add-on. Tautan disimpan terenkripsi untuk akun Windows ini.
+Kode sesi {1} disalin — kirim ke teman-temanmu
+Kode sesi, seperti K7Q2-M9XD
+Pilih beberapa dan beranda dimulai dengan itu
+Pilih gambar
+Pilih rilis untuk diunduh
+Potongan
+Putar / jeda (Spasi)
+Putar file terakhir
+Pemutaran tersendat — menunggu data
+Buffer diputar
+Populer saat ini
+Poster, sinopsis, dan rak dimuat ulang lain kali
+Lebih pelan (↓)
+Reaksi melayang di atas film.
+Reaksi di atas gambar
+Dibaca
+Membaca torrent
+Membaca torrent…
+Gabung lagi ke nonton bareng
+Rilis yang ada di cache TorBox bertanda Instan dan diputar dari servernya — tanpa menunggu peer. Sisanya di-stream dari swarm seperti biasa.
+Hapus dari riwayat
+Hapus dari riwayat?
+Buka lagi nonton bareng
+Resolusi
+TERSIMPAN
+Simpan salinan
+Simpan penuh, lalu buka
+Info torrent tersimpan dihapus
+Tersimpan, terenkripsi di PC ini — Cari subtitle juga mencari di SubDL. Masukkan yang lain untuk menggantinya.
+Menyimpan ke {1}
+Sapa. Hanya orang di sesi ini yang melihatnya, dan hilang saat sesi berakhir.
+Cari berdasarkan judul…
+Cari judul dan file
+Seeder
+Kirim (Enter)
+Bagikan unduhan yang selesai sampai kamu menghentikannya di tab Unduhan
+Tampilkan lebih sedikit episode
+Tampilkan di folder
+Sudah keluar
+Sudah keluar dari Nuvio
+Masuk ke AniList…
+Lewati intro
+Lewati intro otomatis
+Subtitle lebih kecil
+Seseorang
+Sumber  ·  {1}
+Spesial {1}
+Kecepatan ({1}x)
+Kecepatan {1}x
+Awal (0:00)
+Mulai sesi dan kirim kodenya. Semua yang bergabung dengannya menonton film bersamaan denganmu, dengan obrolan dan reaksi. Tanpa akun, dan hanya putar, jeda, dan posisinya yang dibagikan — terenkripsi.
+Memulai
+Memulai unduhan…
+Kecepatan awal
+Hentikan
+Hentikan unduhan?
+Penyimpanan
+Stream
+Stream terputus — menyambung lagi
+Stremio menolak
+Stremio tidak mengirim add-on
+Stremio tidak mengirim kode
+Stremio tidak mengirim apa pun
+SubDL menolak permintaan
+SubDL menolak kunci
+Ukuran subtitle: {1}
+Subtitle: Mati
+Itu tidak berhasil — hubungkan lagi untuk kode baru
+Itu bukan tautan magnet atau .torrent
+Unduhan subtitle itu terlalu besar
+Tautan subtitle itu bukan alamat web yang aman
+Kode 8 karakter yang dibagikan pemimpin (tautan undangan lama juga bisa). Watchly menampilkan apa yang akan diputar dan bertanya sebelum mulai.
+Film dijeda untuk siapa pun yang stream-nya perlu memuat, paling lama selama ini.
+Stream terus terputus
+Pembaruan butuh persetujuanmu untuk dipasang
+Salinan Watchly ini dibuat tanpa relay nonton bareng.
+Judul
+Cache judul dihapus
+Kunci API TorBox
+TorBox tidak mulai — mencoba peer. Jika tetap tidak bisa diputar, video rilis ini mungkin tidak cocok untuk PC ini: coba yang lain.
+Jawaban TorBox tidak masuk akal.
+Torrent perlu mengambil lagi daftar filenya dari swarm saat dibuka lain kali. Riwayat tontonan dan unduhan tetap ada.
+Torrent yang kamu stream muncul di sini dengan semua file di dalamnya, masing-masing dengan titik lanjutnya sendiri.
+Tracker dan cara kerja cache
+Coba rating lebih rendah, atau genre lain.
+Copot {1}
+Tanpa batas
+Buka kunci kontrol
+Tidak terkunci
+Berikutnya dalam {1} dtk
+Unggah
+Batas kecepatan unggah
+Video {1}
+Video {1} Mb/s
+Penampil
+Volume
+Volume {1}%
+Tonton sambil potongan masuk
+Tonton nanti
+Nonton bareng
+Menonton sebagai {1} di Nuvio
+Menonton sebagai {1}
+Watchly · film dan serial, siap kapan pun kamu siap. Kamu bertanggung jawab atas apa yang kamu tonton dan unduh.
+Yang dilihat orang lain
+Yang didapat swarm kembali selama kamu mengunduh
+Saat tamu minta jeda, putar, atau lompat.
+Saat kamu memimpin
+Saat kamu menonton
+Jika intro episode diketahui, lewati alih-alih menampilkan tombol Lewati intro. Sekali per episode — mundur untuk menontonnya.
+Ke mana unduhan disimpan?
+Seluruh file (unduhan)
+Berjendela
+Dengan kunci API torbox.app, rilis yang ada di cache TorBox diputar dari servernya, bukan dari peer. Disimpan terenkripsi untuk akun Windows ini.
+Kamu sedang di sesi
+Kamu sedang di sesi — keluar lewat Nonton bareng di pemutar.
+Kamu memimpin sesi
+Kamu memimpin sesi — akhiri lewat Nonton bareng di pemutar.
+Pustaka Stremio-mu dan posisi terakhirmu ada di sini, Daftarku adalah pustakamu di sana, dan yang kamu selesaikan ditandai ditonton. Add-on yang kamu tambah atau hapus di sini juga berubah di akunmu.
+Pustaka Stremio, Lanjut nonton, dan add-on kamu di sini, sinkron dua arah. Kamu masuk di halaman Stremio sendiri — kata sandimu tidak pernah sampai ke Watchly.
+{1} item dan titik lanjutnya akan dihapus.
+Sisa {1} dtk
+{1} dipilih — ini memimpin beranda
+{1} akan dihapus dari daftar ini dan dari disk.
+{1} — dan {2} rilis yang pernah dipakai memutarnya
+{1} sekarang meminta PIN
+{1} — ganti profil
+{1}% di ep. 1
+{1} bisa diputar · {2} file — mau dibuka bagaimana?
+{1} akan dihapus. File yang selesai tetap ada; yang belum selesai dihapus.
+{1} berating {2}. Ganti ke profil dewasa untuk menontonnya.
+🔒  Film di-stream di PC ini. Hanya putar, jeda, dan posisinya yang dibagikan — terenkripsi, tanpa akun.

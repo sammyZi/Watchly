@@ -33,7 +33,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -297,7 +296,8 @@ fun DetailScreen(initial: Title, watch: Watch, onOrder: (com.torrentviewer.core.
         LazyColumn(state = list, contentPadding = PaddingValues(bottom = 32.dp + LocalTabBarInset.current), modifier = Modifier.fillMaxSize().hazeSource(haze)) {
             item(key = "head") {
                 if (!wide) {
-                    Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
+                    // Taller than square, poster-like: at 1:1 the art read cut short over the title.
+                    Box(Modifier.fillMaxWidth().aspectRatio(0.8f)) {
                         Artwork(title.wide, title.title, Modifier.fillMaxSize().bottomScrim(0.6f), fill = false)
                         TitleMark(title, Modifier.align(Alignment.BottomStart).padding(horizontal = EDGE).widthIn(max = 260.dp), maxHeight = 72.dp, style = Type.display)
                     }
@@ -519,7 +519,7 @@ fun DetailScreen(initial: Title, watch: Watch, onOrder: (com.torrentviewer.core.
                             backgroundColor = page
                             tints = listOf(dev.chrisbanes.haze.HazeTint(page.copy(alpha = 0.55f)))
                             blurRadius = 26.dp
-                            noiseFactor = 0.03f
+                            noiseFactor = if (Ink.pureBlack) 0f else 0.03f
                             // The whole effect fades over the tail, its fill too: fading only the blur left a line.
                             val fadeFrom = if (tall > 0) ((tall - FROST_TAIL.value * density * 1.6f) / tall).coerceIn(0f, 1f) else 0.8f
                             mask = androidx.compose.ui.graphics.Brush.verticalGradient(0f to Color.Black, fadeFrom to Color.Black, 1f to Color.Transparent)

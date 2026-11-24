@@ -1,0 +1,1271 @@
+Deine Add-ons werden gefragt…
+{1} möchte pausieren
+{1} möchte abspielen
+Staffel {1} herunterladen
+Alle warten, bis deins geladen ist
+Nur ich
+Allein
+Wird auf {1} abgespielt
+Intro überspringen
+Der Film wird auf diesem Handy gestreamt. Nur Abspielen, Pause und die Stelle werden geteilt — verschlüsselt, ohne Konto.
+Warte auf {1}
+Warte, bis {1} geladen hat
+Warte auf dich und {1}
+Du wärst der Erste
+Änderbar, sobald nichts heruntergeladen oder abgespielt wird.
+{1} von {2} gesehen
+{1} gesehen
+{1} neu
+{1} hat dich zur Watch-Party eingeladen
+{1} Folgen
+{1} Titel
+{1} Releases
+{1} Seeds
+{1} von {2} gespeichert
+{1} Sekunden früher
+{1} Sekunden später
+{1} Filmreihen, in der richtigen Reihenfolge
+{1} neue Folgen
+{1} installiert · Streams, Untertitel und Kataloge
+Noch {1} Min.
+Noch {1} Std. {2} Min.
+Noch {1} Min.
+{1} Tonaussetzer
+{1} bisher · suche weitere…
+1 neue Folge
+Ein Film oder ein Link zum Abspielen
+Ein kostenloser Schlüssel von subdl.com fügt dessen Untertitel zu „Untertitel finden“ hinzu. Er bleibt verschlüsselt auf diesem Handy.
+Ein Kinderprofil kann keine Torrents oder Add-ons aus anderen Apps öffnen.
+Eine passende Spur wird beim Öffnen eines Videos automatisch aktiviert; wählst du selbst eine, gilt deine. Die Online-Untertitelsuche nutzt die Untertitelsprache.
+Eine Benachrichtigung, wenn eine Serie, die du schaust oder in Meiner Liste hast, eine neue Folge bekommt. Zweimal täglich geprüft.
+Konto
+Konten
+Action
+Add-on hinzufügen
+Ein Add-on hinzufügen
+Füge eins hinzu, um Streams für jeden Film und jede Folge zu finden. Ohne spielen nur Links, die du in der Suche einfügst.
+Füge eins hinzu, um Streams zu finden — Watchly bringt keine mit
+Profil hinzufügen
+Profile hinzufügen
+Dieses Add-on hinzufügen?
+Zum Kalender hinzufügen
+{1} Add-on hinzugefügt
+{1} Add-ons hinzugefügt
+{1} hinzugefügt
+{1} hinzugefügt — siehe Einstellungen → Add-ons
+Wird hinzugefügt…
+Add-ons
+Abenteuer
+Alle
+Alles erledigt
+Alle Genres
+Alles oben Genannte
+Gesamt
+Alles gesehen
+Erlauben
+Sofort erlauben
+Downloads im Hintergrund erlauben
+Benachrichtigungen erlauben
+Bereits synchron.
+Tiere
+Animation
+Anime
+Nur Anime · nicht verbunden
+Beliebig
+Beliebiges Genre
+Beliebige Sprache
+Beliebiges Netz
+Beliebige Qualität
+Beliebige Bewertung
+Beliebiges Jahr
+Darstellung
+Bestätige Watchly auf der AniList-Seite; sie bringt dich hierher zurück.
+Bestätige auf der geöffneten Seite oder öffne sie erneut. Code {1}
+Als Gast wird ein kleiner Abstand zum Leiter durch bis zu 8 % schnelleres oder langsameres Abspielen ausgeglichen, was du nicht hörst. Aus springt der Player stattdessen zum Leiter.
+Mich fragen
+Wird vor dem Öffnen dieses Profils abgefragt. Entfernen zum Entsperren.
+AniList wird gefragt…
+Hängt öffentliche Tracker an Magnet-Links ohne Tracker, damit sie schneller aufgelöst werden.
+Audio
+Audio & Untertitel
+Audiosprache
+Audio: {1}
+Automatisch
+Auszeichnungen
+Zurück
+Sichern
+Sicherung
+Sicherung gespeichert
+Der Akkusparmodus kann Downloads bei ausgeschaltetem Bildschirm verlangsamen oder stoppen. Lass Watchly im Hintergrund laufen, damit sie weiterlaufen.
+Weil du {1} geschaut hast
+Weil du geschaut hast…
+Vor 1990
+Bevor du anfängst
+Beste Passform
+Beste Übereinstimmung
+Größte
+Bitrate
+Hintergrund
+Deine Stremio-Mediathek übernehmen
+Übernimm deine Mediathek, „Weiterschauen“ und Add-ons aus Stremio oder Nuvio. Sie bleiben in beide Richtungen synchron.
+Deine Add-ons werden übernommen…
+Entdecke angesagte Filme, Serien und Anime und spiele sie über die Add-ons und Server deiner Wahl ab. Watchly bringt keine mit.
+Puffer
+Puffer vor dem Abspielen
+Im Video eingebrannt: nutze − und +.
+WÄHLE EIN SYMBOL
+Party noch nicht erreichbar
+Abbrechen
+Streamen
+Streamen braucht WLAN — es gibt keine Adresse für den Fernseher.
+Aufholen
+Ändern
+Nuvio-Profil wechseln
+PIN ändern
+Stream wechseln
+Ändere den Namen, das Gesicht oder die Farbe.
+Zu einem anderen Profil wechseln
+Chat
+Chatnachrichten
+Nach Updates suchen
+Prüfe die Verbindung dieses Handys. Watchly versucht es weiter.
+TorBox wird geprüft
+Schlüssel wird geprüft…
+Wähle eine Folge, um zu sehen, was verfügbar ist.
+Ruckelt hier ({1})
+Löschen
+Alle löschen
+Alles löschen, was du abgespielt hast?
+Schließen
+Code kopiert
+Sammlungsdaten von TMDB. Dieses Produkt nutzt die TMDB-API, ist aber nicht von TMDB unterstützt oder zertifiziert.
+Komödie
+In deiner Liste abgeschlossen
+Verbinden
+Verbinde es zuerst unter Einstellungen → Integrationen
+Verbunden
+Verbunden als {1}
+Verbunden — warte, bis der Gastgeber etwas abspielt
+Verbinde mit der Party…
+Weiter
+Weiterschauen
+Weiter mit {1}
+Weiter mit Nuvio
+Weiter mit Stremio
+Kopiert
+Deine Add-ons auf den Fernseher kopieren?
+Add-on konnte nicht hinzugefügt werden
+Torrent konnte nicht hinzugefügt werden
+Verbindung zu diesem Gerät fehlgeschlagen.
+Untertitel konnte nicht geladen werden
+Bild konnte nicht geladen werden.
+{1} nicht erreichbar.
+AniList nicht erreichbar
+Nuvio nicht erreichbar
+Nuvio nicht erreichbar.
+Stremio nicht erreichbar
+Stremio nicht erreichbar.
+Fernseher nicht erreichbar — ist das Handy im selben WLAN?
+Datei konnte nicht gelesen werden
+Datei konnte nicht gelesen werden.
+Sicherung konnte nicht wiederhergestellt werden
+Download konnte nicht gestartet werden
+Der Download konnte nicht gestartet werden
+Sicherung konnte nicht geschrieben werden: {1}
+Macher
+Krimi
+Krimiserien
+Aktuelle PIN
+Dunkel
+{1} löschen?
+Von diesem Handy löschen
+Profil löschen
+Details
+Direkt
+Regie
+Trennen
+Dokumentationen
+Dokumentation
+Nicht warten
+Fertig
+Herunterladen
+{1} herunterladen: Release wählen
+Vorausladen
+Download abgeschlossen
+Staffel herunterladen
+Herunterladen: Release wählen
+Lädt herunter
+Lade {1} herunter — siehe Downloads
+Lade Staffel {1} von {2} herunter — siehe Downloads
+Lade die nächsten 5 Minuten herunter
+Lade die ganze Datei herunter
+Wird heruntergeladen. Tippe nach Abschluss auf die Benachrichtigung, um zu installieren.
+Downloads
+Drama
+Dramaserien
+Früher
+Startseite bearbeiten
+Profil bearbeiten
+E-Mail
+E-Mail und Passwort
+Ende der Folge
+Party beenden
+Endet um {1}
+Endet um {1}, wenn du jetzt fortsetzt
+Gefällt dir Watchly?
+Gib vier Ziffern für die neue PIN ein
+Gib den 8-stelligen Code ein, den dein Freund geteilt hat.
+Gib zuerst die aktuelle PIN ein
+Gib die aktuelle PIN ein, um sie zu entfernen
+Gib deine Nuvio-E-Mail und dein Passwort ein.
+Gib deine PIN ein, um dieses Profil zu öffnen.
+Folge
+Folge {1}
+Folge {1} {2}
+Folgennummer
+Folgen
+Alle Add-ons sind schon da
+Alle Titel, Add-ons und Stream-Suche inklusive.
+Alles
+Zusätzliche Tracker
+Fehlgeschlagen
+Nur Familienfilme und -serien. Keine Add-ons, keine Stream-Suche und keine Links aus anderen Apps — gib deinem eigenen Profil eine PIN, damit es so bleibt.
+Fantasy
+Am schnellsten
+„Am schnellsten“ holt Teile, wo der Schwarm sie hat. „Der Reihe nach“ füllt jede Datei vom Anfang, damit du sie beim Herunterladen schauen kannst — ist aber langsamer.
+Lieblingsgenres
+Favoriten
+Datei
+Bereits gespeicherte Dateien bleiben auf diesem Handy
+Film
+Film {1} von {2}
+Filme
+Filme & Serien
+Nur Filme
+Eine Reihenfolge finden
+Untertitel finden
+Untertitel online finden…
+Suche {1}…
+Suche Peers
+Suche Peers und lese die Dateiliste
+Suche Peers…
+Suche Quellen…
+Suche den Raum und frage den Gastgeber, was läuft.
+Beende oder stoppe zuerst Downloads und Wiedergabe.
+Fertig
+Vier Ziffern, die vor dem Öffnen dieses Profils abgefragt werden. Ein Schloss für ein geteiltes Handy — kein Passwort.
+Bilder
+Kostenlos und Open Source — ein Stern hilft anderen, es zu finden
+Per URL
+Vom Handy
+Aus deinen Konten
+Genre
+Genres auf der Startseite
+Los geht's
+Weiter
+Gast
+Gast behält „Weiterschauen“ auf diesem Handy; Meine Liste und Anmeldungen verschwinden, wenn die App schließt.
+Anfragen der Gäste
+Gewohnheiten
+Verlauf
+Verlauf, Fortsetzungspunkte, Listen, Einstellungen, Suchen und Intro-Marken als eine Datei. Downloads sind nicht dabei — sie sind Dateien auf diesem Handy.
+Start
+Zeilen der Startseite
+Horror
+Geschaute Stunden, Favoriten und Serien
+Wie viel eines Films auf einmal auf diesem Handy liegen darf. Ist es voll, wird Gesehenes freigegeben. Auto nutzt den freien Speicher und lässt ein paar GB Reserve.
+Wie viel deines Schauens auf jedes Genre entfiel. Ein Titel zählt in jedem seiner Genres.
+Ich stimme zu
+IMDb {1}+
+IMDb-Bewertung
+Ignorieren
+Add-ons importieren
+In Meiner Liste
+Der Reihe nach
+Sofort
+Integrationen
+Einladen
+Es ist kostenlos und Open Source. Ein Stern auf GitHub hilft anderen, es zu finden.
+Der Gastgeber ist gegangen oder hat sie beendet. Bitte um einen neuen Link.
+Eigene Mediathek, Meine Liste und Fortsetzungspunkte.
+Eigener Speicher, getrennt von Watchly
+Beitreten
+Einer Watch-Party beitreten
+Der Party beitreten
+Mit Code beitreten
+Trete der Watch-Party bei…
+Beitritt — der Film der Party erscheint gleich.
+Springe zu {1}
+Nur für dich, oder den Leiter bitten, für alle zu pausieren?
+Nur für dich, oder den Leiter bitten, für alle abzuspielen?
+Weiter herunterladen
+Behalten
+Lass das hier offen — der Film erscheint, sobald sie ihn starten.
+Für schnelles Wiederöffnen behalten
+Kinderprofil
+Bekannt für
+Sprache: {1}
+Sprachen
+Größer startet langsamer, läuft aber stabiler bei schwachem Schwarm.
+Zuletzt gesehen {1}
+Verlassen
+Rechtlicher Hinweis
+Mediathek
+Mediathek, Meine Liste und Fortsetzungspunkte gehören zu diesem Profil.
+Hell
+Helle oder dunkle Seiten, oder wie das Handy eingestellt ist. Der Player bleibt immer dunkel.
+Gefällt mir
+Gefällt dir
+Link zu einem Bild
+Lädt
+Lädt…
+Sperren
+Längste Serie
+Erstelle ein Profil, um deine Anmeldungen zu behalten — Gast vergisst sie, wenn die App schließt.
+Verwalten
+Profile verwalten
+Media3 gibt eine Datei, die es nicht abspielen kann, selbst an VLC weiter. VLC von Anfang an spielt die meisten Formate und volle ASS-Untertitelstile.
+Nachricht
+Mini-Player
+Mehr
+Mehr {1}
+Mehr davon
+Am meisten geschaut
+Verschiebe Zeilen nach oben oder unten oder blende sie aus. Jedes Profil behält seine eigenen.
+Filme, Serien, Anime
+Meine Liste
+Mystery
+NÄCHSTE FOLGE
+Braucht {1} Mbit/s
+Netzwerk
+Netzwerk, Reihenfolge und Speicher
+Neue Folgen
+Neue PIN
+Hinweise auf neue Folgen
+Neue Folge: {1}
+Neue Folgen
+Neue Folgen von Serien, denen du folgst, fertige Downloads und Updates erscheinen hier
+Nächste 5 Minuten
+Nächste Folge
+Als Nächstes: {1}
+Nein
+Noch keine Add-ons auf diesem Handy
+Noch keine Add-ons
+Keine App hier kann diesen Link öffnen
+Noch keine Tonspuren gemeldet.
+Kein installiertes Add-on passt.
+Noch keine Benachrichtigungen
+Noch niemand sonst — tippe oben auf den Einladen-Button.
+Keine andere Zeile in der Nähe dieses Moments. Tippe genau, wenn jemand zu sprechen beginnt.
+Kein anderer Player auf diesem Handy kann es öffnen.
+Kein anderes Release gefunden.
+Keine Peers haben geantwortet. Der Torrent ist vielleicht tot, oder das Netz blockiert BitTorrent.
+Keine Releases für „{1}“
+Keine Releases passen zu den Filtern
+Noch kein Paket für Staffel {1} gefunden — lade die Folgen einzeln herunter.
+Keine Einstellung passt
+Keine Quellen
+Keine Quellen für {1} gefunden.
+Kein Video in diesem Torrent
+Keine Reihenfolge mit diesem Namen
+Keine
+Keine in {1}.
+Normal
+Nicht verbunden
+Nicht für dieses Profil
+Nicht jetzt
+Noch nicht erschienen
+In diesem Build nicht eingerichtet
+Nicht angemeldet
+Auf diesem Handy nicht bei AniList angemeldet
+Nicht begonnen
+Funktioniert nicht
+Funktioniert nicht: {1}
+Noch nichts heruntergeladen. Lade auf der Seite eines Titels herunter, dann spielt er hier ohne Verbindung.
+Nichts gefunden für „{1}“
+Nichts gefunden in {1}. Ändere die Sprache und versuche es erneut.
+Nichts in dieser Sprache gefunden
+Nichts gefunden. Versuche eine andere Folge oder füge unter Einstellungen → Add-ons ein weiteres Add-on hinzu.
+Noch nichts hier. Alles, was du abspielst, erscheint in dieser Liste.
+Nichts behalten. Ein Film, den du mittendrin stoppst, behält hier seinen Anfang, damit er nächstes Mal sofort öffnet.
+Nichts passt zu den Filtern
+Gerade nichts in diesem Regal.
+Hier ist nichts so hoch bewertet.
+Nichts zur Auswahl.
+Noch nichts auf {1} geschaut.
+Benachrichtigungen
+Benachrichtigungen für Watchly sind aus, daher können Hinweise noch nicht erscheinen.
+Benachrichtigungen, {1} neu
+Läuft gerade
+Cache der Nuvio-Engine
+AUF DEM BILD
+Aus
+Aus: Der Player hat keinen Party-Button und Einladungslinks werden abgewiesen. Ausschalten verlässt jede Party, in der du bist.
+An
+Auf dem Bild
+In deiner Liste
+Eine Mediathek auf diesem Handy. Füge Profile hinzu, damit jedes eine eigene Mediathek, Meine Liste und Fortsetzungspunkte hat.
+Nur ein Torrent kann gemeinsam geschaut werden — das hier ist eine Datei oder ein einfacher Link.
+Füge nur Add-ons hinzu, denen du vertraust: Sie bestimmen, was dir zum Abspielen angeboten wird.
+Nur Abspielen, Pause und wo du bist werden geteilt, verschlüsselt. Du siehst, was läuft, bevor etwas abspielt.
+Nur die hier gewählten Genres bekommen Zeilen auf der Startseite. Lass alle aus, um sie aus dem Geschauten zu bauen.
+Nur der Leiter kann die Party pausieren — oder pausiere nur für dich und hole danach auf.
+Nur der Leiter kann die Party abspielen — oder spiele nur für dich ab und hole danach auf.
+Nur die Leute in dieser Party sehen es, und es verschwindet, wenn die Party endet.
+Stremio öffnen
+Stremio erneut öffnen
+Erneut öffnen
+In anderem Player öffnen
+Film wird geöffnet…
+Wird geöffnet…
+Öffnet die App
+Oder tippe auf der Seite eines Add-ons auf Installieren und wähle Watchly.
+Oder tippe hier, wenn jemand spricht
+Reihenfolge
+Original
+Andere Dateien
+Unsere Bedingungen haben sich geändert
+PIN entfernt
+PIN für {1} festgelegt
+Party-Code
+Passwort
+Füge zuerst einen Add-on-Link ein
+Füge zuerst deinen SubDL-Schlüssel ein
+Füge zuerst deinen TorBox-Schlüssel ein
+Pause
+Pause in {1} Min.
+Pausiert
+Pausiert  ·  {1} %
+Personen
+Personen · {1}
+Handy
+Wähle ein paar — deine Startseite beginnt damit. Jederzeit in den Einstellungen änderbar.
+Eigene Quelle wählen
+Für dich ausgewählt
+Bild
+Abspielen
+{1} abspielen
+Wiedergabe
+Wiedergabegeschwindigkeit
+Player
+Player, Sprachen und Untertitel
+Läuft gerade
+Beliebte Serien
+Zurück
+Datenschutzerklärung
+Profil-PIN
+Profilname
+Profil, Stremio, Nuvio und PIN
+Qualität
+Reaktionen
+Wird gelesen…
+Letzte Suchen
+Verbinde neu…
+Wieder beitreten
+Tritt wieder bei, um dabei zu sein, wenn es weitergeht
+Tritt wieder bei, um gemeinsam weiterzuschauen
+Sprache des Releases
+Erscheinungsreihenfolge
+Releases, die TorBox im Cache hat, zeigen „Sofort“ und spielen von dessen Servern — kein Warten auf Peers, springe überallhin. Alles andere streamt wie bisher aus dem Schwarm.
+PIN entfernen
+Aus „Weiterschauen“ entfernen
+Aus Mediathek entfernen
+Schlüssel entfernen
+Wieder öffnen
+Öffne sie wieder — der Link aller funktioniert weiter
+Ersetzt die des Fernsehers, für dieses Profil
+Auf Standard zurücksetzen
+{1} Teile der Mediathek wiederhergestellt
+Fortsetzen
+{1} fortsetzen
+Fortsetzungspunkte und geladene Untertitel gehen ebenfalls
+Rezensionen
+Rezensionen zu {1}
+SD-Karte
+Speichern
+Mediathek sichern oder wiederherstellen
+Auf der SD-Karte im App-Ordner statt auf dem Handy speichern. Die Dateien dort verschwinden, wenn die App deinstalliert wird.
+Gespeichert
+Gespeichert, verschlüsselt auf diesem Handy — „Untertitel finden“ sucht jetzt auch bei SubDL. Gib einen anderen ein, um ihn zu ersetzen.
+Sag Hallo
+Science-Fiction
+Suchen
+Installierte Add-ons durchsuchen
+Einstellungen durchsuchen
+Suche…
+Staffel {1}
+Pakete von Staffel {1}
+Alle ansehen
+Einführungstour erneut ansehen
+Senden
+{1} Add-on senden
+{1} Add-ons senden
+Meine Add-ons an Stremio senden
+Deine AniList-Anmeldung senden
+Sende an den Fernseher…
+Sende deine Add-ons…
+An den Fernseher gesendet
+Serien
+Nur Serien
+Dienste
+PIN festlegen
+Einstellungen
+Anzeigen
+Alle anzeigen
+Alle {1} Folgen anzeigen
+Button anzeigen
+Anmelden
+Melde dich an und bestätige auf der geöffneten Seite — das hier merkt es von selbst. Code {1}
+Bei Nuvio anmelden
+Bei Stremio anmelden
+Abmelden
+Den Fernseher bei AniList anmelden?
+Angemeldet
+Angemeldet als {1}
+Anmeldung…
+Anmeldung auf Stremios eigener Seite
+Simkl, MDBList und AniList
+Größe
+Größe, Farbe und ein Hintergrund hinter dem Text. Media3 zeigt eine Änderung ab der nächsten Zeile; VLC ab dem nächsten Video.
+Überspringen
+Vorerst überspringen
+Übersprungen
+Intro übersprungen
+Sleep-Timer
+Sleep-Timer aus
+Sleep-Timer — pausiert
+Kleinste
+Sanftes Aufholen
+Quellen
+Specials
+Geschwindigkeit ({1})
+Stern auf GitHub
+Starte eine Party und teile ihren Code. Alle, die damit beitreten, schauen den Film gleichzeitig mit dir, mit Chat und Reaktionen. Kein Konto, und nur Abspielen, Pause und die Stelle werden geteilt — verschlüsselt.
+Watch-Party starten
+Starte eine mit dem Personen-Button oben im Player und sende den Link. Jeder streamt den Film auf seinem eigenen Gerät; nur Abspielen, Pause und die Stelle werden geteilt, verschlüsselt, ohne Konto.
+Von vorn
+Wiedergabe startet
+Wiedergabe startet  ·  von {1}
+Statistik
+Suche weiter nach Quellen…
+Nach dieser Folge stoppen
+Stoppen und Geladenes löschen
+Streamen beenden
+Download von {1} stoppen?
+Speicher für einen Film
+Speicher, Puffer und Tracker
+Story-Reihenfolge
+Streaming
+Streams
+Streams, Untertitel und zusätzliche Kataloge kommen aus Add-ons — öffentlichen, denen deines Debrid-Dienstes oder deines eigenen Medienservers. Watchly bringt keine mit.
+Stremio-Code
+Strecken
+SubDL- und TorBox-Schlüssel
+SubDL-Schlüssel
+SubDL-Schlüssel entfernt
+SubDL-Schlüssel gespeichert
+Untertitelsprache
+Untertitelsuche fehlgeschlagen
+Untertitelstil
+Untertitel
+Untertitel synchronisiert: {1}
+Untertitel: {1}
+Schwarm
+Profil wechseln
+Stream wird gewechselt…
+Wechsle zu VLC, um Untertitel früher zu zeigen
+Wechsle zu VLC — der eingebaute Player kann dieses Video nicht abspielen
+Synchronisiert. Untertitel erscheinen jetzt {1}.
+System
+Zum Installieren tippen
+Nutzungsbedingungen
+Der Code ist abgelaufen — melde dich erneut an, um einen neuen zu bekommen.
+Der Code ist abgelaufen — versuche es erneut.
+Das hat nicht geklappt — verbinde erneut für einen neuen Code.
+Das ist kein Watchly-Fernseher in deinem Heimnetz.
+Das ist kein Party-Code — er hat 8 Buchstaben und Ziffern, z. B. K7Q2-M9XD.
+Das ist kein Watch-Party-Code.
+Dieser Magnet-Link konnte nicht gelesen werden
+Das ist ein Link und streamt nur. Wähle einen Torrent zum Herunterladen.
+Diese Version ist nicht mehr die neueste
+Diese Watch-Party wurde geschlossen.
+Dieser Watch-Party-Link ist unvollständig.
+Das ist nicht die PIN
+Das ist nicht die PIN. Versuche es erneut.
+Der 8-stellige Code, den der Leiter im Party-Bereich des Players teilt. Der Party-Button auf der Startseite nimmt ihn auch.
+Der Code hat 8 Buchstaben und Ziffern.
+Standard der Datei
+Der Gastgeber
+Der Leiter legt in einer Watch-Party die Geschwindigkeit fest
+Die nächsten {1} Tage der Serien, denen du folgst, und der Filme, die du gespeichert hast.
+Die Regeln für die Nutzung von Watchly
+Die Watch-Party ist beendet
+Design
+Sprache, Design, Genres und Zeilen der Startseite
+Watchly in deiner Sprache. Titel und Beschreibungen kommen unverändert aus den Katalogen.
+Dieses Nuvio-Konto hat ein Profil
+Dieser Build von Watchly hat keine Watch-Party.
+Dieses Handy
+Dieses Produkt nutzt die TMDB-API, ist aber nicht von TMDB unterstützt oder zertifiziert.
+Dieser Torrent enthält kein Video.
+Diese Watch-Party ist geschlossen
+Diese Woche
+Thriller
+Thriller
+Timing
+Titel
+Titel, die du zu Meiner Liste hinzufügst, warten hier.
+Titel, die dir gefallen, sammeln sich hier.
+Um Gastgeber zu sein, starte eine Party im Player.
+Um Watchly auch auf AniList den Zugriff zu entziehen, entferne es dort unter Settings → Apps.
+Heute
+Top auf IMDb
+Top-Ergebnisse
+TorBox-Schlüssel entfernt
+TorBox-Schlüssel gespeichert
+Torrent-Engine
+Angesagte Filme
+ALS NÄCHSTES
+Deinstallieren
+{1} deinstalliert
+Als Nächstes
+Demnächst
+Aktualisieren
+Update verfügbar
+Verwenden
+Mobile Daten nutzen
+Version {1} · erstellt {2}
+Version {1}  ·  {2}
+Video
+Auf langsame Verbindungen warten
+Warte auf WLAN
+Warte auf WLAN  ·  {1} %
+Warte auf deine Bestätigung…
+Ansehen
+{1} gemeinsam schauen
+Reihenfolge
+Reihenfolgen
+Watch-Party
+Watch-Party ist aus — schalte sie unter Einstellungen → Watch-Party ein.
+Schau etwas, und deine Statistik beginnt hier.
+Gesehen
+Schaut
+Schaut für sich
+Watchly ist nur ein Mediaplayer
+Willkommenstour
+Was magst du?
+Was soll der Fernseher übernehmen?
+Was bei geschlossenem Party-Bereich über dem Film erscheint. Aus sammelt sich der Chat weiter im Bereich — ein Punkt am Party-Button zeigt Neues an.
+Was hier bleibt und was gesendet wird
+Was einen Torrent streamt. Eine Änderung gilt ab dem nächsten Film.
+Was die anderen sehen, wenn du beitrittst oder etwas anfragst. Leer ist es der Profilname, {1}.
+Was du hier beendest, wird in deinen Konten als gesehen markiert, und was du dort gesehen hast, erscheint hier. Du meldest dich auf der Seite jedes Dienstes an, dein Passwort kommt also nie zu Watchly.
+Wenn du eine Party leitest und ein Gast um Pause, Abspielen oder einen Sprung bittet. Ignoriert, zeigen seine Buttons, dass nur du steuerst.
+Wenn du leitest, pausiert der Film für alle, deren Stream nachladen muss, und läuft weiter, wenn sie durch sind — höchstens so lange. „Weiter“ im Banner beendet das Warten jederzeit.
+Wenn das Intro einer Folge bekannt ist, überspringe es automatisch statt den Button „Intro überspringen“ zu zeigen. Einmal pro Folge — spule zurück, um es zu sehen.
+Wo du bei Nuvio aufgehört hast, steht unter „Weiterschauen“, Meine Liste ist deine Nuvio-Mediathek, und was du beendest, wird als gesehen markiert.
+Welches Nuvio-Profil ist das?
+Welche Datei?
+Weiß
+Wer schaut?
+Ganze Datei
+Nur WLAN
+„Nur WLAN“ hält einen Download bei mobilen Daten an — er wartet und läuft weiter, wenn WLAN zurück ist. Nutze mobile Daten bei einem wartenden Download, um ihn durchzulassen.
+Mit einem API-Schlüssel von torbox.app spielen Releases, die TorBox im Cache hat, von dessen Servern statt von Peers. Der Schlüssel steht unter Settings auf torbox.app und bleibt verschlüsselt auf diesem Handy.
+Mit jedem Release, von dem abgespielt wurde
+Jahr
+Gelb
+Du hast deine Watch-Party beendet
+Du hast Version {1}
+Du hast die Watch-Party verlassen
+Am meisten schaust du am
+Offline — zeige Gespeichertes
+Du schaust
+Deine Nuvio-Mediathek, „Weiterschauen“ und Add-ons hier, in beide Richtungen synchron. Dein Passwort geht nur an Nuvio.
+Deine Nuvio-Mediathek, „Weiterschauen“ und Add-ons hier. Als Gast wird alles vergessen, wenn die App schließt.
+Deine Nuvio-Mediathek, „Weiterschauen“ und Add-ons. Dein Passwort geht nur an Nuvio.
+Deine Stremio-Mediathek, „Weiterschauen“ und Add-ons hier, in beide Richtungen synchron. Melde dich auf Stremios eigener Seite an — dein Passwort kommt nie zu Watchly.
+Deine Stremio-Mediathek, „Weiterschauen“ und Add-ons hier. Als Gast wird alles vergessen, wenn die App schließt.
+Dein SubDL-API-Schlüssel
+Dein TorBox-API-Schlüssel
+Deine Genres
+Deine Mediathek
+Dein Mediaplayer
+Dein Name
+Dein Name, Anfragen der Gäste und Warten
+Deine Statistik
+Deine Watch-Party
+Zoomen zum Füllen
+etwa {1} für {2} Folgen
+am Ende dieser Folge
+hat dich eingeladen, gemeinsam zu schauen
+mehr folgt
+jetzt erschienen
+dieser Film
+diesen Monat
+dieses Jahr gesehen
+Tag in Folge
+Tage in Folge
+✓ Bei Stremio angemeldet — deine Mediathek und wo du aufgehört hast, stehen unten
+{1} hat pausiert
+{1} hat auf Abspielen gedrückt
+{1} ist zu {2} gesprungen
+{1} hat die Geschwindigkeit auf {2} gesetzt
+{1} ist beigetreten
+{1} hat die Party verlassen
+{1} hat die Party beendet
+Pause für alle angefragt
+Abspielen angefragt
+Sprung zu {1} für alle angefragt
+Hole die Party ein
+Nur der Leiter steuert diese Party
+Du schaust für dich — hole jederzeit auf
+Ohne {1} weitergemacht
+vor {1} T.
+vor {1} Std.
+vor {1} Min.
+gerade eben
+Morgen
+Beliebt
+Am besten bewertet
+Neueste
+Familie
+Familienfilme
+Familienserien
+Romantik
+Krieg
+Western
+Sport
+Live-TV
+Komplette Serie
+Staffelpaket
+Du hast die neueste Version
+Suche nach Updates fehlgeschlagen
+Update konnte nicht heruntergeladen werden
+Das Update wurde nicht richtig heruntergeladen. Versuche es erneut.
+{1} nicht erreichbar
+{1} nicht gefunden — prüfe den Link und deine Verbindung
+Dieser Torrent konnte nicht geöffnet werden.
+Dieser Stream konnte nicht gestartet werden.
+Kein Add-on unter diesem Link — prüfe ihn
+Kein Add-on-Manifest
+Das ist kein Add-on-Link
+Wiedergabe konnte nicht starten
+Diese Datei konnte nicht abgespielt werden
+Kein Decoder für diesen Ton
+Kein Decoder für dieses Video
+Keine Seeds
+Kein Speicherplatz mehr. Der Stream wurde gestoppt und seine Dateien gelöscht.
+Kein Speicherplatz mehr. Der Stream wurde gestoppt.
+Die Torrent-Engine hat diesen Stream verloren. Bitte versuche es erneut.
+Die Metadaten dieses Torrents sind veraltet. Öffne ihn erneut.
+TorBox hat den API-Schlüssel nicht akzeptiert.
+TorBox bereitet diesen Torrent noch vor. Versuche es in einer Minute erneut.
+TorBox gestoppt — streame stattdessen von Peers.
+TorBox wollte diesen Torrent nicht hinzufügen.
+Diese Sicherung ist leer
+Diese Datei ist weg — vielleicht gelöscht oder die Karte entfernt.
+Untertitel {1}
+Spur {1}
+Verlauf und Fortsetzungspunkte
+Meine Liste, Suchen und Start-Genres
+Einstellungen und Add-ons
+Englisch
+Spanisch
+Französisch
+Deutsch
+Italienisch
+Portugiesisch
+Portugiesisch (Brasilien)
+Russisch
+Türkisch
+Arabisch
+Hindi
+Bengalisch
+Tamil
+Telugu
+Malayalam
+Indonesisch
+Japanisch
+Koreanisch
+Chinesisch
+Niederländisch
+Polnisch
+Schwedisch
+Griechisch
+Hebräisch
+Persisch
+Thailändisch
+Vietnamesisch
+Rumänisch
+Kroatisch
+Serbisch
+Bosnisch
+Sprache
+App-Sprache
+Gerätesprache
+Auto
+AMOLED-Schwarz
+Rein schwarze Hintergründe für OLED-Bildschirme.
+Startseite
+{1} gewählt
+{1} Sprachen
+Science-Fiction
+Biografie
+Musik
+Musical
+Kinder
+Nachrichten
+Reality-TV
+Action & Abenteuer
+Sci-Fi & Fantasy
+Allein — Aufholen ist in der Leiste
+Ein kostenloser Schlüssel von subdl.com fügt dessen Untertitel zu „Untertitel finden“ hinzu. Er bleibt verschlüsselt auf diesem Fernseher.
+Ein Profil hinzufügen
+Füge ein Add-on über seinen Link hinzu — ein öffentliches, das deines Debrid-Dienstes oder deines eigenen Medienservers. Watchly bringt keine mit.
+Hinzugefügt
+{1} hinzugefügt.
+AniList-Anmeldung
+Nur Anime · über dein Handy angemeldet
+Ein anderes Release von {1}, synchron
+Als Gast wird ein kleiner Abstand zum Leiter durch bis zu 8 % schnelleres oder langsameres Abspielen ausgeglichen. Aus springt der Player.
+{1} s zurück
+Holt Verlauf, Fortsetzungspunkte, Listen, Suchen, Add-ons und alle Einstellungen dieses Profils aus Watchly auf deinem Handy und ersetzt, was hier ist. Die SubDL- und TorBox-Schlüssel bleiben — sie werden nicht gesendet.
+Puffert  ·  {1}  ·  {2} Peers
+Update abbrechen
+Party einholen
+Chatnachrichten und Reaktionen über dem Film, wenn der Party-Bereich geschlossen ist.
+Wird geprüft…
+Sammlung
+Add-ons vom Handy kopieren
+Alle Add-ons aus Watchly auf diesem Handy kopieren
+Alles aus Watchly auf diesem Handy kopieren
+Vom Handy kopieren
+Add-on konnte nicht hinzugefügt werden.
+Runter
+Update wird geladen
+Lade Version {1}  ·  {2} %
+4 Ziffern eingeben
+Schlüssel eingeben
+Gib den {1}-stelligen Code ein, den dein Freund geteilt hat.
+Alle Add-ons sind schon da.
+Alle
+Alles, was du abgespielt hast, mit der Stelle, an der du aufgehört hast.
+Suche Peers  ·  {1} DHT-Knoten
+Vergessen
+{1} s vor
+Vier Ziffern, die vor dem Öffnen dieses Profils abgefragt werden. Ein Schloss für einen geteilten Fernseher — kein Passwort.
+Von Stremio
+Zurück
+Ohne sie weitermachen
+Gast behält nichts — Verlauf und Meine Liste verschwinden, wenn die App schließt.
+Diese Zeile ausblenden
+Wie viel eines Films auf einmal auf diesem Fernseher liegen darf. Ist es voll, wird Gesehenes freigegeben. Auto nutzt den freien Speicher und lässt ein paar GB Reserve.
+Einer Party beitreten
+Beitreten und {1} schauen
+Einer beitreten, und wie deine läuft
+Tritt damit in Watchly bei: Einstellungen → Watch-Party.
+Beitritt — schau auf den Fernseher.
+Lass alle aus, um die Startseite aus dem Geschauten zu bauen.
+Party verlassen
+Media3 hält 4K mit Untertiteln flüssig und gibt eine Datei, die es nicht abspielen kann, selbst an VLC weiter. VLC von Anfang an spielt die meisten Formate und volle ASS-Stile, aber ein schwacher Fernseher kann bei jedem Untertitelwechsel Bilder verlieren.
+Nach unten
+Nach oben
+Name
+Keine App auf diesem Fernseher kann diesen Link öffnen
+Noch niemand sonst — scanne den Code zum Einladen.
+Keine Quellen für {1} gefunden
+Keine in {1}
+Nicht das
+Nichts gefunden. Versuche eine andere Folge oder füge unter Einstellungen → Add-ons ein weiteres hinzu.
+Hier ist nichts
+Nuvio-Konto
+Aus: Der Player hat keinen Party-Button und Links von deinem Handy werden abgewiesen. Ausschalten verlässt jede Party, in der du bist.
+Für sich
+Oder mit einem Handy scannen.
+Vom Handy einfügen
+Zuerst einfügen.
+Füge den Link von deinem Handy ein
+Abspielen startet das beste. Oder wähle hier eine Version — Größe, Qualität, Sprache.
+Player und Intro überspringen
+Vorherige Folge
+Profil
+Profil, PIN, Stremio und Nuvio
+Wieder der Party beitreten
+Wieder der Watch-Party beitreten
+Tritt wieder bei, um gemeinsam weiterzuschauen.
+Entfernen
+Öffne sie wieder — der Link aller funktioniert weiter.
+Party wieder öffnen
+Startseite zurücksetzen
+Zeile
+Schlüssel speichern
+Gespeichert, verschlüsselt auf diesem Fernseher — „Untertitel finden“ sucht jetzt auch bei SubDL. Gib einen anderen ein, um ihn zu ersetzen.
+Sag Hallo. Nur die Leute in dieser Party sehen es.
+Mit einem Handy scannen zum Beitreten — es öffnet Watchly.
+Scanne mit der Handykamera und bestätige, oder gib diesen Code ein auf {1}
+Scanne mit der Handykamera, füge deinen {1} auf der geöffneten Seite ein und tippe auf Speichern. Dein Handy muss im selben WLAN sein wie der Fernseher.
+AniList-Anmeldung aus Watchly auf diesem Handy senden
+Einstellungen, Listen und Verlauf aus Watchly auf deinem Handy
+QR-Code zeigen
+Alle {1} Quellen zeigen
+Diese Zeile zeigen
+Mit dem Handy anmelden
+Quellen für S{1}:E{2}
+Geschwindigkeit {1}
+Mit
+Starte eine Party und teile den Link oder QR-Code. Alle, die ihn öffnen, schauen den Film gleichzeitig mit dir, mit Chat und Reaktionen. Kein Konto, und nur Abspielen, Pause und die Stelle werden geteilt — verschlüsselt.
+Wiedergabe startet  ·  {1}  ·  {2} Peers
+Statistik für Nerds
+Stremio-Konto
+Das ließ sich nicht lesen.
+Das hat nicht geklappt.
+Das ist kein vollständiger Watch-Party-Link — kopiere ihn ganz.
+Die Liste ließ sich nicht lesen.
+Der Fernseher ist in keinem Netz, das ein Handy erreicht.
+Der Code hat {1} Buchstaben und Ziffern.
+Die Watch-Party ist beendet — Wieder beitreten steht unter Einstellungen → Watch-Party.
+Dieses Nuvio-Konto hat ein Profil.
+Diese Seite merkt es von selbst, sobald du bestätigt hast.
+Top-IMDb-{1} in deinen Genres
+Top-{1} auf IMDb
+Filme
+Serien
+TorBox-Schlüssel
+Link eingeben
+Gib den 8-stelligen Code ein, den der Leiter teilt. Ein älterer Einladungslink? Scanne den Code unten mit dem Handy und füge ihn dort ein. Der Fernseher fragt, bevor er etwas abspielt.
+Code eingeben
+Hoch
+Link verwenden
+Version {1}  ·  {2} %
+Version {1} ist bereit — siehe Einstellungen
+Watch-Party · {1}
+Schaut als {1} — wechseln
+Was die anderen sehen. Leer ist es der Profilname, {1}.
+Was du hier beendest, wird in deinen Konten als gesehen markiert, und was du dort gesehen hast, erscheint hier. Du meldest dich am Handy an, dein Passwort kommt also nie zu Watchly.
+Wenn du eine Party leitest und ein Gast um Pause, Abspielen oder einen Sprung bittet.
+Wenn du leitest, pausiert der Film für alle, deren Stream nachladen muss, höchstens so lange.
+Wenn das Intro einer Folge bekannt ist, überspringe es automatisch statt den Button „Intro überspringen“ zu zeigen. Einmal pro Folge — spule zurück, um es zu sehen.
+Woher Streams und Untertitel kommen
+Mit einem API-Schlüssel von torbox.app spielen Releases, die TorBox im Cache hat, von dessen Servern statt von Peers. Der Schlüssel steht unter Settings auf torbox.app und bleibt verschlüsselt auf diesem Fernseher.
+Du
+Du bist jetzt in einer Party. Verlasse sie über den Party-Button im Player.
+Deine Nuvio-Mediathek, „Weiterschauen“ und Add-ons auf diesem Fernseher, in beide Richtungen synchron. Dein Passwort geht nur an Nuvio.
+Deine Nuvio-Mediathek, „Weiterschauen“ und Add-ons auf diesem Fernseher. Als Gast wird alles vergessen, wenn die App schließt.
+Deine Stremio-Mediathek, „Weiterschauen“ und Add-ons auf diesem Fernseher, in beide Richtungen synchron. Du meldest dich am Handy an — kein Passwort auf dem Fernseher.
+Deine Stremio-Mediathek, „Weiterschauen“ und Add-ons auf diesem Fernseher. Als Gast wird alles vergessen, wenn die App schließt.
+Deine Add-ons
+{1} Releases für „{2}“
+{1} s im Player
+Sprache und Start-Genres
+Sprache, Design und Start-Genres
+Eine PIN hat vier Ziffern
+Ein kostenloser Schlüssel von subdl.com fügt dessen Untertitel zu „Untertitel finden“ hinzu. Er bleibt verschlüsselt auf diesem PC.
+Eine neue Nachricht erscheint kurz über dem Film, wenn der Party-Bereich geschlossen ist.
+Ein kleiner Abstand zum Leiter wird durch bis zu 8 % schnelleres oder langsameres Abspielen ausgeglichen. Aus springt der Player.
+API-Schlüssel gespeichert
+Hinzufügen
+Öffentliche Tracker hinzufügen
+Zum bereits laufenden Download hinzugefügt
+{1} hinzugefügt — siehe Tab Add-ons
+Voraus
+Alle {1}
+Alle · {1}
+AniList hat abgelehnt
+Bestätige Watchly auf der AniList-Seite — sie bringt dich hierher zurück.
+Später fragen
+Früher fragen
+Frag deine Add-ons nach einem Film per Name, oder füge einen Link ein, um ihn direkt abzuspielen — ein Video auf deinem eigenen Medienserver oder einen Magnet. Du kannst auch eine .torrent-Datei oder einen Magnet-Link irgendwo in dieses Fenster ziehen.
+Audio & Untertitel
+Tonspur {1}
+Durchschnittliche Bitrate
+Zurück (Esc)
+10 Sekunden zurück (←)
+Zurück zum vollen Player (P)
+Magnet-Links ohne Tracker werden viel schneller aufgelöst als nur über DHT
+Größere Untertitel
+Browser
+Puffert
+Puffert {1} %
+Cache, Verlauf und gespeicherte Torrent-Infos
+Ordner ändern
+Kanäle
+Chatnachrichten auf dem Bild
+Prüfe die Verbindung und versuche es erneut.
+Prüfe die Verbindung — es lädt erneut, sobald du wieder online bist.
+Prüfe die Verbindung dieses PCs. Watchly versucht es weiter.
+TorBox wird geprüft…
+Dateien werden geprüft
+Ruckelt hier ({1}) — die Grafik dieses PCs kann es nicht dekodieren
+Bild- und Titel-Cache leeren
+Letzte Suchen löschen
+Gespeicherte Torrent-Infos löschen
+Gespeicherte Torrent-Infos löschen?
+Verlauf löschen
+Verlauf löschen?
+Code {1}
+Codec
+Farbe
+Bestätigen
+Verbindungen
+Inhalts-Bitrate
+Weiterschauen
+Einladungslink kopieren
+Link kopieren
+Magnet-Link kopieren
+Code kopieren
+Beschädigt
+Diese Seite konnte nicht geladen werden
+Dieses Regal konnte nicht geladen werden
+Start fehlgeschlagen: {1}
+Einladung konnte nicht kopiert werden
+Bild konnte nicht geladen werden
+{1} konnte nicht geöffnet werden
+Kein Zugriff auf die Zwischenablage — versuche es erneut
+Macher
+Macher: {1}
+Zuschneiden
+Löschen
+Download löschen?
+Downloads löschen?
+Dateien nach dem Stoppen löschen
+Regie: {1}
+Unterbrechungen
+Schließen
+Anzeige
+Angezeigt
+Einen Torrent herunterladen
+Jede Folge herunterladen
+Jedes Video herunterladen
+Download-Ordner
+Staffel {1} aus diesem Release herunterladen
+Download-Geschwindigkeitslimit
+Dieses Release herunterladen
+Download {1} Mbit/s
+Lade nur die nächsten 5 Minuten
+Wird heruntergeladen — siehe Tab Downloads
+Downloads landen in deinem Download-Ordner, machen nach einem Neustart dort weiter, wo sie waren, und spielen in der VLC-Engine — jedes Format und jede Tonspur wird unterstützt.
+Downloads, die du startest, bleiben hier, bis du sie löschst. Füge oben einen Magnet-Link ein, um einen beliebigen Torrent herunterzuladen.
+Ende ({1})
+Gib einen Suchbegriff ein und drücke Suchen
+Gib deine Nuvio-E-Mail und dein Passwort ein
+Folge {1}
+Vollbild beenden
+F: Vollbild · P: Mini-Player · I: Statistik · Leertaste: Abspielen/Pause · ←/→: 10 s · ↑/↓: Lautstärke · A: Audio · S: Untertitel · [: Langsamer · ]: Schneller
+Nur Familienfilme und -serien. Keine Add-ons, keine Stream-Suche und keine Links — gib deinem eigenen Profil eine PIN, damit es so bleibt.
+Schnell
+Gut
+Schwach
+Wird abgerufen
+Film {1}
+Filme und Serien
+Deinen Schlüssel findest du auf torbox.app
+Suche Releases…
+Suche Pakete für Staffel {1}…
+Ordner, Geschwindigkeitslimits und Seeden
+10 Sekunden vor (→)
+Vier Ziffern, die vor dem Öffnen dieses Profils abgefragt werden. Ein Schloss für einen geteilten PC — kein Passwort.
+Bildrate
+Vom PC
+Vollbild
+Vollbild
+Hol dir einen kostenlosen Schlüssel auf subdl.com
+Hash wird geprüft
+Ausblenden
+So funktioniert es
+So funktioniert der Speicher hier
+In deiner Stremio-Mediathek, oder auf einem anderen Gerät oder vor diesem PC pausiert — öffne eins, um es dort abzuspielen, wo Stremio sagt, dass du warst.
+Eingangs-Bitrate
+Sofort · TorBox
+Einladungslink kopiert — füge ihn für deine Freunde ein
+Einer Watch-Party mit ihrem Code beitreten
+Beitreten
+Nach Abschluss weiter seeden
+Den Cache klein halten; ausschalten, um ohne erneutes Herunterladen noch einmal zu schauen
+Tastenkürzel
+Verlasse sie über Watch-Party im Player.
+Platz für alles andere auf der Verbindung lassen
+Leecher
+Link
+Link kopiert
+Links werden nur gestreamt — hier gibt es keinen Torrent zum Herunterladen.
+Lokale Datei
+Gesperrt
+Abmelden
+Verlorene Puffer
+Verlorene Bilder
+Lauter (↑)
+Magnet-Link kopiert
+Wie Windows, oder fest hell oder dunkel
+Metadaten
+Verschiebe Zeilen nach oben oder unten, oder blende sie aus. Jedes Profil behält seine eigenen.
+Stumm
+Nächste 5 Min.
+Kein SubDL-Schlüssel — füge deinen in den Einstellungen hinzu
+Noch keine Add-ons zum Fragen. Füge eins unter Einstellungen → Add-ons hinzu oder füge einen Link ein.
+Keine Tonspuren erkannt
+Keine Folge {1}
+Noch keine Favoriten
+Keine Treffer
+Noch niemand sonst — kopiere den Einladungslink und schick ihn.
+Kein Paket für Staffel {1} — lade ihre Folgen unten einzeln herunter.
+Kein Paket für Staffel {1} in {2} — ändere die Sprache und versuche es erneut, oder lade ihre Folgen unten einzeln herunter.
+Keine Streams dafür.
+Keine Streams für {1} gefunden
+Kein Untertitel in diesem Download
+Keine Untertitel verfügbar
+Keine Untertitel gefunden
+Keine Untertitel gefunden. Nutze Mehr → Untertitel finden, um online zu suchen.
+Nicht in diesem Build
+Nicht jetzt (Esc)
+Nicht bei Nuvio angemeldet
+Nicht bei Stremio angemeldet
+Noch nichts hier
+Nichts in deiner Mediathek passt zu „{1}“.
+Nichts passt dazu.
+Hier ist nichts so hoch bewertet
+Nichts für später gemerkt
+Noch nichts gespeichert
+Nichts gespeichert — Torrents, die du öffnest, werden hier gemerkt, damit sie nächstes Mal schneller öffnen
+Nichts gespeichert
+Nichts zu löschen
+Öffnen
+Im Browser öffnen
+Regal öffnen
+Seite erneut öffnen
+Titel öffnen
+Titelseite öffnen
+Wird geöffnet
+Öffnet sich im Browser
+Oder klicke auf der Seite eines Add-ons auf Installieren. Links bleiben für dieses Windows-Konto verschlüsselt.
+Party-Code {1} kopiert — schick ihn deinen Freunden
+Party-Code, z. B. K7Q2-M9XD
+Wähle ein paar, und die Startseite beginnt mit ihnen
+Bild wählen
+Wähle ein Release zum Herunterladen
+Teile
+Abspielen / Pause (Leertaste)
+Letzte Datei abspielen
+Wiedergabe hängt — warte auf Daten
+Abgespielte Puffer
+Gerade beliebt
+Poster, Inhalte und Regale laden beim nächsten Mal neu
+Leiser (↓)
+Reaktionen schweben über den Film.
+Reaktionen auf dem Bild
+Gelesen
+Torrent wird gelesen
+Torrent wird gelesen…
+Wieder der Watch-Party beitreten
+Releases, die TorBox im Cache hat, zeigen „Sofort“ und spielen von dessen Servern — kein Warten auf Peers. Alles andere streamt wie bisher aus dem Schwarm.
+Aus dem Verlauf entfernen
+Aus dem Verlauf entfernen?
+Watch-Party wieder öffnen
+Auflösung
+GESPEICHERT
+Kopie speichern
+Ganz speichern, dann öffnen
+Gespeicherte Torrent-Infos gelöscht
+Gespeichert, verschlüsselt auf diesem PC — „Untertitel finden“ sucht jetzt auch bei SubDL. Gib einen anderen ein, um ihn zu ersetzen.
+Speichere in {1}
+Sag Hallo. Nur die Leute in dieser Party sehen es, und es verschwindet, wenn die Party endet.
+Nach Titel suchen…
+Titel und Dateien suchen
+Seeder
+Senden (Enter)
+Einen fertigen Download teilen, bis du ihn im Tab Downloads stoppst
+Weniger Folgen zeigen
+Im Ordner zeigen
+Abgemeldet
+Von Nuvio abgemeldet
+Anmeldung bei AniList…
+Intros überspringen
+Intros automatisch überspringen
+Kleinere Untertitel
+Jemand
+Quellen  ·  {1}
+Special {1}
+Geschwindigkeit ({1}x)
+Geschwindigkeit {1}x
+Anfang (0:00)
+Starte eine Party und schick ihren Code. Alle, die damit beitreten, schauen den Film gleichzeitig mit dir, mit Chat und Reaktionen. Kein Konto, und nur Abspielen, Pause und die Stelle werden geteilt — verschlüsselt.
+Startet
+Download startet…
+Startgeschwindigkeit
+Stoppen
+Download stoppen?
+Speicher
+Stream
+Stream abgebrochen — wird wieder aufgenommen
+Stremio hat abgelehnt
+Stremio hat keine Add-ons gesendet
+Stremio hat keinen Code gesendet
+Stremio hat nichts gesendet
+SubDL hat die Anfrage abgelehnt
+SubDL hat den Schlüssel abgelehnt
+Untertitelgröße: {1}
+Untertitel: Aus
+Das hat nicht geklappt — verbinde erneut für einen neuen Code
+Das ist weder ein Magnet-Link noch eine .torrent-Datei
+Dieser Untertitel-Download ist zu groß
+Dieser Untertitel-Link ist keine sichere Webadresse
+Der 8-stellige Code, den der Leiter teilt (ein älterer Einladungslink geht auch). Watchly zeigt, was es abspielen würde, und fragt, bevor es startet.
+Der Film pausiert für alle, deren Stream nachladen muss, höchstens so lange.
+Der Stream bricht immer wieder ab
+Das Update braucht dein Okay zur Installation
+Diese Watchly-Kopie wurde ohne das Watch-Party-Relay gebaut.
+Titel
+Titel-Cache geleert
+TorBox-API-Schlüssel
+TorBox ist nicht gestartet — versuche Peers. Wenn es auch so nicht spielt, passt das Video dieses Releases vielleicht nicht zu diesem PC: probiere ein anderes.
+Die Antwort von TorBox ergab keinen Sinn.
+Torrents müssen ihre Dateilisten beim nächsten Öffnen erneut aus dem Schwarm holen. Verlauf und Downloads bleiben.
+Torrents, die du streamst, erscheinen hier mit jeder Datei, die sie enthalten, jede mit eigenem Fortsetzungspunkt.
+Tracker und wie der Cache funktioniert
+Versuche eine niedrigere Bewertung oder ein anderes Genre.
+{1} deinstallieren
+Unbegrenzt
+Steuerung entsperren
+Entsperrt
+Als Nächstes in {1} s
+Upload
+Upload-Geschwindigkeitslimit
+Video {1}
+Video {1} Mbit/s
+Ansicht
+Lautstärke
+Lautstärke {1} %
+Schauen, während Teile ankommen
+Später ansehen
+Watch-Partys
+Schaut als {1} auf Nuvio
+Schaut als {1}
+Watchly · Filme und Serien, bereit, wenn du es bist. Du bist verantwortlich für das, was du schaust und herunterlädst.
+Was die anderen sehen
+Was der Schwarm zurückbekommt, während du herunterlädst
+Wenn ein Gast um Pause, Abspielen oder einen Sprung bittet.
+Wenn du leitest
+Wenn du schaust
+Wenn das Intro einer Folge bekannt ist, überspringe es statt den Button „Intro überspringen“ zu zeigen. Einmal pro Folge — spule zurück, um es zu sehen.
+Wohin sollen Downloads?
+Ganze Datei (Download)
+Fenster
+Mit einem API-Schlüssel von torbox.app spielen Releases, die TorBox im Cache hat, von dessen Servern statt von Peers. Verschlüsselt für dieses Windows-Konto gespeichert.
+Du bist in einer Party
+Du bist in einer Party — verlasse sie über Watch-Party im Player.
+Du leitest eine Party
+Du leitest eine Party — beende sie über Watch-Party im Player.
+Deine Stremio-Mediathek und wo du aufgehört hast, sind hier, Meine Liste ist deine Mediathek dort, und was du beendest, wird als gesehen markiert. Add-ons, die du hier hinzufügst oder entfernst, ändern sich auch in deinem Konto.
+Deine Stremio-Mediathek, „Weiterschauen“ und Add-ons hier, in beide Richtungen synchron. Du meldest dich auf Stremios eigener Seite an — dein Passwort kommt nie zu Watchly.
+{1} Einträge und ihre Fortsetzungspunkte werden gelöscht.
+Noch {1} s
+{1} gewählt — diese stehen vorn auf der Startseite
+{1} wird aus dieser Liste und von der Festplatte entfernt.
+{1} — und die {2} Releases, von denen abgespielt wurde
+{1} fragt jetzt nach einer PIN
+{1} — Profil wechseln
+{1} % in Folge 1
+{1} abspielbar · {2} Dateien — wie möchtest du es öffnen?
+{1} wird entfernt. Fertige Dateien bleiben; unfertige werden gelöscht.
+{1} ist ab {2} freigegeben. Wechsle zu einem Erwachsenenprofil, um es zu schauen.
+🔒  Der Film wird auf diesem PC gestreamt. Nur Abspielen, Pause und die Stelle werden geteilt — verschlüsselt, ohne Konto.

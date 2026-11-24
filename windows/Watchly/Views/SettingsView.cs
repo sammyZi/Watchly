@@ -76,7 +76,7 @@ public sealed class SettingsView : UserControl
             new("user", "Account", "Profile, PIN, Stremio and Nuvio", "lock sign in login", () => Go("Account")),
             new("users", "Switch profile", "Change to a different profile", "", shell.ShowProfiles),
         });
-        groups.Add(new() { new("palette", "Appearance", "Theme and home screen genres", "light dark", () => Go("Appearance")) });
+        groups.Add(new() { new("palette", "Appearance", "Language, theme and home screen genres", "light dark language", () => Go("Appearance")) });
         groups.Add(new()
         {
             new("radio", "Streaming", "Trackers and how the cache works", "magnet storage", () => Go("Streaming")),
@@ -355,6 +355,12 @@ public sealed class SettingsView : UserControl
 
     void Appearance()
     {
+        // Every language at once, each in its own words: on a wide window the whole list fits, nothing to scroll.
+        page.Children.Add(Group("App language",
+            ChoiceRow("App language", "Watchly's words in your language. Titles and descriptions come from the catalogues as they are.",
+                new[] { ("", "Device language") }.Concat(I18n.Languages.Select(l => (l.Tag, l.Name))).ToArray(),
+                S.Language ?? "", v => Set(S with { Language = v }))));
+
         page.Children.Add(Group("Appearance",
             ChoiceRow("Theme", "Match Windows, or lock light or dark",
                 new[] { ("system", "System"), ("light", "Light"), ("dark", "Dark") }, S.ThemeMode, v => Set(S with { ThemeMode = v }))));

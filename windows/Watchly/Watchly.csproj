@@ -86,10 +86,14 @@
     <Resource Include="Assets\Reactions\*.png" />
     <!-- The profile faces, drawn from the same file as the phone's and the TV's. -->
     <EmbeddedResource Include="..\..\tv\core\src\main\resources\avatars.json" LogicalName="avatars.json" />
+    <!-- The app's words in every language, the phone's and the TV's files as they are. -->
+    <EmbeddedResource Include="..\..\tv\core\src\main\assets\i18n\*.txt" LogicalName="i18n/%(Filename).txt" />
     <EmbeddedResource Include="..\..\tv\core\src\main\resources\watch-orders.json" LogicalName="watch-orders.json" />
     <EmbeddedResource Include="..\..\tv\core\src\main\resources\legal.json" LogicalName="legal.json" />
     <!-- Hand-drawn people, Open Peeps. CC0, see assets/people/LICENSE. -->
     <EmbeddedResource Include="..\..\tv\core\src\main\assets\people\*.png" LogicalName="people/%(Filename).png" />
+    <!-- Dressed animals, drawn for Watchly. See assets/animals/LICENSE. -->
+    <EmbeddedResource Include="..\..\tv\core\src\main\assets\animals\*.png" LogicalName="animals/%(Filename).png" />
   </ItemGroup>
 
   <ItemGroup>

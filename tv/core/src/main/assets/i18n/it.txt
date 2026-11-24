@@ -1,0 +1,1271 @@
+Interrogo i tuoi add-on…
+{1} chiede di mettere in pausa
+{1} chiede di riprodurre
+Scarica la stagione {1}
+Tutti aspettano che il tuo carichi
+Solo io
+Da solo
+In riproduzione su {1}
+Salta intro
+Il film va in streaming su questo telefono. Si condividono solo play, pausa e il punto — crittografati, senza account.
+In attesa di {1}
+In attesa che {1} carichi
+In attesa di te e {1}
+Saresti il primo a entrare
+Modificabile quando niente è in download o in riproduzione.
+{1} di {2} visti
+{1} visto
+{1} nuovi
+{1} ti ha invitato a guardare insieme
+{1} episodi
+{1} titoli
+{1} release
+{1} seed
+{1} di {2} salvati
+{1} secondi prima
+{1} secondi dopo
+{1} saghe, nell'ordine giusto
+{1} nuovi episodi
+{1} installati · stream, sottotitoli e cataloghi
+Mancano {1} min
+Mancano {1} h {2} min
+Mancano {1} min
+{1} interruzioni audio
+{1} finora · cerco altri…
+1 nuovo episodio
+Un film, o un link da riprodurre
+Una chiave gratuita di subdl.com aggiunge i suoi sottotitoli a Trova sottotitoli. Resta crittografata su questo telefono.
+Un profilo bambini non può aprire torrent o add-on da altre app.
+Una traccia corrispondente si attiva da sola all'apertura di un video; se ne scegli una tu, vale la tua. La ricerca online dei sottotitoli usa la lingua dei sottotitoli.
+Una notifica quando una serie che guardi o hai nella Mia lista esce con un nuovo episodio. Controllato due volte al giorno.
+Account
+Account
+Azione
+Aggiungi add-on
+Aggiungi un add-on
+Aggiungine uno per trovare stream per ogni film ed episodio. Senza, si riproducono solo i link che incolli in Cerca.
+Aggiungine uno per trovare stream — Watchly non ne include nessuno
+Aggiungi profilo
+Aggiungi profili
+Aggiungere questo add-on?
+Aggiungi al calendario
+{1} add-on aggiunto
+{1} add-on aggiunti
+{1} aggiunto
+{1} aggiunto — vedi Impostazioni → Add-on
+Aggiunta…
+Add-on
+Avventura
+Tutti
+Sei in pari
+Tutti i generi
+Tutto quanto sopra
+Da sempre
+Tutto visto
+Consenti
+Consenti subito
+Consenti download in background
+Consenti notifiche
+Già sincronizzato.
+Animali
+Animazione
+Anime
+Solo anime · non connesso
+Qualsiasi
+Qualsiasi genere
+Qualsiasi lingua
+Qualsiasi rete
+Qualsiasi qualità
+Qualsiasi voto
+Qualsiasi anno
+Aspetto
+Approva Watchly nella pagina di AniList; ti riporterà qui.
+Approva nella pagina che si è aperta, o riaprila. Codice {1}
+Come ospite, un piccolo distacco dal leader si recupera riproducendo fino all'8% più veloce o più lento, senza che tu lo senta. Disattivato, il lettore salta al punto del leader.
+Chiedimelo
+Richiesto prima di aprire questo profilo. Rimuovilo per sbloccare.
+Interrogo AniList…
+Aggiunge tracker pubblici ai link magnet che ne sono privi, così si risolvono più in fretta.
+Audio
+Audio e sottotitoli
+Lingua audio
+Audio: {1}
+Automaticamente
+Premi
+Indietro
+Esegui backup
+Backup
+Backup salvato
+Il risparmio energetico può rallentare o fermare i download a schermo spento. Lascia Watchly attivo in background perché continuino.
+Perché hai guardato {1}
+Perché hai guardato…
+Prima del 1990
+Prima di iniziare
+Adatta
+Migliore corrispondenza
+Più grande
+Bitrate
+Sfondo dietro
+Porta la tua libreria di Stremio
+Porta la tua libreria, Continua a guardare e gli add-on da Stremio o Nuvio. Restano sincronizzati in entrambe le direzioni.
+Importo i tuoi add-on…
+Sfoglia film, serie e anime di tendenza e riproducili dagli add-on e server che scegli. Watchly non ne include nessuno.
+Buffer
+Buffer prima della riproduzione
+Impressi nel video: usa − e +.
+SCEGLI UN'ICONA
+Impossibile raggiungere la sessione per ora
+Annulla
+Trasmetti
+La trasmissione richiede il Wi-Fi — non c'è un indirizzo da passare alla TV.
+Recupera
+Cambia
+Cambia profilo Nuvio
+Cambia PIN
+Cambia stream
+Cambia il nome, il volto o il colore.
+Passa a un altro profilo
+Chat
+Messaggi della chat
+Controlla aggiornamenti
+Controlla la connessione di questo telefono. Watchly continua a provare.
+Verifico TorBox
+Verifico la chiave…
+Scegli un episodio per vedere cosa è disponibile.
+A scatti qui ({1})
+Cancella
+Cancella tutto
+Cancellare tutto ciò che hai riprodotto?
+Chiudi
+Codice copiato
+Dati delle raccolte da TMDB. Questo prodotto usa l'API di TMDB ma non è approvato né certificato da TMDB.
+Commedia
+Completato nella tua lista
+Connetti
+Collegalo prima in Impostazioni → Integrazioni
+Connesso
+Connesso come {1}
+Connesso — in attesa che l'host avvii qualcosa
+Connessione alla sessione…
+Continua
+Continua a guardare
+Continua con {1}
+Continua con Nuvio
+Continua con Stremio
+Copiato
+Copiare i tuoi add-on sulla TV?
+Impossibile aggiungere l'add-on
+Impossibile aggiungere il torrent
+Impossibile connettersi a quel dispositivo.
+Impossibile ottenere quel sottotitolo
+Impossibile caricare l'immagine.
+Impossibile raggiungere {1}.
+Impossibile raggiungere AniList
+Impossibile raggiungere Nuvio
+Impossibile raggiungere Nuvio.
+Impossibile raggiungere Stremio
+Impossibile raggiungere Stremio.
+Impossibile raggiungere la TV — il telefono è sullo stesso Wi-Fi?
+Impossibile leggere il file
+Impossibile leggere il file.
+Impossibile ripristinare il backup
+Impossibile avviare quel download
+Impossibile avviare il download
+Impossibile scrivere il backup: {1}
+Creatori
+Crime
+Serie crime
+PIN attuale
+Scuro
+Eliminare {1}?
+Elimina da questo telefono
+Elimina profilo
+Dettagli
+Diretto
+Regista
+Disconnetti
+Documentari
+Documentario
+Non aspettare
+Fatto
+Scarica
+Scarica {1}: scegli una release
+Scarica in anticipo
+Download completato
+Scarica stagione
+Scarica: scegli una release
+Download in corso
+Scarico {1} — vedi Download
+Scarico la stagione {1} di {2} — vedi Download
+Scarico i prossimi 5 minuti
+Scarico l'intero file
+Download in corso. Tocca la notifica al termine per installare.
+Download
+Drammatico
+Serie drammatiche
+Prima
+Modifica Home
+Modifica profilo
+Email
+Email e password
+Fine dell'episodio
+Termina sessione
+Finisce alle {1}
+Finisce alle {1} se riprendi ora
+Ti piace Watchly?
+Inserisci quattro cifre per il nuovo PIN
+Inserisci il codice di 8 caratteri condiviso dal tuo amico.
+Inserisci prima il PIN attuale
+Inserisci il PIN attuale per rimuoverlo
+Inserisci email e password di Nuvio.
+Inserisci il PIN per aprire questo profilo.
+Episodio
+Episodio {1}
+Episodio {1} {2}
+Numero dell'episodio
+Episodi
+Ci sono già tutti gli add-on
+Tutti i titoli, add-on e ricerca di stream inclusi.
+Tutto
+Tracker aggiuntivi
+Non riuscito
+Solo film e serie per famiglie. Niente add-on, ricerca di stream o link da altre app — metti un PIN al tuo profilo perché resti così.
+Fantasy
+Più veloce
+Più veloce prende i pezzi da dove li ha lo sciame. In ordine riempie ogni file dall'inizio, così puoi guardarlo mentre scarica — ma è più lento.
+Generi preferiti
+Preferiti
+File
+I file già salvati restano su questo telefono
+Film
+Film {1} di {2}
+Film
+Film e serie
+Solo film
+Trova un ordine di visione
+Trova sottotitoli
+Trova sottotitoli online…
+Cerco {1}…
+Cerco peer
+Cerco peer e leggo l'elenco dei file
+Cerco peer…
+Cerco fonti…
+Cerco la stanza e chiedo all'host cosa c'è.
+Prima completa o ferma download e riproduzione.
+Completato
+Quattro cifre richieste prima di aprire questo profilo. Un lucchetto per un telefono condiviso — non una password.
+Fotogrammi
+Gratuito e open source — una stella aiuta altri a trovarlo
+Da URL
+Dal telefono
+Dai tuoi account
+Genere
+Generi nella schermata Home
+Inizia
+Continua
+Ospite
+Ospite tiene Continua a guardare su questo telefono; la Mia lista e gli accessi spariscono alla chiusura dell'app.
+Richieste degli ospiti
+Abitudini
+Cronologia
+Cronologia, punti di ripresa, liste, impostazioni, ricerche e segni dell'intro in un unico file. I download non ci sono — sono file su questo telefono.
+Home
+Righe della Home
+Horror
+Ore guardate, preferiti e serie di giorni
+Quanto di un film può stare su questo telefono alla volta. Quando è pieno, ciò che hai visto viene liberato per fare spazio. Auto usa lo spazio libero lasciando qualche GB di margine.
+Quanto di ciò che hai guardato è stato di ciascun genere. Un titolo conta in ognuno dei suoi generi.
+Accetto
+IMDb {1}+
+Voto IMDb
+Ignora
+Importa add-on
+Nella Mia lista
+In ordine
+Istantaneo
+Integrazioni
+Invita
+È gratuito e open source. Una stella su GitHub aiuta altri a trovarlo.
+L'host è uscito o l'ha terminata. Chiedi un nuovo link.
+La sua libreria, Mia lista e punti di ripresa.
+Archivio proprio, separato da quello di Watchly
+Entra
+Entra in una visione di gruppo
+Entra nella sessione
+Entra con un codice
+Entro nella visione di gruppo…
+Entro — il film della sessione appare tra un attimo.
+Vai a {1}
+Solo per te, o chiedere al leader di mettere in pausa per tutti?
+Solo per te, o chiedere al leader di riprodurre per tutti?
+Continua il download
+Tienilo
+Tieni aperto — il film appare qui appena lo avviano.
+Tenuto per riaprire in fretta
+Profilo bambini
+Noto per
+Lingua: {1}
+Lingue
+Più grande parte più lentamente ma è più stabile con pochi peer.
+Visto l'ultima volta {1}
+Esci
+Note legali
+Libreria
+Libreria, Mia lista e punti di ripresa appartengono a questo profilo.
+Chiaro
+Pagine chiare o scure, o come impostato sul telefono. Il lettore resta comunque scuro.
+Mi piace
+Ti piace
+Link a un'immagine
+Caricamento
+Caricamento…
+Blocca
+Serie più lunga
+Crea un profilo per tenere i tuoi accessi — Ospite li dimentica alla chiusura dell'app.
+Gestisci
+Gestisci profili
+Media3 passa da solo a VLC un file che non riesce a riprodurre. VLC dall'inizio riproduce più formati e lo stile completo dei sottotitoli ASS.
+Messaggio
+Mini lettore
+Altro
+Altro {1}
+Simili
+I più visti
+Sposta le righe su o giù, o disattivale. Ogni profilo tiene le sue.
+Film, serie, anime
+La mia lista
+Mistero
+PROSSIMO EPISODIO
+Servono {1} Mb/s
+Rete
+Rete, ordine e archiviazione
+Nuovi episodi
+Nuovo PIN
+Avvisi nuovi episodi
+Nuovo episodio: {1}
+Nuovi episodi
+Qui compaiono i nuovi episodi delle serie che segui, i download finiti e gli aggiornamenti
+Prossimi 5 minuti
+Prossimo episodio
+A seguire: {1}
+No
+Ancora nessun add-on su questo telefono
+Ancora nessun add-on
+Nessuna app qui può aprire quel link
+Nessuna traccia audio segnalata finora.
+Nessun add-on installato corrisponde.
+Ancora nessuna notifica
+Ancora nessun altro — tocca il pulsante di invito qui sopra.
+Nessun'altra battuta vicino a quel momento. Tocca proprio quando qualcuno inizia a parlare.
+Nessun altro lettore su questo telefono può aprirlo.
+Nessun'altra release trovata.
+Nessun peer ha risposto. Il torrent potrebbe essere morto, o la rete blocca BitTorrent.
+Nessuna release per “{1}”
+Nessuna release corrisponde ai filtri
+Ancora nessun pacchetto della stagione {1} — scarica gli episodi uno alla volta.
+Nessuna impostazione corrisponde
+Nessuna fonte
+Nessuna fonte trovata per {1}.
+Nessun video in questo torrent
+Nessun ordine di visione con quel nome
+Nessuno
+Nessuna in {1}.
+Normale
+Non connesso
+Non per questo profilo
+Non ora
+Non ancora uscito
+Non configurato in questa build
+Non hai effettuato l'accesso
+Nessun accesso ad AniList su questo telefono
+Non iniziato
+Non funziona
+Non funziona: {1}
+Ancora niente scaricato. Scarica dalla pagina di un titolo e si riprodurrà qui senza connessione.
+Nessun risultato per “{1}”
+Niente trovato in {1}. Cambia lingua e riprova.
+Niente trovato in questa lingua
+Niente trovato. Prova un altro episodio o aggiungi un altro add-on in Impostazioni → Add-on.
+Ancora niente qui. Tutto ciò che riproduci compare in questa lista.
+Niente tenuto. Un film fermato a metà tiene qui il suo inizio, così si apre subito la prossima volta.
+Niente corrisponde ai filtri
+Niente su questo scaffale al momento.
+Niente con un voto così alto qui.
+Niente da scegliere.
+Niente guardato su {1} finora.
+Notifiche
+Le notifiche di Watchly sono disattivate, quindi gli avvisi non possono ancora comparire.
+Notifiche, {1} nuove
+In riproduzione
+Cache del motore Nuvio
+SULL'IMMAGINE
+Disattivato
+Disattivato, il lettore non ha il pulsante di sessione e i link di invito vengono rifiutati. Disattivarlo ti fa uscire da qualsiasi sessione in corso.
+Attivato
+Sull'immagine
+Nella tua lista
+Una sola libreria su questo telefono. Aggiungi profili per avere ognuno libreria, Mia lista e punti di ripresa.
+Solo un torrent si può guardare insieme — questo è un file o un link semplice.
+Aggiungi solo add-on di cui ti fidi: decidono cosa ti viene proposto.
+Si condividono solo play, pausa e il punto in cui sei, crittografati. Vedrai cosa c'è prima che parta qualcosa.
+Solo i generi scelti qui hanno righe nella Home. Lasciali tutti disattivati per costruirla da ciò che hai guardato.
+Solo il leader può mettere in pausa la sessione — o metti in pausa solo per te e recupera dopo.
+Solo il leader può avviare la sessione — o riproduci solo per te e recupera dopo.
+Solo le persone di questa sessione lo vedono, e sparisce quando la sessione finisce.
+Apri Stremio
+Riapri Stremio
+Riapri
+Apri in un altro lettore
+Apro il film…
+Apertura…
+Apre l'app
+Oppure tocca Installa sul sito di un add-on e scegli Watchly.
+Oppure tocca qui quando qualcuno parla
+Ordine
+Originale
+Altri file
+I nostri termini sono cambiati
+PIN rimosso
+PIN impostato per {1}
+Codice sessione
+Password
+Prima incolla un link di add-on
+Prima incolla la tua chiave SubDL
+Prima incolla la tua chiave TorBox
+Pausa
+Pausa tra {1} min
+In pausa
+In pausa  ·  {1}%
+Persone
+Persone · {1}
+Telefono
+Scegline alcuni — la tua Home partirà da questi. Cambiali quando vuoi in Impostazioni.
+Scegli la mia fonte
+Scelti per te
+Immagine
+Riproduci
+Riproduci {1}
+Riproduzione
+Velocità di riproduzione
+Lettore
+Lettore, lingue e sottotitoli
+In riproduzione
+Serie popolari
+Precedente
+Informativa sulla privacy
+PIN del profilo
+Nome del profilo
+Profilo, Stremio, Nuvio e PIN
+Qualità
+Reazioni
+Lettura…
+Ricerche recenti
+Riconnessione…
+Rientra
+Rientra per esserci quando ripartirà
+Rientra per guardare di nuovo insieme
+Lingua della release
+Ordine di uscita
+Le release che TorBox ha in cache indicano Istantaneo e si riproducono dai suoi server — niente peer da aspettare, salti ovunque. Il resto va in streaming dallo sciame come prima.
+Rimuovi PIN
+Rimuovi da Continua a guardare
+Rimuovi dalla libreria
+Rimuovi chiave
+Riapri
+Riaprila — il link di tutti funziona ancora
+Sostituisce quelli della TV, per questo profilo
+Ripristina predefiniti
+{1} parti della libreria ripristinate
+Riprendi
+Riprendi {1}
+Vanno via anche i punti di ripresa e i sottotitoli scaricati
+Recensioni
+Recensioni di {1}
+Scheda SD
+Salva
+Salva o ripristina la tua libreria
+Salva nella cartella dell'app sulla scheda SD invece che sul telefono. Quei file spariscono se l'app viene disinstallata.
+Salvata
+Salvata, crittografata su questo telefono — Trova sottotitoli cerca anche su SubDL. Inseriscine un'altra per sostituirla.
+Saluta
+Fantascienza
+Cerca
+Cerca negli add-on installati
+Cerca nelle impostazioni
+Ricerca…
+Stagione {1}
+Pacchetti della stagione {1}
+Vedi tutto
+Rivedi il tour iniziale
+Invia
+Invia {1} add-on
+Invia {1} add-on
+Invia i miei add-on a Stremio
+Invia il tuo accesso ad AniList
+Invio alla TV…
+Invio dei tuoi add-on…
+Inviato alla TV
+Serie
+Solo serie
+Servizi
+Imposta PIN
+Impostazioni
+Mostra
+Mostra tutto
+Mostra tutti i {1} episodi
+Mostra il pulsante
+Accedi
+Accedi e approva nella pagina che si è aperta — se ne accorge da solo. Codice {1}
+Accedi a Nuvio
+Accedi a Stremio
+Esci
+Collegare la TV ad AniList?
+Accesso effettuato
+Accesso come {1}
+Accesso…
+Accesso dalla pagina di Stremio
+Simkl, MDBList e AniList
+Dimensione
+Dimensione, colore e uno sfondo dietro il testo. Media3 mostra la modifica dalla riga successiva; VLC dal video successivo.
+Salta
+Salta per ora
+Saltato
+Intro saltata
+Timer di spegnimento
+Timer disattivato
+Timer — in pausa
+Più piccolo
+Recupero fluido
+Fonti
+Speciali
+Velocità ({1})
+Stella su GitHub
+Avvia una sessione e condividi il codice. Chi entra con quello guarda il film in sincronia con te, con chat e reazioni. Niente account, e si condividono solo play, pausa e il punto — crittografati.
+Avvia una visione di gruppo
+Avviane una col pulsante persone in alto nel lettore e invia il link. Ognuno trasmette il film sul proprio dispositivo; si condividono solo play, pausa e il punto, crittografati, senza account.
+Ricomincia
+Avvio della riproduzione
+Avvio della riproduzione  ·  da {1}
+Statistiche
+Cerco ancora fonti…
+Ferma dopo questo episodio
+Ferma ed elimina quanto arrivato
+Interrompi trasmissione
+Interrompere il download di {1}?
+Spazio per un film
+Archiviazione, buffer e tracker
+Ordine della storia
+Streaming
+Stream
+Stream, sottotitoli e cataloghi extra arrivano dagli add-on — pubblici, del tuo servizio debrid o del tuo media server. Watchly non ne include nessuno.
+Codice Stremio
+Allunga
+Chiavi SubDL e TorBox
+Chiave SubDL
+Chiave SubDL rimossa
+Chiave SubDL salvata
+Lingua dei sottotitoli
+Ricerca sottotitoli non riuscita
+Stile dei sottotitoli
+Sottotitoli
+Sottotitoli sincronizzati: {1}
+Sottotitoli: {1}
+Sciame
+Cambia profilo
+Cambio stream…
+Passo a VLC per anticipare i sottotitoli
+Passo a VLC — il lettore integrato non riesce a riprodurre questo video
+Sincronizzati. Ora i sottotitoli compaiono {1}.
+Sistema
+Tocca per installare
+Termini e condizioni
+Quel codice è scaduto — accedi di nuovo per averne uno nuovo.
+Quel codice è scaduto — riprova.
+Non è andato a buon fine — collegati di nuovo per un nuovo codice.
+Non è una TV con Watchly sulla tua rete di casa.
+Non è un codice di sessione — sono 8 lettere e numeri, come K7Q2-M9XD.
+Non è un codice di visione di gruppo.
+Impossibile leggere quel link magnet
+Quello è un link e va solo in streaming. Scegli un torrent da scaricare.
+Quella versione non è più la più recente
+Quella visione di gruppo è chiusa.
+Quel link di visione di gruppo è incompleto.
+Non è il PIN
+Non è il PIN. Riprova.
+Il codice di 8 caratteri che il leader condivide dal pannello sessione del lettore. Lo accetta anche il pulsante sessione della Home.
+Il codice è di 8 lettere e numeri.
+Predefinito del file
+L'host
+In una visione di gruppo la velocità la decide il leader
+I prossimi {1} giorni delle serie che segui e dei film che hai salvato.
+Le regole d'uso di Watchly
+La visione di gruppo è terminata
+Tema
+Lingua, tema, generi e righe della Home
+Watchly nella tua lingua. Titoli e descrizioni arrivano dai cataloghi così come sono.
+Questo account Nuvio ha un profilo
+Questa build di Watchly non ha la visione di gruppo.
+Questo telefono
+Questo prodotto usa l'API di TMDB ma non è approvato né certificato da TMDB.
+Questo torrent non contiene video.
+Questa visione di gruppo è chiusa
+Questa settimana
+Thriller
+Thriller
+Tempi
+Titoli
+I titoli che aggiungi alla Mia lista aspettano qui.
+I titoli che ti piacciono si raccolgono qui.
+Per ospitare, avvia una sessione dal lettore.
+Per togliere a Watchly anche l'accesso su AniList, rimuovilo lì in Settings → Apps.
+Oggi
+Il meglio su IMDb
+Risultati migliori
+Chiave TorBox rimossa
+Chiave TorBox salvata
+Motore torrent
+Film di tendenza
+A SEGUIRE
+Disinstalla
+{1} disinstallato
+A seguire
+In arrivo
+Aggiorna
+Aggiornamento disponibile
+Usa
+Usa dati mobili
+Versione {1} · compilata {2}
+Versione {1}  ·  {2}
+Video
+Attendi le connessioni lente
+In attesa del Wi-Fi
+In attesa del Wi-Fi  ·  {1}%
+In attesa della tua approvazione…
+Guarda
+Guarda {1} insieme
+Ordine di visione
+Ordini di visione
+Visione di gruppo
+La visione di gruppo è disattivata — attivala in Impostazioni → Visione di gruppo.
+Guarda qualcosa e le tue statistiche iniziano qui.
+Visto
+In visione
+Guarda per conto suo
+Watchly è solo un lettore multimediale
+Tour di benvenuto
+Cosa ti piace?
+Cosa deve copiare la TV?
+Cosa compare sul film quando il pannello della sessione è chiuso. Disattivato, la chat si raccoglie comunque nel pannello — un punto sul pulsante sessione segnala le novità.
+Cosa resta qui e cosa viene inviato
+Cosa trasmette un torrent. La modifica vale dal film successivo.
+Ciò che gli altri vedono quando entri o chiedi qualcosa. Se vuoto, è il nome del profilo, {1}.
+Ciò che finisci qui viene segnato come visto sui tuoi account, e ciò che hai visto lì compare qui. Accedi dalla pagina di ciascun servizio, così la password non arriva mai a Watchly.
+Quando guidi una sessione e un ospite chiede pausa, play o un salto. Se ignorata, i suoi pulsanti gli dicono che controlli solo tu.
+Quando guidi, il film si mette in pausa per chi deve caricare lo stream e riparte quando ha finito — al massimo per questo tempo. Continua, nel banner, smette di aspettare in qualsiasi momento.
+Quando l'intro di un episodio è nota, saltala da sola invece di mostrare il pulsante Salta intro. Una volta per episodio — torna indietro per vederla.
+Dove ti sei fermato su Nuvio è in Continua a guardare, la Mia lista è la tua libreria Nuvio e ciò che finisci viene segnato come visto.
+Quale profilo Nuvio è questo?
+Quale file?
+Bianco
+Chi sta guardando?
+File intero
+Solo Wi-Fi
+Solo Wi-Fi trattiene un download con i dati mobili — aspetta e riprende quando torna il Wi-Fi. Usa i dati mobili su un download in attesa per farlo passare.
+Con una chiave API di torbox.app, le release che TorBox ha in cache si riproducono dai suoi server invece che dai peer. La chiave è in Settings su torbox.app e resta crittografata su questo telefono.
+Con ogni release da cui è stato riprodotto
+Anno
+Giallo
+Hai terminato la tua visione di gruppo
+Hai la versione {1}
+Hai lasciato la visione di gruppo
+Guardi di più il
+Sei offline — mostro ciò che è stato salvato
+Stai guardando
+La tua libreria Nuvio, Continua a guardare e gli add-on qui, sincronizzati in entrambe le direzioni. La password va solo a Nuvio.
+La tua libreria Nuvio, Continua a guardare e gli add-on qui. Come Ospite viene dimenticata alla chiusura dell'app.
+La tua libreria Nuvio, Continua a guardare e gli add-on. La password va solo a Nuvio.
+La tua libreria Stremio, Continua a guardare e gli add-on qui, sincronizzati in entrambe le direzioni. Accedi dalla pagina di Stremio — la password non arriva mai a Watchly.
+La tua libreria Stremio, Continua a guardare e gli add-on qui. Come Ospite viene dimenticata alla chiusura dell'app.
+La tua chiave API SubDL
+La tua chiave API TorBox
+I tuoi generi
+La tua libreria
+Il tuo lettore multimediale
+Il tuo nome
+Il tuo nome, richieste degli ospiti e attesa
+Le tue statistiche
+La tua visione di gruppo
+Zoom per riempire
+circa {1} per {2} episodi
+alla fine di questo episodio
+ti ha invitato a guardare insieme
+altri in arrivo
+disponibile ora
+questo film
+questo mese
+visti quest'anno
+giorno di fila
+giorni di fila
+✓ Accesso a Stremio effettuato — la tua libreria e dove ti eri fermato sono qui sotto
+{1} ha messo in pausa
+{1} ha premuto play
+{1} è andato a {2}
+{1} ha impostato la velocità a {2}
+{1} è entrato
+{1} ha lasciato la sessione
+{1} ha terminato la sessione
+Pausa richiesta per tutti
+Riproduzione richiesta
+Salto a {1} richiesto per tutti
+Recupero la sessione
+Solo il leader controlla questa sessione
+Guardi per conto tuo — recupera quando vuoi
+Si è proseguito senza {1}
+{1} g fa
+{1} h fa
+{1} min fa
+proprio ora
+Domani
+Popolari
+I più votati
+I più recenti
+Famiglia
+Film per famiglie
+Serie per famiglie
+Romantico
+Guerra
+Western
+Sport
+TV in diretta
+Serie completa
+Pacchetto stagione
+Hai l'ultima versione
+Impossibile controllare gli aggiornamenti
+Impossibile scaricare l'aggiornamento
+L'aggiornamento non è stato scaricato correttamente. Riprova.
+Impossibile raggiungere {1}
+Impossibile trovare {1} — controlla il link e la connessione
+Impossibile aprire quel torrent.
+Impossibile avviare quello stream.
+Nessun add-on a quel link — controllalo
+Non è un manifest di add-on
+Non è un link di add-on
+Impossibile avviare la riproduzione
+Impossibile riprodurre questo file
+Nessun decoder per questo audio
+Nessun decoder per questo video
+Nessun seed
+Spazio esaurito. Lo stream è stato fermato e i suoi file cancellati.
+Spazio esaurito. Lo stream è stato fermato.
+Il motore torrent ha perso questo stream. Riprova.
+I metadati di questo torrent sono scaduti. Riaprilo.
+TorBox non ha accettato la chiave API.
+TorBox sta ancora preparando questo torrent. Riprova tra un minuto.
+TorBox si è fermato — streaming dai peer.
+TorBox non ha voluto aggiungere questo torrent.
+Quel backup è vuoto
+Quel file non c'è più — forse è stato eliminato o la scheda rimossa.
+Sottotitolo {1}
+Traccia {1}
+Cronologia e punti di ripresa
+La mia lista, ricerche e generi della Home
+Impostazioni e add-on
+Inglese
+Spagnolo
+Francese
+Tedesco
+Italiano
+Portoghese
+Portoghese (Brasile)
+Russo
+Turco
+Arabo
+Hindi
+Bengalese
+Tamil
+Telugu
+Malayalam
+Indonesiano
+Giapponese
+Coreano
+Cinese
+Olandese
+Polacco
+Svedese
+Greco
+Ebraico
+Persiano
+Thailandese
+Vietnamita
+Rumeno
+Croato
+Serbo
+Bosniaco
+Lingua
+Lingua dell'app
+Lingua del dispositivo
+Auto
+Nero AMOLED
+Usa sfondi nero puro per gli schermi OLED.
+Schermata Home
+{1} scelti
+{1} lingue
+Fantascienza
+Biografico
+Musica
+Musical
+Bambini
+Notizie
+Reality
+Azione e avventura
+Fantascienza e fantasy
+Da solo — Recupera è nella barra
+Una chiave gratuita di subdl.com aggiunge i suoi sottotitoli a Trova sottotitoli. Resta crittografata su questa TV.
+Aggiungi un profilo
+Aggiungi un add-on tramite il suo link — pubblico, del tuo servizio debrid o del tuo media server. Watchly non ne include nessuno.
+Aggiunto
+{1} aggiunto.
+Accesso AniList
+Solo anime · accesso dal telefono
+Un'altra release di {1}, sincronizzata
+Come ospite, un piccolo distacco dal leader si recupera riproducendo fino all'8% più veloce o più lento. Disattivato, il lettore salta.
+Indietro {1} s
+Porta cronologia, punti di ripresa, liste, ricerche, add-on e ogni impostazione di questo profilo da Watchly sul telefono, sostituendo ciò che c'è qui. Le chiavi SubDL e TorBox restano — non vengono inviate.
+Buffer  ·  {1}  ·  {2} peer
+Annulla l'aggiornamento
+Recupera la sessione
+Messaggi della chat e reazioni sul film quando il pannello della sessione è chiuso.
+Verifica…
+Raccolta
+Copia gli add-on dal telefono
+Copia tutti gli add-on da Watchly su questo telefono
+Copia tutto da Watchly su questo telefono
+Copia dal telefono
+Impossibile aggiungere l'add-on.
+Giù
+Download dell'aggiornamento
+Download della versione {1}  ·  {2}%
+Inserisci 4 cifre
+Inserisci una chiave
+Inserisci il codice di {1} caratteri condiviso dal tuo amico.
+Ci sono già tutti gli add-on.
+Tutti
+Tutto ciò che hai riprodotto, con il punto in cui ti sei fermato.
+Cerco peer  ·  {1} nodi DHT
+Lascia perdere
+Avanti {1} s
+Quattro cifre richieste prima di aprire questo profilo. Un lucchetto per una TV condivisa — non una password.
+Da Stremio
+Indietro
+Prosegui senza di loro
+Ospite non tiene nulla — cronologia e La mia lista spariscono alla chiusura dell'app.
+Nascondi questa riga
+Quanto di un film può stare su questa TV alla volta. Quando è pieno, ciò che hai visto viene liberato per fare spazio. Auto usa lo spazio libero lasciando qualche GB di margine.
+Entra in una sessione
+Entra e guarda {1}
+Entra in una, e come funziona la tua
+Entra con quello in Watchly: Impostazioni → Visione di gruppo.
+Entro — guarda la TV.
+Lasciali tutti disattivati per costruire la Home da ciò che hai guardato.
+Esci dalla sessione
+Media3 mantiene fluido il 4K con i sottotitoli e passa da solo a VLC un file che non riesce a riprodurre. VLC dall'inizio riproduce più formati e lo stile ASS completo, ma una TV poco potente può perdere fotogrammi a ogni cambio di sottotitolo.
+Sposta giù
+Sposta su
+Nome
+Nessuna app su questa TV può aprire quel link
+Ancora nessun altro — scansiona il codice per invitare.
+Nessuna fonte trovata per {1}
+Nessuna in {1}
+Non quello
+Niente trovato. Prova un altro episodio o aggiungi un altro add-on in Impostazioni → Add-on.
+Niente qui
+Account Nuvio
+Disattivato, il lettore non ha il pulsante di sessione e i link dal telefono vengono rifiutati. Disattivarlo ti fa uscire da qualsiasi sessione in corso.
+Per conto suo
+Oppure scansiona con un telefono.
+Incolla dal telefono
+Prima incollalo.
+Incolla il link dal telefono
+Riproduci avvia la migliore. Oppure scegli una versione qui — dimensione, qualità, lingua.
+Lettore e salta intro
+Episodio precedente
+Profilo
+Profilo, PIN, Stremio e Nuvio
+Rientra nella sessione
+Rientra nella visione di gruppo
+Rientra per guardare di nuovo insieme.
+Rimuovi
+Riaprila — il link di tutti funziona ancora.
+Riapri la sessione
+Ripristina la Home
+Riga
+Salva chiave
+Salvata, crittografata su questa TV — Trova sottotitoli cerca anche su SubDL. Inseriscine un'altra per sostituirla.
+Saluta. Solo le persone di questa sessione lo vedono.
+Scansiona con un telefono per entrare — apre Watchly.
+Scansiona con la fotocamera del telefono e approva, oppure inserisci questo codice su {1}
+Scansiona con la fotocamera del telefono, incolla la tua {1} nella pagina che si apre e tocca Salva. Il telefono deve essere sulla stessa Wi-Fi della TV.
+Invia l'accesso AniList da Watchly su questo telefono
+Impostazioni, liste e cronologia da Watchly sul telefono
+Mostra codice QR
+Mostra tutte le {1} fonti
+Mostra questa riga
+Accedi con il telefono
+Fonti per S{1}:E{2}
+Velocità {1}
+Con
+Avvia una sessione e condividi il link o il codice QR. Chi lo apre guarda il film in sincronia con te, con chat e reazioni. Niente account, e si condividono solo play, pausa e il punto — crittografati.
+Avvio della riproduzione  ·  {1}  ·  {2} peer
+Statistiche per esperti
+Account Stremio
+Non si legge.
+Non ha funzionato.
+Non è un link completo di visione di gruppo — copialo tutto.
+Quella lista non si legge.
+La TV non è su una rete raggiungibile da un telefono.
+Il codice è di {1} lettere e numeri.
+La visione di gruppo è terminata — Rientra è in Impostazioni → Visione di gruppo.
+Questo account Nuvio ha un profilo.
+Questa pagina se ne accorge da sola quando hai approvato.
+Top {1} IMDb nei tuoi generi
+Top {1} su IMDb
+film
+serie
+Chiave TorBox
+Scrivi un link
+Scrivi il codice di 8 caratteri che condivide il leader. Un vecchio link di invito? Scansiona il codice qui sotto con il telefono e incollalo lì. La TV chiede prima di riprodurre qualsiasi cosa.
+Scrivi il codice
+Su
+Usa link
+Versione {1}  ·  {2}%
+La versione {1} è pronta — vedi Impostazioni
+Visione di gruppo · {1}
+Guardi come {1} — cambia
+Ciò che vedono gli altri. Se vuoto, è il nome del profilo, {1}.
+Ciò che finisci qui viene segnato come visto sui tuoi account, e ciò che hai visto lì compare qui. Accedi dal telefono, così la password non arriva mai a Watchly.
+Quando guidi una sessione e un ospite chiede pausa, play o un salto.
+Quando guidi, il film si mette in pausa per chi deve caricare lo stream, al massimo per questo tempo.
+Quando l'intro di un episodio è nota, saltala da sola invece di mostrare il pulsante Salta intro. Una volta per episodio — riavvolgi per vederla.
+Da dove arrivano stream e sottotitoli
+Con una chiave API di torbox.app, le release che TorBox ha in cache si riproducono dai suoi server invece che dai peer. La chiave è in Settings su torbox.app e resta crittografata su questa TV.
+Tu
+Ora sei in una sessione. Esci dal pulsante di sessione nel lettore.
+La tua libreria Nuvio, Continua a guardare e gli add-on su questa TV, sincronizzati in entrambe le direzioni. La password va solo a Nuvio.
+La tua libreria Nuvio, Continua a guardare e gli add-on su questa TV. Come Ospite viene dimenticata alla chiusura dell'app.
+La tua libreria Stremio, Continua a guardare e gli add-on su questa TV, sincronizzati in entrambe le direzioni. Accedi dal telefono — nessuna password sulla TV.
+La tua libreria Stremio, Continua a guardare e gli add-on su questa TV. Come Ospite viene dimenticata alla chiusura dell'app.
+I tuoi add-on
+{1} release per “{2}”
+{1} s nel lettore
+Lingua e generi della Home
+Lingua, tema e generi della Home
+Un PIN è di quattro cifre
+Una chiave gratuita di subdl.com aggiunge i suoi sottotitoli a Trova sottotitoli. Resta crittografata su questo PC.
+Un nuovo messaggio compare per un attimo sul film quando il pannello della sessione è chiuso.
+Un piccolo distacco dal leader si recupera riproducendo fino all'8% più veloce o più lento. Disattivato, il lettore salta.
+Chiave API salvata
+Aggiungi
+Aggiungi tracker pubblici
+Aggiunto al download già in corso
+{1} aggiunto — vedi la scheda Add-on
+Avanti
+Tutti i {1}
+Tutti · {1}
+AniList l'ha rifiutato
+Approva Watchly nella pagina di AniList — ti riporta qui.
+Chiedi più tardi
+Chiedi prima
+Chiedi ai tuoi add-on un film per nome, oppure incolla un link per riprodurlo così com'è — un video sul tuo media server o un magnet. Puoi anche trascinare un file .torrent o un link magnet in qualsiasi punto di questa finestra.
+Audio e sottotitoli
+Traccia audio {1}
+Bitrate medio
+Indietro (Esc)
+Indietro di 10 secondi (←)
+Torna al lettore completo (P)
+I link magnet senza tracker si risolvono molto più in fretta che con il solo DHT
+Sottotitoli più grandi
+Browser
+Buffer
+Buffer {1}%
+Cache, cronologia e info dei torrent salvate
+Cambia cartella
+Canali
+Messaggi della chat sull'immagine
+Controlla la connessione e riprova.
+Controlla la connessione — si ricarica quando torni online.
+Controlla la connessione di questo PC. Watchly continua a provare.
+Verifico TorBox…
+Verifica dei file
+A scatti qui ({1}) — la grafica di questo PC non riesce a decodificarlo
+Svuota la cache di immagini e titoli
+Cancella le ricerche recenti
+Cancella le info dei torrent salvate
+Cancellare le info dei torrent salvate?
+Cancella la cronologia
+Cancellare la cronologia?
+Codice {1}
+Codec
+Colore
+Conferma
+Connessioni
+Bitrate del contenuto
+Continua a guardare
+Copia link di invito
+Copia link
+Copia link magnet
+Copia il codice
+Danneggiato
+Impossibile caricare questa pagina
+Impossibile caricare questo scaffale
+Impossibile avviare: {1}
+Impossibile copiare l'invito
+Impossibile caricare l'immagine
+Impossibile aprire {1}
+Appunti non raggiungibili — riprova
+Creatore
+Creatori: {1}
+Ritaglia
+Elimina
+Eliminare il download?
+Eliminare i download?
+Elimina i file dopo l'arresto
+Regista: {1}
+Discontinuità
+Chiudi
+Schermo
+Mostrati
+Scarica un torrent
+Scarica ogni episodio
+Scarica ogni video
+Cartella dei download
+Scarica la stagione {1} da questa release
+Limite di velocità di download
+Scarica questa release
+Download {1} Mb/s
+Scarico solo i prossimi 5 minuti
+Download in corso — vedi la scheda Download
+I download vanno nella tua cartella dei download, riprendono da dove erano dopo un riavvio e si riproducono nel motore di VLC — ogni formato e traccia audio è supportato.
+I download che avvii restano qui finché non li elimini. Incolla un link magnet qui sopra per scaricare qualsiasi torrent.
+Fine ({1})
+Scrivi un termine e premi Cerca
+Inserisci email e password di Nuvio
+Ep. {1}
+Esci da schermo intero
+F: Schermo intero · P: Mini lettore · I: Statistiche · Spazio: Play/Pausa · ←/→: 10 s · ↑/↓: Volume · A: Audio · S: Sottotitoli · [: Più lento · ]: Più veloce
+Solo film e serie per famiglie. Niente add-on, ricerca di stream o link — metti un PIN al tuo profilo perché resti così.
+Veloce
+Buona
+Debole
+Recupero
+Film {1}
+Film e serie
+Trova la tua chiave su torbox.app
+Cerco release…
+Cerco pacchetti della stagione {1}…
+Cartella, limiti di velocità e seeding
+Avanti di 10 secondi (→)
+Quattro cifre richieste prima di aprire questo profilo. Un lucchetto per un PC condiviso — non una password.
+Frequenza fotogrammi
+Dal PC
+Schermo intero
+Schermo intero
+Ottieni una chiave gratuita su subdl.com
+Verifica hash
+Nascondi
+Come funziona
+Come funziona l'archiviazione qui
+Nella tua libreria Stremio, o in pausa su un altro dispositivo o prima di questo PC — aprine uno per riprodurlo da dove Stremio dice che eri.
+Bitrate in ingresso
+Istantaneo · TorBox
+Link di invito copiato — incollalo ai tuoi amici
+Entra in una visione di gruppo con il suo codice
+Entra
+Continua il seeding al termine
+Tieni la cache piccola; disattiva per rivedere senza riscaricare
+Scorciatoie da tastiera
+Esci da Visione di gruppo nel lettore.
+Lascia spazio a tutto il resto sulla connessione
+Leecher
+Link
+Link copiato
+I link vanno solo in streaming — qui non c'è un torrent da scaricare.
+File locale
+Bloccato
+Esci
+Buffer persi
+Fotogrammi persi
+Più forte (↑)
+Link magnet copiato
+Come Windows, o fissa chiaro o scuro
+Metadati
+Sposta le righe su o giù, o nascondile. Ogni profilo tiene le sue.
+Muto
+Prossimi 5 min
+Nessuna chiave SubDL — aggiungi la tua in Impostazioni
+Ancora nessun add-on da interrogare. Aggiungine uno in Impostazioni → Add-on, o incolla un link.
+Nessuna traccia audio rilevata
+Nessun episodio {1}
+Ancora nessun preferito
+Nessun risultato
+Ancora nessun altro — copia il link di invito e invialo.
+Nessun pacchetto per la stagione {1} — scarica i suoi episodi uno alla volta qui sotto.
+Nessun pacchetto della stagione {1} in {2} — cambia lingua e riprova, o scarica i suoi episodi uno alla volta qui sotto.
+Nessuno stream per questo.
+Nessuno stream trovato per {1}
+Nessun sottotitolo in quel download
+Nessun sottotitolo disponibile
+Nessun sottotitolo trovato
+Nessun sottotitolo trovato. Usa Altro → Trova sottotitoli per cercare online.
+Non in questa build
+Non ora (Esc)
+Nessun accesso a Nuvio
+Nessun accesso a Stremio
+Ancora niente qui
+Niente nella tua libreria corrisponde a “{1}”.
+Niente corrisponde.
+Niente con un voto così alto qui
+Niente salvato per dopo
+Ancora niente di salvato
+Niente di salvato — i torrent che apri vengono ricordati qui per aprirsi più in fretta la prossima volta
+Niente di archiviato
+Niente da cancellare
+Apri
+Apri nel browser
+Apri scaffale
+Riapri la pagina
+Apri titolo
+Apri pagina del titolo
+Apertura
+Si apre nel browser
+Oppure fai clic su Installa sul sito di un add-on. I link restano crittografati per questo account Windows.
+Codice sessione {1} copiato — invialo ai tuoi amici
+Codice sessione, come K7Q2-M9XD
+Scegline alcuni e la Home inizierà da questi
+Scegli un'immagine
+Scegli una release da scaricare
+Pezzi
+Play / pausa (Spazio)
+Riproduci l'ultimo file
+Riproduzione ferma — in attesa di dati
+Buffer riprodotti
+Popolari ora
+Locandine, trame e scaffali si ricaricano la prossima volta
+Più piano (↓)
+Le reazioni fluttuano sul film.
+Reazioni sull'immagine
+Letti
+Lettura del torrent
+Lettura del torrent…
+Rientra nella visione di gruppo
+Le release che TorBox ha in cache indicano Istantaneo e si riproducono dai suoi server — niente peer da aspettare. Il resto va in streaming dallo sciame come prima.
+Rimuovi dalla cronologia
+Rimuovere dalla cronologia?
+Riapri la visione di gruppo
+Risoluzione
+SALVATO
+Salva una copia
+Salva per intero, poi apri
+Info dei torrent cancellate
+Salvata, crittografata su questo PC — Trova sottotitoli cerca anche su SubDL. Inseriscine un'altra per sostituirla.
+Salvataggio in {1}
+Saluta. Solo le persone di questa sessione lo vedono, e sparisce quando la sessione finisce.
+Cerca per titolo…
+Cerca titoli e file
+Seeder
+Invia (Invio)
+Condividi un download finito finché non lo fermi nella scheda Download
+Mostra meno episodi
+Mostra nella cartella
+Disconnesso
+Disconnesso da Nuvio
+Accesso ad AniList…
+Salta le intro
+Salta le intro automaticamente
+Sottotitoli più piccoli
+Qualcuno
+Fonti  ·  {1}
+Speciale {1}
+Velocità ({1}x)
+Velocità {1}x
+Inizio (0:00)
+Avvia una sessione e invia il codice. Chi entra con quello guarda il film in sincronia con te, con chat e reazioni. Niente account, e si condividono solo play, pausa e il punto — crittografati.
+Avvio
+Avvio del download…
+Velocità di avvio
+Ferma
+Fermare il download?
+Archiviazione
+Stream
+Lo stream si è interrotto — lo riprendo
+Stremio ha detto di no
+Stremio non ha inviato add-on
+Stremio non ha inviato alcun codice
+Stremio non ha inviato nulla
+SubDL ha rifiutato la richiesta
+SubDL ha rifiutato la chiave
+Dimensione sottotitoli: {1}
+Sottotitoli: disattivati
+Non è andato a buon fine — collegati di nuovo per un nuovo codice
+Non è né un link magnet né un .torrent
+Quel download di sottotitoli è troppo grande
+Quel link di sottotitoli non è un indirizzo web sicuro
+Il codice di 8 caratteri che condivide il leader (funziona anche un vecchio link di invito). Watchly mostra cosa riprodurrebbe e chiede prima di iniziare.
+Il film si mette in pausa per chi deve caricare lo stream, al massimo per questo tempo.
+Lo stream continua a interrompersi
+L'aggiornamento ha bisogno del tuo via libera per installarsi
+Questa copia di Watchly è stata compilata senza il relay della visione di gruppo.
+Titolo
+Cache dei titoli svuotata
+Chiave API TorBox
+TorBox non è partito — provo con i peer. Se non si riproduce neanche così, il video di questa release potrebbe non andare bene per questo PC: provane un'altra.
+La risposta di TorBox non aveva senso.
+I torrent dovranno recuperare di nuovo dallo sciame l'elenco dei file la prossima volta che li apri. Cronologia e download restano.
+I torrent in streaming compaiono qui con ogni file che contengono, ciascuno con il suo punto di ripresa.
+Tracker e come funziona la cache
+Prova un voto più basso o un altro genere.
+Disinstalla {1}
+Illimitata
+Sblocca i controlli
+Sbloccato
+A seguire tra {1} s
+Upload
+Limite di velocità di upload
+Video {1}
+Video {1} Mb/s
+Visualizzatore
+Volume
+Volume {1}%
+Guarda mentre arrivano i pezzi
+Guarda più tardi
+Visioni di gruppo
+Guardi come {1} su Nuvio
+Guardi come {1}
+Watchly · film e serie, pronti quando lo sei tu. Sei responsabile di ciò che guardi e scarichi.
+Ciò che vedono gli altri
+Ciò che lo sciame riceve mentre scarichi
+Quando un ospite chiede pausa, play o un salto.
+Quando guidi
+Quando guardi
+Quando l'intro di un episodio è nota, saltala invece di mostrare il pulsante Salta intro. Una volta per episodio — torna indietro per vederla.
+Dove salvare i download?
+File intero (download)
+In finestra
+Con una chiave API di torbox.app, le release che TorBox ha in cache si riproducono dai suoi server invece che dai peer. Salvata crittografata per questo account Windows.
+Sei in una sessione
+Sei in una sessione — esci da Visione di gruppo nel lettore.
+Stai guidando una sessione
+Stai guidando una sessione — terminala da Visione di gruppo nel lettore.
+La tua libreria Stremio e dove ti eri fermato sono qui, La mia lista è la tua libreria lì e ciò che finisci viene segnato come visto. Gli add-on che aggiungi o rimuovi qui cambiano anche sul tuo account.
+La tua libreria Stremio, Continua a guardare e gli add-on qui, sincronizzati in entrambe le direzioni. Accedi dalla pagina di Stremio — la password non arriva mai a Watchly.
+{1} elementi e i loro punti di ripresa verranno eliminati.
+Mancano {1} s
+{1} scelti — aprono la Home
+{1} verrà rimosso da questa lista e dal disco.
+{1} — e le {2} release da cui è stato riprodotto
+{1} ora chiede un PIN
+{1} — cambia profilo
+{1}% nell'ep. 1
+{1} riproducibili · {2} file — come vuoi aprirlo?
+{1} verrà rimosso. I file completati restano; quelli incompleti vengono eliminati.
+{1} è classificato {2}. Passa a un profilo adulto per guardarlo.
+🔒  Il film va in streaming su questo PC. Si condividono solo play, pausa e il punto — crittografati, senza account.

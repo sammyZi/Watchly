@@ -37,18 +37,28 @@ import java.io.File
 private const val PEOPLE = "people/"
 
 /**
- * Profile icons: hand-drawn people from Open Peeps (CC0, assets/people/LICENSE). A profile's icon is one
+ * Profile icons: hand-drawn people from Open Peeps (CC0, assets/people/LICENSE), then animals. A profile's icon is one
  * of these or the absolute path of a picture of its own; anything else (an emoji or a drawn face from
  * before) shows a person picked from the profile's id.
  */
-val PROFILE_ICONS = listOf(
+/** The first sixteen: a profile without a pick gets one of these, so adding icons never changes its face. */
+private val FIRST_PEOPLE = listOf(
     "nova", "theo", "raj", "maya", "leo", "kofi", "ivy", "rosa", "amara", "sana", "jin", "omar", "zoe", "gus", "dev", "kai",
 ).map { PEOPLE + it }
+
+val PROFILE_PEOPLE = FIRST_PEOPLE + listOf("ari", "bea", "gia", "iris", "kemi", "mila", "nico", "quinn", "ravi", "tess", "uma", "suki").map { PEOPLE + it }
+
+/** Dressed animals, flat, drawn for this app (assets/animals/LICENSE). */
+val PROFILE_ANIMALS = listOf(
+    "bear", "fox", "pig", "owl", "lion", "cat", "elephant", "cow", "dog", "panda", "rabbit", "koala", "tiger", "monkey", "penguin", "frog",
+).map { "animals/$it" }
+
+val PROFILE_ICONS = PROFILE_PEOPLE + PROFILE_ANIMALS
 
 private fun bundled(icon: String) = icon in PROFILE_ICONS
 
 /** The person a profile shows when it has no picture: its pick, or a steady one from its id. */
-fun personOf(profile: Profile): String = profile.icon?.takeIf(::bundled) ?: PROFILE_ICONS[(profile.id + profile.name).sumOf { it.code } % PROFILE_ICONS.size]
+fun personOf(profile: Profile): String = profile.icon?.takeIf(::bundled) ?: FIRST_PEOPLE[(profile.id + profile.name).sumOf { it.code } % FIRST_PEOPLE.size]
 
 /**
  * A picture from the device or the web, as a small copy of our own: leave to read a picked file ends

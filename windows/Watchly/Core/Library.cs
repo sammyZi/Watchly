@@ -397,6 +397,8 @@ public sealed record AppSettings
     public List<string> Genres { get; init; } = new();
     /// <summary>system | light | dark</summary>
     public string ThemeMode { get; init; } = "system";
+    /// <summary>The app's words: a tag from <see cref="I18n.Languages"/>, or "" for Windows' own language.</summary>
+    public string Language { get; init; } = "";
     /// <summary>Where finished downloads are kept.</summary>
     public string? DownloadFolder { get; init; }
     /// <summary>0 = unlimited, in KB/s.</summary>

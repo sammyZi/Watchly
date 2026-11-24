@@ -24,12 +24,16 @@ public static class Avatars
     public static readonly string[] Icons = new[]
     {
         "nova", "theo", "raj", "maya", "leo", "kofi", "ivy", "rosa", "amara", "sana", "jin", "omar", "zoe", "gus", "dev", "kai",
-    }.Select(n => "people/" + n).ToArray();
+        "ari", "bea", "gia", "iris", "kemi", "mila", "nico", "quinn", "ravi", "tess", "uma", "suki",
+    }.Select(n => "people/" + n).Concat(new[]
+    {
+        "bear", "fox", "pig", "owl", "lion", "cat", "elephant", "cow", "dog", "panda", "rabbit", "koala", "tiger", "monkey", "penguin", "frog",
+    }.Select(n => "animals/" + n)).ToArray();
 
     static bool IsBundled(string? icon) => icon is not null && Icons.Contains(icon);
 
-    /// <summary>core personOf: the person a profile shows when it has no picture — its pick, or a steady one from its id.</summary>
-    public static string PersonOf(Profile p) => IsBundled(p.Icon) ? p.Icon! : Icons[(p.Id + p.Name).Sum(c => c) % Icons.Length];
+    /// <summary>core personOf: the person a profile shows when it has no picture — its pick, or a steady one from its id, of the first sixteen.</summary>
+    public static string PersonOf(Profile p) => IsBundled(p.Icon) ? p.Icon! : Icons[(p.Id + p.Name).Sum(c => c) % 16];
 
     static readonly Dictionary<string, ImageSource> Pictures = new();
 

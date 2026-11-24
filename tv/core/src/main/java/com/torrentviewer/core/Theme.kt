@@ -93,11 +93,25 @@ object Ink {
         Color(0xFFF6F2EE), Color(0xFFFFFFFF), Color(0xFFEAE4DE), Color(0xFFDDD5CE),
         Color(0xFF141414), Color(0xFF575757), Color(0xFF8A8A8A), Color(0xFF1E8E3E), Color(0xFFB26A00), Color(0xFFD32F2F),
     )
+    /** The dark page in pure black, for OLED screens: those pixels switch off. Cards only just above it, to be told apart. */
+    private val BLACK = Palette(
+        Color(0xFF000000), Color(0xFF0A0A0A), Color(0xFF161616), Color(0xFF242424),
+        Color(0xFFFFFFFF), Color(0xFFB3B3B3), Color(0xFF7A7A7A), Color(0xFF46D369), Color(0xFFFFB340), Color(0xFFFF5A4E),
+    )
     private var p by mutableStateOf(DARK)
 
-    val isDark get() = p === DARK
+    /** Dark pages in pure black ([BLACK]); the light page is unchanged. */
+    var amoled = false
+        set(value) {
+            field = value
+            if (p !== LIGHT) p = if (value) BLACK else DARK
+        }
+
+    val isDark get() = p !== LIGHT
+    /** AMOLED black is showing: no grain or frost noise, which would grey it. Read in a draw, it redraws on the switch. */
+    val pureBlack get() = p === BLACK
     fun use(dark: Boolean) {
-        p = if (dark) DARK else LIGHT
+        p = if (!dark) LIGHT else if (amoled) BLACK else DARK
     }
 
     val bg get() = p.bg
@@ -378,8 +392,8 @@ fun Modifier.glow(colors: List<Color>, cx: Float, cy: Float) = drawBehind {
     drawRect(grainBrush)
 }
 
-/** Film grain on a surface, under its content: after `.background(…)`. */
-fun Modifier.grain() = drawBehind { drawRect(grainBrush) }
+/** Film grain on a surface, under its content: after `.background(…)`. None on AMOLED black, which it would grey. */
+fun Modifier.grain() = drawBehind { if (!Ink.pureBlack) drawRect(grainBrush) }
 
 /** [glow]'s colours for the accent: a deep base, the red itself, and a warm light rising in it. */
 fun accentGlow() = listOf(

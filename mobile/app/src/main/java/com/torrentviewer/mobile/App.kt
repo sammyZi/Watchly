@@ -50,7 +50,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -217,7 +216,8 @@ fun darkFor(mode: String, systemDark: Boolean) = when (mode) {
 }
 
 /** The page's palette, and status and navigation bar icons that read on it. */
-fun ComponentActivity.applyTheme(dark: Boolean) {
+fun ComponentActivity.applyTheme(dark: Boolean, amoled: Boolean = SettingsStore.value.value.amoled) {
+    Ink.amoled = amoled
     Ink.use(dark)
     val bars = if (dark) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT) else SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
     enableEdgeToEdge(bars, bars)
@@ -242,14 +242,14 @@ fun App(watch: Watch, incoming: MutableState<Uri?>) {
     val reveal = remember { androidx.compose.animation.core.Animatable(0f) }
     var started by remember { mutableStateOf(false) }
     // Live, for the setting and the system's own switch; the player keeps its dark while it is up.
-    LaunchedEffect(dark) {
+    LaunchedEffect(dark, settings.amoled) {
         if (watch.phase == Phase.PLAYING) return@LaunchedEffect
         // Not at launch, and not if it is already in this theme: nothing to change from.
-        val animate = started && Ink.isDark != dark && screen.size.width > 0
+        val animate = started && (Ink.isDark != dark || (dark && Ink.amoled != settings.amoled)) && screen.size.width > 0
         started = true
         // Before the palette changes, while the layer still holds the old one.
         if (animate) old = runCatching { screen.toImageBitmap() }.getOrNull()
-        activity?.applyTheme(dark)
+        activity?.applyTheme(dark, settings.amoled)
         if (old != null) {
             reveal.snapTo(0f)
             reveal.animateTo(1f, tween(650, easing = androidx.compose.animation.core.FastOutSlowInEasing))
@@ -748,7 +748,7 @@ private fun TabBar(tab: Tab, onTab: (Tab) -> Unit, haze: dev.chrisbanes.haze.Haz
                     backgroundColor = page
                     tints = listOf(dev.chrisbanes.haze.HazeTint(Ink.surface.copy(alpha = 0.72f)))
                     blurRadius = 24.dp
-                    noiseFactor = 0.03f
+                    noiseFactor = if (Ink.pureBlack) 0f else 0.03f
                     // Blurred at half size: under this much blur it looks the same, and it is a quarter of the
                     // work on every frame a page scrolls under the dock — what an older phone runs short of.
                     inputScale = dev.chrisbanes.haze.HazeInputScale.Fixed(0.5f)

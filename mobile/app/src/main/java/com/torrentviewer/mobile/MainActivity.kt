@@ -83,6 +83,12 @@ class MainActivity : FragmentActivity() {
     /** A magnet or .torrent handed to us by another app. */
     private val incoming = mutableStateOf<Uri?>(null)
 
+    // The language picked in Settings, words and layout direction both; the phone's own when none is.
+    override fun attachBaseContext(newBase: android.content.Context) {
+        com.torrentviewer.core.I18n.ensure(newBase)
+        super.attachBaseContext(com.torrentviewer.core.I18n.wrap(newBase))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Services.init(applicationContext)

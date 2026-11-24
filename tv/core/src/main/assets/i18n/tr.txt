@@ -1,0 +1,1271 @@
+Eklentilerine soruluyor…
+{1} duraklatmak istiyor
+{1} oynatmak istiyor
+{1}. sezonu indir
+Herkes seninkinin yüklenmesini bekliyor
+Sadece ben
+Kendi başına
+{1} üzerinde oynatılıyor
+Girişi atla
+Film bu telefonda yayınlanır. Yalnızca oynatma, duraklatma ve konum paylaşılır — şifreli, hesapsız.
+{1} bekleniyor
+{1} yüklenmesi bekleniyor
+Sen ve {1} bekleniyor
+Katılan ilk kişi sen olursun
+Hiçbir şey inmiyor veya oynatılmıyorken değiştirilebilir.
+{2} içinden {1} izlendi
+{1} izlendi
+{1} yeni
+{1} seni ortak izlemeye davet etti
+{1} bölüm
+{1} başlık
+{1} sürüm
+{1} seed
+{2} içinden {1} kaydedildi
+{1} saniye önce
+{1} saniye sonra
+{1} seri, doğru sırayla
+{1} yeni bölüm
+{1} yüklü · yayınlar, altyazılar ve kataloglar
+{1} dk kaldı
+{1} sa {2} dk kaldı
+{1} dk kaldı
+{1} ses kesintisi
+Şimdilik {1} · daha fazlası aranıyor…
+1 yeni bölüm
+Bir film ya da oynatılacak bir bağlantı
+subdl.com'dan ücretsiz bir anahtar, altyazılarını Altyazı bul'a ekler. Bu telefonda şifreli kalır.
+Çocuk profili diğer uygulamalardan torrent veya eklenti açamaz.
+Video açılınca eşleşen parça kendiliğinden açılır; kendin seçersen seninki geçerli olur. Çevrimiçi altyazı araması altyazı dilinde arar.
+İzlediğin veya Listem'de olan bir dizinin yeni bölümü çıktığında bildirim. Günde iki kez kontrol edilir.
+Hesap
+Hesaplar
+Aksiyon
+Eklenti ekle
+Bir eklenti ekle
+Her film ve bölüm için yayın bulmak üzere bir tane ekle. Hiç yoksa yalnızca Ara'ya yapıştırdığın bağlantılar oynar.
+Yayın bulmak için bir tane ekle — Watchly hiçbiriyle gelmez
+Profil ekle
+Profil ekle
+Bu eklenti eklensin mi?
+Takvime ekle
+{1} eklenti eklendi
+{1} eklenti eklendi
+{1} eklendi
+{1} eklendi — Ayarlar → Eklentiler'e bak
+Ekleniyor…
+Eklentiler
+Macera
+Tümü
+Hepsini izledin
+Tüm türler
+Yukarıdakilerin hepsi
+Tüm zamanlar
+Hepsi izlendi
+İzin ver
+Hemen izin ver
+Arka planda indirmeye izin ver
+Bildirimlere izin ver
+Zaten eşitlendi.
+Hayvanlar
+Animasyon
+Anime
+Yalnızca anime · bağlı değil
+Herhangi
+Herhangi bir tür
+Herhangi bir dil
+Herhangi bir ağ
+Herhangi bir kalite
+Herhangi bir puan
+Herhangi bir yıl
+Görünüm
+Watchly'yi AniList sayfasında onayla; seni buraya geri getirir.
+Açılan sayfada onayla veya sayfayı yeniden aç. Kod {1}
+Misafir olarak lidere küçük bir fark, fark etmeyeceğin şekilde %8'e kadar hızlı veya yavaş oynatılarak kapatılır. Kapalıyken oynatıcı lidere atlar.
+Bana sor
+Bu profil açılmadan önce sorulur. Kilidi açmak için kaldır.
+AniList'e soruluyor…
+Trackersız magnet bağlantılarına genel tracker'lar ekler, böylece daha hızlı çözülürler.
+Ses
+Ses ve altyazı
+Ses dili
+Ses: {1}
+Otomatik
+Ödüller
+Geri
+Yedekle
+Yedek
+Yedek kaydedildi
+Pil tasarrufu ekran kapalıyken indirmeleri yavaşlatabilir veya durdurabilir. Devam etmeleri için Watchly'nin arka planda çalışmasına izin ver.
+{1} izlediğin için
+İzlediğin için…
+1990 öncesi
+Başlamadan önce
+En iyi sığdırma
+En iyi eşleşme
+En büyük
+Bit hızı
+Arka kutu
+Stremio kitaplığını getir
+Kitaplığını, İzlemeye devam et listeni ve eklentilerini Stremio veya Nuvio'dan getir. İki yönde eşit kalırlar.
+Eklentilerin getiriliyor…
+Popüler film, dizi ve animelere göz at, seçtiğin eklenti ve sunuculardan oynat. Watchly hiçbiriyle gelmez.
+Arabellek
+Oynatmadan önce arabellek
+Videoya gömülü: − ve + kullan.
+BİR SİMGE SEÇ
+Ortak izlemeye henüz ulaşılamıyor
+İptal
+Yayınla
+Yayınlamak için Wi-Fi gerekir — TV'ye verilecek adres yok.
+Yetiş
+Değiştir
+Nuvio profilini değiştir
+PIN'i değiştir
+Yayını değiştir
+Adı, yüzü veya rengi değiştir.
+Başka profile geç
+Sohbet
+Sohbet mesajları
+Güncellemeleri denetle
+Bu telefonun bağlantısını kontrol et. Watchly denemeye devam ediyor.
+TorBox kontrol ediliyor
+Anahtar kontrol ediliyor…
+Nelerin mevcut olduğunu görmek için bir bölüm seç.
+Burada takılıyor ({1})
+Temizle
+Tümünü temizle
+Oynattığın her şey temizlensin mi?
+Kapat
+Kod kopyalandı
+Koleksiyon verileri TMDB'den. Bu ürün TMDB API'sini kullanır ancak TMDB tarafından onaylanmamış veya sertifikalandırılmamıştır.
+Komedi
+Listende tamamlandı
+Bağlan
+Önce Ayarlar → Entegrasyonlar'dan bağla
+Bağlı
+{1} olarak bağlı
+Bağlandı — sunucunun bir şey oynatması bekleniyor
+Ortak izlemeye bağlanılıyor…
+Devam
+İzlemeye devam et
+{1} ile devam et
+Nuvio ile devam et
+Stremio ile devam et
+Kopyalandı
+Eklentilerin TV'ye kopyalansın mı?
+Eklenti eklenemedi
+Torrent eklenemedi
+Cihaza bağlanılamadı.
+Altyazı alınamadı
+Resim yüklenemedi.
+{1} adresine ulaşılamadı.
+AniList'e ulaşılamadı
+Nuvio'ya ulaşılamadı
+Nuvio'ya ulaşılamadı.
+Stremio'ya ulaşılamadı
+Stremio'ya ulaşılamadı.
+TV'ye ulaşılamadı — telefon aynı Wi-Fi'da mı?
+Dosya okunamadı
+Dosya okunamadı.
+Yedek geri yüklenemedi
+İndirme başlatılamadı
+İndirme başlatılamadı
+Yedek yazılamadı: {1}
+Yaratıcılar
+Suç
+Suç dizileri
+Mevcut PIN
+Koyu
+{1} silinsin mi?
+Bu telefondan sil
+Profili sil
+Ayrıntılar
+Doğrudan
+Yönetmen
+Bağlantıyı kes
+Belgeseller
+Belgesel
+Bekleme
+Bitti
+İndir
+{1} indir: bir sürüm seç
+Önceden indir
+İndirme bitti
+Sezonu indir
+İndir: bir sürüm seç
+İndiriliyor
+{1} indiriliyor — İndirilenler'e bak
+{2} {1}. sezon indiriliyor — İndirilenler'e bak
+Sonraki 5 dakika indiriliyor
+Dosyanın tamamı indiriliyor
+İndiriliyor. Bitince yüklemek için bildirime dokun.
+İndirilenler
+Dram
+Dram dizileri
+Daha önce
+Ana sayfayı düzenle
+Profili düzenle
+E-posta
+E-posta ve şifre
+Bölüm sonu
+Ortak izlemeyi bitir
+{1} saatinde biter
+Şimdi devam edersen {1} saatinde biter
+Watchly'yi beğendin mi?
+Yeni PIN için dört rakam gir
+Arkadaşının paylaştığı 8 karakterlik kodu gir.
+Önce mevcut PIN'i gir
+Kaldırmak için mevcut PIN'i gir
+Nuvio e-posta ve şifreni gir.
+Bu profili açmak için PIN'ini gir.
+Bölüm
+{1}. bölüm
+{1}. bölüm {2}
+Bölüm numarası
+Bölümler
+Tüm eklentiler zaten burada
+Tüm içerikler, eklentiler ve yayın araması dahil.
+Her şey
+Ek tracker'lar
+Başarısız
+Yalnızca aile filmleri ve dizileri. Eklenti, yayın araması veya diğer uygulamalardan bağlantı yok — böyle kalması için kendi profiline bir PIN koy.
+Fantastik
+En hızlı
+En hızlı, parçaları sürüde nerede varsa oradan alır. Sırayla her dosyayı baştan doldurur, böylece inerken izleyebilirsin — ama daha yavaştır.
+Favori türler
+Favoriler
+Dosya
+Zaten kaydedilen dosyalar bu telefonda kalır
+Film
+Film {1} / {2}
+Filmler
+Filmler ve diziler
+Yalnızca filmler
+İzleme sırası bul
+Altyazı bul
+Çevrimiçi altyazı bul…
+{1} aranıyor…
+Eşler aranıyor
+Eşler aranıyor ve dosya listesi okunuyor
+Eşler aranıyor…
+Kaynaklar aranıyor…
+Oda bulunuyor ve sunucuya ne oynadığı soruluyor.
+Önce indirmeleri ve oynatmayı bitir ya da durdur.
+Bitti
+Bu profil açılmadan önce sorulan dört rakam. Paylaşılan bir telefon için kilit — şifre değil.
+Kareler
+Ücretsiz ve açık kaynak — bir yıldız başkalarının bulmasına yardım eder
+URL'den
+Telefondan
+Hesaplarından
+Tür
+Ana sayfadaki türler
+Başla
+Devam et
+Misafir
+Misafir, İzlemeye devam et listesini bu telefonda tutar; Listem ve oturum açmalar uygulama kapanınca gider.
+Misafirlerin istekleri
+Alışkanlıklar
+Geçmiş
+Geçmiş, devam noktaları, listeler, ayarlar, aramalar ve giriş işaretleri tek dosyada. İndirmeler dahil değildir — onlar bu telefondaki dosyalardır.
+Ana sayfa
+Ana sayfa satırları
+Korku
+İzlenen saatler, favoriler ve seriler
+Bir filmin ne kadarının aynı anda bu telefonda durabileceği. Dolunca izlediğin kısım yer açmak için silinir. Otomatik boş alanı kullanır, birkaç GB yedek bırakır.
+İzlediklerinin ne kadarının hangi türde olduğu. Bir yapım her türünde sayılır.
+Kabul ediyorum
+IMDb {1}+
+IMDb puanı
+Yoksay
+Eklentileri içe aktar
+Listem'de
+Sırayla
+Anında
+Entegrasyonlar
+Davet et
+Ücretsiz ve açık kaynak. GitHub'daki bir yıldız başkalarının bulmasına yardım eder.
+Sunucu ayrıldı ya da bitirdi. Yeni bir bağlantı iste.
+Kendi kitaplığı, Listem'i ve devam noktaları.
+Watchly'ninkinden ayrı kendi deposu
+Katıl
+Ortak izlemeye katıl
+Ortak izlemeye katıl
+Kodla katıl
+Ortak izlemeye katılınıyor…
+Katılınıyor — ortak izlemenin filmi birazdan görünecek.
+{1} konumuna atla
+Sadece senin için mi, yoksa liderden herkes için duraklatmasını mı isteyelim?
+Sadece senin için mi, yoksa liderden herkes için oynatmasını mı isteyelim?
+İndirmeye devam et
+Kalsın
+Bunu açık tut — başlattıkları anda film burada görünür.
+Hızlı yeniden açma için saklandı
+Çocuk profili
+Bilinen yapımları
+Dil: {1}
+Diller
+Daha büyük olan geç başlar ama zayıf sürüde daha kararlıdır.
+Son izleme {1}
+Ayrıl
+Yasal uyarı
+Kitaplık
+Kitaplık, Listem ve devam noktaları bu profile aittir.
+Açık
+Açık ya da koyu sayfalar veya telefonun ayarı. Oynatıcı her durumda koyu kalır.
+Beğen
+Beğenildi
+Bir resmin bağlantısı
+Yükleniyor
+Yükleniyor…
+Kilitle
+En uzun seri
+Oturum açmalarını korumak için bir profil oluştur — Misafir uygulama kapanınca onları unutur.
+Yönet
+Profilleri yönet
+Media3 oynatamadığı bir dosyayı kendiliğinden VLC'ye verir. Baştan VLC en çok biçimi ve tam ASS altyazı stilini oynatır.
+Mesaj
+Mini oynatıcı
+Daha fazla
+Daha fazla {1}
+Benzerleri
+En çok izlenen
+Satırları yukarı veya aşağı taşı ya da kapat. Her profil kendininkini tutar.
+Filmler, diziler, anime
+Listem
+Gizem
+SONRAKİ BÖLÜM
+{1} Mb/sn gerekir
+Ağ
+Ağ, sıra ve depolama
+Yeni bölümler
+Yeni PIN
+Yeni bölüm bildirimleri
+Yeni bölüm: {1}
+Yeni bölümler
+Takip ettiğin dizilerin yeni bölümleri, biten indirmeler ve güncellemeler burada görünür
+Sonraki 5 dakika
+Sonraki bölüm
+Sıradaki: {1}
+Hayır
+Bu telefonda henüz eklenti yok
+Henüz eklenti yok
+Buradaki hiçbir uygulama bu bağlantıyı açamaz
+Henüz ses parçası bildirilmedi.
+Yüklü hiçbir eklenti eşleşmiyor.
+Henüz bildirim yok
+Henüz başka kimse yok — yukarıdaki davet düğmesine dokun.
+O ana yakın başka bir replik yok. Biri konuşmaya başladığı anda dokun.
+Bu telefondaki başka hiçbir oynatıcı açamıyor.
+Başka sürüm bulunamadı.
+Hiçbir eş yanıt vermedi. Torrent ölü olabilir ya da ağ BitTorrent'i engelliyor olabilir.
+“{1}” için sürüm yok
+Filtrelere uyan sürüm yok
+Henüz {1}. sezon paketi bulunamadı — bölümleri tek tek indir.
+Eşleşen ayar yok
+Kaynak yok
+{1} için kaynak bulunamadı.
+Bu torrentte video yok
+Bu adla bir izleme sırası yok
+Hiçbiri
+{1} içinde yok.
+Normal
+Bağlı değil
+Bu profil için değil
+Şimdi değil
+Henüz çıkmadı
+Bu sürümde ayarlanmadı
+Oturum açılmadı
+Bu telefonda AniList oturumu yok
+Başlanmadı
+Çalışmıyor
+Çalışmıyor: {1}
+Henüz bir şey indirilmedi. Bir yapımın sayfasından indir, burada bağlantısız oynar.
+“{1}” için bir şey bulunamadı
+{1} dilinde bir şey bulunamadı. Dili değiştirip tekrar dene.
+Bu dilde bir şey bulunamadı
+Bir şey bulunamadı. Başka bir bölüm dene ya da Ayarlar → Eklentiler'den başka bir eklenti ekle.
+Henüz burada bir şey yok. Oynattığın her şey bu listede görünür.
+Saklanan bir şey yok. Yarıda bıraktığın bir film başını burada saklar, böylece bir dahaki sefere hemen açılır.
+Filtrelere uyan bir şey yok
+Bu rafta şu an bir şey yok.
+Burada bu kadar yüksek puanlı bir şey yok.
+Seçilecek bir şey yok.
+{1} günü henüz bir şey izlenmedi.
+Bildirimler
+Watchly bildirimleri kapalı, bu yüzden uyarılar henüz gösterilemiyor.
+Bildirimler, {1} yeni
+Şimdi oynatılıyor
+Nuvio motorunun önbelleği
+RESMİN ÜZERİNDE
+Kapalı
+Kapalıyken oynatıcıda ortak izleme düğmesi olmaz ve davet bağlantıları reddedilir. Kapatınca içinde olduğun ortak izlemeden ayrılırsın.
+Açık
+Resmin üzerinde
+Listende
+Bu telefonda tek kitaplık. Her biri için ayrı kitaplık, Listem ve devam noktaları tutmak üzere profil ekle.
+Yalnızca bir torrent birlikte izlenebilir — bu bir dosya ya da düz bir bağlantı.
+Yalnızca güvendiğin eklentileri ekle: sana neyin oynatılacağını onlar seçer.
+Yalnızca oynatma, duraklatma ve konumun şifreli olarak paylaşılır. Bir şey oynamadan önce ne açılacağını görürsün.
+Ana sayfada yalnızca burada seçilen türlere satır verilir. İzlediklerinden oluşturulması için hepsini kapalı bırak.
+Ortak izlemeyi yalnızca lider duraklatabilir — ya da sadece kendin için duraklat ve sonra yetiş.
+Ortak izlemeyi yalnızca lider oynatabilir — ya da sadece kendin için oynat ve sonra yetiş.
+Bunu yalnızca bu ortak izlemedeki kişiler görür ve ortak izleme bitince kaybolur.
+Stremio'yu aç
+Stremio'yu tekrar aç
+Tekrar aç
+Başka bir oynatıcıda aç
+Film açılıyor…
+Açılıyor…
+Uygulamayı açar
+Ya da bir eklentinin sitesinde Yükle'ye dokunup Watchly'yi seç.
+Ya da biri konuştuğunda buraya dokun
+Sıra
+Orijinal
+Diğer dosyalar
+Koşullarımız değişti
+PIN kaldırıldı
+{1} için PIN ayarlandı
+Ortak izleme kodu
+Şifre
+Önce bir eklenti bağlantısı yapıştır
+Önce SubDL anahtarını yapıştır
+Önce TorBox anahtarını yapıştır
+Duraklat
+{1} dk sonra duraklat
+Duraklatıldı
+Duraklatıldı  ·  %{1}
+Kişiler
+Kişiler · {1}
+Telefon
+Birkaç tane seç — ana sayfan bunlarla başlar. İstediğin zaman Ayarlar'dan değiştir.
+Kaynağı kendim seçeyim
+Senin için seçildi
+Görüntü
+Oynat
+{1} oynat
+Oynatma
+Oynatma hızı
+Oynatıcı
+Oynatıcı, diller ve altyazılar
+Şimdi oynatılıyor
+Popüler diziler
+Önceki
+Gizlilik politikası
+Profil PIN'i
+Profil adı
+Profil, Stremio, Nuvio ve PIN
+Kalite
+Tepkiler
+Okunuyor…
+Son aramalar
+Yeniden bağlanılıyor…
+Yeniden katıl
+Yeniden başladığında orada olmak için yeniden katıl
+Yeniden birlikte izlemek için yeniden katıl
+Sürüm dili
+Çıkış sırası
+TorBox önbelleğindeki sürümler Anında yazar ve onun sunucularından oynar — eş beklemek yok, istediğin yere atla. Geri kalanı eskisi gibi sürüden yayınlanır.
+PIN'i kaldır
+İzlemeye devam et'ten kaldır
+Kitaplıktan kaldır
+Anahtarı kaldır
+Yeniden aç
+Yeniden aç — herkesin bağlantısı hâlâ çalışıyor
+Bu profil için TV'dekinin yerini alır
+Varsayılana sıfırla
+Kitaplığın {1} bölümü geri yüklendi
+Devam et
+{1} devam et
+Devam noktaları ve indirilen altyazılar da gider
+İncelemeler
+{1} incelemeleri
+SD kart
+Kaydet
+Kitaplığını kaydet veya geri yükle
+Telefon yerine SD karttaki uygulama klasörüne kaydet. Uygulama kaldırılırsa oradaki dosyalar gider.
+Kaydedildi
+Bu telefonda şifreli olarak kaydedildi — Altyazı bul SubDL'de de arar. Değiştirmek için başka birini gir.
+Merhaba de
+Bilim kurgu
+Ara
+Yüklü eklentilerde ara
+Ayarlarda ara
+Aranıyor…
+{1}. sezon
+{1}. sezon paketleri
+Tümünü gör
+İlk tanıtımı yeniden gör
+Gönder
+{1} eklenti gönder
+{1} eklenti gönder
+Eklentilerimi Stremio'ya gönder
+AniList oturumunu gönder
+TV'ye gönderiliyor…
+Eklentilerin gönderiliyor…
+TV'ye gönderildi
+Diziler
+Yalnızca diziler
+Hizmetler
+PIN ayarla
+Ayarlar
+Göster
+Tümünü göster
+{1} bölümün hepsini göster
+Düğmeyi göster
+Oturum aç
+Oturum aç ve açılan sayfada onayla — bu kendiliğinden fark eder. Kod {1}
+Nuvio'da oturum aç
+Stremio'da oturum aç
+Oturumu kapat
+TV'de AniList oturumu açılsın mı?
+Oturum açıldı
+{1} olarak oturum açıldı
+Oturum açılıyor…
+Stremio'nun kendi sayfasında oturum açar
+Simkl, MDBList ve AniList
+Boyut
+Boyut, renk ve yazının arkasında bir kutu. Media3 değişikliği sonraki satırda, VLC sonraki videoda gösterir.
+Atla
+Şimdilik atla
+Atlandı
+Giriş atlandı
+Uyku zamanlayıcısı
+Uyku zamanlayıcısı kapalı
+Uyku zamanlayıcısı — duraklatıldı
+En küçük
+Yumuşak yetişme
+Kaynaklar
+Özel bölümler
+Hız ({1})
+GitHub'da yıldız ver
+Bir ortak izleme başlat ve kodunu paylaş. Bu kodla katılan herkes filmi seninle eş zamanlı izler, sohbet ve tepkilerle. Hesap yok ve yalnızca oynatma, duraklatma ve konum paylaşılır — şifreli.
+Ortak izleme başlat
+Oynatıcının üstündeki kişiler düğmesiyle başlat ve bağlantıyı gönder. Herkes filmi kendi cihazında izler; yalnızca oynatma, duraklatma ve konum paylaşılır, şifreli ve hesapsız.
+Baştan başla
+Oynatma başlıyor
+Oynatma başlıyor  ·  {1} üzerinden
+İstatistikler
+Kaynaklar hâlâ aranıyor…
+Bu bölümden sonra dur
+Durdur ve gelenleri sil
+Yayını durdur
+{1} indirmesi durdurulsun mu?
+Bir film için depolama
+Depolama, arabellek ve tracker'lar
+Hikâye sırası
+Yayın
+Yayınlar
+Yayınlar, altyazılar ve ek kataloglar eklentilerden gelir — herkese açık olanlar, debrid hizmetininkiler ya da kendi medya sunucunun. Watchly hiçbiriyle gelmez.
+Stremio kodu
+Uzat
+SubDL ve TorBox anahtarları
+SubDL anahtarı
+SubDL anahtarı kaldırıldı
+SubDL anahtarı kaydedildi
+Altyazı dili
+Altyazı araması başarısız
+Altyazı stili
+Altyazılar
+Altyazılar eşitlendi: {1}
+Altyazılar: {1}
+Sürü
+Profil değiştir
+Yayın değiştiriliyor…
+Altyazıları öne almak için VLC'ye geçiliyor
+VLC'ye geçiliyor — dahili oynatıcı bu videoyu oynatamıyor
+Eşitlendi. Altyazılar artık {1} görünüyor.
+Sistem
+Yüklemek için dokun
+Şartlar ve koşullar
+Bu kodun süresi doldu — yenisi için tekrar oturum aç.
+Bu kodun süresi doldu — tekrar dene.
+Gerçekleşmedi — yeni kod için tekrar bağlan.
+Bu, ev ağındaki bir Watchly TV değil.
+Bu bir ortak izleme kodu değil — K7Q2-M9XD gibi 8 harf ve rakamdan oluşur.
+Bu bir ortak izleme kodu değil.
+Magnet bağlantısı çözümlenemedi
+Bu bir bağlantı ve yalnızca yayınlanır. İndirmek için bir torrent seç.
+Bu sürüm artık en yenisi değil
+Bu ortak izleme kapandı.
+Bu ortak izleme bağlantısı eksik.
+PIN bu değil
+PIN bu değil. Tekrar dene.
+Liderin oynatıcının ortak izleme panelinden paylaştığı 8 karakterlik kod. Ana sayfanın ortak izleme düğmesi de kabul eder.
+Kod 8 harf ve rakamdan oluşur.
+Dosyanın varsayılanı
+Sunucu
+Ortak izlemede hızı lider belirler
+Takip ettiğin dizilerin ve kaydettiğin filmlerin önümüzdeki {1} günü.
+Watchly kullanım kuralları
+Ortak izleme sona erdi
+Tema
+Dil, tema, ana sayfa türleri ve satırları
+Watchly senin dilinde. Başlıklar ve açıklamalar kataloglardan olduğu gibi gelir.
+Bu Nuvio hesabında tek profil var
+Watchly'nin bu sürümünde ortak izleme yok.
+Bu telefon
+Bu ürün TMDB API'sini kullanır ancak TMDB tarafından onaylanmamış veya sertifikalandırılmamıştır.
+Bu torrent video içermiyor.
+Bu ortak izleme kapalı
+Bu hafta
+Gerilim
+Gerilim
+Zamanlama
+Başlıklar
+Listem'e eklediğin yapımlar burada bekler.
+Beğendiğin yapımlar burada toplanır.
+Sunucu olmak için oynatıcıdan bir ortak izleme başlat.
+Watchly'nin AniList erişimini de kaldırmak için oradaki Settings → Apps bölümünden kaldır.
+Bugün
+IMDb'de en iyiler
+En iyi sonuçlar
+TorBox anahtarı kaldırıldı
+TorBox anahtarı kaydedildi
+Torrent motoru
+Popüler filmler
+SIRADAKİ
+Kaldır
+{1} kaldırıldı
+Sıradaki
+Yakında
+Güncelle
+Güncelleme mevcut
+Kullan
+Mobil veri kullan
+Sürüm {1} · derleme {2}
+Sürüm {1}  ·  {2}
+Video
+Yavaş bağlantıları bekle
+Wi-Fi bekleniyor
+Wi-Fi bekleniyor  ·  %{1}
+Onayın bekleniyor…
+İzle
+{1} birlikte izle
+İzleme sırası
+İzleme sıraları
+Ortak izleme
+Ortak izleme kapalı — Ayarlar → Ortak izleme'den aç.
+Bir şey izle, istatistiklerin burada başlasın.
+İzlendi
+İzleniyor
+Kendi başına izliyor
+Watchly yalnızca bir medya oynatıcıdır
+Hoş geldin turu
+Neleri seversin?
+TV neyi kopyalasın?
+Ortak izleme paneli kapalıyken filmin üzerinde görünenler. Kapalıyken sohbet panelde birikmeye devam eder — ortak izleme düğmesindeki nokta yeni bir şey olduğunu söyler.
+Burada kalan ve gönderilenler
+Torrent'i ne yayınlar. Değişiklik sonraki filmle başlar.
+Katıldığında veya bir şey istediğinde diğerlerinin gördüğü. Boş bırakılırsa profil adıdır: {1}.
+Burada bitirdiklerin hesaplarında izlendi olarak işaretlenir, orada izlediklerin burada görünür. Her hizmetin kendi sayfasında oturum açarsın, böylece şifren asla Watchly'ye gelmez.
+Bir ortak izlemeyi yönetirken bir misafir duraklatma, oynatma veya atlama istediğinde. Yoksayılırsa düğmeleri yalnızca senin kontrol ettiğini söyler.
+Sen yönetirken film, yayını yüklenmek için duranlar için duraklar ve hazır olunca devam eder — en fazla bu kadar süre. Banttaki Devam et beklemeyi her an bitirir.
+Bir bölümün girişi biliniyorsa Girişi atla düğmesini göstermek yerine kendiliğinden atla. Bölüm başına bir kez — izlemek için geri sar.
+Nuvio'da kaldığın yer İzlemeye devam et'te, Listem Nuvio kitaplığındır ve bitirdiklerin izlendi olarak işaretlenir.
+Bu hangi Nuvio profili?
+Hangi dosya?
+Beyaz
+Kim izliyor?
+Dosyanın tamamı
+Yalnızca Wi-Fi
+Yalnızca Wi-Fi, mobil veride bir indirmeyi bekletir — Wi-Fi gelince devam eder. Geçmesine izin vermek için bekleyen indirmede Mobil veri kullan'ı seç.
+torbox.app API anahtarıyla TorBox'ın önbellekteki sürümleri eşler yerine onun sunucularından oynar. Anahtar torbox.app'te Settings altındadır ve bu telefonda şifreli kalır.
+Oynatıldığı her sürümle
+Yıl
+Sarı
+Ortak izlemeni bitirdin
+Sürüm {1} sende
+Ortak izlemeden ayrıldın
+En çok izlediğin gün
+Çevrimdışısın — kaydedilenler gösteriliyor
+İzliyorsun
+Nuvio kitaplığın, İzlemeye devam et ve eklentilerin burada, iki yönde eşit. Şifren yalnızca Nuvio'ya gider.
+Nuvio kitaplığın, İzlemeye devam et ve eklentilerin burada. Misafir olarak uygulama kapanınca unutulur.
+Nuvio kitaplığın, İzlemeye devam et ve eklentilerin. Şifren yalnızca Nuvio'ya gider.
+Stremio kitaplığın, İzlemeye devam et ve eklentilerin burada, iki yönde eşit. Stremio'nun kendi sayfasında oturum aç — şifren asla Watchly'ye gelmez.
+Stremio kitaplığın, İzlemeye devam et ve eklentilerin burada. Misafir olarak uygulama kapanınca unutulur.
+SubDL API anahtarın
+TorBox API anahtarın
+Türlerin
+Kitaplığın
+Medya oynatıcın
+Adın
+Adın, misafir istekleri ve bekleme
+İstatistiklerin
+Ortak izlemen
+Doldurmak için yakınlaştır
+{2} bölüm için yaklaşık {1}
+bu bölümün sonunda
+seni birlikte izlemeye davet etti
+devamı geliyor
+şimdi yayında
+bu film
+bu ay
+bu yıl izlenen
+günlük seri
+günlük seri
+✓ Stremio'da oturum açıldı — kitaplığın ve kaldığın yerler aşağıda
+{1} duraklattı
+{1} oynat'a bastı
+{1} {2} konumuna atladı
+{1} hızı {2} yaptı
+{1} katıldı
+{1} ortak izlemeden ayrıldı
+{1} ortak izlemeyi bitirdi
+Herkes için duraklatma istendi
+Oynatma istendi
+Herkes için {1} konumuna atlama istendi
+Ortak izlemeye yetişiliyor
+Bu ortak izlemeyi yalnızca lider kontrol eder
+Kendi başına izliyorsun — istediğin zaman yetiş
+{1} olmadan devam edildi
+{1} gün önce
+{1} sa önce
+{1} dk önce
+az önce
+Yarın
+Popüler
+En yüksek puanlı
+En yeni
+Aile
+Aile filmleri
+Aile dizileri
+Romantik
+Savaş
+Western
+Spor
+Canlı TV
+Tüm dizi
+Sezon paketi
+En son sürümü kullanıyorsun
+Güncellemeler denetlenemedi
+Güncelleme indirilemedi
+Güncelleme düzgün inmedi. Tekrar dene.
+{1} adresine ulaşılamadı
+{1} bulunamadı — bağlantıyı ve internetini kontrol et
+Torrent açılamadı.
+Yayın başlatılamadı.
+Bu bağlantıda eklenti yok — kontrol et
+Eklenti manifestosu değil
+Bu bir eklenti bağlantısı değil
+Oynatma başlatılamadı
+Bu dosya oynatılamadı
+Bu ses için kod çözücü yok
+Bu video için kod çözücü yok
+Seed yok
+Depolama alanı doldu. Yayın durduruldu ve dosyaları silindi.
+Depolama alanı doldu. Yayın durduruldu.
+Torrent motoru bu yayını kaybetti. Lütfen tekrar dene.
+Bu torrentin meta verileri eskidi. Yeniden aç.
+TorBox API anahtarını kabul etmedi.
+TorBox bu torrenti hâlâ hazırlıyor. Bir dakika sonra tekrar dene.
+TorBox durdu — eşlerden yayınlanıyor.
+TorBox bu torrenti eklemedi.
+Bu yedek boş
+Bu dosya artık yok — silinmiş ya da kart çıkarılmış olabilir.
+Altyazı {1}
+Parça {1}
+Geçmiş ve devam noktaları
+Listem, aramalar ve ana sayfa türleri
+Ayarlar ve eklentiler
+İngilizce
+İspanyolca
+Fransızca
+Almanca
+İtalyanca
+Portekizce
+Portekizce (Brezilya)
+Rusça
+Türkçe
+Arapça
+Hintçe
+Bengalce
+Tamilce
+Telugu dili
+Malayalam dili
+Endonezce
+Japonca
+Korece
+Çince
+Felemenkçe
+Lehçe
+İsveççe
+Yunanca
+İbranice
+Farsça
+Tayca
+Vietnamca
+Rumence
+Hırvatça
+Sırpça
+Boşnakça
+Dil
+Uygulama dili
+Cihaz dili
+Otomatik
+AMOLED Siyah
+OLED ekranlar için tamamen siyah arka plan kullan.
+Ana sayfa
+{1} seçildi
+{1} dil
+Bilim kurgu
+Biyografi
+Müzik
+Müzikal
+Çocuk
+Haberler
+Realite şov
+Aksiyon ve macera
+Bilim kurgu ve fantastik
+Kendi başına — Yetiş çubukta
+subdl.com'dan ücretsiz bir anahtar, altyazılarını Altyazı bul'a ekler. Bu TV'de şifreli kalır.
+Profil ekle
+Bağlantısıyla bir eklenti ekle — herkese açık, debrid hizmetinin ya da kendi medya sunucunun. Watchly hiçbiriyle gelmez.
+Eklendi
+{1} eklendi.
+AniList oturumu
+Yalnızca anime · telefonundan oturum açıldı
+{1} için başka bir sürüm, eş zamanlı
+Misafir olarak lidere küçük bir fark, %8'e kadar hızlı veya yavaş oynatılarak kapatılır. Kapalıyken oynatıcı atlar.
+{1} sn geri
+Bu profilin geçmişini, devam noktalarını, listelerini, aramalarını, eklentilerini ve tüm ayarlarını telefonundaki Watchly'den getirir, buradakinin yerine koyar. SubDL ve TorBox anahtarları yerinde kalır — gönderilmez.
+Arabellek  ·  {1}  ·  {2} eş
+Güncellemeyi iptal et
+Ortak izlemeye yetiş
+Ortak izleme paneli kapalıyken filmin üzerinde sohbet mesajları ve tepkiler.
+Kontrol ediliyor…
+Koleksiyon
+Eklentileri telefondan kopyala
+Bu telefondaki Watchly'den tüm eklentileri kopyala
+Bu telefondaki Watchly'den her şeyi kopyala
+Telefondan kopyala
+Eklenti eklenemedi.
+Aşağı
+Güncelleme indiriliyor
+{1} sürümü indiriliyor  ·  %{2}
+4 rakam gir
+Bir anahtar gir
+Arkadaşının paylaştığı {1} karakterlik kodu gir.
+Tüm eklentiler zaten burada.
+Herkes
+Oynattığın her şey, kaldığın yerle birlikte.
+Eşler aranıyor  ·  {1} DHT düğümü
+Boş ver
+{1} sn ileri
+Bu profil açılmadan önce sorulan dört rakam. Paylaşılan bir TV için kilit — şifre değil.
+Stremio'dan
+Geri dön
+Onlarsız devam et
+Misafir hiçbir şey tutmaz — geçmiş ve Listem uygulama kapanınca gider.
+Bu satırı gizle
+Bir filmin ne kadarının aynı anda bu TV'de durabileceği. Dolunca izlediğin kısım yer açmak için silinir. Otomatik boş alanı kullanır, birkaç GB yedek bırakır.
+Ortak izlemeye katıl
+Katıl ve {1} izle
+Birine katıl, ve seninki nasıl işliyor
+Watchly'de onunla katıl: Ayarlar → Ortak izleme.
+Katılınıyor — TV'ye bak.
+İzlediklerinden ana sayfa oluşturulması için hepsini kapalı bırak.
+Ortak izlemeden ayrıl
+Media3 altyazı açıkken 4K'yı akıcı tutar ve oynatamadığı bir dosyayı kendiliğinden VLC'ye verir. Baştan VLC en çok biçimi ve tam ASS stilini oynatır, ama zayıf bir TV her altyazı değişiminde kare kaçırabilir.
+Aşağı taşı
+Yukarı taşı
+Ad
+Bu TV'deki hiçbir uygulama bu bağlantıyı açamaz
+Henüz başka kimse yok — davet etmek için kodu tara.
+{1} için kaynak bulunamadı
+{1} içinde yok
+O değil
+Bir şey bulunamadı. Başka bir bölüm dene ya da Ayarlar → Eklentiler'den başka bir eklenti ekle.
+Burada bir şey yok
+Nuvio hesabı
+Kapalıyken oynatıcıda ortak izleme düğmesi olmaz ve telefonundan gelen bağlantılar reddedilir. Kapatınca içinde olduğun ortak izlemeden ayrılırsın.
+Kendi başına
+Ya da bir telefonla tara.
+Telefondan yapıştır
+Önce yapıştır.
+Bağlantıyı telefonundan yapıştır
+Oynat en iyisini başlatır. Ya da buradan bir sürüm seç — boyut, kalite, dil.
+Oynatıcı ve girişi atlama
+Önceki bölüm
+Profil
+Profil, PIN, Stremio ve Nuvio
+Ortak izlemeye yeniden katıl
+Ortak izlemeye yeniden katıl
+Yeniden birlikte izlemek için yeniden katıl.
+Kaldır
+Yeniden aç — herkesin bağlantısı hâlâ çalışıyor.
+Ortak izlemeyi yeniden aç
+Ana sayfayı varsayılana sıfırla
+Satır
+Anahtarı kaydet
+Bu TV'de şifreli olarak kaydedildi — Altyazı bul SubDL'de de arar. Değiştirmek için başka birini gir.
+Merhaba de. Bunu yalnızca bu ortak izlemedeki kişiler görür.
+Katılmak için bir telefonla tara — Watchly'yi açar.
+Telefonunun kamerasıyla tara ve onayla ya da bu kodu şuraya gir: {1}
+Telefonunun kamerasıyla tara, açılan sayfaya {1} değerini yapıştır ve Kaydet'e dokun. Telefonun TV ile aynı Wi-Fi'da olmalı.
+Bu telefondaki Watchly'den AniList oturumunu gönder
+Telefonundaki Watchly'den ayarlar, listeler ve geçmiş
+QR kodu göster
+{1} kaynağın hepsini göster
+Bu satırı göster
+Telefonla oturum aç
+S{1}:B{2} kaynakları
+Hız {1}
+Oyuncular
+Bir ortak izleme başlat ve bağlantıyı ya da QR kodu paylaş. Açan herkes filmi seninle eş zamanlı izler, sohbet ve tepkilerle. Hesap yok ve yalnızca oynatma, duraklatma ve konum paylaşılır — şifreli.
+Oynatma başlıyor  ·  {1}  ·  {2} eş
+Meraklısına istatistikler
+Stremio hesabı
+Okunamadı.
+Olmadı.
+Bu tam bir ortak izleme bağlantısı değil — hepsini kopyala.
+O liste okunamadı.
+TV, bir telefonun ulaşabileceği bir ağda değil.
+Kod {1} harf ve rakamdan oluşur.
+Ortak izleme sona erdi — Yeniden katıl, Ayarlar → Ortak izleme'de.
+Bu Nuvio hesabında tek profil var.
+Onayladığında bu sayfa kendiliğinden fark eder.
+Türlerinde en iyi IMDb {1}
+IMDb'de en iyi {1}
+filmler
+diziler
+TorBox anahtarı
+Bir bağlantı yaz
+Liderin paylaştığı 8 karakterlik kodu yaz. Eski bir davet bağlantısı mı? Aşağıdaki kodu telefonunla tara ve oraya yapıştır. TV bir şey oynatmadan önce sorar.
+Kodu yaz
+Yukarı
+Bağlantıyı kullan
+Sürüm {1}  ·  %{2}
+{1} sürümü hazır — Ayarlar'a bak
+Ortak izleme · {1}
+{1} olarak izleniyor — değiştir
+Diğerlerinin gördüğü. Boş bırakılırsa profil adıdır: {1}.
+Burada bitirdiklerin hesaplarında izlendi olarak işaretlenir, orada izlediklerin burada görünür. Telefonundan oturum açarsın, böylece şifren asla Watchly'ye gelmez.
+Bir ortak izlemeyi yönetirken bir misafir duraklatma, oynatma veya atlama istediğinde.
+Sen yönetirken film, yayını yüklenmek için duranlar için en fazla bu kadar süre duraklar.
+Bir bölümün girişi biliniyorsa Girişi atla düğmesini göstermek yerine kendiliğinden atla. Bölüm başına bir kez — izlemek için geri sar.
+Yayınların ve altyazıların kaynağı
+torbox.app API anahtarıyla TorBox'ın önbellekteki sürümleri eşler yerine onun sunucularından oynar. Anahtar torbox.app'te Settings altındadır ve bu TV'de şifreli kalır.
+Sen
+Şu an bir ortak izlemedesin. Oynatıcıdaki ortak izleme düğmesinden ayrıl.
+Nuvio kitaplığın, İzlemeye devam et ve eklentilerin bu TV'de, iki yönde eşit. Şifren yalnızca Nuvio'ya gider.
+Nuvio kitaplığın, İzlemeye devam et ve eklentilerin bu TV'de. Misafir olarak uygulama kapanınca unutulur.
+Stremio kitaplığın, İzlemeye devam et ve eklentilerin bu TV'de, iki yönde eşit. Telefonundan oturum açarsın — TV'de şifre yok.
+Stremio kitaplığın, İzlemeye devam et ve eklentilerin bu TV'de. Misafir olarak uygulama kapanınca unutulur.
+Eklentilerin
+“{2}” için {1} sürüm
+Oynatıcıda {1} sn
+Dil ve ana sayfa türleri
+Dil, tema ve ana sayfa türleri
+PIN dört rakamdır
+subdl.com'dan ücretsiz bir anahtar, altyazılarını Altyazı bul'a ekler. Bu bilgisayarda şifreli kalır.
+Ortak izleme paneli kapalıyken yeni bir mesaj bir an filmin üzerinde görünür.
+Lidere küçük bir fark, %8'e kadar hızlı veya yavaş oynatılarak kapatılır. Kapalıyken oynatıcı atlar.
+API anahtarı kaydedildi
+Ekle
+Genel tracker'lar ekle
+Zaten süren indirmeye eklendi
+{1} eklendi — Eklentiler sekmesine bak
+İleride
+Tüm {1}
+Tümü · {1}
+AniList reddetti
+Watchly'yi AniList sayfasında onayla — seni buraya geri getirir.
+Sonra sor
+Daha önce sor
+Eklentilerine adıyla bir film sor ya da olduğu gibi oynatmak için bir bağlantı yapıştır — kendi medya sunucundaki bir video ya da bir magnet. Bir .torrent dosyasını ya da magnet bağlantısını bu pencerenin herhangi bir yerine de bırakabilirsin.
+Ses ve altyazı
+Ses parçası {1}
+Ortalama bit hızı
+Geri (Esc)
+10 saniye geri (←)
+Tam oynatıcıya dön (P)
+Tracker'sız magnet bağlantıları yalnızca DHT'ye göre çok daha hızlı çözülür
+Daha büyük altyazı
+Tarayıcı
+Arabellek
+Arabellek %{1}
+Önbellek, geçmiş ve kayıtlı torrent bilgisi
+Klasörü değiştir
+Kanallar
+Resmin üzerinde sohbet mesajları
+Bağlantını kontrol et ve tekrar dene.
+Bağlantını kontrol et — tekrar çevrimiçi olunca yeniden yüklenir.
+Bu bilgisayarın bağlantısını kontrol et. Watchly denemeye devam ediyor.
+TorBox kontrol ediliyor…
+Dosyalar kontrol ediliyor
+Burada takılıyor ({1}) — bu bilgisayarın ekran kartı bunu çözemiyor
+Görsel ve başlık önbelleğini temizle
+Son aramaları temizle
+Kayıtlı torrent bilgisini temizle
+Kayıtlı torrent bilgisi temizlensin mi?
+İzleme geçmişini temizle
+İzleme geçmişi temizlensin mi?
+Kod {1}
+Codec
+Renk
+Onayla
+Bağlantılar
+İçerik bit hızı
+İzlemeye devam et
+Davet bağlantısını kopyala
+Bağlantıyı kopyala
+Magnet bağlantısını kopyala
+Kodu kopyala
+Bozuk
+Bu sayfa yüklenemedi
+Bu raf yüklenemedi
+Başlatılamadı: {1}
+Davet kopyalanamadı
+Resim yüklenemedi
+{1} açılamadı
+Panoya ulaşılamadı — tekrar dene
+Yaratıcı
+Yaratıcılar: {1}
+Kırp
+Sil
+İndirme silinsin mi?
+İndirmeler silinsin mi?
+Durdurunca dosyaları sil
+Yönetmen: {1}
+Kesintiler
+Kapat
+Ekran
+Gösterilen
+Bir torrent indir
+Tüm bölümleri indir
+Tüm videoları indir
+İndirme klasörü
+Bu sürümden {1}. sezonu indir
+İndirme hız sınırı
+Bu sürümü indir
+İndirme {1} Mb/sn
+Yalnızca sonraki 5 dakika indiriliyor
+İndiriliyor — İndirilenler sekmesine bak
+İndirmeler indirme klasörüne gider, yeniden başlatmadan sonra kaldığı yerden devam eder ve VLC motorunda oynar — tüm biçimler ve ses parçaları desteklenir.
+Başlattığın indirmeler sen silene kadar burada kalır. Herhangi bir torrent'i indirmek için yukarıya bir magnet bağlantısı yapıştır.
+Son ({1})
+Bir arama terimi gir ve Ara'ya bas
+Nuvio e-posta ve şifreni gir
+Böl. {1}
+Tam ekrandan çık
+F: Tam ekran · P: Mini oynatıcı · I: İstatistikler · Boşluk: Oynat/Duraklat · ←/→: 10 sn · ↑/↓: Ses · A: Ses parçası · S: Altyazı · [: Yavaş · ]: Hızlı
+Yalnızca aile filmleri ve dizileri. Eklenti, yayın araması veya bağlantı yok — böyle kalması için kendi profiline bir PIN koy.
+Hızlı
+İyi
+Zayıf
+Alınıyor
+Film {1}
+Filmler ve diziler
+Anahtarını torbox.app'te bul
+Sürümler aranıyor…
+{1}. sezon paketleri aranıyor…
+Klasör, hız sınırları ve paylaşım
+10 saniye ileri (→)
+Bu profil açılmadan önce sorulan dört rakam. Paylaşılan bir bilgisayar için kilit — şifre değil.
+Kare hızı
+Bilgisayardan
+Tam ekran
+Tam ekran
+subdl.com'dan ücretsiz anahtar al
+Doğrulanıyor
+Gizle
+Nasıl çalışır
+Burada depolama nasıl çalışır
+Stremio kitaplığında, ya da başka bir cihazda veya bu bilgisayardan önce duraklatılmış — Stremio'nun kaldığını söylediği yerden oynatmak için birini aç.
+Giriş bit hızı
+Anında · TorBox
+Davet bağlantısı kopyalandı — arkadaşlarına yapıştır
+Koduyla bir ortak izlemeye katıl
+Katıl
+Bitince paylaşmaya devam et
+Önbelleği küçük tut; yeniden indirmeden tekrar izlemek için kapat
+Klavye kısayolları
+Oynatıcıdaki Ortak izleme'den ayrıl.
+Bağlantıda diğer her şeye yer bırak
+Leecher'lar
+Bağlantı
+Bağlantı kopyalandı
+Bağlantılar yalnızca yayınlanır — burada indirilecek torrent yok.
+Yerel dosya
+Kilitli
+Çıkış yap
+Kaybolan arabellekler
+Kaybolan kareler
+Daha yüksek (↑)
+Magnet bağlantısı kopyalandı
+Windows'a uy ya da açık veya koyu sabitle
+Meta veriler
+Satırları yukarı veya aşağı taşı ya da gizle. Her profil kendininkini tutar.
+Sessiz
+Sonraki 5 dk
+SubDL anahtarı yok — kendininkini Ayarlar'dan ekle
+Henüz sorulacak eklenti yok. Ayarlar → Eklentiler'den bir tane ekle ya da bir bağlantı yapıştır.
+Ses parçası algılanmadı
+{1}. bölüm yok
+Henüz favori yok
+Eşleşme yok
+Henüz başka kimse yok — davet bağlantısını kopyala ve gönder.
+{1}. sezon için paket yok — bölümlerini aşağıdan tek tek indir.
+{2} dilinde {1}. sezon paketi yok — dili değiştirip tekrar dene ya da bölümlerini aşağıdan tek tek indir.
+Bunun için yayın yok.
+{1} için yayın bulunamadı
+O indirmede altyazı yok
+Altyazı yok
+Altyazı bulunamadı
+Altyazı bulunamadı. Çevrimiçi aramak için Daha fazla → Altyazı bul'u kullan.
+Bu sürümde yok
+Şimdi değil (Esc)
+Nuvio'da oturum açılmadı
+Stremio'da oturum açılmadı
+Henüz burada bir şey yok
+Kitaplığında “{1}” ile eşleşen bir şey yok.
+Buna uyan bir şey yok.
+Burada bu kadar yüksek puanlı bir şey yok
+Sonraya kaydedilen bir şey yok
+Henüz kaydedilen bir şey yok
+Kaydedilen bir şey yok — açtığın torrent'ler bir dahaki sefere daha hızlı açılsın diye burada hatırlanır
+Depolanan bir şey yok
+Temizlenecek bir şey yok
+Aç
+Tarayıcıda aç
+Rafı aç
+Sayfayı yeniden aç
+Yapımı aç
+Yapım sayfasını aç
+Açılıyor
+Tarayıcıda açılır
+Ya da bir eklentinin sitesinde Yükle'ye tıkla. Bağlantılar bu Windows hesabı için şifreli tutulur.
+Ortak izleme kodu {1} kopyalandı — arkadaşlarına gönder
+Ortak izleme kodu, örn. K7Q2-M9XD
+Birkaç tane seç, ana sayfa bunlarla açılsın
+Bir resim seç
+İndirmek için bir sürüm seç
+Parçalar
+Oynat / duraklat (Boşluk)
+Son dosyayı oynat
+Oynatma takıldı — veri bekleniyor
+Oynatılan arabellekler
+Şu an popüler
+Afişler, özetler ve raflar bir dahaki sefere yeniden yüklenir
+Daha alçak (↓)
+Tepkiler filmin üzerinde süzülür.
+Resmin üzerinde tepkiler
+Okunan
+Torrent okunuyor
+Torrent okunuyor…
+Ortak izlemeye yeniden katıl
+TorBox önbelleğindeki sürümler Anında yazar ve onun sunucularından oynar — eş beklemek yok. Geri kalanı eskisi gibi sürüden yayınlanır.
+Geçmişten kaldır
+Geçmişten kaldırılsın mı?
+Ortak izlemeyi yeniden aç
+Çözünürlük
+KAYDEDİLDİ
+Bir kopya kaydet
+Tamamen kaydet, sonra aç
+Kayıtlı torrent bilgisi temizlendi
+Bu bilgisayarda şifreli olarak kaydedildi — Altyazı bul SubDL'de de arar. Değiştirmek için başka birini gir.
+{1} konumuna kaydediliyor
+Merhaba de. Bunu yalnızca bu ortak izlemedeki kişiler görür ve ortak izleme bitince kaybolur.
+Ada göre ara…
+Yapımları ve dosyaları ara
+Seeder'lar
+Gönder (Enter)
+Biten bir indirmeyi, İndirilenler sekmesinden durdurana kadar paylaş
+Daha az bölüm göster
+Klasörde göster
+Oturum kapatıldı
+Nuvio oturumu kapatıldı
+AniList'te oturum açılıyor…
+Girişleri atla
+Girişleri otomatik atla
+Daha küçük altyazı
+Biri
+Kaynaklar  ·  {1}
+Özel {1}
+Hız ({1}x)
+Hız {1}x
+Baş (0:00)
+Bir ortak izleme başlat ve kodunu gönder. Bu kodla katılan herkes filmi seninle eş zamanlı izler, sohbet ve tepkilerle. Hesap yok ve yalnızca oynatma, duraklatma ve konum paylaşılır — şifreli.
+Başlıyor
+İndirme başlıyor…
+Başlangıç hızı
+Durdur
+İndirme durdurulsun mu?
+Depolama
+Yayın
+Yayın koptu — yeniden alınıyor
+Stremio hayır dedi
+Stremio eklenti göndermedi
+Stremio kod göndermedi
+Stremio hiçbir şey göndermedi
+SubDL isteği reddetti
+SubDL anahtarı reddetti
+Altyazı boyutu: {1}
+Altyazı: Kapalı
+Gerçekleşmedi — yeni kod için tekrar bağlan
+Bu bir magnet bağlantısı ya da .torrent değil
+O altyazı indirmesi çok büyük
+O altyazı bağlantısı güvenli bir web adresi değil
+Liderin paylaştığı 8 karakterlik kod (eski bir davet bağlantısı da olur). Watchly neyi oynatacağını gösterir ve başlamadan önce sorar.
+Film, yayını yüklenmek için duranlar için en fazla bu kadar süre duraklar.
+Yayın kopup duruyor
+Güncellemenin yüklenmesi için onayın gerekiyor
+Watchly'nin bu kopyası ortak izleme aktarıcısı olmadan derlendi.
+Başlık
+Başlık önbelleği temizlendi
+TorBox API anahtarı
+TorBox başlamadı — eşler deneniyor. Yine oynamazsa bu sürümün videosu bu bilgisayara uymuyor olabilir: başka birini dene.
+TorBox'ın yanıtı anlamsızdı.
+Torrent'ler bir dahaki açılışta dosya listelerini sürüden yeniden almak zorunda kalacak. İzleme geçmişi ve indirmeler kalır.
+Yayınladığın torrent'ler burada içerdikleri tüm dosyalarla görünür, her birinin kendi devam noktası vardır.
+Tracker'lar ve önbellek nasıl çalışır
+Daha düşük bir puan ya da başka bir tür dene.
+{1} kaldır
+Sınırsız
+Kontrolleri aç
+Kilit açıldı
+Sıradaki {1} sn içinde
+Yükleme
+Yükleme hız sınırı
+Video {1}
+Video {1} Mb/sn
+İzleyici
+Ses
+Ses %{1}
+Parçalar geldikçe izle
+Sonra izle
+Ortak izlemeler
+Nuvio'da {1} olarak izleniyor
+{1} olarak izleniyor
+Watchly · filmler ve diziler, sen hazır olduğunda. İzlediğinden ve indirdiğinden sen sorumlusun.
+Diğerlerinin gördüğü
+İndirirken sürünün geri aldığı
+Bir misafir duraklatma, oynatma veya atlama istediğinde.
+Sen yönetirken
+Sen izlerken
+Bir bölümün girişi biliniyorsa Girişi atla düğmesini göstermek yerine atla. Bölüm başına bir kez — izlemek için geri sar.
+İndirmeler nereye gitsin?
+Dosyanın tamamı (indirme)
+Pencerede
+torbox.app API anahtarıyla TorBox'ın önbellekteki sürümleri eşler yerine onun sunucularından oynar. Bu Windows hesabı için şifreli saklanır.
+Bir ortak izlemedesin
+Bir ortak izlemedesin — oynatıcıdaki Ortak izleme'den ayrıl.
+Bir ortak izlemeyi yönetiyorsun
+Bir ortak izlemeyi yönetiyorsun — oynatıcıdaki Ortak izleme'den bitir.
+Stremio kitaplığın ve kaldığın yerler burada, Listem oradaki kitaplığındır ve bitirdiklerin izlendi olarak işaretlenir. Burada eklediğin ya da kaldırdığın eklentiler hesabında da değişir.
+Stremio kitaplığın, İzlemeye devam et ve eklentilerin burada, iki yönde eşit. Stremio'nun kendi sayfasında oturum açarsın — şifren asla Watchly'ye gelmez.
+{1} öğe ve devam noktaları silinecek.
+{1} sn kaldı
+{1} seçildi — ana sayfayı bunlar açar
+{1} bu listeden ve diskten kaldırılacak.
+{1} — ve oynatıldığı {2} sürüm
+{1} artık PIN istiyor
+{1} — profil değiştir
+1. bölümün %{1} kadarı
+{1} oynatılabilir · {2} dosya — nasıl açmak istersin?
+{1} kaldırılacak. Biten dosyalar kalır; bitmemiş olanlar silinir.
+{1} için yaş sınırı {2}. İzlemek için bir yetişkin profiline geç.
+🔒  Film bu bilgisayarda yayınlanır. Yalnızca oynatma, duraklatma ve konum paylaşılır — şifreli, hesapsız.

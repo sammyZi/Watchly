@@ -2,6 +2,8 @@ package com.torrentviewer.mobile
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import dev.chrisbanes.haze.hazeEffect
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,7 +26,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -54,12 +55,12 @@ private data class Line(val key: String, val title: String?, val text: String, v
 
 /** The bell on Home, with a count while either source has something unseen. */
 @Composable
-fun NotificationBell(solid: Float, onClick: () -> Unit) {
+fun NotificationBell(solid: Float, onClick: () -> Unit, haze: dev.chrisbanes.haze.HazeState? = null) {
     val items by Inbox.items.collectAsState()
     val readAt by Inbox.readAt.collectAsState()
     val aniUnread by AniList.unread.collectAsState()
     val count = aniUnread + items.count { it.at > readAt }
-    HeaderTile(L.drawable.lucide_ic_bell, if (count > 0) "Notifications, $count new" else "Notifications", solid, onClick) {
+    HeaderTile(L.drawable.lucide_ic_bell, if (count > 0) "Notifications, $count new" else "Notifications", solid, onClick, haze) {
         if (count > 0) Box(
             Modifier.align(Alignment.TopEnd).offset(x = 5.dp, y = (-5).dp).height(18.dp).widthIn(min = 18.dp)
                 .clip(CircleShape).background(Ink.accent).padding(horizontal = 5.dp),
@@ -72,15 +73,32 @@ fun NotificationBell(solid: Float, onClick: () -> Unit) {
 
 /**
  * One of Home's header buttons, shaped like the avatar beside them: a glass tile over the art ([solid] 0)
- * that turns the page's own surface as the bar fills in (1). [extra] draws over it, a badge say.
+ * that turns the page's own surface as the bar fills in (1). [extra] draws over it, a badge say. Given the
+ * page's [haze], the glass is frosted: what's behind it blurred under the tint, with a hairline edge over art.
  */
 @Composable
-fun HeaderTile(icon: Int, description: String, solid: Float, onClick: () -> Unit, extra: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit = {}) {
-    val fill = androidx.compose.ui.graphics.lerp(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.38f), Ink.surface2, solid)
-    val tint = androidx.compose.ui.graphics.lerp(androidx.compose.ui.graphics.Color.White, Ink.text, solid)
+fun HeaderTile(icon: Int, description: String, solid: Float, onClick: () -> Unit, haze: dev.chrisbanes.haze.HazeState? = null, extra: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit = {}) {
+    val white = androidx.compose.ui.graphics.Color.White
+    val fill = androidx.compose.ui.graphics.lerp(androidx.compose.ui.graphics.Color.Black.copy(alpha = if (haze != null) 0.22f else 0.38f), Ink.surface2.copy(alpha = 0.75f), solid)
+    val tint = androidx.compose.ui.graphics.lerp(white, Ink.text, solid)
+    val shape = RoundedCornerShape(9.dp)
+    val page = Ink.bg
     Box(Modifier.size(40.dp).semantics { contentDescription = description }) {
-        Tap(onClick, Modifier.matchParentSize(), RoundedCornerShape(9.dp)) {
-            Box(Modifier.matchParentSize().background(fill), contentAlignment = Alignment.Center) {
+        Tap(onClick, Modifier.matchParentSize(), shape) {
+            Box(
+                Modifier.matchParentSize()
+                    .then(
+                        if (haze == null) Modifier.background(fill)
+                        else Modifier.hazeEffect(haze) {
+                            backgroundColor = page
+                            tints = listOf(dev.chrisbanes.haze.HazeTint(fill))
+                            blurRadius = 16.dp
+                            noiseFactor = 0f
+                        },
+                    )
+                    .border(1.dp, white.copy(alpha = 0.16f * (1f - solid)), shape),
+                contentAlignment = Alignment.Center,
+            ) {
                 Lc(icon, tint = tint, size = 20.dp)
             }
         }

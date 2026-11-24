@@ -614,10 +614,16 @@ public partial class MainWindow : Window
     public void ChangeSettings(AppSettings next)
     {
         var themeChanged = next.ThemeMode != Settings.ThemeMode;
+        var languageChanged = (next.Language ?? "") != (Settings.Language ?? "");
         var limitsChanged = next.MaxDownloadKbps != Settings.MaxDownloadKbps || next.MaxUploadKbps != Settings.MaxUploadKbps;
         Settings = next;
         next.Save();
         if (themeChanged) Theme.Apply(next.ThemeMode);
+        if (languageChanged)
+        {
+            Core.I18n.Use(next.Language ?? "");
+            Controls.Words.Again(this);
+        }
         // Not made yet, it reads the saved limits when it is: nothing to start the network for now.
         if (limitsChanged && TorrentEngine.Started) _ = TorrentEngine.Instance.ApplyLimits(next);
         // Watch party turned on or off: the rail's Join with it.

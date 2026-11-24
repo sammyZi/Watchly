@@ -57,7 +57,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Text
 import androidx.compose.animation.animateContentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -76,7 +75,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.torrentviewer.core.PROFILE_ANIMALS
 import com.torrentviewer.core.PROFILE_ICONS
+import com.torrentviewer.core.PROFILE_PEOPLE
+import androidx.compose.foundation.clickable
 import com.torrentviewer.core.personOf
 import com.torrentviewer.core.Avatar
 import com.torrentviewer.core.CACHE_CAPS
@@ -646,6 +648,7 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEd
     var current by remember { mutableStateOf("") }
     /** "audio" or "subs" while that language list is up. */
     var picking by remember { mutableStateOf<String?>(null) }
+    var choosingLanguage by remember { mutableStateOf(false) }
     val subdl by Secrets.subdl.collectAsState()
     /** A SubDL key being typed or pasted, until Save. */
     var key by remember { mutableStateOf("") }
@@ -691,8 +694,30 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEd
     // A page's back and name stay put at the top, on frost; the list's own heading scrolls, and its name comes onto the frost.
     var pinned by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     val pinnedDp = with(androidx.compose.ui.platform.LocalDensity.current) { pinned.toDp() }
+    // Into a page it comes a little way in from the trailing side, back to the list from the leading side,
+    // fading up as it goes: a hint of direction, not a whole slide. Calibration: 36dp of travel, 300ms.
+    // A new one per page, starting at 0 in the very frame the page changes: reset from an effect, the new page
+    // showed whole for a frame first.
+    val arrive = remember(page) { androidx.compose.animation.core.Animatable(0f) }
+    val forward = page != null
+    LaunchedEffect(page) {
+        arrive.animateTo(1f, androidx.compose.animation.core.tween(300, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+    }
+    val travel = with(androidx.compose.ui.platform.LocalDensity.current) { 36.dp.toPx() }
+    val rtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl
     Box(Modifier.fillMaxSize()) {
-    Column(Modifier.fillMaxSize().hazeSource(haze).verticalScroll(scroll).padding(horizontal = EDGE).padding(bottom = 32.dp + LocalTabBarInset.current)) {
+    Column(
+        Modifier.fillMaxSize()
+            .graphicsLayer {
+                val left = 1f - arrive.value
+                // Faded per drawing, not through an offscreen copy: that copy was dropped the moment it reached
+                // full opacity, and the text redrawn sharper — the flicker at the end.
+                compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.ModulateAlpha
+                alpha = 1f - 0.8f * left
+                translationX = left * travel * (if (forward) 1f else -1f) * (if (rtl) -1f else 1f)
+            }
+            .hazeSource(haze).verticalScroll(scroll).padding(horizontal = EDGE).padding(bottom = 32.dp + LocalTabBarInset.current),
+    ) {
         if (page == null) {
             Heading("Settings")
             Field(query, { query = it }, "Search settings", Modifier.fillMaxWidth().padding(bottom = 12.dp), leading = L.drawable.lucide_ic_search)
@@ -716,9 +741,9 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEd
                         Entry(L.drawable.lucide_ic_user, "Account", "Profile, Stremio, Nuvio and PIN", "lock sign in login") { page = "Account" },
                         Entry(L.drawable.lucide_ic_users, "Switch profile", "Change to a different profile", onClick = onSwitchProfile),
                     ),
+                    // Your stats is the banner up top: a row for it here said the same thing twice.
                     listOf(
-                        Entry(L.drawable.lucide_ic_trophy, "Your stats", "Hours watched, favourites and streaks", "year recap history time") { page = "Your stats" },
-                        Entry(L.drawable.lucide_ic_palette, "Appearance", "Theme, home screen genres and rows", "light dark home rows edit") { page = "Appearance" },
+                        Entry(L.drawable.lucide_ic_palette, "Appearance", "Language, theme, home screen genres and rows", "light dark home rows edit language") { page = "Appearance" },
                     ),
                     listOf(
                         Entry(L.drawable.lucide_ic_radio, "Streaming", "Storage, buffer and trackers", "cache magnet") { page = "Streaming" },
@@ -1109,30 +1134,7 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEd
         }
         }
 
-        if (page == "Appearance") Panel {
-        Section("Theme", "Light or dark pages, or whichever the phone is set to. The player stays dark either way.") {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("system" to "System", "light" to "Light", "dark" to "Dark").forEach { (mode, label) ->
-                    Chip(label, settings.themeMode == mode, onClick = { set(settings.copy(themeMode = mode)) })
-                }
-            }
-        }
-
-        Section("Home screen rows", "Move rows up or down, or switch them off. Each profile keeps its own.") {
-            Button("Edit Home", onEditHome, icon = L.drawable.lucide_ic_settings_2, compact = true)
-        }
-
-        Section("Genres on the home screen", "Only the genres picked here get rows on the home screen. Leave all off to build it from what you have watched.") {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                GENRES.forEach { g ->
-                    val on = g in settings.genres
-                    Chip(g, on, icon = if (on) L.drawable.lucide_ic_check else null, onClick = {
-                        set(settings.copy(genres = if (on) settings.genres - g else settings.genres + g))
-                    })
-                }
-            }
-        }
-        }
+        if (page == "Appearance") AppearancePage(settings, { set(it) }, onEditHome) { choosingLanguage = true }
 
         if (page == "Your stats") StatsPage()
 
@@ -1185,6 +1187,18 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEd
             },
             onDismiss = { picking = null },
         )
+    }
+    // Out here, over the page: inside its scrolling column the sheet was laid out under the last card, unseen.
+    if (choosingLanguage) {
+        val picked = remember { com.torrentviewer.core.I18n.picked(appContext) }
+        LanguageSheet(picked, deviceLanguage(), { choosingLanguage = false }) { tag ->
+            choosingLanguage = false
+            if (tag != picked) {
+                com.torrentviewer.core.I18n.pick(appContext, tag)
+                // Every screen again, in the new words and, for Arabic, right to left.
+                (appContext as? android.app.Activity)?.recreate()
+            }
+        }
     }
 }
 
@@ -1921,6 +1935,213 @@ private fun Section(title: String, hint: String, content: @Composable () -> Unit
     }
 }
 
+/* ----------------------------------------------------------- appearance */
+
+/**
+ * Appearance as the phone's own settings lay it out: a card a subject, named above and explained under. The
+ * language opens a full list of its own; the theme shows each page as a little picture to pick.
+ */
+@Composable
+private fun AppearancePage(settings: Settings, set: (Settings) -> Unit, onEditHome: () -> Unit, onChooseLanguage: () -> Unit) {
+    val context = LocalContext.current
+    val i18n = com.torrentviewer.core.I18n
+    val picked = remember { i18n.picked(context) }
+
+    SettingsGroup("Language", "Watchly's words in your language. Titles and descriptions come from the catalogues as they are.") {
+        LinkRow(
+            L.drawable.lucide_ic_languages, "App language",
+            if (picked.isEmpty()) com.torrentviewer.core.tr("Device language") + "  ·  " + deviceLanguage() else i18n.LANGUAGES[picked] ?: "English",
+            onChooseLanguage,
+        )
+    }
+
+    SettingsGroup("Theme", "Light or dark pages, or whichever the phone is set to. The player stays dark either way.") {
+        Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            listOf("system" to "System", "light" to "Light", "dark" to "Dark").forEach { (mode, label) ->
+                ThemeTile(mode, label, settings.themeMode == mode, settings.amoled, Modifier.weight(1f)) { set(settings.copy(themeMode = mode)) }
+            }
+        }
+        RowDivider()
+        SwitchRow("AMOLED Black", "Use pure black backgrounds for OLED screens.", settings.amoled) { set(settings.copy(amoled = it)) }
+    }
+
+    SettingsGroup("Home screen") {
+        LinkRow(L.drawable.lucide_ic_rows_3, "Home screen rows", "Move rows up or down, or switch them off. Each profile keeps its own.", onEditHome)
+        RowDivider()
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Genres on the home screen", Modifier.weight(1f), style = Type.body.copy(fontWeight = FontWeight.SemiBold))
+                if (settings.genres.isNotEmpty()) Text("${settings.genres.size} picked", style = Type.meta.copy(color = Ink.accent, fontWeight = FontWeight.SemiBold))
+            }
+            Text(
+                "Only the genres picked here get rows on the home screen. Leave all off to build it from what you have watched.",
+                Modifier.padding(top = 4.dp, bottom = 14.dp), style = Type.meta.copy(color = Ink.faint),
+            )
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                GENRES.forEach { g ->
+                    val on = g in settings.genres
+                    Chip(g, on, icon = if (on) L.drawable.lucide_ic_check else null, onClick = {
+                        set(settings.copy(genres = if (on) settings.genres - g else settings.genres + g))
+                    })
+                }
+            }
+        }
+    }
+
+}
+
+/** The phone's own language, in its own words, where Watchly has it; English otherwise. */
+private fun deviceLanguage(): String = com.torrentviewer.core.I18n.LANGUAGES[java.util.Locale.getDefault().language] ?: "English"
+
+/** A settings card: its name above, the rows in it, a word on what it does under it. */
+@Composable
+private fun SettingsGroup(title: String, footer: String? = null, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    Column(Modifier.padding(bottom = 22.dp)) {
+        Text(title, Modifier.padding(start = 6.dp, bottom = 8.dp), style = Type.label.copy(color = Ink.muted, fontWeight = FontWeight.SemiBold))
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Ink.surface), content = content)
+        footer?.let { Text(it, Modifier.padding(start = 6.dp, end = 6.dp, top = 8.dp), style = Type.meta.copy(color = Ink.faint)) }
+    }
+}
+
+@Composable
+private fun RowDivider() {
+    Box(Modifier.fillMaxWidth().padding(start = 16.dp).height(1.dp).background(Ink.stroke.copy(alpha = 0.5f)))
+}
+
+/** A row that opens something: its icon, name and what it is set to, and a chevron pointing on. */
+@Composable
+private fun LinkRow(@androidx.annotation.DrawableRes icon: Int, title: String, value: String, onClick: () -> Unit) {
+    val rtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl
+    Tap(onClick, Modifier.fillMaxWidth(), RoundedCornerShape(18.dp)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(Ink.text.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
+                Lc(icon, tint = Ink.text, size = 18.dp)
+            }
+            Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
+                Text(title, style = Type.body.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(value, style = Type.meta.copy(color = Ink.faint), maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            // Points on, which in a right-to-left language is the other way.
+            Lc(L.drawable.lucide_ic_chevron_right, Modifier.graphicsLayer { if (rtl) scaleX = -1f }, tint = Ink.faint, size = 20.dp)
+        }
+    }
+}
+
+/** A setting that is on or off: the whole row flips it, as the switch does. */
+@Composable
+private fun SwitchRow(title: String, hint: String, on: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable { onChange(!on) }.padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(title, style = Type.body.copy(fontWeight = FontWeight.SemiBold))
+            Text(hint, Modifier.padding(top = 2.dp), style = Type.meta.copy(color = Ink.faint))
+        }
+        androidx.compose.material3.Switch(
+            on, onChange,
+            colors = androidx.compose.material3.SwitchDefaults.colors(
+                checkedThumbColor = Color.White, checkedTrackColor = Ink.accent,
+                uncheckedThumbColor = Ink.muted, uncheckedTrackColor = Ink.surface2, uncheckedBorderColor = Ink.faint,
+            ),
+        )
+    }
+}
+
+/** A round pick-one mark: a ring, filled with a dot when it is the one. */
+@Composable
+private fun Radio(on: Boolean) {
+    val ring by androidx.compose.animation.animateColorAsState(if (on) Ink.accent else Ink.faint, label = "radio")
+    val dot by androidx.compose.animation.core.animateFloatAsState(if (on) 1f else 0f, label = "dot")
+    Box(Modifier.size(20.dp).border(2.dp, ring, CircleShape), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(10.dp).graphicsLayer { scaleX = dot; scaleY = dot }.clip(CircleShape).background(Ink.accent))
+    }
+}
+
+/** A theme as a little page in its colours, the phone's own split down the middle, picked by a tap. */
+@Composable
+private fun ThemeTile(mode: String, label: String, on: Boolean, amoled: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val edge by androidx.compose.animation.animateColorAsState(if (on) Ink.accent else Ink.stroke, label = "edge")
+    val light = Triple(Color(0xFFF6F2EE), Color.White, Color(0xFFDDD5CE))
+    val dark = Triple(if (amoled) Color.Black else Color(0xFF0A0A0A), Color(0xFF1C1C1C), Color(0xFF333333))
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Tap(onClick, Modifier.fillMaxWidth(), RoundedCornerShape(14.dp)) {
+            Box(Modifier.aspectRatio(1.3f).border(2.dp, edge, RoundedCornerShape(14.dp)).padding(4.dp).clip(RoundedCornerShape(10.dp))) {
+                when (mode) {
+                    "light" -> MiniPage(light)
+                    "dark" -> MiniPage(dark)
+                    else -> Row(Modifier.fillMaxSize()) {
+                        Box(Modifier.weight(1f).fillMaxHeight()) { MiniPage(light) }
+                        Box(Modifier.weight(1f).fillMaxHeight()) { MiniPage(dark) }
+                    }
+                }
+            }
+        }
+        Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Radio(on)
+            Text(label, Modifier.padding(start = 8.dp), style = Type.label.copy(color = if (on) Ink.text else Ink.muted, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium))
+        }
+    }
+}
+
+/** A page in miniature: a red pill for the wordmark, a card, two lines of words. */
+@Composable
+private fun MiniPage(colours: Triple<Color, Color, Color>) {
+    val (page, card, line) = colours
+    Column(Modifier.fillMaxSize().background(page).padding(8.dp)) {
+        Box(Modifier.fillMaxWidth(0.45f).height(6.dp).clip(CircleShape).background(Ink.accent))
+        Box(Modifier.padding(top = 8.dp).fillMaxWidth().weight(1f).clip(RoundedCornerShape(5.dp)).background(card))
+        Box(Modifier.padding(top = 7.dp).fillMaxWidth(0.8f).height(5.dp).clip(CircleShape).background(line))
+        Box(Modifier.padding(top = 4.dp).fillMaxWidth(0.55f).height(5.dp).clip(CircleShape).background(line))
+    }
+}
+
+/**
+ * Every language, each in its own words with its name in the reader's under it. The list fades out at its foot
+ * while there is more below, so a list that runs past the sheet reads as one to scroll.
+ */
+@Composable
+private fun LanguageSheet(picked: String, device: String, onDismiss: () -> Unit, onPick: (String) -> Unit) {
+    val i18n = com.torrentviewer.core.I18n
+    val english = mapOf(
+        "en" to "English", "es" to "Spanish", "pt" to "Portuguese (Brazil)", "fr" to "French", "de" to "German", "it" to "Italian",
+        "ru" to "Russian", "tr" to "Turkish", "ar" to "Arabic", "hi" to "Hindi", "id" to "Indonesian", "ja" to "Japanese", "ko" to "Korean", "zh" to "Chinese",
+    )
+    val rows = listOf(Triple("", com.torrentviewer.core.tr("Device language"), device)) +
+        i18n.LANGUAGES.map { (tag, name) -> Triple(tag, name, com.torrentviewer.core.tr(english[tag] ?: name).takeIf { it != name }) }
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    val surface = Ink.surface
+    BottomSheet("App language", onDismiss) {
+        Text("${i18n.LANGUAGES.size} languages", Modifier.padding(start = 20.dp, bottom = 6.dp), style = Type.meta.copy(color = Ink.faint))
+        Box {
+            androidx.compose.foundation.lazy.LazyColumn(state = list) {
+                rows.forEach { (tag, name, hint) ->
+                    item(key = tag) {
+                        val on = tag == picked
+                        Tap({ onPick(tag) }, Modifier.fillMaxWidth(), RoundedCornerShape(0.dp)) { pressed ->
+                            Row(
+                                Modifier.background(if (pressed) Ink.text.copy(alpha = 0.08f) else Color.Transparent).padding(horizontal = 20.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(name, style = Type.label.copy(fontSize = 16.sp, color = if (on) Ink.text else Ink.text.copy(alpha = 0.9f), fontWeight = if (on) FontWeight.Bold else FontWeight.Medium))
+                                    hint?.let { Text(it, style = Type.meta.copy(color = Ink.faint), maxLines = 1) }
+                                }
+                                Radio(on)
+                            }
+                        }
+                    }
+                }
+                item { Spacer(Modifier.height(24.dp)) }
+            }
+            if (list.canScrollForward) Box(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(64.dp)
+                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(surface.copy(alpha = 0f), surface))),
+            )
+        }
+    }
+}
+
 /* ------------------------------------------------------------- profiles */
 
 private sealed interface ProfilesMode {
@@ -1948,10 +2169,10 @@ fun ProfilesScreen(profiles: List<Profile>, onPick: (Profile) -> Unit, onCancel:
     }
     // The editor scrolls its own form so Save stays on screen; the rest scroll whole.
     val scroll = if (mode is ProfilesMode.Edit) Modifier else Modifier.verticalScroll(rememberScrollState())
-    // What's on, behind the profiles: the welcome screen's wall, washed back.
+    // What's on, behind the profiles: the welcome screen's wall, washed back. The editor is a form: plain page.
     Box(Modifier.fillMaxSize()) {
-    ProfilesPosterWall()
-    Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().then(scroll).padding(horizontal = EDGE, vertical = 24.dp), contentAlignment = Alignment.Center) {
+    if (mode is ProfilesMode.Edit) Box(Modifier.fillMaxSize().background(Ink.bg)) else ProfilesPosterWall()
+    Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().then(scroll).padding(horizontal = EDGE, vertical = if (mode is ProfilesMode.Edit) 8.dp else 24.dp), contentAlignment = Alignment.Center) {
         when (val m = mode) {
             ProfilesMode.Pick, ProfilesMode.Manage -> Picker(
                 profiles, m == ProfilesMode.Manage, onCancel,
@@ -2047,6 +2268,7 @@ private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, Strin
     var icon by remember { mutableStateOf(profile?.let { p -> p.icon?.takeIf { it.startsWith("/") } ?: personOf(p) } ?: PROFILE_ICONS[0]) }
     var colour by remember { mutableStateOf(profile?.colour ?: COLOURS[0]) }
     var kids by remember { mutableStateOf(profile?.kids ?: false) }
+    var animals by remember { mutableStateOf(icon in PROFILE_ANIMALS) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     /** The address being typed; null while that box is closed. */
@@ -2066,26 +2288,49 @@ private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, Strin
         }
     }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let(::usePicture) }
-    Column(Modifier.widthIn(max = 480.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
-            Avatar(Profile("preview", name.ifBlank { "?" }, colour, icon), 110.dp)
-            Text(if (profile == null) "Add a profile" else "Edit profile", Modifier.padding(top = 18.dp), style = Type.display)
-            Text(note ?: if (profile == null) "Its own library, My List and resume points." else "Change the name, the face or the colour.", Modifier.padding(top = 4.dp, bottom = 18.dp), style = Type.meta, textAlign = TextAlign.Center)
-            Field(name, { name = it.take(20) }, "Name", Modifier.fillMaxWidth())
-            Text("ICON", Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 10.dp), style = Type.overline)
-            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                PROFILE_ICONS.forEach { a ->
-                    Tap({ icon = a }, Modifier.size(54.dp), RoundedCornerShape(12.dp)) {
-                        Box {
-                            AvatarImage(a, colorOf(colour), 54.dp)
-                            if (a == icon) Box(Modifier.matchParentSize().border(3.dp, Ink.accent, RoundedCornerShape(12.dp)))
+    val fromPhone = { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+    Column(Modifier.widthIn(max = 480.dp).fillMaxSize()) {
+        // Top bar, as Netflix's and Disney+'s editors: close on the left, the title in the middle.
+        Box(Modifier.fillMaxWidth().height(52.dp), contentAlignment = Alignment.Center) {
+            if (canCancel) Tap(onCancel, Modifier.align(Alignment.CenterStart), CircleShape) { Lc(L.drawable.lucide_ic_x, Modifier.padding(8.dp), tint = Ink.text, size = 24.dp) }
+            Text(if (profile == null) "Add profile" else "Edit profile", style = Type.title.copy(fontWeight = FontWeight.Bold))
+        }
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(bottom = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            // The preview; a tap picks a photo, as the pencil says.
+            Tap(fromPhone, Modifier.padding(top = 12.dp), RoundedCornerShape(16.dp)) {
+                Box {
+                    Avatar(Profile("preview", name.ifBlank { "?" }, colour, icon), 120.dp)
+                    Badge(L.drawable.lucide_ic_pencil)
+                }
+            }
+            Text(note ?: if (profile == null) "Its own library, My List and resume points." else "Change the name, the face or the colour.", Modifier.padding(top = 12.dp, bottom = 20.dp), style = Type.meta.copy(color = Ink.faint), textAlign = TextAlign.Center)
+            Field(name, { name = it.take(20) }, "Profile name", Modifier.fillMaxWidth(), action = androidx.compose.ui.text.input.ImeAction.Done)
+            // People or animals, a set at a time as Disney+ groups its avatars.
+            Row(Modifier.fillMaxWidth().padding(top = 28.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("CHOOSE AN ICON", Modifier.weight(1f), style = Type.overline)
+                Chip("People", !animals, { animals = false }, compact = true)
+                Spacer(Modifier.width(8.dp))
+                Chip("Animals", animals, { animals = true }, compact = true)
+            }
+            // Four across, in even rows.
+            Column(Modifier.fillMaxWidth().animateContentSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                (if (animals) PROFILE_ANIMALS else PROFILE_PEOPLE).chunked(4).forEach { row ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        row.forEach { a ->
+                            val on = a == icon
+                            val ring by androidx.compose.animation.animateColorAsState(if (on) Ink.text else Color.Transparent, label = "ring")
+                            Box(Modifier.weight(1f).aspectRatio(1f).border(2.5.dp, ring, RoundedCornerShape(20.dp)).padding(5.dp)) {
+                                Tap({ icon = a }, Modifier.fillMaxSize(), RoundedCornerShape(15.dp)) {
+                                    androidx.compose.foundation.layout.BoxWithConstraints { AvatarImage(a, colorOf(colour), maxWidth) }
+                                }
+                            }
                         }
                     }
                 }
             }
-            Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button("From phone", { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, icon = L.drawable.lucide_ic_image, compact = true)
-                Button("From URL", { link = if (link == null) "" else null }, icon = L.drawable.lucide_ic_link, compact = true)
+            Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button("From phone", fromPhone, Modifier.weight(1f), icon = L.drawable.lucide_ic_image)
+                Button("From URL", { link = if (link == null) "" else null }, Modifier.weight(1f), icon = L.drawable.lucide_ic_link)
             }
             link?.let { typed ->
                 Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -2094,36 +2339,51 @@ private fun Editor(profile: Profile?, canCancel: Boolean, onSave: (String, Strin
                 }
             }
             if (failed) Text("Couldn't load that picture.", Modifier.fillMaxWidth().padding(top = 8.dp), style = Type.meta.copy(color = Ink.danger))
-            Text("COLOUR", Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 10.dp), style = Type.overline)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("COLOUR", Modifier.fillMaxWidth().padding(top = 28.dp, bottom = 12.dp), style = Type.overline)
+            // Spread across the width so all six always show; the picked one gets a ring.
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 COLOURS.forEach { c ->
-                    Tap({ colour = c }, Modifier.size(40.dp), CircleShape) {
-                        Box(Modifier.background(colorOf(c)), contentAlignment = Alignment.Center) { if (c == colour) Lc(L.drawable.lucide_ic_check, tint = Color.White, size = 18.dp) }
+                    val ring by androidx.compose.animation.animateColorAsState(if (c == colour) Ink.text else Color.Transparent, label = "ring")
+                    Box(Modifier.size(46.dp).border(2.5.dp, ring, CircleShape).padding(5.dp)) {
+                        Tap({ colour = c }, Modifier.fillMaxSize(), CircleShape) { Box(Modifier.background(colorOf(c))) }
                     }
                 }
             }
-            Text("KIDS", Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 10.dp), style = Type.overline)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Chip("Kids profile", kids, onClick = { kids = true }, icon = if (kids) L.drawable.lucide_ic_check else null)
-                Chip("Everything", !kids, onClick = { kids = false })
+            // Kids: one switch in a card, as the streaming apps all do it.
+            Row(
+                Modifier.fillMaxWidth().padding(top = 28.dp).clip(RoundedCornerShape(14.dp)).background(Ink.surface).clickable { kids = !kids }.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text("Kids profile", style = Type.body.copy(fontWeight = FontWeight.SemiBold))
+                    Text(
+                        if (kids) "Family films and series only. No addons, stream search or links from other apps — give your own profile a PIN so it stays that way."
+                        else "Every title, addons and stream search included.",
+                        Modifier.padding(top = 4.dp),
+                        style = Type.meta.copy(color = Ink.faint),
+                    )
+                }
+                androidx.compose.material3.Switch(
+                    kids, { kids = it },
+                    colors = androidx.compose.material3.SwitchDefaults.colors(
+                        checkedThumbColor = Color.White, checkedTrackColor = Ink.accent,
+                        uncheckedThumbColor = Ink.muted, uncheckedTrackColor = Ink.surface2, uncheckedBorderColor = Ink.faint,
+                    ),
+                )
             }
-            Text(
-                if (kids) "Family films and series only. No addons, stream search or links from other apps — give your own profile a PIN so it stays that way."
-                else "Every title, addons and stream search included.",
-                Modifier.fillMaxWidth().padding(top = 8.dp),
-                style = Type.meta.copy(color = Ink.faint),
-            )
             // A profile not saved yet has no id to keep a connection under.
             if (profile != null) Column(Modifier.fillMaxWidth().padding(top = 24.dp)) {
                 if (Stremio.available) StremioSection(profile)
                 NuvioSection(profile)
             }
+            if (profile != null) Tap(onDelete, Modifier.padding(top = 12.dp)) {
+                Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Lc(L.drawable.lucide_ic_trash_2, tint = Ink.danger, size = 18.dp)
+                    Text("Delete profile", Modifier.padding(start = 8.dp), style = Type.label.copy(color = Ink.danger, fontWeight = FontWeight.SemiBold))
+                }
+            }
         }
-        Button("Save", { onSave(name, icon, colour, kids) }, Modifier.fillMaxWidth().padding(top = 20.dp), icon = L.drawable.lucide_ic_check, primary = true)
-        Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (canCancel) Button("Cancel", onCancel)
-            if (profile != null) Button("Delete profile", onDelete, icon = L.drawable.lucide_ic_trash_2)
-        }
+        Button("Save", { onSave(name, icon, colour, kids) }, Modifier.fillMaxWidth().padding(bottom = 8.dp), icon = L.drawable.lucide_ic_check, primary = true)
     }
 }
 

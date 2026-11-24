@@ -674,10 +674,12 @@ object Downloads {
             data = android.net.Uri.parse(DOWNLOADS_LINK)
         }
         val pi = PendingIntent.getActivity(context, 0, open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        // The service can outlive the screens, which load the words otherwise.
+        com.torrentviewer.core.I18n.ensure(context)
         return NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentTitle(title)
-            .setContentText(text)
+            .setContentTitle(com.torrentviewer.core.tr(title))
+            .setContentText(text?.let { com.torrentviewer.core.tr(it) })
             .setProgress(100, percent, percent <= 0)
             .setOngoing(true)
             .setOnlyAlertOnce(true)

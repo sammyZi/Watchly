@@ -175,6 +175,8 @@ data class Settings(
     val wholeFile: Boolean = false,
     /** "system", "light" or "dark" — the phone's page; the TV is always dark. */
     val themeMode: String = "system",
+    /** Dark pages in pure black, for OLED screens — the phone's. */
+    val amoled: Boolean = false,
     /** Jump past an episode's intro by itself, rather than offer the button. */
     val autoSkipIntro: Boolean = false,
     /** A notification when a followed series has a new episode out — the phone's. */
@@ -309,6 +311,7 @@ object SettingsStore {
         playerScale = o.optString("playerScale", "Best fit").ifBlank { "Best fit" },
         wholeFile = o.optBoolean("streamWholeFile", false),
         themeMode = o.optString("themeMode").takeIf { it == "light" || it == "dark" } ?: "system",
+        amoled = o.optBoolean("amoled", false),
         autoSkipIntro = o.optBoolean("autoSkipIntro", false),
         episodeAlerts = o.optBoolean("episodeAlerts", true),
         partyOn = o.optBoolean("partyOn", true),
@@ -330,7 +333,7 @@ object SettingsStore {
             .put("cacheMb", next.cacheCapMb).put("vlcPlayer", next.vlcPlayer)
             .put("subLang", next.subLang).put("audioLang", next.audioLang)
             .put("subSize", next.subtitles.size).put("subColor", if (next.subtitles.yellow) "yellow" else "white").put("subBackground", next.subtitles.box)
-            .put("playbackRate", next.playbackRate.toDouble()).put("playerScale", next.playerScale).put("streamWholeFile", next.wholeFile).put("themeMode", next.themeMode).put("autoSkipIntro", next.autoSkipIntro).put("episodeAlerts", next.episodeAlerts)
+            .put("playbackRate", next.playbackRate.toDouble()).put("playerScale", next.playerScale).put("streamWholeFile", next.wholeFile).put("themeMode", next.themeMode).put("amoled", next.amoled).put("autoSkipIntro", next.autoSkipIntro).put("episodeAlerts", next.episodeAlerts)
             .put("partyOn", next.partyOn).put("partyName", next.partyName).put("partyAsks", next.partyAsks).put("partyHoldSec", next.partyWaitSec).put("partySmooth", next.partySmooth)
             .put("partyShowChat", next.partyShowChat).put("partyShowReactions", next.partyShowReactions)
             .put("nuvioEngine", next.nuvioEngine)

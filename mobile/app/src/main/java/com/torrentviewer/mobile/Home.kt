@@ -28,7 +28,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -59,6 +58,9 @@ import com.torrentviewer.core.ANIME_GENRE
 import com.torrentviewer.core.Artwork
 import com.torrentviewer.core.Avatar
 import com.torrentviewer.core.Facts
+import com.torrentviewer.core.ImdbBadge
+import com.torrentviewer.core.runtimeLabel
+import androidx.compose.foundation.border
 import com.torrentviewer.core.History
 import com.torrentviewer.core.Ink
 import com.torrentviewer.core.grain
@@ -269,7 +271,8 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
     var releases by remember { mutableStateOf<List<Item>?>(null) }
     // Nothing already played, seen elsewhere or saved is a suggestion.
     val watched = remember(history, everywhere) { com.torrentviewer.core.watchedFilms(history, everywhere) }
-    val known = remember(watched, history, saved) { watched + history.mapNotNull { it.imdb } + saved.map { it.imdb } }
+    val played = remember(watched, history) { watched + history.mapNotNull { it.imdb } }
+    val known = remember(played, saved) { played + saved.map { it.imdb } }
     val picks = state.forYou.picks.filter { it.title.imdb !in known }.take(FOR_YOU_PICKS)
     val because = state.forYou.rails.map { (name, titles) -> name to titles.filter { it.imdb !in known } }.filter { it.second.size >= 3 }
     val charts = tops.groupBy { it.kind }.map { (kind, parts) ->
@@ -278,7 +281,9 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
         Triple(kind, heading, com.torrentviewer.core.mixTop(parts.map { state.loaded[it.key].orEmpty() }, CHART_SIZE))
     }
     // What's suggested, then every chosen genre in turn, so one genre doesn't fill the hero.
-    val mixed = com.torrentviewer.core.interleave(listOf(picks.map { it.title }) + chosen.map { state.loaded[it.key].orEmpty() }).filter { it.imdb !in watched }
+    // Saved titles stay: saving one took it off the billboard, and the next one slid in.
+    val heroPicks = state.forYou.picks.filter { it.title.imdb !in played }.take(FOR_YOU_PICKS)
+    val mixed = com.torrentviewer.core.interleave(listOf(heroPicks.map { it.title }) + chosen.map { state.loaded[it.key].orEmpty() }).filter { it.imdb !in watched }
     val heroes = mixed.ifEmpty { shelves.firstNotNullOfOrNull { state.loaded[it.key]?.takeIf { l -> l.isNotEmpty() } }.orEmpty() }.take(HEROES)
     SideEffect { state.heroCount = heroes.size }
     // A title shows once, in the first row it lands in: genre rows overlap, and the week's
@@ -394,7 +399,7 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(state = state.list, contentPadding = PaddingValues(bottom = 24.dp + LocalTabBarInset.current), verticalArrangement = Arrangement.spacedBy(22.dp), modifier = Modifier.hazeSource(haze)) {
             item(key = "hero") {
-                if (heroes.isEmpty()) Box(Modifier.fillMaxWidth().height(if (isWide()) 320.dp else 420.dp))
+                if (heroes.isEmpty()) Box(Modifier.fillMaxWidth().height(if (isWide()) 320.dp else (LocalConfiguration.current.screenWidthDp * 1.28f).dp))
                 else Hero(state.hero, heroes, onOpen)
             }
             order.filter { it !in settings.homeHidden }.forEach { key -> byKey[key]?.rows?.invoke(this) }
@@ -438,10 +443,10 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
                 // Joining takes the code the leader shared: right here, not three screens into Settings.
                 // Not while in one: a second code walked out of the party you were in without a word.
                 if (com.torrentviewer.core.Party.available && settings.partyOn && !com.torrentviewer.core.Kids.on && com.torrentviewer.core.Party.room == null) {
-                    HeaderTile(L.drawable.lucide_ic_users, "Join a watch party", solid, { joiningParty = true })
+                    HeaderTile(L.drawable.lucide_ic_users, "Join a watch party", solid, { joiningParty = true }, haze)
                     Spacer(Modifier.width(10.dp))
                 }
-                NotificationBell(solid, onNotifications)
+                NotificationBell(solid, onNotifications, haze)
                 if (!isWide()) Tap(onProfile, Modifier.padding(start = 12.dp), shape = RoundedCornerShape(9.dp)) { Avatar(who, 40.dp) }
             }
         }
@@ -590,15 +595,14 @@ private fun Hero(pager: PagerState, titles: List<Title>, onOpen: (Title) -> Unit
         pager.animateScrollToPage((pager.settledPage + 1) % count, animationSpec = tween(650, easing = androidx.compose.animation.core.FastOutSlowInEasing))
     }
     val wide = isWide()
-    // Upright, a little taller than wide-and-a-tenth: the art had the logo, facts and buttons crowding its foot.
-    val height = if (wide) (LocalConfiguration.current.screenHeightDp * 0.82f).dp else (LocalConfiguration.current.screenWidthDp * 1.22f).dp
+    // Upright, near poster-tall: the art had the logo, facts and buttons crowding its foot, and at 1.22 it read cut short.
+    // ponytail: by width alone; 1.28 leaves Continue Watching's names in view above the dock on a ~20:9 phone. Tune here.
+    val height = if (wide) (LocalConfiguration.current.screenHeightDp * 0.82f).dp else (LocalConfiguration.current.screenWidthDp * 1.28f).dp
     Box(Modifier.fillMaxWidth().height(height)) {
         HorizontalPager(pager, Modifier.fillMaxSize(), key = { titles.getOrNull(it)?.imdb ?: it }) { page ->
             val start = titles.getOrNull(page) ?: return@HorizontalPager
             // The shelf row carries no logo or runtime; the full entry does.
             val t by produceState(start, start.imdb) { Meta.title(start.imdb, start.kind)?.let { value = it } }
-            val saved by SavedStore.items.collectAsState()
-            val inList = saved.any { it.imdb == t.imdb && it.list == "later" }
             // The whole billboard opens the title, as Watch does; the buttons keep their own taps.
             val open = Modifier.fillMaxSize().clickable(remember { MutableInteractionSource() }, indication = null) { onOpen(t) }
             if (wide) {
@@ -608,23 +612,25 @@ private fun Hero(pager: PagerState, titles: List<Title>, onOpen: (Title) -> Unit
                         TitleMark(t, Modifier.widthIn(max = 300.dp), maxHeight = 72.dp, style = Type.display)
                         Facts(t.copy(genres = t.genres.take(2)), Modifier.padding(top = 12.dp))
                         t.plot?.let { Text(it, Modifier.padding(top = 8.dp), style = Type.body.copy(color = Ink.text.copy(alpha = 0.78f)), maxLines = 3, overflow = TextOverflow.Ellipsis) }
-                        HeroButtons(t, inList, onOpen, Modifier.padding(top = 16.dp))
+                        HeroButtons(t, onOpen, Modifier.padding(top = 16.dp).widthIn(min = 200.dp))
                     }
                 }
             } else {
                 Box(open) {
                     Artwork(t.wide, t.title, Modifier.fillMaxSize().bottomScrim(0.35f), fill = false)
-                    Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = EDGE, vertical = 18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(Modifier.widthIn(max = 280.dp), contentAlignment = Alignment.Center) {
-                            TitleMark(t, maxHeight = 84.dp, style = Type.display.copy(textAlign = TextAlign.Center))
+                    // As Netflix and Disney+ stack it: the logo, one line of facts, the genres under it, then Watch
+                    // across, with room under it for the dots.
+                    Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(start = EDGE, end = EDGE, bottom = 34.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(Modifier.widthIn(max = 260.dp), contentAlignment = Alignment.Center) {
+                            TitleMark(t, maxHeight = 88.dp, style = Type.display.copy(textAlign = TextAlign.Center))
                         }
-                        Facts(t.copy(genres = t.genres.take(2)), Modifier.padding(top = 12.dp))
-                        HeroButtons(t, inList, onOpen, Modifier.padding(top = 16.dp))
+                        HeroFacts(t, Modifier.padding(top = 14.dp))
+                        HeroButtons(t, onOpen, Modifier.padding(top = 18.dp).width(200.dp))
                     }
                 }
             }
         }
-        if (count > 1) HeroDots(pager, count, Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp))
+        if (count > 1) HeroDots(pager, count, Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp))
     }
 }
 
@@ -659,11 +665,33 @@ private fun HeroDots(pager: PagerState, count: Int, modifier: Modifier = Modifie
     }
 }
 
+/** The rating, year and running time on one line; the genres, in the viewer's words, on a quieter one under it. */
 @Composable
-private fun HeroButtons(t: Title, inList: Boolean, onOpen: (Title) -> Unit, modifier: Modifier) {
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Button("Watch", { onOpen(t) }, Modifier.widthIn(min = 132.dp), icon = L.drawable.lucide_ic_play, primary = true)
-        // Wide enough for "In My List", and the details screen's toggle: a green disc springs in behind the tick.
-        Button(if (inList) "In My List" else "My List", { SavedStore.toggle(t) }, Modifier.widthIn(min = 132.dp), icon = if (inList) L.drawable.lucide_ic_check else L.drawable.lucide_ic_plus, on = inList)
+private fun HeroFacts(t: Title, modifier: Modifier) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            t.rating?.let {
+                ImdbBadge(it)
+                Spacer(Modifier.width(10.dp))
+            }
+            Text(
+                listOfNotNull(t.year?.take(9), t.runtime?.let(::runtimeLabel)).joinToString("  ·  "),
+                style = Type.meta.copy(color = Ink.text.copy(alpha = 0.85f), fontWeight = FontWeight.Medium),
+                maxLines = 1,
+            )
+        }
+        if (t.genres.isNotEmpty()) Text(
+            t.genres.take(3).joinToString("  •  ") { com.torrentviewer.core.tr(it) },
+            Modifier.padding(top = 6.dp),
+            style = Type.meta.copy(color = Ink.text.copy(alpha = 0.68f)),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
+}
+
+/** Watch, the one button: My List is on the title's own page. */
+@Composable
+private fun HeroButtons(t: Title, onOpen: (Title) -> Unit, modifier: Modifier) {
+    Button("Watch", { onOpen(t) }, modifier, icon = L.drawable.lucide_ic_play, primary = true)
 }

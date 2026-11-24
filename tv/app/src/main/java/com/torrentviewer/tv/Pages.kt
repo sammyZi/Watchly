@@ -33,7 +33,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -512,7 +511,7 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
                         Entry(L.drawable.lucide_ic_users, "Switch profile", "Change to a different profile", onClick = onSwitchProfile),
                     ),
                     listOf(
-                        Entry(L.drawable.lucide_ic_palette, "Appearance", "Genres on the home screen", "theme") { page = "Appearance" },
+                        Entry(L.drawable.lucide_ic_palette, "Appearance", "Language and home screen genres", "theme language") { page = "Appearance" },
                     ),
                     listOfNotNull(
                         Entry(L.drawable.lucide_ic_radio, "Streaming", "Storage, buffer and trackers", "cache magnet") { page = "Streaming" },
@@ -803,6 +802,12 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
 
+        if (page == "Appearance") Section("App language", "Watchly's words in your language. Titles and descriptions come from the catalogues as they are.") {
+            val picked = remember { com.torrentviewer.core.I18n.picked(context) }
+            val name = com.torrentviewer.core.I18n.LANGUAGES[picked]
+                ?: (com.torrentviewer.core.tr("Device language") + "  ·  " + (com.torrentviewer.core.I18n.LANGUAGES[java.util.Locale.getDefault().language] ?: "English"))
+            Chip(name, true, onClick = { picking = "app" }, icon = L.drawable.lucide_ic_languages)
+        }
         if (page == "Appearance") Section("Genres on the home screen", "Leave all off to build the home screen from what you have watched.") {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.widthIn(max = 900.dp)) {
                 GENRES.forEach { g ->
@@ -814,7 +819,25 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
     }
-    picking?.let { which ->
+    // Every language, each in its own words with its name in the reader's under it; picking one starts the screens again in it.
+    if (picking == "app") {
+        val i18n = com.torrentviewer.core.I18n
+        val picked = remember { i18n.picked(context) }
+        Sheet(
+            title = "App language",
+            options = listOf(Option("", "Device language", i18n.LANGUAGES[java.util.Locale.getDefault().language] ?: "English")) +
+                i18n.LANGUAGES.map { (tag, name) -> Option(tag, name, com.torrentviewer.core.tr(LANGUAGE_NAMES[tag] ?: name).takeIf { it != name }) },
+            selected = picked,
+            onPick = { tag ->
+                picking = null
+                if (tag != picked) {
+                    i18n.pick(context, tag)
+                    (context as? android.app.Activity)?.recreate()
+                }
+            },
+            onDismiss = { picking = null },
+        )
+    } else picking?.let { which ->
         val audio = which == "audio"
         Sheet(
             title = if (audio) "Audio language" else "Subtitle language",
@@ -830,6 +853,12 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
     }
     first.claim(page)
 }
+
+/** Each app language's English name, translated in the sheet to the reader's. */
+private val LANGUAGE_NAMES = mapOf(
+    "en" to "English", "es" to "Spanish", "pt" to "Portuguese (Brazil)", "fr" to "French", "de" to "German", "it" to "Italian",
+    "ru" to "Russian", "tr" to "Turkish", "ar" to "Arabic", "hi" to "Hindi", "id" to "Indonesian", "ja" to "Japanese", "ko" to "Korean", "zh" to "Chinese",
+)
 
 /** One line of the settings list; [words] are what else it answers to in the search. */
 private class Entry(@androidx.annotation.DrawableRes val icon: Int, val title: String, val hint: String, val words: String = "", val tint: Color? = null, val onClick: () -> Unit) {
