@@ -1,8 +1,5 @@
-package com.torrentviewer.mobile
+package com.torrentviewer.core
 
-import com.torrentviewer.core.Kv
-import com.torrentviewer.core.objects
-import com.torrentviewer.core.str
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONArray

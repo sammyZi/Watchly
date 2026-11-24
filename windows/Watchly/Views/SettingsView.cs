@@ -76,7 +76,11 @@ public sealed class SettingsView : UserControl
             new("user", "Account", "Profile, PIN, Stremio and Nuvio", "lock sign in login", () => Go("Account")),
             new("users", "Switch profile", "Change to a different profile", "", shell.ShowProfiles),
         });
-        groups.Add(new() { new("palette", "Appearance", "Language, theme and home screen genres", "light dark language", () => Go("Appearance")) });
+        groups.Add(new()
+        {
+            new("palette", "Appearance", "Language, theme, accent colour and home screen genres", "light dark language accent colour amoled", () => Go("Appearance")),
+            new("award", "Your stats", "Hours watched, favourites and streaks", "statistics year recap hours", () => Go("Your stats")),
+        });
         groups.Add(new()
         {
             new("radio", "Streaming", "Trackers and how the cache works", "magnet storage", () => Go("Streaming")),
@@ -92,7 +96,7 @@ public sealed class SettingsView : UserControl
         });
         groups.Add(new()
         {
-            new("hard-drive", "Storage", "Cache, history and saved torrent info", "clear delete", () => Go("Storage")),
+            new("hard-drive", "Storage", "Backup, cache, history and saved torrent info", "clear delete backup restore export import", () => Go("Storage")),
             new("refresh-cw", "Check for updates", $"You have version {Updates.Version}", "new version upgrade", () => _ = Updates.CheckNow(m => shell.Toast(m))),
         });
         groups.Add(new()
@@ -173,6 +177,7 @@ public sealed class SettingsView : UserControl
                 page.Children.Add(NuvioGroup());
                 break;
             case "Appearance": Appearance(); break;
+            case "Your stats": page.Children.Add(StatsView.Build(shell)); break;
             case "Streaming":
                 page.Children.Add(Note("How storage works here",
                     "A stream keeps the pieces you watch in a cache and clears it when you stop, unless you turn that off under Storage. " +
@@ -361,9 +366,17 @@ public sealed class SettingsView : UserControl
                 new[] { ("", "Device language") }.Concat(I18n.Languages.Select(l => (l.Tag, l.Name))).ToArray(),
                 S.Language ?? "", v => Set(S with { Language = v }))));
 
-        page.Children.Add(Group("Appearance",
-            ChoiceRow("Theme", "Match Windows, or lock light or dark",
-                new[] { ("system", "System"), ("light", "Light"), ("dark", "Dark") }, S.ThemeMode, v => Set(S with { ThemeMode = v }))));
+        page.Children.Add(Group("Appearance", new StackPanel
+        {
+            Children =
+            {
+                ChoiceRow("Theme", "Match Windows, or lock light or dark",
+                    new[] { ("system", "System"), ("light", "Light"), ("dark", "Dark") }, S.ThemeMode, v => Set(S with { ThemeMode = v })),
+                Row("AMOLED black", "Pure black pages in the dark theme, for OLED screens", Toggle(S.Amoled, v => Set(S with { Amoled = v }))),
+                Divider(),
+                AccentPicker(),
+            },
+        }));
 
         var genres = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
         foreach (var g in Meta.Genres)
@@ -414,8 +427,43 @@ public sealed class SettingsView : UserControl
         }));
     }
 
+    /// <summary>The phone's Backup: the library as one file, and back again.</summary>
+    FrameworkElement BackupGroup()
+    {
+        var save = Ui.Button(Ui.Text("Back up", "Label", "Accent", 13, FontWeights.SemiBold), () =>
+        {
+            var dialog = new SaveFileDialog { FileName = $"watchly-backup-{DateTime.Now:yyyy-MM-dd}.json", Filter = "Watchly backup (*.json)|*.json", DefaultExt = ".json" };
+            if (dialog.ShowDialog() != true) return;
+            try
+            {
+                File.WriteAllText(dialog.FileName, Backup.Export());
+                shell.Toast("Backup saved");
+            }
+            catch (Exception ex) { shell.Toast($"Couldn't write the backup: {ex.Message}", true); }
+        });
+        var restore = Ui.Button(Ui.Text("Restore", "Label", "Accent", 13, FontWeights.SemiBold), () =>
+        {
+            var dialog = new OpenFileDialog { Filter = "Watchly backup (*.json)|*.json|All files|*.*", Title = "Restore a backup" };
+            if (dialog.ShowDialog() != true) return;
+            try
+            {
+                // A backup is kilobytes; anything far larger is not one.
+                if (new FileInfo(dialog.FileName).Length > 8 << 20) throw new InvalidDataException("That file is not a Watchly backup");
+                var parts = Backup.Restore(File.ReadAllText(dialog.FileName));
+                shell.AfterRestore();
+                shell.Toast($"Restored {parts} parts of the library");
+            }
+            catch (Exception ex) { shell.Toast(ex.Message, true); }
+        });
+        restore.Margin = new Thickness(16, 0, 0, 0);
+        return Group("Backup", Row("Your library",
+            "History, resume points, lists, searches, stats and settings as one file. Downloads are not in it — they are files on this PC.",
+            new StackPanel { Orientation = Orientation.Horizontal, Children = { save, restore } }));
+    }
+
     void StoragePage()
     {
+        page.Children.Add(BackupGroup());
         var clear = Ui.Button(Row("Clear watch history", shell.HistoryList.Count > 0 ? $"{shell.HistoryList.Count} item(s) stored" : "Nothing stored",
             Ui.Glyph("chevron-right", 18, "Faint"), danger: shell.HistoryList.Count > 0), shell.AskClearHistory);
         clear.IsEnabled = shell.HistoryList.Count > 0;
@@ -939,6 +987,66 @@ public sealed class SettingsView : UserControl
         }
         dock.Children.Add(text);
         return dock;
+    }
+
+    /// <summary>The phone's and TV's accents (core Theme.kt's ACCENTS), as ARGB; 0 is the red.</summary>
+    static readonly (string Name, int Argb)[] Accents =
+    {
+        ("White", unchecked((int)0xFFF5F5F5)), ("Crimson", 0), ("Ocean", unchecked((int)0xFF1E88E5)), ("Violet", unchecked((int)0xFF9C3FB8)),
+        ("Emerald", unchecked((int)0xFF43A047)), ("Amber", unchecked((int)0xFFFF8F00)), ("Rose", unchecked((int)0xFFE8336B)),
+    };
+
+    /// <summary>Kept across the rebuild every saved setting makes of this page.</summary>
+    static bool editingAccent;
+
+    /// <summary>Custom, then the presets, as swatches; Custom opens a box for a #RRGGBB colour.</summary>
+    FrameworkElement AccentPicker()
+    {
+        var current = S.Accent;
+        var custom = Accents.All(a => a.Argb != current);
+        static Color ColorOf(int argb) => argb == 0 ? Color.FromRgb(0xb8, 0x1d, 0x24) : Color.FromRgb((byte)(argb >> 16), (byte)(argb >> 8), (byte)argb);
+        var swatches = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+        foreach (var (name, argb) in new[] { ("Custom", custom ? current : unchecked((int)0xFFF77FA8)) }.Concat(Accents))
+        {
+            var on = name == "Custom" ? custom : argb == current;
+            var c = ColorOf(argb);
+            var light = 0.2126 * c.R + 0.7152 * c.G + 0.0722 * c.B > 180;
+            var dot = new Border
+            {
+                Width = 48, Height = 48, CornerRadius = new CornerRadius(24), Background = new SolidColorBrush(c),
+                BorderThickness = new Thickness(1), BorderBrush = (Brush)FindResource("Line"),
+                Child = on || name == "Custom" ? new Controls.Icon { Kind = on ? "check" : "palette", Size = 20, Foreground = light ? new SolidColorBrush(Color.FromRgb(0x14, 0x14, 0x14)) : Brushes.White, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center } : null,
+            };
+            var ring = new Border
+            {
+                Width = 58, Height = 58, CornerRadius = new CornerRadius(29), BorderThickness = new Thickness(2), Padding = new Thickness(3),
+                BorderBrush = on ? new SolidColorBrush(light ? ((SolidColorBrush)FindResource("Muted")).Color : c) : Brushes.Transparent, Child = dot,
+            };
+            var label = Ui.Text(name, "Meta", on ? "Text" : "Muted", 12, on ? FontWeights.Bold : FontWeights.Medium);
+            label.HorizontalAlignment = HorizontalAlignment.Center;
+            label.Margin = new Thickness(0, 6, 0, 0);
+            var tile = Ui.Button(new StackPanel { Width = 76, Children = { ring, label } }, () =>
+            {
+                editingAccent = name == "Custom" && (!editingAccent || !on);
+                Set(S with { Accent = argb });
+            });
+            tile.Margin = new Thickness(0, 0, 8, 8);
+            swatches.Children.Add(tile);
+        }
+        var box = new StackPanel { Children = { Row("Accent colour", "The colour of buttons, highlights and progress bars, in place of the red"), swatches } };
+        if (editingAccent)
+        {
+            var hex = new TextBox { Style = (Style)FindResource("Field"), Width = 160, HorizontalAlignment = HorizontalAlignment.Left, Text = $"#{current & 0xFFFFFF:X6}", ToolTip = "A colour as #RRGGBB, then Enter" };
+            void Apply()
+            {
+                var text = hex.Text.Trim().TrimStart('#');
+                if (text.Length == 6 && int.TryParse(text, System.Globalization.NumberStyles.HexNumber, null, out var rgb)) Set(S with { Accent = unchecked((int)0xFF000000) | rgb });
+            }
+            hex.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) Apply(); };
+            hex.LostFocus += (_, _) => Apply();
+            box.Children.Add(new StackPanel { Margin = new Thickness(0, 4, 0, 8), Children = { Ui.Text("Your own colour, as #RRGGBB", "Meta", "Faint", 13), hex } });
+        }
+        return box;
     }
 
     static FrameworkElement ChoiceRow(string title, string subtitle, (string Value, string Label)[] choices, string current, Action<string> pick)

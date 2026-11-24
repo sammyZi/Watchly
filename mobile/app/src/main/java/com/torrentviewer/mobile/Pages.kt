@@ -93,6 +93,7 @@ import com.torrentviewer.core.History
 import com.torrentviewer.core.Ink
 import com.torrentviewer.core.Item
 import com.torrentviewer.core.Lc
+import com.torrentviewer.core.ACCENTS
 import com.torrentviewer.core.Meta
 import com.torrentviewer.core.Note
 import com.torrentviewer.core.Profile
@@ -1927,12 +1928,6 @@ private fun TrackerSection(t: com.torrentviewer.core.Tracker) {
         note?.let { Text(it, Modifier.padding(top = 8.dp), style = Type.meta.copy(color = Ink.faint)) }
     }
 }
-
-/** The accents on offer, as stored ARGB; 0 is the phone's own red. */
-private val ACCENTS = listOf(
-    "White" to 0xFFF5F5F5.toInt(), "Crimson" to 0, "Ocean" to 0xFF1E88E5.toInt(), "Violet" to 0xFF9C3FB8.toInt(),
-    "Emerald" to 0xFF43A047.toInt(), "Amber" to 0xFFFF8F00.toInt(), "Rose" to 0xFFE8336B.toInt(),
-)
 
 /** Custom, then the presets, three to a row; Custom opens hue, strength and brightness sliders under the grid. */
 @Composable

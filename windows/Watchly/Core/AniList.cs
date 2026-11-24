@@ -161,6 +161,69 @@ public static class AniList
         return o["data"]!;
     }
 
+    /* ------------------------------------------------------------------ notifications */
+
+    /// <summary>One of AniList's notifications, as core AniList.Notice: what it says, and where it leads.</summary>
+    public sealed record Notice(int Id, string Text, long At, string Url, string? Imdb, string? Kind, string? Poster);
+
+    /// <summary>AniList's own count of unread notifications, asked by <see cref="CountUnread"/>.</summary>
+    public static int Unread { get; private set; }
+
+    public static async Task CountUnread()
+    {
+        if (sign is null) return;
+        try { Unread = (await Gql("query{Viewer{unreadNotificationCount}}", new JsonObject()).ConfigureAwait(false))["Viewer"]?["unreadNotificationCount"]?.GetValue<int>() ?? Unread; }
+        catch { }
+    }
+
+    const string MediaFields = "media{id siteUrl title{english romaji} coverImage{medium}}";
+    const string PersonFields = "user{name siteUrl}";
+
+    /// <summary>The latest 30, newest first. <paramref name="read"/> marks them read there too, as AniList's own page does on opening.</summary>
+    public static async Task<List<Notice>> Notices(bool read)
+    {
+        if (sign is null) return new();
+        await Mapping().ConfigureAwait(false);
+        var social = string.Join(" ", new[] { "Following", "ActivityMessage", "ActivityMention", "ActivityReply", "ActivityReplySubscribed", "ActivityLike", "ActivityReplyLike" }
+            .Select(t => $"... on {t}Notification{{id type context createdAt {PersonFields}{(t == "Following" ? "" : " activityId")}}}"));
+        var threads = string.Join(" ", new[] { "ThreadCommentMention", "ThreadCommentReply", "ThreadCommentSubscribed", "ThreadCommentLike", "ThreadLike" }
+            .Select(t => $"... on {t}Notification{{id type context createdAt {PersonFields} thread{{siteUrl}}}}"));
+        var media = string.Join(" ", new[] { "RelatedMediaAddition", "MediaDataChange", "MediaMerge" }.Select(t => $"... on {t}Notification{{id type context createdAt {MediaFields}}}"));
+        var query = "query($r:Boolean){Page(perPage:30){notifications(resetNotificationCount:$r){" +
+            $"... on AiringNotification{{id type episode contexts createdAt {MediaFields}}} {social} {threads} {media} " +
+            "... on MediaDeletionNotification{id type context createdAt deletedMediaTitle}}}}";
+        var rows = (await Gql(query, new JsonObject { ["r"] = read }).ConfigureAwait(false))["Page"]?["notifications"] as JsonArray ?? new JsonArray();
+        if (read) Unread = 0;
+        return rows.OfType<JsonObject>().Select(NoticeOf).OfType<Notice>().ToList();
+    }
+
+    static Notice? NoticeOf(JsonObject n)
+    {
+        static string? Str(JsonNode? node, string key) => node?[key] is JsonValue v && v.TryGetValue<string>(out var s) && s.Length > 0 ? s : null;
+        var id = n["id"]?.GetValue<int>() ?? 0;
+        if (id <= 0) return null;
+        var m = n["media"] as JsonObject;
+        var title = Str(m?["title"], "english") ?? Str(m?["title"], "romaji");
+        var who = n["user"] as JsonObject;
+        var context = Str(n, "context") ?? "";
+        string text;
+        if (n["contexts"] is JsonArray contexts)
+        {
+            var parts = contexts.Select(c => c?.GetValue<string>() ?? "").ToList();
+            var episode = n["episode"]?.GetValue<int>() ?? 0;
+            text = parts.Count >= 3 ? $"{parts[0]}{episode}{parts[1]}{title ?? "a show"}{parts[2]}" : $"Episode {episode} of {title ?? "a show"} aired.";
+        }
+        else if (who is not null) text = (Str(who, "name") ?? "Someone") + context;
+        else if (title is not null) text = title + context;
+        else if (Str(n, "deletedMediaTitle") is { } gone) text = gone + context;
+        else return null;
+        var entry = m?["id"]?.GetValue<int>() is { } mid ? byId.GetValueOrDefault(mid) : null;
+        var url = Str(n["thread"], "siteUrl")
+            ?? (n["activityId"]?.GetValue<int>() is > 0 and var activity ? $"https://anilist.co/activity/{activity}" : null)
+            ?? Str(who, "siteUrl") ?? Str(m, "siteUrl") ?? "https://anilist.co/notifications";
+        return new Notice(id, text.Trim(), (n["createdAt"]?.GetValue<long>() ?? 0) * 1000, url, entry?.Imdb, entry is null ? null : entry.IsFilm ? "movie" : "tv", Str(m?["coverImage"], "medium"));
+    }
+
     /* ------------------------------------------------------------------ mapping */
 
     static Dictionary<string, List<Entry>> byImdb = new();

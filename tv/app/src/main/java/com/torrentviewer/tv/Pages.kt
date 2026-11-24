@@ -55,6 +55,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -511,7 +512,8 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
                         Entry(L.drawable.lucide_ic_users, "Switch profile", "Change to a different profile", onClick = onSwitchProfile),
                     ),
                     listOf(
-                        Entry(L.drawable.lucide_ic_palette, "Appearance", "Language and home screen genres", "theme language") { page = "Appearance" },
+                        Entry(L.drawable.lucide_ic_palette, "Appearance", "Language, accent colour and home screen genres", "theme language accent colour") { page = "Appearance" },
+                        Entry(L.drawable.lucide_ic_chart_no_axes_column, "Your stats", "Hours watched, favourites and streaks", "statistics year recap hours") { page = "Your stats" },
                     ),
                     listOfNotNull(
                         Entry(L.drawable.lucide_ic_radio, "Streaming", "Storage, buffer and trackers", "cache magnet") { page = "Streaming" },
@@ -547,6 +549,7 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             }
         }
 
+        if (page == "Your stats") StatsPage()
         if (page == "Legal notice") LegalText(com.torrentviewer.core.Legal.NOTICE)
         if (page == "Privacy policy") LegalText(com.torrentviewer.core.Legal.PRIVACY)
         if (page == "Terms and conditions") LegalText(com.torrentviewer.core.Legal.TERMS)
@@ -807,6 +810,9 @@ fun SettingsScreen(who: Profile, onSwitchProfile: () -> Unit) {
             val name = com.torrentviewer.core.I18n.LANGUAGES[picked]
                 ?: (com.torrentviewer.core.tr("Device language") + "  ·  " + (com.torrentviewer.core.I18n.LANGUAGES[java.util.Locale.getDefault().language] ?: "English"))
             Chip(name, true, onClick = { picking = "app" }, icon = L.drawable.lucide_ic_languages)
+        }
+        if (page == "Appearance") Section("Accent colour", "The colour of buttons, highlights and progress bars, in place of the red.") {
+            AccentRow(settings.accent) { set(settings.copy(accent = it)) }
         }
         if (page == "Appearance") Section("Genres on the home screen", "Leave all off to build the home screen from what you have watched.") {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.widthIn(max = 900.dp)) {
@@ -1306,6 +1312,35 @@ fun NuvioSection(me: Profile) {
                 } else TvButton(if (busy) "Signing in…" else "Sign in to Nuvio", ::signIn, icon = L.drawable.lucide_ic_log_in)
             }
             note?.let { Text(it, Modifier.padding(top = 10.dp), style = Type.meta.copy(color = Ink.faint)) }
+        }
+    }
+}
+
+/**
+ * The accents as swatches, the remote coming into the row on the one in force. No sliders for a remote:
+ * a custom colour shows only when one came over from the phone.
+ */
+@Composable
+private fun AccentRow(current: Int, onPick: (Int) -> Unit) {
+    val tiles = (if (ACCENTS.none { it.second == current }) listOf("Custom" to current) else emptyList()) + ACCENTS
+    val lead = remember { FocusRequester() }
+    val at = tiles.indexOfFirst { it.second == current }.coerceAtLeast(0)
+    Row(Modifier.focusRow(lead), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        tiles.forEachIndexed { i, (name, argb) ->
+            val color = if (argb == 0) TV_RED else Color(argb)
+            val on = argb == current
+            Focusable({ onPick(argb) }, shape = RoundedCornerShape(14.dp), scale = 1.08f, ring = false, requester = lead.takeIf { i == at }) { focused ->
+                Column(Modifier.background(if (focused) Color.White.copy(alpha = 0.1f) else Color.Transparent).padding(horizontal = 12.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        Modifier.size(56.dp).border(3.dp, if (focused) Color.White else if (on) color else Color.Transparent, CircleShape).padding(6.dp)
+                            .clip(CircleShape).background(color),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (on) Lc(L.drawable.lucide_ic_check, tint = if (color.luminance() > 0.5f) Color(0xFF141414) else Color.White, size = 22.dp)
+                    }
+                    Text(name, Modifier.padding(top = 8.dp), style = Type.meta.copy(color = if (on || focused) Ink.text else Ink.muted, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium))
+                }
+            }
         }
     }
 }

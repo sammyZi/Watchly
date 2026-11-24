@@ -1,5 +1,6 @@
 package com.torrentviewer.mobile
 
+import com.torrentviewer.core.Inbox
 import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.Intent

@@ -133,6 +133,15 @@ private val SCALES = listOf(
 /** The Up Next card appears this many seconds before the end and counts down. */
 private const val UP_NEXT_SECONDS = 10
 
+/** Sleep timer steps, in minutes; -1 is "at the end of this episode" — the phone's. */
+private val SLEEP = listOf(0, 15, 30, 60, -1)
+
+private fun sleepLabel(step: Int, ends: Long) = when {
+    SLEEP[step] == 0 -> "Off"
+    SLEEP[step] < 0 -> "End of episode"
+    else -> "${maxOf(1L, (ends - System.currentTimeMillis() + 59_999) / 60_000)} min left"
+}
+
 /** Presses of ‹ › commit after this pause, the way a TV remote expects. */
 private const val SCRUB_COMMIT_MS = 700L
 
@@ -230,6 +239,14 @@ private fun Player(watch: Watch) {
     var hudAt by remember { mutableLongStateOf(0L) }
     var hud by remember { mutableStateOf<String?>(null) }
     var external by remember { mutableStateOf(watch.savedSubs()) }
+    /** Subtitles shown this much later (negative: earlier), as on the phone. */
+    var subDelay by remember { mutableLongStateOf(0L) }
+    /** The line a press last moved, never moved again by the next: see SubtitleSync.match. */
+    var syncedLine by remember { mutableStateOf<Long?>(null) }
+    var syncNote by remember { mutableStateOf<String?>(null) }
+    /** Index into [SLEEP], and when a timed one runs out. */
+    var sleep by remember { mutableIntStateOf(0) }
+    var sleepEnds by remember { mutableLongStateOf(0L) }
     var found by remember { mutableStateOf<List<Sub>?>(null) }
     var finding by remember { mutableStateOf(false) }
     var advanced by remember { mutableStateOf(false) }
@@ -294,6 +311,52 @@ private fun Player(watch: Watch) {
         if (wp.onTogglePause()) return
         v.setPaused(!v.isPaused)
         paused = v.isPaused
+    }
+
+    /** Timing: Media3 can only hold subtitles back, so earlier switches to VLC, picked up where the film is. */
+    fun setDelay(ms: Long) {
+        engine.note("player: subtitle delay set to ${ms}ms")
+        subDelay = ms
+        if (view.value?.setSubtitleDelay(ms) == false) {
+            say("Switching to VLC to bring subtitles earlier")
+            tracks = null
+            langDone.fill(false)
+            vlc = true
+        }
+    }
+
+    /** As a line begins: the subtitle file's nearest line is moved to this moment. */
+    fun syncToLine() {
+        val pressMs = (at * 1000).toLong()
+        val files = ready?.subtitleFiles.orEmpty() + external.map { it.path }
+        scope.launch {
+            val best = withContext(Dispatchers.IO) {
+                files.mapNotNull { f -> runCatching { SubtitleSync.match(SubtitleSync.starts(java.io.File(f).readText()), pressMs, subDelay, syncedLine) }.getOrNull() }
+                    .minByOrNull { it.distanceMs }
+            }
+            when {
+                best == null -> syncNote = "No line near that moment. Press just as someone starts speaking."
+                kotlin.math.abs(best.delayMs - subDelay) < 150 -> syncNote = "Already in sync."
+                else -> {
+                    syncedLine = best.lineMs
+                    setDelay(best.delayMs)
+                    val seconds = "%.1f".format(kotlin.math.abs(best.delayMs) / 1000.0)
+                    syncNote = "Synced. Subtitles now show $seconds s ${if (best.delayMs >= 0) "later" else "earlier"}."
+                }
+            }
+        }
+    }
+
+    fun cycleSleep() {
+        sleep = (sleep + 1) % SLEEP.size
+        sleepEnds = System.currentTimeMillis() + SLEEP[sleep] * 60_000L
+        say(
+            when {
+                SLEEP[sleep] == 0 -> "Sleep timer off"
+                SLEEP[sleep] < 0 -> "Stop after this episode"
+                else -> "Pause in ${SLEEP[sleep]} min"
+            },
+        )
     }
 
     fun goNext() {
@@ -503,7 +566,18 @@ private fun Player(watch: Watch) {
     // Well before the end — 70% through, or ten minutes left — the next episode's start is fetched behind this one.
     val nearEnd by remember { derivedStateOf { loaded && duration > 0 && (at / duration >= 0.7 || duration - at <= 600) } }
     LaunchedEffect(nearEnd, next) { if (nearEnd && !noNext && next != null) watch.warmNext(next, null) }
-    val offerNext by remember { derivedStateOf { next != null && !noNext && loaded && duration > 0 && duration - at <= UP_NEXT_SECONDS } }
+    // A timed sleep: pause where we are and keep the place, as on the phone.
+    LaunchedEffect(sleep, sleepEnds) {
+        if (SLEEP[sleep] <= 0) return@LaunchedEffect
+        delay((sleepEnds - System.currentTimeMillis()).coerceAtLeast(0))
+        view.value?.setPaused(true)
+        paused = true
+        if (at > 0) watch.savePosition(at)
+        sleep = 0
+        say("Sleep timer — paused")
+    }
+    // Not when the sleep timer says this episode is the last.
+    val offerNext by remember { derivedStateOf { next != null && !noNext && SLEEP[sleep] >= 0 && loaded && duration > 0 && duration - at <= UP_NEXT_SECONDS } }
     LaunchedEffect(offerNext) {
         if (!offerNext) return@LaunchedEffect
         snapshotFlow { duration - at }.first { it <= 0.5 }
@@ -627,6 +701,7 @@ private fun Player(watch: Watch) {
                     v.setRate(rate)
                     // The TV never applied the Settings style: Media3 drew its own default.
                     v.subtitleStyle = SettingsStore.value.value.subtitles
+                    v.setSubtitleDelay(subDelay)
                     v.setScale(SCALES[scale].first)
                     if (!vlc) v.onUnsupported = { message ->
                         Log.w("Player", "Media3 gave up ($message), falling back to VLC")
@@ -701,7 +776,7 @@ private fun Player(watch: Watch) {
                         if (duration > 0 && at < duration - EARLY_END_SECONDS && recoveries < MAX_RECOVERIES) {
                             recoveries++
                             v.reload((at * 1000).toLong())
-                        } else if (next != null && !noNext) goNext() else watch.exit()
+                        } else if (next != null && !noNext && SLEEP[sleep] >= 0) goNext() else watch.exit()
                     }
                     v.onFailed = { message ->
                         engine.note("player: failed — $message")
@@ -905,6 +980,12 @@ private fun Player(watch: Watch) {
                     view.value?.setAudioTrack(it)
                 },
                 onFind = ::findSubs,
+                delay = subDelay,
+                onDelay = ::setDelay,
+                // Only a subtitle file has lines to read; one built into the video is timed with − and +.
+                canSync = subtitle != null && (ready?.subtitleFiles.orEmpty().isNotEmpty() || external.isNotEmpty()),
+                syncNote = syncNote,
+                onSync = ::syncToLine,
                 onDismiss = ::closePanel,
             )
             Panel.SPEED -> Sheet(
@@ -976,11 +1057,13 @@ private fun Player(watch: Watch) {
                 options = listOf(
                     Option("picture", "Picture", SCALES[scale].second),
                     Option("stats", "Stats for nerds", if (info) "On" else "Off"),
+                    Option("sleep", "Sleep timer", sleepLabel(sleep, sleepEnds)),
                 ),
                 selected = null,
                 onPick = { what ->
                     when (what) {
                         "picture" -> panel = Panel.ASPECT
+                        "sleep" -> cycleSleep()
                         // Shut, so the numbers it turns on are in sight over the film.
                         "stats" -> {
                             info = !info
@@ -1669,6 +1752,11 @@ private fun TracksPanel(
     onSubtitle: (Int?) -> Unit,
     onAudio: (Int) -> Unit,
     onFind: () -> Unit,
+    delay: Long,
+    onDelay: (Long) -> Unit,
+    canSync: Boolean,
+    syncNote: String?,
+    onSync: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     BackHandler(onBack = onDismiss)
@@ -1697,6 +1785,27 @@ private fun TracksPanel(
                         Text(subSize.replaceFirstChar(Char::uppercase), Modifier.width(96.dp), style = Type.title.copy(fontWeight = FontWeight.Bold), textAlign = TextAlign.Center)
                         SizeStep(L.drawable.lucide_ic_a_arrow_up) { onSubSize(1) }
                     }
+                }
+                // Off a tenth of a second at a time; the middle puts it back.
+                item {
+                    Row(Modifier.padding(start = 14.dp, top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Timing", Modifier.width(64.dp), style = Type.title.copy(color = Ink.muted, fontWeight = FontWeight.Medium))
+                        SizeStep(L.drawable.lucide_ic_minus) { onDelay(delay - 100) }
+                        Focusable({ onDelay(0) }, shape = RoundedCornerShape(6.dp), scale = 1.06f, ring = false) { focused ->
+                            Text(
+                                "%+.1f s".format(delay / 1000.0),
+                                Modifier.width(96.dp).background(if (focused) Color.White else Color.Transparent).padding(vertical = 6.dp),
+                                style = Type.title.copy(color = if (focused) Color.Black else if (delay != 0L) Ink.accent else Color.White, fontWeight = FontWeight.Bold),
+                                textAlign = TextAlign.Center,
+                            )
+                        }
+                        SizeStep(L.drawable.lucide_ic_plus) { onDelay(delay + 100) }
+                    }
+                }
+                if (canSync) item {
+                    Spacer(Modifier.height(6.dp))
+                    TrackRow("Sync to this line — press as someone starts speaking", false, null, icon = L.drawable.lucide_ic_audio_lines, onClick = onSync)
+                    syncNote?.let { Text(it, Modifier.padding(start = 46.dp, top = 4.dp), style = Type.meta.copy(color = Ink.muted)) }
                 }
             }
         }

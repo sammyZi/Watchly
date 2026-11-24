@@ -397,6 +397,12 @@ public sealed record AppSettings
     public List<string> Genres { get; init; } = new();
     /// <summary>system | light | dark</summary>
     public string ThemeMode { get; init; } = "system";
+    /// <summary>The accent as ARGB in place of the red, as on the phone and TV; 0 keeps the red.</summary>
+    public int Accent { get; init; }
+    /// <summary>Look for new episodes of followed series, for the Notifications tab — the phone's episode alerts.</summary>
+    public bool EpisodeAlerts { get; init; } = true;
+    /// <summary>Dark pages in pure black, for OLED screens — the phone's AMOLED black.</summary>
+    public bool Amoled { get; init; }
     /// <summary>The app's words: a tag from <see cref="I18n.Languages"/>, or "" for Windows' own language.</summary>
     public string Language { get; init; } = "";
     /// <summary>Where finished downloads are kept.</summary>

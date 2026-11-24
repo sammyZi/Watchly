@@ -99,8 +99,29 @@ public partial class MainWindow : Window
         ("addons", "Addons", "puzzle"),
         ("history", "Library", "library"),
         ("downloads", "Downloads", "download"),
+        ("notifications", "Notifications", "inbox"),
         ("settings", "Settings", "settings"),
     };
+
+    /// <summary>The dot on the Notifications tab while something there is unseen.</summary>
+    readonly Border notificationsDot = new() { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(22, 10, 0, 0), IsHitTestVisible = false, Visibility = Visibility.Collapsed };
+    readonly System.Windows.Threading.DispatcherTimer episodeCheck = new() { Interval = TimeSpan.FromHours(12) };
+
+    public void RefreshNotificationsBadge() => notificationsDot.Visibility = Inbox.Unseen > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>New episodes of followed series into the Notifications tab, and AniList's unread count for its dot.</summary>
+    async Task CheckNotifications()
+    {
+        if (Who is null || Who.IsGuest) return;
+        if (Settings.EpisodeAlerts && !KidsMode.On)
+        {
+            var before = Inbox.Items.Count;
+            try { await NewEpisodes.Check(HistoryList, SavedList); } catch (Exception ex) { Log.Warn("inbox", $"episode check failed: {ex.Message}"); }
+            if (Inbox.Items.Count > before && Inbox.Items.FirstOrDefault() is { } latest) Toast($"{latest.Title} — {latest.Text}");
+        }
+        await AniList.CountUnread();
+        RefreshNotificationsBadge();
+    }
 
     readonly Dictionary<string, FrameworkElement> tabViews = new();
     readonly Dictionary<string, (TextBlock Label, Icon Icon, Border Tick, Border Plate)> tabParts = new();
@@ -186,6 +207,9 @@ public partial class MainWindow : Window
     /// <summary>The accept screen, while it is up: the keys and a dropped file wait for it.</summary>
     AgreementView? agreement;
 
+    /// <summary>Nobody has used Watchly on this PC yet: the first profile in gets the tour (<see cref="WelcomeView"/>).</summary>
+    bool freshInstall = WelcomeView.Needed;
+
     /// <summary>
     /// A PC is mostly one person's: straight back into whoever was last in. Who's watching only when
     /// there was nobody, it was the guest, or that profile is locked with a PIN.
@@ -256,6 +280,21 @@ public partial class MainWindow : Window
         ShowTab("home");
         LibraryChanged?.Invoke();
         _ = BackfillPosters();
+        RefreshNotificationsBadge();
+        _ = CheckNotifications();
+        // The tour, once, on a fresh install — after the profile, so its genres belong to someone.
+        if (freshInstall && !profile.IsGuest)
+        {
+            freshInstall = false;
+            WelcomeView? welcome = null;
+            welcome = new WelcomeView(() =>
+            {
+                Root.Children.Remove(welcome);
+                LibraryChanged?.Invoke();
+            });
+            Grid.SetColumnSpan(welcome, 2);
+            Root.Children.Add(welcome);
+        }
         if (waitingToOpen is { } source)
         {
             waitingToOpen = null;
@@ -326,6 +365,10 @@ public partial class MainWindow : Window
 
     void BuildTabBar()
     {
+        notificationsDot.SetResourceReference(Border.BackgroundProperty, "Accent");
+        Inbox.Changed += () => Dispatcher.BeginInvoke(RefreshNotificationsBadge);
+        episodeCheck.Tick += (_, _) => _ = CheckNotifications();
+        episodeCheck.Start();
         foreach (var (key, label, icon) in TabList)
         {
             var glyph = new Icon { Kind = icon, Size = 22, HorizontalAlignment = HorizontalAlignment.Center };
@@ -343,7 +386,9 @@ public partial class MainWindow : Window
                 Height = 58,
                 Margin = new Thickness(7, 1, 7, 1),
                 Tag = 12,
-                Content = new Grid { Children = { plate, tick, new StackPanel { Children = { glyph, text }, VerticalAlignment = VerticalAlignment.Center } } },
+                Content = key == "notifications"
+                    ? new Grid { Children = { plate, tick, new StackPanel { Children = { glyph, text }, VerticalAlignment = VerticalAlignment.Center }, notificationsDot } }
+                    : new Grid { Children = { plate, tick, new StackPanel { Children = { glyph, text }, VerticalAlignment = VerticalAlignment.Center } } },
                 ToolTip = label,
             };
             // A tab is a fresh start, as on the phone: whatever pages were open over it close.
@@ -428,6 +473,7 @@ public partial class MainWindow : Window
                 "addons" => new AddonsView(),
                 "history" => new LibraryView(),
                 "downloads" => new DownloadsView(),
+                "notifications" => new NotificationsView(),
                 _ => new SettingsView(),
             };
             tabViews[key] = view;
@@ -614,6 +660,8 @@ public partial class MainWindow : Window
     public void ChangeSettings(AppSettings next)
     {
         var themeChanged = next.ThemeMode != Settings.ThemeMode;
+        if (next.Accent != Settings.Accent) Theme.SetAccent(next.Accent);
+        if (next.Amoled != Settings.Amoled) Theme.SetAmoled(next.Amoled);
         var languageChanged = (next.Language ?? "") != (Settings.Language ?? "");
         var limitsChanged = next.MaxDownloadKbps != Settings.MaxDownloadKbps || next.MaxUploadKbps != Settings.MaxUploadKbps;
         Settings = next;
@@ -1402,10 +1450,29 @@ public partial class MainWindow : Window
         return player;
     }
 
+    /// <summary>A backup was restored: read everything again, and repaint for its settings.</summary>
+    public void AfterRestore()
+    {
+        Settings = AppSettings.Load().ForProfile();
+        HistoryList = History.Load();
+        SavedList = Saved.Load();
+        Links = EpisodeLinks.Load();
+        Theme.Apply(Settings.ThemeMode);
+        Theme.SetAmoled(Settings.Amoled);
+        Theme.SetAccent(Settings.Accent);
+        LibraryChanged?.Invoke();
+        SettingsChanged?.Invoke();
+        RefreshNotificationsBadge();
+    }
+
     public void SavePosition(string uri, int index, double seconds)
     {
         HistoryList = History.SetPosition(uri, index, seconds);
         var item = HistoryList.FirstOrDefault(h => h.Uri == uri);
+        // Your stats: what was played since this file's last save, as core Watch credits it. A jump is no watching.
+        var key = $"{uri}#{index}";
+        if (item is not null && credited.TryGetValue(key, out var was) && seconds - was is > 0 and <= 30) WatchLog.Add(item, seconds - was, HistoryList);
+        credited[key] = seconds;
         var of = item?.DurationOf(index);
         if (item is null || of is not > 0 || seconds / of.Value < Stremio.WatchedAt || !stremioMarked.Add($"{uri}#{index}")) return;
         if (EpisodeOf(item, index) is var (ok, ep) && ok)
@@ -1416,6 +1483,9 @@ public partial class MainWindow : Window
             AniList.Finished(item, ep);
         }
     }
+
+    /// <summary>Each file's spot at its last save this session, for crediting what was watched since (<see cref="WatchLog"/>).</summary>
+    readonly Dictionary<string, double> credited = new();
 
     /// <summary>Files already sent to Stremio as watched this session, so a film goes up once however often its spot is saved.</summary>
     readonly HashSet<string> stremioMarked = new();

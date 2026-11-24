@@ -134,6 +134,12 @@ object Ink {
     val focus = Color.White
 }
 
+/** The accents on offer in place of the red, as stored ARGB ([Settings.accent]); 0 is the app's own red. */
+val ACCENTS = listOf(
+    "White" to 0xFFF5F5F5.toInt(), "Crimson" to 0, "Ocean" to 0xFF1E88E5.toInt(), "Violet" to 0xFF9C3FB8.toInt(),
+    "Emerald" to 0xFF43A047.toInt(), "Amber" to 0xFFFF8F00.toInt(), "Rose" to 0xFFE8336B.toInt(),
+)
+
 /** Every [Type] style's face, on the phone and the TV alike (Windows bundles the same): Poppins, one file a weight. */
 val Sans = FontFamily(
     Font(R.font.poppins_regular, FontWeight.Normal),

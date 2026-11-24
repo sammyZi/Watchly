@@ -1,5 +1,7 @@
 package com.torrentviewer.mobile
 
+import com.torrentviewer.core.Note
+import com.torrentviewer.core.Inbox
 import android.app.ActivityManager
 import android.app.Notification
 import android.app.NotificationChannel

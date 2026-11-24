@@ -370,6 +370,8 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
             // Likewise the saved volume: set before playback there is no output to take it.
             player.Mute = userMuted;
             player.Volume = shell.Settings.Volume;
+            // A player swapped in for a new subtitle size keeps the timing.
+            if (subDelay != 0) player.SetSpuDelay(subDelay * 1000);
             OnPlaying();
             Bump();
             Render();
@@ -873,7 +875,122 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
 
     bool SkipIntroVisible => intro is { } i && started && duration > 0 && !Preparing && !locked && !SheetOpen && !UpNextVisible && i.Covers(current / 1000.0);
 
-    bool UpNextVisible =>request.Next is not null && !dismissedNext && duration > 0 && duration - current <= UpNextSeconds * 1000;
+    bool UpNextVisible =>request.Next is not null && !dismissedNext && Sleep[sleepIdx] >= 0 && duration > 0 && duration - current <= UpNextSeconds * 1000;
+
+    // ── Sleep timer and subtitle timing — the phone's and the TV's ──────────
+
+    /// <summary>Sleep timer steps, in minutes; -1 is "at the end of this episode".</summary>
+    static readonly int[] Sleep = { 0, 15, 30, 60, -1 };
+    int sleepIdx;
+    DateTime sleepEnds;
+    readonly System.Windows.Threading.DispatcherTimer sleepTimer = new();
+    /// <summary>Subtitles shown this much later (negative: earlier), in ms.</summary>
+    long subDelay;
+    long? syncedLine;
+    string? syncNote;
+
+    string SleepLabel => Sleep[sleepIdx] switch
+    {
+        0 => "Off",
+        < 0 => "End of episode",
+        _ => $"{Math.Max(1, (int)Math.Ceiling((sleepEnds - DateTime.Now).TotalMinutes))} min left",
+    };
+
+    void CycleSleep()
+    {
+        sleepIdx = (sleepIdx + 1) % Sleep.Length;
+        sleepTimer.Stop();
+        if (Sleep[sleepIdx] > 0)
+        {
+            sleepEnds = DateTime.Now.AddMinutes(Sleep[sleepIdx]);
+            sleepTimer.Interval = sleepEnds - DateTime.Now;
+            sleepTimer.Tick -= SleepRanOut;
+            sleepTimer.Tick += SleepRanOut;
+            sleepTimer.Start();
+        }
+        ShowHud(Sleep[sleepIdx] switch { 0 => "Sleep timer off", < 0 => "Stop after this episode", _ => $"Pause in {Sleep[sleepIdx]} min" });
+        Render();
+    }
+
+    /// <summary>Pause where we are and keep the place.</summary>
+    void SleepRanOut(object? sender, EventArgs e)
+    {
+        sleepTimer.Stop();
+        sleepIdx = 0;
+        if (SafeState == VLCState.Playing) player.SetPause(true);
+        SavePosition();
+        ShowHud("Sleep timer — paused", 2500);
+        Render();
+    }
+
+    void SetDelay(long ms)
+    {
+        subDelay = ms;
+        player.SetSpuDelay(ms * 1000);
+        Log.Info("player", $"subtitle delay set to {ms}ms");
+        Render();
+    }
+
+    /// <summary>As a line begins: the subtitle file's nearest line is moved to this moment.</summary>
+    async void SyncToLine()
+    {
+        var pressMs = current;
+        var files = externalSubs.Select(s => s.Path).ToList();
+        var anchored = syncedLine;
+        var delay = subDelay;
+        var best = await Task.Run(() => files
+            .Select(f => { try { return SubtitleSync.Find(SubtitleSync.Starts(File.ReadAllText(f)), pressMs, delay, anchored); } catch { return null; } })
+            .Where(m => m is not null)
+            .MinBy(m => m!.DistanceMs));
+        if (best is null) syncNote = "No line near that moment. Click just as someone starts speaking.";
+        else if (Math.Abs(best.DelayMs - subDelay) < 150) syncNote = "Already in sync.";
+        else
+        {
+            syncedLine = best.LineMs;
+            SetDelay(best.DelayMs);
+            syncNote = $"Synced. Subtitles now show {Math.Abs(best.DelayMs) / 1000.0:0.0} s {(best.DelayMs >= 0 ? "later" : "earlier")}.";
+        }
+        Render();
+    }
+
+    /// <summary>Timing a tenth of a second at a time, the middle putting it back; and Sync to this line for a subtitle file.</summary>
+    FrameworkElement TimingRows()
+    {
+        var box = new StackPanel();
+        FrameworkElement Step(string glyph, long by, string tip)
+        {
+            var b = Controls.Ui.Button(WIcon(glyph, 16), () => { SetDelay(subDelay + by); Bump(); }, "Bare", tip);
+            b.Padding = new Thickness(8);
+            b.Tag = 8;
+            return b;
+        }
+        var value = WText($"{(subDelay >= 0 ? "+" : "−")}{Math.Abs(subDelay) / 1000.0:0.0} s", 12);
+        value.Width = 56;
+        value.TextAlignment = TextAlignment.Center;
+        var reset = Controls.Ui.Button(value, () => { SetDelay(0); Bump(); }, "Bare", "Back to no delay");
+        reset.VerticalAlignment = VerticalAlignment.Center;
+        var row = new DockPanel { Margin = new Thickness(10, 2, 4, 4) };
+        var steps = new StackPanel { Orientation = Orientation.Horizontal, Children = { Step("minus", -100, "Subtitles earlier"), reset, Step("plus", 100, "Subtitles later") } };
+        DockPanel.SetDock(steps, Dock.Right);
+        row.Children.Add(steps);
+        var label = WText("Timing", 12, White(0x90));
+        label.VerticalAlignment = VerticalAlignment.Center;
+        row.Children.Add(label);
+        box.Children.Add(row);
+        // Only a subtitle file has lines to read; one built into the video is timed with − and +.
+        if (player.Spu >= 0 && externalSubs.Count > 0)
+        {
+            box.Children.Add(Option("Sync to this line — click as someone starts speaking", false, SyncToLine));
+            if (syncNote is not null)
+            {
+                var note = WText(syncNote, 11, White(0x90));
+                note.TextWrapping = TextWrapping.Wrap;
+                note.Margin = new Thickness(10, 2, 10, 6);
+                box.Children.Add(note);
+            }
+        }
+        return box;
+    }
 
     void OnEnded()
     {
@@ -882,6 +999,13 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
         var nearEnd = duration > 0 && current >= duration - 10_000;
         // A guest goes on when the leader does.
         if (nearEnd && party.Guest) return;
+        // The sleep timer said this episode was the last.
+        if (nearEnd && Sleep[sleepIdx] < 0)
+        {
+            sleepIdx = 0;
+            RequestExit();
+            return;
+        }
         if (nearEnd && request.Next is not null && !dismissedNext)
         {
             PlayNext();
@@ -2500,6 +2624,7 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
         if (session is not null) list.Children.Add(MoreRow("download", "Save a copy", null, false, SaveCopy));
         list.Children.Add(MoreRow("pip", "Mini player", null, false, () => { more = false; TogglePip(); }));
         list.Children.Add(MoreRow("info", "Stats for nerds", showInfo ? "On" : "Off", showInfo, ToggleInfo));
+        list.Children.Add(MoreRow("clock", "Sleep timer", SleepLabel, sleepIdx != 0, CycleSleep));
         list.Children.Add(MoreRow("type", "Keyboard shortcuts", "H", false, ShowShortcutsHelp));
         return SheetBox(new ScrollViewer { MaxHeight = Math.Max(160, ActualHeight / ControlsScale - 200), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = list });
     }
@@ -2685,6 +2810,7 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
             subs.Children.Add(none);
         }
         subs.Children.Add(SizeRow());
+        subs.Children.Add(TimingRows());
         return subs;
     }
 
@@ -2913,6 +3039,7 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
 
     async Task CloseCore()
     {
+        sleepTimer.Stop();
         overlay.Background = Brushes.Black;
         Background = Brushes.Black;
         SavePosition();

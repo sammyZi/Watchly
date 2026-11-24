@@ -87,6 +87,7 @@ enum class Tab(val label: String, @DrawableRes val icon: Int) {
     SEARCH("Search", L.drawable.lucide_ic_search),
     HOME("Home", L.drawable.lucide_ic_house),
     LIBRARY("Library", L.drawable.lucide_ic_history),
+    NOTIFICATIONS("Notifications", L.drawable.lucide_ic_bell),
     SETTINGS("Settings", L.drawable.lucide_ic_settings),
 }
 
@@ -103,8 +104,15 @@ private sealed interface Stop {
 /** A stremio:// link that wants to add an addon, until the viewer says yes or no. */
 private var pendingAddon by mutableStateOf<String?>(null)
 
+/** The TV's own red, Netflix's, lit for across the room: the accent until another is picked. */
+val TV_RED = Color(0xFFE50914)
+
 @Composable
 fun App(watch: Watch, incoming: MutableState<Uri?>) {
+    // The accent picked in Settings, or the TV's own red. Derived, so other settings don't recompose the whole app.
+    val settings = com.torrentviewer.core.SettingsStore.value.collectAsState()
+    val accent by remember { androidx.compose.runtime.derivedStateOf { settings.value.accent } }
+    Ink.accent = if (accent == 0) TV_RED else Color(accent)
     MaterialTheme(colorScheme = darkColorScheme(primary = Ink.accent, background = Ink.bg, surface = Ink.surface)) {
         // The one full-screen background. Pages draw none of their own and the window none
         // at all: every extra full-screen fill was another pass for a TV GPU already behind.
@@ -152,6 +160,9 @@ private fun UpdateProgress(watch: Watch, modifier: Modifier = Modifier) {
 /** The date of the legal text last accepted. */
 private const val AGREED = "tv:agreed"
 
+/** The first-launch tour has been seen (or skipped). */
+private const val TOURED = "tv:toured"
+
 @Composable
 private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
     // Before anything else, for everyone, and again whenever the words change: what was accepted is
@@ -198,6 +209,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         com.torrentviewer.core.SettingsStore.load()
         History.load()
         SavedStore.load()
+        com.torrentviewer.core.Inbox.load()
         Stremio.load(profile.id, profile.isGuest)
         com.torrentviewer.core.Nuvio.load(profile.id, profile.isGuest)
         com.torrentviewer.core.WATCH_TRACKERS.forEach { it.load(profile.id, profile.isGuest) }
@@ -270,6 +282,10 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         watch.resume(item)
     }
 
+    // The tour, once, on a fresh install — after the profile, so its genres belong to someone.
+    // Anyone with a profile or a library already knows the app.
+    var toured by remember { mutableStateOf(Kv.global(TOURED) != null || Profiles.list.value.isNotEmpty() || History.items.value.isNotEmpty()) }
+
     // Who is watching, decided before anything else — even with one profile, since
     // whoever picked up the remote is not necessarily whoever put it down.
     if (who == null || switching) {
@@ -279,6 +295,13 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
             onCancel = if (who != null) ({ switching = false }) else null,
             onRemoved = { if (who?.id == it.id) who = null },
         )
+        return
+    }
+    if (!toured) {
+        Welcome {
+            Kv.setGlobal(TOURED, "1")
+            toured = true
+        }
         return
     }
 
@@ -392,13 +415,25 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
                     .then(if (frost) Modifier.hazeSource(pageHaze) else Modifier),
             ) {
                 if (top != null) {
-                    pages.SaveableStateProvider(top.key) {
-                        when (top) {
-                            is Stop.Film -> DetailScreen(top.title, watch, onBack = back, onOrder = openOrder, onOpen = openTitle, onPerson = { open(Stop.Person(it.id, it.name)) })
-                            Stop.Orders -> WatchOrdersScreen(onOpen = openOrder)
-                            is Stop.Order -> WatchOrderScreen(top.order, onOpen = openTitle)
-                            is Stop.Person -> PersonScreen(top.id, top.name, onOpen = openTitle)
-                            is Stop.Top -> TopScreen(top.kind, onOpen = openTitle)
+                    // A page opening, or the one under it coming back, fades up from just under full size —
+                    // the phone's transition, on the incoming page alone: the TV's GPU can't afford two at once.
+                    androidx.compose.runtime.key(stops.size, top.key) {
+                        val shown = remember { androidx.compose.animation.core.Animatable(0f) }
+                        LaunchedEffect(Unit) { shown.animateTo(1f, tween(220, easing = androidx.compose.animation.core.FastOutSlowInEasing)) }
+                        Box(Modifier.fillMaxSize().graphicsLayer {
+                            alpha = shown.value
+                            scaleX = 0.97f + 0.03f * shown.value
+                            scaleY = scaleX
+                        }) {
+                            pages.SaveableStateProvider(top.key) {
+                                when (top) {
+                                    is Stop.Film -> DetailScreen(top.title, watch, onBack = back, onOrder = openOrder, onOpen = openTitle, onPerson = { open(Stop.Person(it.id, it.name)) })
+                                    Stop.Orders -> WatchOrdersScreen(onOpen = openOrder)
+                                    is Stop.Order -> WatchOrderScreen(top.order, onOpen = openTitle)
+                                    is Stop.Person -> PersonScreen(top.id, top.name, onOpen = openTitle)
+                                    is Stop.Top -> TopScreen(top.kind, onOpen = openTitle)
+                                }
+                            }
                         }
                     }
                 } else {
@@ -406,6 +441,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
                         Tab.HOME -> HomeScreen(home, watch, onOpen = openTitle, onTop = { open(Stop.Top(it)) })
                         Tab.SEARCH -> SearchScreen(watch, onOpen = openTitle)
                         Tab.LIBRARY -> LibraryScreen(watch, who!!, onOpen = openTitle)
+                        Tab.NOTIFICATIONS -> NotificationsScreen(onOpen = openTitle)
                         Tab.SETTINGS -> SettingsScreen(who!!, onSwitchProfile = { switching = true })
                     }
                 }
@@ -413,6 +449,7 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>) {
         }
         FocusRingLayer(focusRing)
         }
+        EpisodeAlertsLoop(who?.id) { watch.notes.tryEmit(it) }
         val settingsNow by com.torrentviewer.core.SettingsStore.value.collectAsState()
         // Joining by code, from the rail: not three pages into Settings.
         val canJoin = Party.available && settingsNow.partyOn && !com.torrentviewer.core.Kids.on && Party.room == null
@@ -557,6 +594,7 @@ private fun NavRail(tab: Tab, who: Profile, current: FocusRequester, page: Focus
                 }
             }
             Spacer(Modifier.weight(1f))
+            val unread = unreadNotifications()
             Tab.entries.forEach { t ->
                 val on = t == tab
                 Focusable(
@@ -580,10 +618,14 @@ private fun NavRail(tab: Tab, who: Profile, current: FocusRequester, page: Focus
                         Modifier.background(if (focused) Color.White else Color.Transparent).height(44.dp).fillMaxWidth().padding(horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Lc(t.icon, tint = tint, size = 21.dp)
+                        Box {
+                            Lc(t.icon, tint = tint, size = 21.dp)
+                            // Something unseen in Notifications: a dot on the bell, in the accent.
+                            if (t == Tab.NOTIFICATIONS && unread > 0) Box(Modifier.align(Alignment.TopEnd).size(8.dp).clip(androidx.compose.foundation.shape.CircleShape).background(Ink.accent))
+                        }
                         if (open) {
                             Spacer(Modifier.width(16.dp))
-                            Text(t.label, style = Type.label.copy(color = tint, fontWeight = if (on || focused) FontWeight.Bold else FontWeight.Medium))
+                            Text(if (t == Tab.NOTIFICATIONS && unread > 0) "${t.label} ($unread)" else t.label, style = Type.label.copy(color = tint, fontWeight = if (on || focused) FontWeight.Bold else FontWeight.Medium))
                         }
                     }
                     // The red tick on the page you are on.

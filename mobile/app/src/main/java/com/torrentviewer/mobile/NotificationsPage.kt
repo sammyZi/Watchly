@@ -1,5 +1,6 @@
 package com.torrentviewer.mobile
 
+import com.torrentviewer.core.Inbox
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -135,7 +136,7 @@ fun NotificationsScreen(watch: Watch, onLink: (String) -> Unit, onBack: () -> Un
             }
             add(Line("w:${n.id}", n.title, n.text, n.at, false, icon, null, n.at > seenBefore) {
                 when {
-                    n.link != null -> onLink(n.link)
+                    n.link != null -> onLink(n.link!!)
                     n.id.startsWith("update:") -> Updates.release.value?.takeIf { "update:${it.version}" == n.id }
                         ?.let { r -> downloadUpdate(context, r) { watch.notes.tryEmit(it) } }
                         ?: watch.notes.tryEmit("That version is no longer the latest")

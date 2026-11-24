@@ -36,6 +36,8 @@ public partial class App : Application
         Log.Info("app", "Watchly starting up...");
         var settings = AppSettings.Load();
         Theme.Apply(settings.ThemeMode);
+        Theme.SetAmoled(settings.Amoled);
+        Theme.SetAccent(settings.Accent);
         // The words, before the first window: every TextBlock is translated as it loads.
         I18n.Use(settings.Language ?? "");
         Controls.Words.Start();

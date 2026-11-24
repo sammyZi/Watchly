@@ -356,7 +356,7 @@ fun TvButton(
 ) {
     Focusable(onClick, modifier, RoundedCornerShape(8.dp), 1.05f, ring = primary, requester = requester, onFocus = onFocus) { focused ->
         val bg by animateColorAsState(if (focused) Color.White else Color.White.copy(alpha = 0.14f), Motion.effects(), label = "bg")
-        val fg = if (focused && !primary) Color.Black else Color.White
+        val fg = if (primary) Ink.onAccent else if (focused) Color.Black else Color.White
         Row(
             (if (primary) Modifier.glow(accentGlow(), 0.85f, 1.1f) else Modifier.background(bg)).height(44.dp).padding(horizontal = 22.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -380,7 +380,7 @@ fun Chip(label: String, on: Boolean, onClick: () -> Unit, modifier: Modifier = M
             on -> Ink.accent
             else -> Color.White.copy(alpha = 0.1f)
         }
-        val fg = if (focused) Color.Black else if (on) Color.White else Ink.muted
+        val fg = if (focused) Color.Black else if (on) Ink.onAccent else Ink.muted
         Row(Modifier.background(bg).height(38.dp).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
             if (icon != null) {
                 Lc(icon, tint = fg, size = 16.dp)

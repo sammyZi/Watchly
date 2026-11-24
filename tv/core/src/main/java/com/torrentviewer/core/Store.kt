@@ -177,7 +177,7 @@ data class Settings(
     val themeMode: String = "system",
     /** Dark pages in pure black, for OLED screens — the phone's. */
     val amoled: Boolean = false,
-    /** The phone's accent as ARGB, in place of its red; 0 keeps the red. The TV never reads it. */
+    /** The accent as ARGB, in place of the red; 0 keeps each app's own red. */
     val accent: Int = 0,
     /** Jump past an episode's intro by itself, rather than offer the button. */
     val autoSkipIntro: Boolean = false,
