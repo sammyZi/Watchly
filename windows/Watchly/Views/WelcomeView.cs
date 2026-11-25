@@ -14,8 +14,11 @@ public sealed class WelcomeView : UserControl
 {
     const string Key = "toured";
 
-    /// <summary>A fresh install: never toured, and nobody has a profile yet. Read before the first one is made.</summary>
-    public static bool Needed => Store.Load<string?>(Key, null) is null && Profiles.Load().Count == 0;
+    /// <summary>
+    /// A fresh install: never toured, no profile yet, no history, and the terms never accepted before — a Guest-only
+    /// user keeps no history, but has accepted them. Read at launch, before the first profile is made.
+    /// </summary>
+    public static bool Needed => Store.Load<string?>(Key, null) is null && Profiles.Load().Count == 0 && History.Load().Count == 0 && !AgreementView.EverAccepted;
 
     readonly MainWindow shell = MainWindow.Shell;
     readonly Action onDone;

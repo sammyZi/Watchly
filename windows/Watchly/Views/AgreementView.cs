@@ -13,6 +13,9 @@ public sealed class AgreementView : UserControl
     /// <summary>Nothing accepted yet, or the words have changed since.</summary>
     public static bool Needed => Store.Load<string?>(Key, null) != Legal.Updated;
 
+    /// <summary>Any version was ever accepted on this PC: Watchly has been used here, even if only as Guest.</summary>
+    public static bool EverAccepted => Store.Load<string?>(Key, null) is not null;
+
     readonly Action onDone;
     readonly bool changed = Store.Load<string?>(Key, null) is not null;
 

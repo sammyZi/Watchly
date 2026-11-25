@@ -22,8 +22,8 @@ android {
         applicationId = "com.torrentviewer.app"
         minSdk = 24
         targetSdk = 36
-        versionCode = 6
-        versionName = "2.4.0"
+        versionCode = 7
+        versionName = "2.5.0"
         buildConfigField("String", "SUBDL_KEY", "\"$subdlKey\"")
         // Public ids, no secrets: both sign in by device code.
         buildConfigField("String", "SIMKL_CLIENT_ID", "\"${env("SIMKL_CLIENT_ID")}\"")

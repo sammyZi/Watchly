@@ -104,6 +104,8 @@ class KeyDrop(
         what.replaceFirstChar { it.uppercase() },
         (note?.let { "<p class=note>${escape(it)}</p>" } ?: "") +
             """<form method=post action="/$token"><label for=e>Sign in here and the TV signs in. It goes from this phone to the TV, and from the TV only to the service.</label>""" +
+            // ponytail: plain HTTP on the LAN, so it says so; encrypting the form with a key in the QR's fragment is the upgrade.
+            "<p><small>This page talks to the TV over your home Wi-Fi without encryption. Use it on your own network, not on public or shared Wi-Fi.</small></p>" +
             """<input id=e name=email type=email autocomplete=username autocapitalize=off spellcheck=false placeholder=Email value="${escape(email).replace("\"", "&quot;")}" autofocus>""" +
             """<input id=p name=password type=password autocomplete=current-password placeholder=Password style="margin-top:10px"><button>Sign in</button></form>""",
     ) else page(

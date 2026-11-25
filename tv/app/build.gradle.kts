@@ -20,8 +20,8 @@ android {
         applicationId = "com.torrentviewer.tv"
         minSdk = 24
         targetSdk = 36
-        versionCode = 6
-        versionName = "2.4.0"
+        versionCode = 7
+        versionName = "2.5.0"
         buildConfigField("String", "SUBDL_KEY", "\"$subdlKey\"")
         buildConfigField("String", "SIMKL_CLIENT_ID", "\"${env("SIMKL_CLIENT_ID")}\"")
         buildConfigField("String", "MDBLIST_CLIENT_ID", "\"${env("MDBLIST_CLIENT_ID")}\"")

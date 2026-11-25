@@ -60,7 +60,8 @@ public static class NewEpisodes
     static bool Aired(Episode e, DateTime now) =>
         e.Season > 0 && e.Released is { Length: >= 10 } r && DateTime.TryParseExact(r[..10], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var at) && at <= now;
 
-    public static async Task Check(IEnumerable<HistoryItem> history, IEnumerable<SavedTitle> saved)
+    /// <summary><paramref name="stillHere"/>: the profile it started for is still in. Asked after each wait, before any write, as the writes go to whoever is in.</summary>
+    public static async Task Check(IEnumerable<HistoryItem> history, IEnumerable<SavedTitle> saved, Func<bool> stillHere)
     {
         var now = DateTime.UtcNow;
         var shows = history.Where(h => h.Kind == "tv").OrderByDescending(h => h.At).Select(h => h.Imdb)
@@ -73,6 +74,7 @@ public static class NewEpisodes
         {
             Title? t;
             try { t = await Meta.LoadTitle(imdb, "tv"); } catch { continue; }
+            if (!stillHere()) return;
             if (t is null || t.Episodes.Count == 0) continue;
             var aired = t.Episodes.Where(e => Aired(e, now)).ToList();
             next[imdb] = aired.Count;
@@ -84,6 +86,6 @@ public static class NewEpisodes
                 $"New episode: {(count > 1 ? $"{count} new episodes, the latest is " : "")}S{latest.Season}:E{latest.Number}{name}",
                 DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), imdb, "tv"));
         }
-        Store.SaveOwn(Alerted, next);
+        if (stillHere()) Store.SaveOwn(Alerted, next);
     }
 }

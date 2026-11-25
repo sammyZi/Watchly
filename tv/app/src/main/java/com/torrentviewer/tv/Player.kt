@@ -71,6 +71,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -192,12 +193,15 @@ private enum class Panel { TRACKS, SPEED, ASPECT, FIND, LANG, EPISODES, PARTY, S
 
 @Composable
 fun PlayerScreen(watch: Watch) {
-    // Everything resets per file — a new episode is a new player.
-    key(watch.playId) { Player(watch) }
+    // The sleep timer outlives the episode, as on the phone: a timed one still pauses the next.
+    val sleep = remember { mutableIntStateOf(0) }
+    val sleepEnds = remember { mutableLongStateOf(0L) }
+    // Everything else resets per file — a new episode is a new player.
+    key(watch.playId) { Player(watch, sleep, sleepEnds) }
 }
 
 @Composable
-private fun Player(watch: Watch) {
+private fun Player(watch: Watch, sleepState: MutableState<Int>, sleepEndsState: MutableState<Long>) {
     val engine = watch.engine
     val scope = rememberCoroutineScope()
     val ready by engine.ready.collectAsState()
@@ -244,9 +248,9 @@ private fun Player(watch: Watch) {
     /** The line a press last moved, never moved again by the next: see SubtitleSync.match. */
     var syncedLine by remember { mutableStateOf<Long?>(null) }
     var syncNote by remember { mutableStateOf<String?>(null) }
-    /** Index into [SLEEP], and when a timed one runs out. */
-    var sleep by remember { mutableIntStateOf(0) }
-    var sleepEnds by remember { mutableLongStateOf(0L) }
+    /** Index into [SLEEP], and when a timed one runs out: [PlayerScreen]'s, so they carry into the next episode. */
+    var sleep by sleepState
+    var sleepEnds by sleepEndsState
     var found by remember { mutableStateOf<List<Sub>?>(null) }
     var finding by remember { mutableStateOf(false) }
     var advanced by remember { mutableStateOf(false) }

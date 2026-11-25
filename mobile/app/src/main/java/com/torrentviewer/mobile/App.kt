@@ -544,7 +544,8 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>, barHaze: dev.chris
         pages.lastIndex to pages.lastOrNull(),
         transitionSpec = {
             val grow = tween<Float>(300, easing = androidx.compose.animation.core.FastOutSlowInEasing)
-            if (targetState.first > initialState.first) {
+            // Deeper, or a page put in place of the one on top: in. Only a shallower stack is going back.
+            if (targetState.first >= initialState.first) {
                 (fadeIn(tween(220)) + androidx.compose.animation.scaleIn(grow, initialScale = 0.94f)) togetherWith fadeOut(tween(200))
             } else {
                 (fadeIn(tween(220)) togetherWith (fadeOut(tween(220)) + androidx.compose.animation.scaleOut(grow, targetScale = 0.94f)))

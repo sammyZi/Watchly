@@ -113,11 +113,12 @@ public partial class MainWindow : Window
     async Task CheckNotifications()
     {
         if (Who is null || Who.IsGuest) return;
+        var who = Who;
         if (Settings.EpisodeAlerts && !KidsMode.On)
         {
             var before = Inbox.Items.Count;
-            try { await NewEpisodes.Check(HistoryList, SavedList); } catch (Exception ex) { Log.Warn("inbox", $"episode check failed: {ex.Message}"); }
-            if (Inbox.Items.Count > before && Inbox.Items.FirstOrDefault() is { } latest) Toast($"{latest.Title} — {latest.Text}");
+            try { await NewEpisodes.Check(HistoryList, SavedList, () => Who == who); } catch (Exception ex) { Log.Warn("inbox", $"episode check failed: {ex.Message}"); }
+            if (Who == who && Inbox.Items.Count > before && Inbox.Items.FirstOrDefault() is { } latest) Toast($"{latest.Title} — {latest.Text}");
         }
         await AniList.CountUnread();
         RefreshNotificationsBadge();

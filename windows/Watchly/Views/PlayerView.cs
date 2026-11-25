@@ -236,6 +236,7 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
     public PlayerView(PlaybackRequest request)
     {
         this.request = request;
+        ArmSleep();
         // Subtitles found online and kept for this file. The torrent's own come fresh from the
         // stream each time: ones stored before were every episode's of a pack, not just this one's.
         externalSubs = request.SavedSubs.Where(s => File.Exists(s.Path) && !s.Path.StartsWith(Paths.StreamCache, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -881,8 +882,22 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
 
     /// <summary>Sleep timer steps, in minutes; -1 is "at the end of this episode".</summary>
     static readonly int[] Sleep = { 0, 15, 30, 60, -1 };
-    int sleepIdx;
-    DateTime sleepEnds;
+    // Static: the timer outlives the episode, as on the phone — the next one's player picks it up (ArmSleep).
+    // A player left any way but on to the next episode clears it (CloseCore).
+    static int sleepIdx;
+    static DateTime sleepEnds;
+    /// <summary>Leaving for the next episode: the sleep timer carries on into its player.</summary>
+    bool carrySleep;
+
+    /// <summary>A timed sleep set in the episode before: run on to its end time here.</summary>
+    void ArmSleep()
+    {
+        if (Sleep[sleepIdx] <= 0) return;
+        sleepTimer.Interval = sleepEnds > DateTime.Now ? sleepEnds - DateTime.Now : TimeSpan.FromSeconds(1);
+        sleepTimer.Tick -= SleepRanOut;
+        sleepTimer.Tick += SleepRanOut;
+        sleepTimer.Start();
+    }
     readonly System.Windows.Threading.DispatcherTimer sleepTimer = new();
     /// <summary>Subtitles shown this much later (negative: earlier), in ms.</summary>
     long subDelay;
@@ -1234,6 +1249,7 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
     {
         SavePosition();
         dismissedNext = true;
+        carrySleep = true;
         var wasFullscreen = fullscreen;
         // Hand the screen back first: if the next episode has to be searched for
         // and nothing turns up, the page underneath is where that is said.
@@ -3040,6 +3056,7 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
     async Task CloseCore()
     {
         sleepTimer.Stop();
+        if (!carrySleep) sleepIdx = 0;
         overlay.Background = Brushes.Black;
         Background = Brushes.Black;
         SavePosition();
