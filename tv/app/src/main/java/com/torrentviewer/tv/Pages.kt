@@ -1058,7 +1058,12 @@ private const val STREMIO_LATER = "stremio:later"
  * page's button that has the phone app send what it has instead.
  */
 @Composable
-private fun PhoneKey(what: String, several: Boolean = false, label: String = "Paste from phone", fromApp: String? = null, everything: Boolean = false, asks: String? = null, onKey: suspend (String) -> String) {
+private fun PhoneKey(
+    what: String, several: Boolean = false, label: String = "Paste from phone", fromApp: String? = null, everything: Boolean = false, asks: String? = null,
+    /** A sign-in on the phone instead of a pasted key: see KeyDrop.onLogin. */
+    onLogin: (suspend (String, String) -> String)? = null,
+    onKey: suspend (String) -> String = { "" },
+) {
     var open by remember { mutableStateOf(false) }
     // One button that changes its label, not a button swapped for another: a focused button taken
     // away left focus nowhere, and the page sent it back to the top.
@@ -1069,7 +1074,8 @@ private fun PhoneKey(what: String, several: Boolean = false, label: String = "Pa
     var address by remember { mutableStateOf<String?>(null) }
     var tried by remember { mutableStateOf(false) }
     DisposableEffect(Unit) {
-        val drop = KeyDrop(what, fromApp, everything, asks) {
+        // A sign-in that worked shuts the QR, as a key that was taken does; one that failed leaves it up to try again.
+        val drop = KeyDrop(what, fromApp, everything, asks, onLogin?.let { login -> { e: String, p: String -> login(e, p).also { if (!several) open = false } } }) {
             onKey(it).also { if (!several) open = false }
         }
         address = drop.open()
@@ -1082,6 +1088,7 @@ private fun PhoneKey(what: String, several: Boolean = false, label: String = "Pa
         Column(Modifier.widthIn(max = 520.dp)) {
             Text(
                 when {
+                    address != null && onLogin != null -> "Scan with your phone's camera and sign in on the page that opens — your phone's saved password works there. Your phone needs to be on the same Wi-Fi as the TV."
                     address != null && fromApp != null -> "Scan with your phone's camera and tap \"$fromApp\" on the page that opens — or paste one $what there. Your phone needs to be on the same Wi-Fi as the TV."
                     address != null -> "Scan with your phone's camera, paste your $what on the page that opens, and tap Save. Your phone needs to be on the same Wi-Fi as the TV."
                     tried -> "The TV isn't on a network a phone can reach."
@@ -1311,6 +1318,13 @@ fun NuvioSection(me: Profile) {
                     TvButton("Sign out", { com.torrentviewer.core.Nuvio.disconnect(); note = null }, icon = L.drawable.lucide_ic_link)
                 } else TvButton(if (busy) "Signing in…" else "Sign in to Nuvio", ::signIn, icon = L.drawable.lucide_ic_log_in)
             }
+            // No typing with the remote: a QR, and the email and password typed on the phone, which hands them to the TV.
+            if (!connected) PhoneKey("Nuvio sign-in", label = "Sign in with your phone", onLogin = { e, p ->
+                val all = com.torrentviewer.core.Nuvio.signIn(e, p)
+                if (all.size > 1) choices = all
+                note = null
+                "Signed in to Nuvio as $e." + if (all.size > 1) " Pick which Nuvio profile on the TV." else " You can close this page."
+            })
             note?.let { Text(it, Modifier.padding(top = 10.dp), style = Type.meta.copy(color = Ink.faint)) }
         }
     }

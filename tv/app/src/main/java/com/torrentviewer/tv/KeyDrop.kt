@@ -29,7 +29,12 @@ class KeyDrop(
     private val everything: Boolean = false,
     /** What the phone app is asked to send instead of its addons ("anilist"): its link says so. */
     private val asks: String? = null,
-    private val onKey: suspend (String) -> String,
+    /**
+     * A sign-in instead of a key: the page asks for an email and a password (a real password box, so the phone's
+     * password manager can fill it) and hands both here. The password is never written back into the page.
+     */
+    private val onLogin: (suspend (email: String, password: String) -> String)? = null,
+    private val onKey: suspend (String) -> String = { "" },
 ) {
     private val token = ByteArray(12).also(SecureRandom()::nextBytes).joinToString("") { "%02x".format(it) }
     @Volatile private var server: ServerSocket? = null
@@ -76,8 +81,16 @@ class KeyDrop(
             "POST" -> {
                 // Room for an addon link carrying its whole config (kilobytes), or the phone's whole library.
                 val body = String(readBody(input, minOf(length, if (everything) 8 shl 20 else 65_536)))
-                val key = body.split('&').firstOrNull { it.startsWith("key=") }?.substringAfter('=')
-                    ?.let { runCatching { URLDecoder.decode(it, "UTF-8") }.getOrNull() }?.trim().orEmpty()
+                fun field(name: String) = body.split('&').firstOrNull { it.startsWith("$name=") }?.substringAfter('=')
+                    ?.let { runCatching { URLDecoder.decode(it, "UTF-8") }.getOrNull() }.orEmpty()
+                onLogin?.let { login ->
+                    val email = field("email").trim()
+                    val password = field("password")
+                    if ('@' !in email || password.isEmpty()) return reply("200 OK", form("Enter your email and password.", email))
+                    val said = runCatching { runBlocking(Dispatchers.Main) { login(email, password) } }.getOrElse { it.message ?: "That didn't work." }
+                    return reply("200 OK", form(said, email))
+                }
+                val key = field("key").trim()
                 if (key.isEmpty()) return reply("200 OK", form("Paste it first."))
                 // This thread waits while the TV checks it — an addon's manifest is fetched — so the phone hears how it went.
                 val said = runCatching { runBlocking(Dispatchers.Main) { onKey(key) } }.getOrElse { it.message ?: "That didn't work." }
@@ -87,7 +100,13 @@ class KeyDrop(
         }
     }
 
-    private fun form(note: String?) = page(
+    private fun form(note: String?, email: String = "") = if (onLogin != null) page(
+        what.replaceFirstChar { it.uppercase() },
+        (note?.let { "<p class=note>${escape(it)}</p>" } ?: "") +
+            """<form method=post action="/$token"><label for=e>Sign in here and the TV signs in. It goes from this phone to the TV, and from the TV only to the service.</label>""" +
+            """<input id=e name=email type=email autocomplete=username autocapitalize=off spellcheck=false placeholder=Email value="${escape(email).replace("\"", "&quot;")}" autofocus>""" +
+            """<input id=p name=password type=password autocomplete=current-password placeholder=Password style="margin-top:10px"><button>Sign in</button></form>""",
+    ) else page(
         what.replaceFirstChar { it.uppercase() },
         (note?.let { "<p class=note>${escape(it)}</p>" } ?: "") +
             (fromApp?.let {
