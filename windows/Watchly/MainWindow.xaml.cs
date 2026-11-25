@@ -99,7 +99,8 @@ public partial class MainWindow : Window
         ("addons", "Addons", "puzzle"),
         ("history", "Library", "library"),
         ("downloads", "Downloads", "download"),
-        ("notifications", "Notifications", "inbox"),
+        // "Notifications" is wider than a tab and was cut off: the tab says Inbox, like its icon; the tooltip and page say the rest.
+        ("notifications", "Inbox", "inbox"),
         ("settings", "Settings", "settings"),
     };
 
@@ -390,7 +391,7 @@ public partial class MainWindow : Window
                 Content = key == "notifications"
                     ? new Grid { Children = { plate, tick, new StackPanel { Children = { glyph, text }, VerticalAlignment = VerticalAlignment.Center }, notificationsDot } }
                     : new Grid { Children = { plate, tick, new StackPanel { Children = { glyph, text }, VerticalAlignment = VerticalAlignment.Center } } },
-                ToolTip = label,
+                ToolTip = key == "notifications" ? "Notifications" : label,
             };
             // A tab is a fresh start, as on the phone: whatever pages were open over it close.
             button.Click += (_, _) =>
@@ -682,8 +683,9 @@ public partial class MainWindow : Window
 
     public void ToggleSaved(Title title, string list)
     {
-        var adding = !Saved.OnList(SavedList, title.Imdb, list);
-        SavedList = Saved.Toggle(title, list);
+        // My List is also the Stremio and Nuvio libraries: a title only there is on the list, and the tick takes it off.
+        var adding = list == "later" ? !Saved.InMyList(SavedList, title.Imdb) : !Saved.OnList(SavedList, title.Imdb, list);
+        if (adding || Saved.OnList(SavedList, title.Imdb, list)) SavedList = Saved.Toggle(title, list);
         // My List is the Stremio library, when an account is signed in.
         if (list == "later")
         {
@@ -1482,6 +1484,9 @@ public partial class MainWindow : Window
             Nuvio.Watched(item, ep);
             foreach (var tracker in Trackers.All) tracker.Finished(item, ep);
             AniList.Finished(item, ep);
+            // A film seen through comes off My List, here and on the accounts; the Library's Watched tab has it now.
+            if (ep is null && item.Imdb is { } film && Saved.InMyList(SavedList, film))
+                ToggleSaved(new Title { Imdb = film, Kind = "movie", Name = item.Title, Poster = item.Poster }, "later");
         }
     }
 

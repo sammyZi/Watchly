@@ -307,6 +307,10 @@ object Nuvio {
                 val watched = allPages(PAGE) { i -> rpc("sync_pull_watched_items", JSONObject().put("p_page", i + 1).put("p_page_size", PAGE), owner) } ?: return@runCatching
                 val library = allPages(PAGE) { i -> rpc("sync_pull_library", JSONObject().put("p_limit", PAGE).put("p_offset", i * PAGE), owner) } ?: return@runCatching
                 if (owner != profile) return@runCatching
+                // What came back, and what the app leaves out: a title Nuvio keeps only by a TMDB id has no IMDb id here.
+                val rows = runCatching { JSONArray(library).objects() }.getOrDefault(emptyList())
+                val dropped = rows.map { it.optString("content_id") }.filterNot { it.startsWith("tt") }
+                Log.i("nuvio", "library: ${rows.size} rows for Nuvio profile ${profileName.value ?: "?"}; ${dropped.size} without an IMDb id ${dropped.take(10)}")
                 val there = parseNuvio(progress, watched, library)
                 _library.value = there
                 val (finished, left) = nuvioBacklog(History.items.value, there)
@@ -380,6 +384,10 @@ object Nuvio {
     /** My List here is the library there: added or taken out together. */
     fun setInLibrary(title: Title, on: Boolean) {
         if (session == null) return
+        // Here at once, as My List shows it, not at the next pull.
+        _library.value = _library.value.let { l ->
+            l.copy(seen = if (on) listOf(Seen(title.imdb, title.title, title.year, title.kind, isoNow())) + l.seen.filterNot { it.imdb == title.imdb } else l.seen.filterNot { it.imdb == title.imdb })
+        }
         val type = if (title.type == "movie") "movie" else "series"
         if (on) send(
             "sync_push_library_items",

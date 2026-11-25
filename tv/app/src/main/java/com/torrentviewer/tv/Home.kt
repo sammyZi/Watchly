@@ -224,7 +224,8 @@ fun HomeScreen(state: HomeState, watch: Watch, onOpen: (Title) -> Unit, onTop: (
     val fromStremio = Kids.only(everywhereNow.paused.filter { p -> history.none { it.imdb == p.imdb } }.distinctBy { it.imdb }) { Title(it.imdb, it.kind, it.title) }.take(8)
     val resuming = resumable.isNotEmpty() || fromStremio.isNotEmpty()
     var releases by remember { mutableStateOf<List<Item>?>(null) }
-    val watchlist = saved.filter { it.list == "later" }.map { it.asTitle() }
+    // This TV's list with the Stremio and Nuvio libraries: a title saved on the phone or in either app shows here too.
+    val watchlist = com.torrentviewer.core.myList(saved, stremio.seen, com.torrentviewer.core.watchedFilms(history, stremio))
     // Nothing already played, seen elsewhere or saved is a suggestion.
     val everywhere by WatchedEverywhere.collectAsState(stremio)
     val watched = remember(history, everywhere) { watchedFilms(history, everywhere) }

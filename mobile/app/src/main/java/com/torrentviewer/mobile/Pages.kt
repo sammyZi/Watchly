@@ -404,7 +404,23 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
 
 /* -------------------------------------------------------------- library */
 
-private enum class Shelfs(val label: String) { HISTORY("History"), LATER("My List"), FAVORITE("Favourites") }
+private enum class Shelfs(val label: String) { HISTORY("History"), LATER("My List"), WATCHED("Watched"), FAVORITE("Favourites") }
+
+/**
+ * [all] in two sections, Movies then Series, each under its heading — a section with nothing in it is left out.
+ * [prefix] keeps keys apart where a shelf shows two such lists.
+ */
+private fun <T> androidx.compose.foundation.lazy.grid.LazyGridScope.inSections(
+    prefix: String, all: List<T>, isSeries: (T) -> Boolean, key: (T) -> Any, content: @Composable (T) -> Unit,
+) {
+    listOf("Movies" to all.filterNot(isSeries), "Series" to all.filter(isSeries)).forEach { (name, part) ->
+        if (part.isEmpty()) return@forEach
+        item(key = "$prefix:h:$name", span = { GridItemSpan(maxLineSpan) }) {
+            Text(name, Modifier.padding(top = 6.dp), style = Type.label.copy(color = Ink.muted, fontWeight = FontWeight.SemiBold))
+        }
+        items(part, key = { "$prefix:${key(it)}" }) { content(it) }
+    }
+}
 
 /** The History's "This phone" chip: what was played here, none of the accounts'. */
 private const val PHONE = "phone"
@@ -448,7 +464,21 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit, onDownload
     }
     val fromStremio = fromAccounts.map { it.first }
     val sources = history.groupingBy { it.titleKey }.eachCount()
-    val listed = saved.filter { it.list == if (shelf == Shelfs.FAVORITE) "favorite" else "later" }.map { it.asTitle() }
+    // My List's own chips: Stremio's and Nuvio's libraries are saved lists like this one (the trackers' are what was watched).
+    val lists = accounts.filter { it.first == "Stremio" || it.first == "Nuvio" }
+    /** null is this phone's list and the accounts' together; [PHONE] this phone's alone; else an account's name. */
+    var listFrom by rememberSaveable(me.id) { mutableStateOf<String?>(null) }
+    if (listFrom != null && listFrom != PHONE && lists.none { it.first == listFrom }) listFrom = null
+    val synced by com.torrentviewer.core.Synced.collectAsState(com.torrentviewer.core.syncedNow())
+    // Films seen through, here or on an account: off My List, on the Watched shelf.
+    val watched = com.torrentviewer.core.watchedFilms(history, synced)
+    val listed = when {
+        shelf == Shelfs.FAVORITE -> saved.filter { it.list == "favorite" }.map { it.asTitle() }
+        shelf == Shelfs.WATCHED -> com.torrentviewer.core.watchedShelf(history, synced)
+        listFrom == null -> com.torrentviewer.core.myList(saved, lists.flatMap { it.second.seen }, watched)
+        listFrom == PHONE -> com.torrentviewer.core.myList(saved, emptyList(), watched)
+        else -> com.torrentviewer.core.myList(emptyList(), lists.find { it.first == listFrom }?.second?.seen.orEmpty(), watched)
+    }
 
     val grid = rememberLazyGridState()
     val haze = dev.chrisbanes.haze.rememberHazeState()
@@ -473,7 +503,6 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit, onDownload
                         stremioLater = true
                     })
                 }
-                if (stremio) Text("✓ Signed in to Stremio — your library and where you stopped are below", Modifier.padding(bottom = 10.dp), style = Type.meta.copy(color = Ink.faint))
             }
         }
         if (shelf == Shelfs.HISTORY) {
@@ -481,7 +510,8 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit, onDownload
             if (local.isEmpty() && fromStremio.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
                 Note(if (from == null || from == PHONE) "Nothing here yet. Anything you play turns up in this list." else "Nothing watched on $from yet.", Modifier.padding(top = 16.dp))
             }
-            items(local, key = { it.titleKey }) { item ->
+            // Movies, then Series: what was played here, and after it what the accounts have, each split the same way.
+            inSections("here", local, { it.kind == "tv" }, { it.titleKey }) { item ->
                 HistoryRow(item, sources[item.titleKey] ?: 1, onPlay = {
                     // Played from more than one release: ask which, as Continue watching does.
                     val all = history.filter { it.titleKey == item.titleKey }.sortedByDescending { it.at }
@@ -491,14 +521,21 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit, onDownload
             if (from == null && local.isNotEmpty() && fromAccounts.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
                 Text("From your accounts", Modifier.padding(top = 18.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
             }
-            items(fromAccounts, key = { "account:${it.first.imdb}" }) { (s, source) ->
+            inSections("account", fromAccounts, { it.first.kind == "tv" }, { it.first.imdb }) { (s, source) ->
                 StremioRow(s, source, allPaused.find { it.imdb == s.imdb }) { onOpen(Title(s.imdb, s.kind, s.title, year = s.year)) }
             }
         } else {
             if (listed.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
-                Note(if (shelf == Shelfs.LATER) "Titles you add to My List wait here." else "Titles you like collect here.", Modifier.padding(top = 16.dp))
+                Note(
+                    when (shelf) {
+                        Shelfs.LATER -> "Titles you add to My List wait here."
+                        Shelfs.WATCHED -> "Films you watch to the end, and series you have watched episodes of, collect here."
+                        else -> "Titles you like collect here."
+                    },
+                    Modifier.padding(top = 16.dp),
+                )
             }
-            items(listed, key = { it.imdb }) { t -> PosterCard(t, { onOpen(t) }, sub = subOf(t)) }
+            inSections(shelf.name, listed, { it.isSeries }, { it.imdb }) { t -> PosterCard(t, { onOpen(t) }, sub = subOf(t)) }
         }
     }
     FrostTop(haze, grid.scrolled(), Modifier.onSizeChanged { pinned = it.height }) {
@@ -515,17 +552,42 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit, onDownload
                     }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Shelfs.entries.forEach { s -> Chip(s.label, s == shelf, onClick = { shelf = s }) }
+            // The four shelves as tabs, each as wide as its word and spread edge to edge with even gaps — equal shares of
+            // the width ran the long ones together — the open one underlined across its word in the accent.
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Shelfs.entries.forEach { s ->
+                    val on = s == shelf
+                    Tap({ shelf = s }, shape = RoundedCornerShape(6.dp)) {
+                        Column(Modifier.width(androidx.compose.foundation.layout.IntrinsicSize.Max).padding(top = 6.dp)) {
+                            Text(
+                                s.label, maxLines = 1,
+                                style = Type.label.copy(fontSize = 15.sp, color = if (on) Ink.text else Ink.muted, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium),
+                            )
+                            Box(Modifier.padding(top = 9.dp).fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(if (on) Ink.accent else Color.Transparent))
+                        }
+                    }
+                }
             }
-            // Whose history: this phone's, or a signed-in account's or tracker's. Only with one signed in.
-            if (shelf == Shelfs.HISTORY && accounts.isNotEmpty()) Row(
-                Modifier.padding(top = 8.dp).horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Chip("All", from == null, onClick = { from = null }, compact = true)
-                Chip("This phone", from == PHONE, onClick = { from = PHONE }, compact = true)
-                accounts.forEach { (name, _) -> Chip(name, from == name, onClick = { from = name }, compact = true) }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Ink.stroke.copy(alpha = 0.5f)))
+            // Whose: one picker, not a row of chips. History: this phone or any signed-in account or tracker;
+            // My List: this phone, Stremio or Nuvio. Only with one signed in.
+            val pickFrom = when (shelf) {
+                Shelfs.HISTORY -> accounts.map { it.first }
+                Shelfs.LATER -> lists.map { it.first }
+                else -> emptyList()
+            }
+            if (pickFrom.isNotEmpty()) {
+                val current = if (shelf == Shelfs.HISTORY) from else listFrom
+                Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Showing", Modifier.padding(end = 10.dp), style = Type.meta.copy(color = Ink.faint))
+                    Dropdown(
+                        when (current) { null -> "All"; PHONE -> "This phone"; else -> current },
+                        listOf("All", "This phone") + pickFrom,
+                    ) { picked ->
+                        val next = when (picked) { "All" -> null; "This phone" -> PHONE; else -> picked }
+                        if (shelf == Shelfs.HISTORY) from = next else listFrom = next
+                    }
+                }
             }
         }
     }

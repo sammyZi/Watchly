@@ -265,7 +265,8 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
     // With what is being watched on AniList: the episode after the last one marked there.
     val everywhere by com.torrentviewer.core.WatchedEverywhere.collectAsState(stremio)
     val fromStremio = com.torrentviewer.core.Kids.only(everywhere.paused.filter { p -> history.none { it.imdb == p.imdb } }.distinctBy { it.imdb }) { Title(it.imdb, it.kind, it.title) }.take(10)
-    val watchlist = saved.filter { it.list == "later" }.map { it.asTitle() }
+    // This phone's list with the Stremio and Nuvio libraries: a title saved in either app shows here too.
+    val watchlist = com.torrentviewer.core.myList(saved, stremio.seen, com.torrentviewer.core.watchedFilms(history, stremio))
     var menu by remember { mutableStateOf<Item?>(null) }
     var comingAll by remember { mutableStateOf(false) }
     var releases by remember { mutableStateOf<List<Item>?>(null) }

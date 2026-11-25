@@ -948,6 +948,39 @@ data class Saved(
     fun asTitle() = Title(imdb = imdb, kind = kind, title = title, year = year, rating = rating, poster = poster)
 }
 
+/** An account's library title as a card. It carries no poster: Metahub's, by IMDb id. */
+fun Seen.asTitle() = Title(imdb, kind, title, year = year, poster = "https://images.metahub.space/poster/medium/$imdb/img")
+
+/**
+ * My List wherever it shows: this device's list, then [accounts] — Stremio's and Nuvio's libraries, which are saved
+ * lists too — each title once. A title saved on another device or in the Nuvio or Stremio app shows here as well.
+ */
+fun myList(saved: List<Saved>, accounts: List<Seen>, watched: Set<String> = emptySet()): List<Title> =
+    (saved.filter { it.list == "later" }.map { it.asTitle() } + Kids.only(accounts.map { it.asTitle() }))
+        // A film seen through is done with: it leaves the list (a series stays until it is).
+        .filterNot { it.kind == "movie" && it.imdb in watched }
+        .distinctBy { it.imdb }
+
+/** On My List: this device's, or a signed-in Stremio or Nuvio library — the tick on a title's page. */
+fun inMyList(imdb: String, saved: List<Saved>, accounts: StremioLibrary): Boolean =
+    saved.any { it.imdb == imdb && it.list == "later" } || accounts.seen.any { it.imdb == imdb }
+
+/**
+ * The Library's Watched shelf, newest first: films seen through, and series with an episode seen through — here or on
+ * an account. A title only an account knows is named from its library when it is there; otherwise the card is its poster alone.
+ */
+fun watchedShelf(history: List<Item>, accounts: StremioLibrary): List<Title> {
+    fun poster(id: String) = "https://images.metahub.space/poster/medium/$id/img"
+    // Any of its files played to [WATCHED_AT]: a film's one, or one of a series' episodes.
+    fun seenThrough(h: Item) = h.positions.any { (i, at) -> (h.durations[i] ?: 0.0).let { of -> of > 0 && at / of >= WATCHED_AT } }
+    val here = latestPerTitle(history).filter { it.imdb != null && history.any { h -> h.imdb == it.imdb && seenThrough(h) } }
+        .map { it.lastPlayed to Title(it.imdb!!, if (it.kind == "tv") "tv" else "movie", it.label.substringBefore(" · "), poster = it.poster ?: poster(it.imdb)) }
+    val names = accounts.seen.associate { it.imdb to it.title }
+    val films = accounts.films.map { id -> (accounts.finishedAt[id] ?: 0L) to Title(id, "movie", names[id].orEmpty(), poster = poster(id)) }
+    val shows = accounts.episodes.filterValues { it.isNotEmpty() }.keys.map { id -> (accounts.finishedAt[id] ?: 0L) to Title(id, "tv", names[id].orEmpty(), poster = poster(id)) }
+    return Kids.only((here + films + shows).sortedByDescending { it.first }.map { it.second }.distinctBy { it.imdb })
+}
+
 /** "later" — My List. */
 object SavedStore {
     private const val KEY = "saved"
@@ -964,10 +997,18 @@ object SavedStore {
 
     fun has(imdb: String, list: String = "later") = _items.value.any { it.imdb == imdb && it.list == list }
 
+    /** Off My List, wherever it is — this device's list and the accounts' libraries. A film seen through goes so. */
+    fun dropFromMyList(title: Title) {
+        if (inMyList(title.imdb, _items.value, syncedNow())) {
+            if (has(title.imdb)) toggle(title) else { Stremio.setInLibrary(title, false); Nuvio.setInLibrary(title, false) }
+        }
+    }
+
     fun toggle(title: Title, list: String = "later") {
         val all = _items.value
         val without = all.filter { !(it.imdb == title.imdb && it.list == list) }
-        val adding = without.size == all.size
+        // My List is also the Stremio and Nuvio libraries: a title only there is on the list, and the tick takes it off.
+        val adding = without.size == all.size && !(list == "later" && syncedNow().seen.any { it.imdb == title.imdb })
         val next = if (adding) {
             listOf(Saved(title.imdb, title.kind, title.title, title.poster, title.year, title.rating, list, System.currentTimeMillis())) + without
         } else {

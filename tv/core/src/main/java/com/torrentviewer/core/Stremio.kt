@@ -495,5 +495,12 @@ object Stremio {
     }
 
     /** My List here is the library there: added or taken out together. */
-    fun setInLibrary(title: Title, on: Boolean) = update(title.imdb, title.title, title.type, title.poster, inLibrary = on)
+    fun setInLibrary(title: Title, on: Boolean) {
+        if (key == null) return
+        // Here at once, as My List shows it, not at the next pull.
+        _library.value = _library.value.let { l ->
+            l.copy(seen = if (on) listOf(Seen(title.imdb, title.title, title.year, title.kind, isoNow())) + l.seen.filterNot { it.imdb == title.imdb } else l.seen.filterNot { it.imdb == title.imdb })
+        }
+        update(title.imdb, title.title, title.type, title.poster, inLibrary = on)
+    }
 }

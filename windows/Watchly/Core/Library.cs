@@ -261,6 +261,47 @@ public static class Saved
 
     public static List<SavedTitle> InList(IEnumerable<SavedTitle> saved, string list) => saved.Where(s => s.List == list).ToList();
 
+    /// <summary>
+    /// core myList: My List wherever it shows — this PC's list, then <paramref name="accounts"/> (Stremio's and Nuvio's
+    /// libraries, saved lists too), each title once. A library title has no poster here: Metahub's, by IMDb id.
+    /// </summary>
+    public static List<Title> MyList(IEnumerable<SavedTitle> saved, IEnumerable<StremioSeen> accounts)
+    {
+        // A film seen through is done with: it leaves the list (a series stays).
+        var watched = WatchedFilms(MainWindow.Shell.HistoryList);
+        return InList(saved, "later").Select(s => s.AsTitle())
+            .Concat(KidsMode.Only(accounts.Select(s => new Title { Imdb = s.Imdb, Kind = s.Kind, Name = s.Title, Year = s.Year, Poster = $"https://images.metahub.space/poster/medium/{s.Imdb}/img" })))
+            .Where(t => !(t.Kind == "movie" && watched.Contains(t.Imdb)))
+            .DistinctBy(t => t.Imdb).ToList();
+    }
+
+    /// <summary>On My List: this PC's, or a signed-in Stremio or Nuvio library — the tick on a title's page.</summary>
+    public static bool InMyList(IEnumerable<SavedTitle> saved, string imdb) =>
+        OnList(saved, imdb, "later") || Lists().Any(a => a.Seen.Any(s => s.Imdb == imdb));
+
+    /// <summary>A film's last play reached <see cref="Stremio.WatchedAt"/>.</summary>
+    static bool SeenThrough(HistoryItem h) =>
+        h.Kind == "movie" && h.LastFileIndex is { } i && h.DurationOf(i) is > 0 and var of && (h.Positions?.GetValueOrDefault(i) ?? 0) / of >= Stremio.WatchedAt;
+
+    /// <summary>core watchedFilms: films seen through here, or marked watched on Stremio or Nuvio, by IMDb id.</summary>
+    public static HashSet<string> WatchedFilms(IEnumerable<HistoryItem> history) =>
+        history.Where(SeenThrough).Select(h => h.Imdb).OfType<string>().Concat(Trackers.Synced.Films).ToHashSet();
+
+    /// <summary>core watchedShelf: the Library's Watched tab — films seen through, here or on an account, newest first.</summary>
+    public static List<Title> WatchedShelf(IEnumerable<HistoryItem> history)
+    {
+        var names = Lists().SelectMany(a => a.Seen).GroupBy(s => s.Imdb).ToDictionary(g => g.Key, g => g.First().Title);
+        var here = History.LatestPerTitle(history.ToList()).Where(h => SeenThrough(h) && h.Imdb is not null)
+            .Select(h => new Title { Imdb = h.Imdb!, Kind = "movie", Name = h.Title, Poster = h.Poster ?? $"https://images.metahub.space/poster/medium/{h.Imdb}/img" });
+        var there = Trackers.Synced.Films.Select(id => new Title { Imdb = id, Kind = "movie", Name = names.GetValueOrDefault(id) ?? "", Poster = $"https://images.metahub.space/poster/medium/{id}/img" });
+        return KidsMode.Only(here.Concat(there).DistinctBy(t => t.Imdb));
+    }
+
+    /// <summary>The signed-in accounts whose library is a saved list, by name.</summary>
+    public static List<(string Name, List<StremioSeen> Seen)> Lists() =>
+        new[] { ("Stremio", Stremio.Connected, Stremio.Library.Seen), ("Nuvio", Nuvio.Connected, Nuvio.Library.Seen) }
+            .Where(a => a.Item2).Select(a => (a.Item1, a.Item3)).ToList();
+
     public static List<SavedTitle> Toggle(Title title, string list)
     {
         var all = Load();

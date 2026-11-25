@@ -441,6 +441,12 @@ public static class Nuvio
     /// <summary>My List here is the library there: added or taken out together.</summary>
     public static void SetInLibrary(Title title, bool on)
     {
+        if (!Connected) return;
+        // Here at once, as My List shows it, not at the next pull.
+        var seen = Library.Seen.Where(s => s.Imdb != title.Imdb).ToList();
+        if (on) seen.Insert(0, new StremioSeen(title.Imdb, title.Name, title.Year, title.Kind, DateTime.UtcNow.ToString("o"), null));
+        Library = Library with { Seen = seen };
+        Changed?.Invoke();
         var type = title.StremioType == "movie" ? "movie" : "series";
         if (on)
             Push("sync_push_library_items", new JsonObject

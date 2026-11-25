@@ -320,6 +320,11 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit) {
     // After a reinstall this TV's history is empty; what Stremio has still belongs here.
     val stremioLibrary by com.torrentviewer.core.Synced.collectAsState(com.torrentviewer.core.syncedNow())
     val fromStremio = remember(stremioLibrary, history, Kids.on, Kids.allowed) { Kids.only(stremioLibrary.notIn(history)) { Title(it.imdb, it.kind, it.title) } }
+    // My List, as the phone's: this TV's list with the Stremio and Nuvio libraries, each title once.
+    val saved by SavedStore.items.collectAsState()
+    // Films seen through, here or on an account: off My List, in Watched.
+    val listed = remember(saved, stremioLibrary, history, Kids.on, Kids.allowed) { myList(saved, stremioLibrary.seen, watchedFilms(history, stremioLibrary)) }
+    val watchedList = remember(stremioLibrary, history, Kids.on, Kids.allowed) { watchedShelf(history, stremioLibrary) }
     var focusedUri by remember { mutableStateOf<String?>(null) }
     val first = remember { FocusRequester() }
     var releases by remember { mutableStateOf<List<Item>?>(null) }
@@ -419,9 +424,43 @@ fun LibraryScreen(watch: Watch, me: Profile, onOpen: (Title) -> Unit) {
                 }
             }
         }
+        if (listed.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+            Text("My List", Modifier.padding(top = 14.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
+        }
+        // Saved here, on the phone, or in the Stremio or Nuvio app: the title's page opens.
+        items(listed, key = { "list:${it.imdb}" }) { t ->
+            Focusable(
+                onClick = { onOpen(t) },
+                modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
+                shape = RoundedCornerShape(8.dp),
+                scale = 1.08f,
+                requester = if (items.isEmpty() && fromStremio.isEmpty() && t == listed.first()) first else null,
+            ) {
+                Artwork("https://images.metahub.space/background/medium/${t.imdb}/img", t.title, Modifier.fillMaxSize(), fallback = t.poster)
+                Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(0.4f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.85f))))
+                Column(Modifier.align(Alignment.BottomStart).padding(10.dp)) {
+                    Text(t.title, style = Type.label.copy(fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(listOfNotNull(if (t.isSeries) "Series" else "Film", t.year).joinToString("  ·  "), style = Type.meta.copy(fontSize = 11.sp), maxLines = 1)
+                }
+            }
+        }
+        if (watchedList.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+            Text("Watched", Modifier.padding(top = 14.dp), style = Type.title.copy(fontWeight = FontWeight.Bold))
+        }
+        // Films seen through, here or on an account, newest first.
+        items(watchedList, key = { "watched:${it.imdb}" }) { t ->
+            Focusable(onClick = { onOpen(t) }, modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f), shape = RoundedCornerShape(8.dp), scale = 1.08f) {
+                Artwork("https://images.metahub.space/background/medium/${t.imdb}/img", t.title, Modifier.fillMaxSize(), fallback = t.poster)
+                Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(0.4f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.85f))))
+                Column(Modifier.align(Alignment.BottomStart).padding(10.dp)) {
+                    if (t.title.isNotEmpty()) Text(t.title, style = Type.label.copy(fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("Watched", style = Type.meta.copy(fontSize = 11.sp, color = Ink.good), maxLines = 1)
+                }
+            }
+        }
     }
     }
-    if (items.isNotEmpty() || fromStremio.isNotEmpty()) first.claim()
+    if (items.isNotEmpty() || fromStremio.isNotEmpty() || listed.isNotEmpty()) first.claim()
     releases?.let { all -> ReleasesSheet(all, watch) { releases = null } }
 }
 

@@ -326,7 +326,7 @@ public sealed class DetailView : UserControl, IDisposable
         }
 
         // However many actions there are, they share the width evenly.
-        var later = Saved.OnList(shell.SavedList, title.Imdb, "later");
+        var later = Saved.InMyList(shell.SavedList, title.Imdb);
         var liked = Saved.OnList(shell.SavedList, title.Imdb, "favorite");
         var actions = new UniformGrid { Rows = 1, Margin = new Thickness(0, 14, 0, 0) };
         actions.Children.Add(Ui.IconAction(later ? "check" : "plus", later ? "In My List" : "My List", () => { shell.ToggleSaved(title, "later"); Render(); }, later, "Good", double.NaN));

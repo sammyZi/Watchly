@@ -87,7 +87,9 @@ fun DetailScreen(initial: Title, watch: Watch, onBack: () -> Unit, onOrder: (Wat
     val people = tmdb?.cast.orEmpty()
     val similar = tmdb?.similar.orEmpty().takeUnless { Kids.on }.orEmpty()
     val saved by SavedStore.items.collectAsState()
-    val inList = saved.any { it.imdb == title.imdb && it.list == "later" }
+    // On this TV's list or in the Stremio or Nuvio library: ticked, and the tick takes it off everywhere.
+    val accounts by com.torrentviewer.core.Synced.collectAsState(com.torrentviewer.core.syncedNow())
+    val inList = com.torrentviewer.core.inMyList(title.imdb, saved, accounts)
 
     val seasons = remember(title.episodes) { title.episodes.map { it.season }.filter { it > 0 }.distinct().sorted() }
     val history by History.items.collectAsState()

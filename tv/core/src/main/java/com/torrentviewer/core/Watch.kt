@@ -585,6 +585,8 @@ class Watch(val engine: TorrentStream) {
         Nuvio.watched(at, ep?.season, ep?.episode)
         WATCH_TRACKERS.forEach { it.watched(at, ep?.season, ep?.episode) }
         AniList.watched(at, ep?.season, ep?.episode)
+        // A film seen through comes off My List, here and on the accounts; it is on the Library's Watched shelf now.
+        if (ep == null && at.imdb != null) SavedStore.dropFromMyList(Title(at.imdb, "movie", at.label.substringBefore(" · "), poster = at.poster))
     }
 
     fun saveDuration(seconds: Double) = item?.let { History.setDuration(it.uri, playingIndex, seconds) }

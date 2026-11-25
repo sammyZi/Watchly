@@ -21,6 +21,21 @@ public sealed class LibraryView : UserControl
     readonly HashSet<string> expanded = new();
     readonly HashSet<string> openFolders = new();
     string view = "history";
+    /// <summary>My List's chip: null this PC's list and the accounts' together, "pc" this PC's alone, else an account's name.</summary>
+    string? listFrom;
+
+    /// <summary>My List as the chip picks it.</summary>
+    List<Title> Listed()
+    {
+        var lists = Saved.Lists();
+        if (listFrom is not null && listFrom != "pc" && lists.All(a => a.Name != listFrom)) listFrom = null;
+        return listFrom switch
+        {
+            null => Saved.MyList(shell.SavedList, lists.SelectMany(a => a.Seen)),
+            "pc" => Saved.MyList(shell.SavedList, Array.Empty<StremioSeen>()),
+            var name => Saved.MyList(Array.Empty<SavedTitle>(), lists.First(a => a.Name == name).Seen),
+        };
+    }
     bool searching;
     TextBox? query;
     bool dirty;
@@ -62,7 +77,8 @@ public sealed class LibraryView : UserControl
         foreach (var (key, label, icon, count) in new[]
         {
             ("history", "History", "clock", history.Count),
-            ("later", "Watch later", "bookmark", Saved.InList(saved, "later").Count),
+            ("later", "My List", "bookmark", Listed().Count),
+            ("watched", "Watched", "check-circle", Saved.WatchedShelf(history).Count),
             ("favorite", "Favourites", "heart", Saved.InList(saved, "favorite").Count),
         })
         {
@@ -115,12 +131,35 @@ public sealed class LibraryView : UserControl
     {
         if (view != "history")
         {
-            var titles = Saved.InList(shell.SavedList, view).Select(s => s.AsTitle()).ToList();
-            list.Content = titles.Count > 0
+            var titles = view switch
+            {
+                "later" => Listed(),
+                "watched" => Saved.WatchedShelf(shell.HistoryList),
+                _ => Saved.InList(shell.SavedList, view).Select(s => s.AsTitle()).ToList(),
+            };
+            var body = titles.Count > 0
                 ? Ui.Grid(titles)
-                : Ui.Empty(view == "later" ? "bookmark" : "heart",
-                    view == "later" ? "Nothing saved for later" : "No favourites yet",
-                    $"Open any title and use the {(view == "later" ? "bookmark" : "heart")} in the top corner to put it here.");
+                : view == "watched"
+                    ? Ui.Empty("check-circle", "Nothing watched yet", "Films you watch to the end collect here, and leave My List.")
+                    : Ui.Empty(view == "later" ? "bookmark" : "heart",
+                        view == "later" ? "Nothing in My List" : "No favourites yet",
+                        $"Open any title and use the {(view == "later" ? "bookmark" : "heart")} in the top corner to put it here.");
+            // Whose list, as the phone's My List: this PC's, or Stremio's or Nuvio's library. Only with one signed in.
+            var lists = Saved.Lists();
+            if (view != "later" || lists.Count == 0)
+            {
+                list.Content = body;
+                return;
+            }
+            var chips = new WrapPanel { Margin = new Thickness(24, 0, 24, 8) };
+            foreach (var (key, label) in new (string?, string)[] { (null, "All"), ("pc", "This PC") }.Concat(lists.Select(a => ((string?)a.Name, a.Name))))
+            {
+                var chip = Ui.Chip(label, listFrom == key, () => { listFrom = key; Render(); }, style: "ChoiceChip");
+                chip.Margin = new Thickness(0, 0, 8, 0);
+                chips.Children.Add(chip);
+            }
+            DockPanel.SetDock(chips, Dock.Top);
+            list.Content = new DockPanel { Children = { chips, body } };
             return;
         }
 

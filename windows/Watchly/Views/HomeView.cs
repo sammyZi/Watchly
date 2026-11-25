@@ -395,7 +395,8 @@ public sealed class HomeView : UserControl
                     : new[] { p.Ep is { } e ? $"S{e.Season}:E{e.Episode}" : null, $"{(int)p.Progress}%" }).Where(s => s is not null)))));
         if (resumable.Count > 0) made.Add(("resume", "Continue Watching", Section("Continue Watching", () => shell.ShowTab("history"), resumable, "ResumeCard")));
 
-        var later = Saved.InList(shell.SavedList, "later").Select(s => s.AsTitle()).ToList();
+        // This PC's list with the Stremio and Nuvio libraries: a title saved in either app, or on the phone, shows here too.
+        var later = Saved.MyList(shell.SavedList, Saved.Lists().SelectMany(a => a.Seen));
         if (later.Count > 0) made.Add(("list", "My List", Section("My List", null, later, "RailCard")));
 
         var favorites = Saved.InList(shell.SavedList, "favorite").Select(s => s.AsTitle()).ToList();
@@ -700,7 +701,7 @@ public sealed class HomeView : UserControl
             plot.Margin = new Thickness(0, 8, 0, 0);
             words.Children.Add(plot);
         }
-        var inList = Saved.OnList(shell.SavedList, title.Imdb, "later");
+        var inList = Saved.InMyList(shell.SavedList, title.Imdb);
         var list = Ui.Action(inList ? "In My List" : "My List", inList ? "check" : "plus", () => { shell.ToggleSaved(title, "later"); ShowHeroPage(heroPage); }, width: 132);
         list.Margin = new Thickness(10, 0, 0, 0);
         words.Children.Add(new StackPanel
