@@ -494,6 +494,9 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>, barHaze: dev.chris
     // The tour, once, on a fresh install: anyone with a library or a profile already knows the app.
     // Decided before the profile step below, which makes a profile on a fresh install.
     var toured by remember { mutableStateOf(Kv.global(TOURED) != null || Profiles.list.value.isNotEmpty() || History.items.value.isNotEmpty()) }
+    // After an update, once: what is new in it. Someone who already used the app, as the tour decides it; a fresh
+    // install has the tour instead, and only records the version.
+    var whatsNew by remember { mutableStateOf(whatsNewDue(existing = toured)) }
 
     // Who first, before the tour: its genres and sign-in then belong to someone. On a fresh install
     // that opens on making a profile; back from there, Guest is still on offer.
@@ -528,6 +531,16 @@ private fun Shell(watch: Watch, incoming: MutableState<Uri?>, barHaze: dev.chris
 
     if (watch.phase == Phase.PLAYING) {
         PlayerScreen(watch)
+        return
+    }
+
+    // Due after an update, or asked for again from Settings.
+    (whatsNew ?: BuildConfig.VERSION_NAME.takeIf { whatsNewAgain })?.let { version ->
+        WhatsNew(version) {
+            whatsNewSeen()
+            whatsNew = null
+            whatsNewAgain = false
+        }
         return
     }
 

@@ -839,6 +839,10 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEd
                         Entry(L.drawable.lucide_ic_shield, "Privacy policy", "What stays here and what is sent", "data") { page = "Privacy policy" },
                         Entry(L.drawable.lucide_ic_file_text, "Terms and conditions", "The rules for using Watchly", "agreement licence") { page = "Terms and conditions" },
                     ),
+                    // Last, at the foot of Settings: what this version brought, as shown after the update.
+                    if (hasWhatsNew) listOf(
+                        Entry(L.drawable.lucide_ic_sparkles, "What's new", "New in version ${BuildConfig.VERSION_NAME}", "update changelog release notes features") { whatsNewAgain = true },
+                    ) else null,
                 ),
                 query,
             )
