@@ -58,6 +58,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.animation.animateContentSize
+import androidx.compose.ui.draw.alpha
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -1507,11 +1508,21 @@ private fun KeptForReopen() {
         kept = Services.engine.keptStarts()
         nuvio = NuvioTorrent.cacheBytes(context)
     }
-    fun clear(work: () -> Unit) = scope.launch {
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { work() }
-        // Nuvio's figure is sampled about once a second.
-        delay(1200)
-        reload()
+    /** What is being cleared now — a film's hash, "nuvio", "all" — so its row says so while the files go (seconds, for a big film). */
+    var clearing by remember { mutableStateOf(emptySet<String>()) }
+    fun clear(what: Set<String>, work: () -> Unit) {
+        if (clearing.containsAll(what)) return
+        clearing = clearing + what
+        scope.launch {
+            try {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { work() }
+                // Nuvio's figure is sampled about once a second.
+                delay(1200)
+                reload()
+            } finally {
+                clearing = clearing - what
+            }
+        }
     }
     LaunchedEffect(Unit) { reload() }
     // A film as the history has it, where it was played from: its name, poster and how far in.
@@ -1524,22 +1535,40 @@ private fun KeptForReopen() {
         if (total == 0L) "Nothing kept. A film you stop part-way keeps its start here, so it opens at once next time."
         else "A film you stop part-way keeps its start here, so it opens at once next time. ${bytes(total)} in all.",
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Rows that went close up smoothly rather than jump.
+        Column(Modifier.animateContentSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             kept.forEach { k ->
                 val item = played[k.hash.lowercase()]
                 // The history's name ("The Matrix"); else the release's, with its scaffolding cut ("The.Matrix.1999.1080p…").
                 val name = item?.titleName ?: com.torrentviewer.core.searchableName(k.name).ifBlank { k.name }
                 val facts = listOfNotNull(com.torrentviewer.core.yearOf(k.name), com.torrentviewer.core.quality(k.name)).joinToString("  ·  ")
+                val going = k.hash in clearing || "all" in clearing
                 KeptRow(
                     name, facts, item?.poster, item?.ratio?.takeIf { it > 0.01 },
-                    if (k.playing) "Playing now" else "${bytes(k.bytes)}  ·  left ${ago(k.savedAt)}", k.playing,
-                    onClear = if (k.playing) null else ({ clear { Services.engine.clearStart(k.hash) } }),
+                    when {
+                        k.playing -> "Playing now"
+                        going -> "Clearing…"
+                        else -> "${bytes(k.bytes)}  ·  left ${ago(k.savedAt)}"
+                    },
+                    k.playing,
+                    busy = going && !k.playing,
+                    onClear = if (k.playing) null else ({ clear(setOf(k.hash)) { Services.engine.clearStart(k.hash) } }),
                 )
             }
-            if (nuvio > 0) KeptRow("Nuvio engine's cache", "Its own store, apart from Watchly's", null, null, bytes(nuvio), false, icon = L.drawable.lucide_ic_hard_drive, onClear = { clear { NuvioTorrent.clearCache(context) } })
+            if (nuvio > 0) {
+                val going = "nuvio" in clearing || "all" in clearing
+                KeptRow(
+                    "Nuvio engine's cache", "Its own store, apart from Watchly's", null, null, if (going) "Clearing…" else bytes(nuvio), false,
+                    icon = L.drawable.lucide_ic_hard_drive, busy = going, onClear = { clear(setOf("nuvio")) { NuvioTorrent.clearCache(context) } },
+                )
+            }
         }
         if (kept.count { !it.playing } + (if (nuvio > 0) 1 else 0) > 1) {
-            Button("Clear all", { clear { Services.engine.clearStarts(); NuvioTorrent.clearCache(context) } }, Modifier.padding(top = 12.dp), icon = L.drawable.lucide_ic_trash_2, compact = true)
+            val all = "all" in clearing
+            Button(
+                if (all) "Clearing…" else "Clear all", { clear(setOf("all")) { Services.engine.clearStarts(); NuvioTorrent.clearCache(context) } },
+                Modifier.padding(top = 12.dp), icon = if (all) L.drawable.lucide_ic_loader_circle else L.drawable.lucide_ic_trash_2, compact = true,
+            )
         }
     }
 }
@@ -1549,14 +1578,16 @@ private fun KeptForReopen() {
  * takes and when — or Playing now, in the accent, while it is on (and can't go yet).
  */
 @Composable
-private fun KeptRow(title: String, facts: String, poster: String?, ratio: Double?, detail: String, live: Boolean, icon: Int = L.drawable.lucide_ic_film, onClear: (() -> Unit)?) {
+private fun KeptRow(title: String, facts: String, poster: String?, ratio: Double?, detail: String, live: Boolean, icon: Int = L.drawable.lucide_ic_film, busy: Boolean = false, onClear: (() -> Unit)?) {
     val shape = RoundedCornerShape(12.dp)
+    // Being cleared: the row fades back, and a spinner turns where the bin was.
+    val fade by androidx.compose.animation.core.animateFloatAsState(if (busy) 0.5f else 1f, label = "clearing")
     Row(Modifier.fillMaxWidth().clip(shape).background(Ink.text.copy(alpha = 0.05f)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(width = 44.dp, height = 64.dp).clip(RoundedCornerShape(8.dp)).background(Ink.text.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(width = 44.dp, height = 64.dp).alpha(fade).clip(RoundedCornerShape(8.dp)).background(Ink.text.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
             if (poster != null) coil3.compose.AsyncImage(poster, null, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
             else Lc(icon, tint = Ink.faint, size = 20.dp)
         }
-        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+        Column(Modifier.weight(1f).alpha(fade).padding(horizontal = 12.dp)) {
             Text(title, style = Type.label.copy(color = Ink.text, fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (facts.isNotEmpty()) Text(facts, Modifier.padding(top = 2.dp), style = Type.meta.copy(color = Ink.muted), maxLines = 1)
             ratio?.let { r ->
@@ -1569,7 +1600,9 @@ private fun KeptRow(title: String, facts: String, poster: String?, ratio: Double
             }
             Text(detail, Modifier.padding(top = 5.dp), style = Type.meta.copy(color = if (live) Ink.accent else Ink.faint, fontWeight = if (live) FontWeight.SemiBold else FontWeight.Normal), maxLines = 1)
         }
-        onClear?.let {
+        if (busy) Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) {
+            androidx.compose.material3.CircularProgressIndicator(Modifier.size(20.dp), color = Ink.accent, strokeWidth = 2.dp, trackColor = Ink.text.copy(alpha = 0.1f))
+        } else onClear?.let {
             Tap(it, Modifier.size(38.dp), CircleShape) {
                 Box(Modifier.fillMaxSize().background(Ink.text.copy(alpha = 0.07f)), contentAlignment = Alignment.Center) {
                     Lc(L.drawable.lucide_ic_trash_2, tint = Ink.muted, size = 18.dp)

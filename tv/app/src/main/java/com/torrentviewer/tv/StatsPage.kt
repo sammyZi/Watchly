@@ -36,6 +36,7 @@ import com.torrentviewer.core.Ink
 import com.torrentviewer.core.Lc
 import com.torrentviewer.core.Meta
 import com.torrentviewer.core.SavedStore
+import com.torrentviewer.core.Title
 import com.torrentviewer.core.Type
 import com.torrentviewer.core.WatchLog
 import com.torrentviewer.core.WatchStats
@@ -54,11 +55,17 @@ private val PALETTE get() = listOf(Ink.accent, BLUE, GREEN, ORANGE, TEAL, PINK)
  */
 @Composable
 fun StatsPage() {
-    val log = remember { WatchLog.read() }
-    val stats = remember(log) { WatchStats.of(log) }
+    val history by History.items.collectAsState()
+    // What this TV timed, with what Stremio, Nuvio and the trackers say was watched elsewhere (estimated, as they keep
+    // what but not how long); streaks and days stay this TV's own. The phone's page, the same way.
+    val here = remember { WatchLog.read() }
+    val accounts by com.torrentviewer.core.WatchedEverywhere.collectAsState(com.torrentviewer.core.syncedNow())
+    val merged = remember(here, accounts, history) { com.torrentviewer.core.AccountWatches.merge(here, accounts, history.mapNotNull { it.imdb }.toSet()) }
+    val log = merged.first
+    val estimated = merged.second
+    val stats = remember(here, log) { com.torrentviewer.core.AccountWatches.stats(here, log) }
     val genres by produceState(emptyList<Pair<String, Double>>(), log) { value = WatchStats.genres(log) { id, kind -> Meta.title(id, kind)?.genres.orEmpty() } }
     val year = remember { Calendar.getInstance().get(Calendar.YEAR) }
-    val history by History.items.collectAsState()
     val saved by SavedStore.items.collectAsState()
     val whole = stats.thisYear.coerceAtLeast(1.0)
     fun percent(seconds: Double) = "${(seconds * 100 / whole).toInt().coerceIn(1, 100)}%"
@@ -88,12 +95,15 @@ fun StatsPage() {
             stats.top.forEachIndexed { i, (name, kind, seconds) ->
                 val id = ids[name]
                 val known = history.firstOrNull { it.imdb == id }?.poster ?: saved.firstOrNull { it.imdb == id }?.poster
-                val poster by produceState(known, id) { if (value == null && id?.startsWith("tt") == true) value = Meta.title(id, kind)?.poster }
+                // An account's title may come with no name (it is then its IMDb id): Cinemeta has it, with the poster.
+                val meta by produceState<Title?>(null, id) { if (id?.startsWith("tt") == true && (known == null || name == id)) value = Meta.title(id, kind) }
+                val poster = known ?: meta?.poster
+                val shown = if (name == id) meta?.title ?: "" else name
                 Row(Modifier.padding(top = if (i == 0) 0.dp else 14.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("${i + 1}", Modifier.width(28.dp), style = Type.title.copy(color = if (i == 0) ORANGE else Ink.faint, fontWeight = FontWeight.Bold))
-                    Artwork(poster, name, Modifier.size(width = 44.dp, height = 66.dp).clip(RoundedCornerShape(6.dp)))
+                    Artwork(poster, shown, Modifier.size(width = 44.dp, height = 66.dp).clip(RoundedCornerShape(6.dp)))
                     Column(Modifier.padding(start = 14.dp).weight(1f)) {
-                        Text(name, style = Type.label.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(shown, style = Type.label.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text((if (kind == "tv") "Series" else "Film") + "  ·  " + WatchStats.hours(seconds) + "  ·  " + percent(seconds) + " of your year", style = Type.meta.copy(color = Ink.muted), maxLines = 1)
                         Meter((seconds / whole).toFloat(), PALETTE[i % PALETTE.size], Modifier.padding(top = 8.dp))
                     }
@@ -118,7 +128,11 @@ fun StatsPage() {
         Card("Habits", L.drawable.lucide_ic_trending_up, BLUE) {
             stats.busiestWeekday?.let { Fact("You watch most on", it) }
             Fact("All time", WatchStats.hours(stats.allTime))
-            if (log.base > 0) Text("All time includes about ${WatchStats.hours(log.base)} from before this log began.", Modifier.padding(top = 8.dp), style = Type.meta.copy(color = Ink.faint))
+            if (here.base > 0) Text("All time includes about ${WatchStats.hours(here.base)} from before this log began.", Modifier.padding(top = 8.dp), style = Type.meta.copy(color = Ink.faint))
+            if (estimated > 0) Text(
+                "Includes about ${WatchStats.hours(estimated)} watched on your Stremio, Nuvio and tracker accounts, estimated at a typical film and episode length. Streaks and days watched count what this TV played.",
+                Modifier.padding(top = 8.dp), style = Type.meta.copy(color = Ink.faint),
+            )
         }
     }
 }

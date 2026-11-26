@@ -570,6 +570,28 @@ class LibTest {
         assertTrue(plausibleRuntime("2h 10min"))
         assertEquals("3h 05m", WatchStats.hours(3 * h + 5 * 60))
         assertEquals("42m", WatchStats.hours(42 * 60.0))
+
+        // The accounts' watches: tt2 was timed here and tt9 played here, so neither counts again; tt4 is a film finished
+        // on the 13th, tt5 a series with three episodes and no date (all time only).
+        val accounts = StremioLibrary(
+            films = setOf("tt2", "tt4", "tt9"),
+            episodes = mapOf("tt5" to setOf(Ep(1, 1), Ep(1, 2), Ep(1, 3))),
+            seen = listOf(Seen("tt4", "Film Four", null, "movie", "")),
+            finishedAt = mapOf("tt4" to fmt.parse("2026-11-13")!!.time + 3600_000L),
+        )
+        val (merged, estimated) = AccountWatches.merge(log, accounts, played = setOf("tt9"))
+        assertEquals(AccountWatches.FILM_SECONDS + 3 * AccountWatches.EPISODE_SECONDS, estimated, 1e-9)
+        val all = AccountWatches.stats(log, merged, now)
+        assertEquals(s.allTime + estimated, all.allTime, 1e-9)
+        assertEquals(s.thisMonth + AccountWatches.FILM_SECONDS, all.thisMonth, 1e-9)
+        assertEquals("Film Four", merged.titles["tt4"]?.name)
+        assertEquals("tt5", merged.titles["tt5"]?.name)
+        // tt5 has no day, so it is all time only, not one of this year's series.
+        assertEquals(s.shows, all.shows)
+        assertEquals(s.films + 1, all.films)
+        // Streaks stay as this device timed them.
+        assertEquals(s.streak, all.streak)
+        assertEquals(s.activeDays, all.activeDays)
     }
 
     @Test fun localVideos() {

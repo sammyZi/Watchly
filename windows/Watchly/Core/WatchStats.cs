@@ -54,6 +54,52 @@ public static class WatchLog
     }
 }
 
+/// <summary>
+/// core AccountWatches: what Stremio, Nuvio and the trackers say was watched, for Your stats. They keep what was
+/// watched, not for how long: each film counts <see cref="FilmSeconds"/> and each episode <see cref="EpisodeSeconds"/>,
+/// on the day the account says the title was finished, or to all time only when it doesn't say. A title this PC timed
+/// or played itself is left as logged, so nothing counts twice. Names are the accounts' where they have one, else the IMDb id.
+/// </summary>
+public static class AccountWatches
+{
+    /// <summary>Calibration knobs: a typical film, a typical episode.</summary>
+    public const double FilmSeconds = 110 * 60, EpisodeSeconds = 42 * 60;
+
+    /// <summary><paramref name="log"/> with the accounts' watches added, and how many seconds of it are estimated.</summary>
+    public static (WatchLogData Merged, double Estimated) Merge(WatchLogData log, StremioLibrary accounts, ISet<string> played)
+    {
+        var names = accounts.Seen.GroupBy(s => s.Imdb).ToDictionary(g => g.Key, g => g.First().Title);
+        var days = new SortedDictionary<string, Dictionary<string, double>>(log.Days.ToDictionary(d => d.Key, d => new Dictionary<string, double>(d.Value)));
+        var titles = new Dictionary<string, WatchLog.Seen>(log.Titles);
+        var @base = log.Base;
+        var added = 0.0;
+        void Credit(string id, string kind, double seconds)
+        {
+            if (seconds <= 0 || log.Titles.ContainsKey(id) || played.Contains(id)) return;
+            titles[id] = new WatchLog.Seen(names.GetValueOrDefault(id) is { Length: > 0 } n ? n : id, kind);
+            added += seconds;
+            var at = accounts.FinishedAt.GetValueOrDefault(id);
+            if (at <= 0) { @base += seconds; return; }
+            var day = DateTimeOffset.FromUnixTimeMilliseconds(at).LocalDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            if (!days.TryGetValue(day, out var d)) days[day] = d = new();
+            d[id] = d.GetValueOrDefault(id) + seconds;
+        }
+        foreach (var id in accounts.Films) Credit(id, "movie", FilmSeconds);
+        foreach (var (id, eps) in accounts.Episodes) Credit(id, "tv", eps.Count * EpisodeSeconds);
+        return (log with { Base = @base, Days = days, Titles = titles }, added);
+    }
+
+    /// <summary>
+    /// The page's numbers: hours, months, titles and genres from everything; streaks, days watched and the busiest
+    /// weekday from what this PC timed, as the accounts don't say which days the rest was watched on.
+    /// </summary>
+    public static WatchStats Stats(WatchLogData log, WatchLogData merged, DateTime? at = null)
+    {
+        var here = WatchStats.Of(log, at);
+        return WatchStats.Of(merged, at) with { Streak = here.Streak, LongestStreak = here.LongestStreak, ActiveDays = here.ActiveDays, BusiestWeekday = here.BusiestWeekday };
+    }
+}
+
 /// <summary>core WatchStats: what Your stats shows, worked out from the log.</summary>
 public sealed record WatchStats(
     double AllTime, double ThisYear, double ThisMonth, double[] ByMonth,

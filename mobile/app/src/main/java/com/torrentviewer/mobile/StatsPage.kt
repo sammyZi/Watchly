@@ -53,7 +53,13 @@ private val PALETTE get() = listOf(Ink.accent, BLUE, GREEN, ORANGE, TEAL, PINK)
 @Composable
 fun StatsBanner(onOpen: () -> Unit) {
     val year = remember { Calendar.getInstance().get(Calendar.YEAR) }
-    val stats = remember { WatchStats.of(WatchLog.read()) }
+    // As the page counts it: this phone's log with what the accounts and trackers say was watched.
+    val accounts by com.torrentviewer.core.WatchedEverywhere.collectAsState(com.torrentviewer.core.syncedNow())
+    val history by History.items.collectAsState()
+    val stats = remember(accounts, history) {
+        val here = WatchLog.read()
+        com.torrentviewer.core.AccountWatches.stats(here, com.torrentviewer.core.AccountWatches.merge(here, accounts, history.mapNotNull { it.imdb }.toSet()).first)
+    }
     Tap(onOpen, Modifier.padding(bottom = 12.dp).fillMaxWidth(), RoundedCornerShape(18.dp)) {
         Row(Modifier.fillMaxWidth().background(Ink.surface).padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(42.dp).clip(CircleShape).background(Ink.accent), contentAlignment = Alignment.Center) {
@@ -79,11 +85,17 @@ fun StatsBanner(onOpen: () -> Unit) {
  */
 @Composable
 fun StatsPage() {
-    val log = remember { WatchLog.read() }
-    val stats = remember(log) { WatchStats.of(log) }
+    val history by History.items.collectAsState()
+    // What this phone timed, with what Stremio, Nuvio and the trackers say was watched elsewhere (estimated, as they
+    // keep what but not how long); streaks and days stay this phone's own.
+    val here = remember { WatchLog.read() }
+    val accounts by com.torrentviewer.core.WatchedEverywhere.collectAsState(com.torrentviewer.core.syncedNow())
+    val merged = remember(here, accounts, history) { com.torrentviewer.core.AccountWatches.merge(here, accounts, history.mapNotNull { it.imdb }.toSet()) }
+    val log = merged.first
+    val estimated = merged.second
+    val stats = remember(here, log) { com.torrentviewer.core.AccountWatches.stats(here, log) }
     val genres by produceState(emptyList<Pair<String, Double>>(), log) { value = WatchStats.genres(log) { id, kind -> Meta.title(id, kind)?.genres.orEmpty() } }
     val year = remember { Calendar.getInstance().get(Calendar.YEAR) }
-    val history by History.items.collectAsState()
     val saved by SavedStore.items.collectAsState()
 
     // The headline: the year, what it is made of, and its months.
@@ -117,12 +129,15 @@ fun StatsPage() {
         stats.top.forEachIndexed { i, (name, kind, seconds) ->
             val id = ids[name]
             val known = history.firstOrNull { it.imdb == id }?.poster ?: saved.firstOrNull { it.imdb == id }?.poster
-            val poster by produceState(known, id) { if (value == null && id?.startsWith("tt") == true) value = Meta.title(id, kind)?.poster }
+            // An account's title may come with no name (it is then its IMDb id): Cinemeta has it, with the poster.
+            val meta by produceState<com.torrentviewer.core.Title?>(null, id) { if (id?.startsWith("tt") == true && (known == null || name == id)) value = Meta.title(id, kind) }
+            val poster = known ?: meta?.poster
+            val shown = if (name == id) meta?.title ?: "" else name
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("${i + 1}", Modifier.width(22.dp), style = Type.title.copy(color = if (i == 0) ORANGE else Ink.faint, fontWeight = FontWeight.Bold))
-                Artwork(poster, name, Modifier.size(width = 42.dp, height = 62.dp).clip(RoundedCornerShape(6.dp)))
+                Artwork(poster, shown, Modifier.size(width = 42.dp, height = 62.dp).clip(RoundedCornerShape(6.dp)))
                 Column(Modifier.padding(start = 12.dp).weight(1f)) {
-                    Text(name, style = Type.label.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(shown, style = Type.label.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text((if (kind == "tv") "Series" else "Film") + "  ·  " + WatchStats.hours(seconds) + "  ·  " + percent(seconds) + " of your year", Modifier.padding(top = 2.dp), style = Type.meta.copy(color = Ink.muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Meter((seconds / whole).toFloat(), PALETTE[i % PALETTE.size], Modifier.padding(top = 8.dp))
                 }
@@ -150,7 +165,11 @@ fun StatsPage() {
         Fact(L.drawable.lucide_ic_crown, ORANGE, "Longest streak", "${stats.longestStreak} day${if (stats.longestStreak == 1) "" else "s"}")
         stats.busiestWeekday?.let { Fact(L.drawable.lucide_ic_popcorn, PINK, "You watch most on", it) }
         Fact(L.drawable.lucide_ic_timer, TEAL, "All time", WatchStats.hours(stats.allTime))
-        if (log.base > 0) Text("All time includes about ${WatchStats.hours(log.base)} from before this log began.", style = Type.meta.copy(color = Ink.faint))
+        if (here.base > 0) Text("All time includes about ${WatchStats.hours(here.base)} from before this log began.", style = Type.meta.copy(color = Ink.faint))
+        if (estimated > 0) Text(
+            "Includes about ${WatchStats.hours(estimated)} watched on your Stremio, Nuvio and tracker accounts, estimated at a typical film and episode length. Streaks and days watched count what this phone played.",
+            style = Type.meta.copy(color = Ink.faint),
+        )
     }
 }
 

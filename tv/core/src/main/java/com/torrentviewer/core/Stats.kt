@@ -69,6 +69,48 @@ object WatchLog {
     }
 }
 
+/**
+ * What Stremio, Nuvio and the trackers say was watched, for the stats page. They keep what was watched, not for how
+ * long: each film counts [FILM_SECONDS] and each episode [EPISODE_SECONDS], on the day the account says the title was
+ * finished, or to all time only when it doesn't say. A title this device timed or played itself is left as it logged
+ * it, so nothing counts twice. The names are the accounts' where they have one, else the IMDb id (the page looks it up).
+ */
+object AccountWatches {
+    /** Calibration knobs: a typical film, a typical episode. */
+    const val FILM_SECONDS = 110 * 60.0
+    const val EPISODE_SECONDS = 42 * 60.0
+
+    /** [log] with the accounts' watches added, and how many seconds of it are estimated. [played]: IMDb ids played here. */
+    fun merge(log: WatchLog.Log, accounts: StremioLibrary, played: Set<String>): Pair<WatchLog.Log, Double> {
+        val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        val names = accounts.seen.associate { it.imdb to it.title }
+        val days = log.days.mapValues { it.value.toMutableMap() }.toMutableMap()
+        val titles = log.titles.toMutableMap()
+        var base = log.base
+        var added = 0.0
+        fun credit(id: String, kind: String, seconds: Double) {
+            if (seconds <= 0 || id in log.titles || id in played) return
+            titles[id] = WatchLog.Seen(names[id]?.takeIf { it.isNotBlank() } ?: id, kind)
+            added += seconds
+            val at = accounts.finishedAt[id]?.takeIf { it > 0 }
+            if (at == null) base += seconds
+            else days.getOrPut(fmt.format(Date(at))) { mutableMapOf() }.let { it[id] = (it[id] ?: 0.0) + seconds }
+        }
+        accounts.films.forEach { credit(it, "movie", FILM_SECONDS) }
+        accounts.episodes.forEach { (id, eps) -> credit(id, "tv", eps.size * EPISODE_SECONDS) }
+        return WatchLog.Log(base, days.toSortedMap(), titles) to added
+    }
+
+    /**
+     * The page's numbers: hours, months, titles and genres from everything; streaks, days watched and the busiest
+     * weekday from what this device timed, as the accounts don't say which days the rest was watched on.
+     */
+    fun stats(log: WatchLog.Log, merged: WatchLog.Log, now: Long = System.currentTimeMillis()): WatchStats {
+        val here = WatchStats.of(log, now)
+        return WatchStats.of(merged, now).copy(streak = here.streak, longestStreak = here.longestStreak, activeDays = here.activeDays, busiestWeekday = here.busiestWeekday)
+    }
+}
+
 /** What the stats page shows, worked out from a [WatchLog.Log]. Not [Stats], which is the player's own readout. */
 data class WatchStats(
     val allTime: Double,

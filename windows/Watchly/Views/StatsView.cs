@@ -21,8 +21,11 @@ public static class StatsView
 
     public static FrameworkElement Build(MainWindow shell)
     {
-        var log = WatchLog.Read();
-        var stats = WatchStats.Of(log);
+        // What this PC timed, with what Stremio, Nuvio and the trackers say was watched elsewhere (estimated, as they
+        // keep what but not how long); streaks and days stay this PC's own — as on the phone and TV.
+        var here = WatchLog.Read();
+        var (log, estimated) = AccountWatches.Merge(here, Trackers.Everywhere, shell.HistoryList.Select(h => h.Imdb).OfType<string>().ToHashSet());
+        var stats = AccountWatches.Stats(here, log);
         var year = DateTime.Now.Year;
         var whole = Math.Max(1, stats.ThisYear);
         string Percent(double s) => $"{Math.Clamp((int)(s * 100 / whole), 1, 100)}%";
@@ -50,14 +53,18 @@ public static class StatsView
             for (var i = 0; i < stats.Top.Count; i++)
             {
                 var (name, kind, seconds, id) = stats.Top[i];
-                var poster = shell.HistoryList.FirstOrDefault(h => h.Imdb == id)?.Poster ?? shell.SavedList.FirstOrDefault(s => s.Imdb == id)?.Poster;
+                var poster = shell.HistoryList.FirstOrDefault(h => h.Imdb == id)?.Poster ?? shell.SavedList.FirstOrDefault(s => s.Imdb == id)?.Poster
+                    ?? (id.StartsWith("tt") ? $"https://images.metahub.space/poster/medium/{id}/img" : null);
                 var number = Ui.Text($"{i + 1}", "TitleText", i == 0 ? null : "Faint", 18, FontWeights.Bold);
                 if (i == 0) number.Foreground = new SolidColorBrush(Orange);
                 number.Width = 28;
                 number.VerticalAlignment = VerticalAlignment.Center;
                 var art = Ui.Art(poster, name, 44, 66, 6);
                 var words = new StackPanel { Margin = new Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
-                words.Children.Add(Ui.Text(name, "Label", "Text", 15, FontWeights.SemiBold));
+                var nameText = Ui.Text(name == id ? "" : name, "Label", "Text", 15, FontWeights.SemiBold);
+                words.Children.Add(nameText);
+                // An account's title may come with no name (it is then its IMDb id): Cinemeta has it.
+                if (name == id && id.StartsWith("tt")) _ = NameOf(nameText, id, kind);
                 words.Children.Add(Ui.Text($"{(kind == "tv" ? "Series" : "Film")}  ·  {WatchStats.Hours(seconds)}  ·  {Percent(seconds)} of your year", "Meta", "Muted", 13));
                 words.Children.Add(Spaced(Meter(seconds / whole, Palette[i % Palette.Length]), 8));
                 var row = new DockPanel { Margin = new Thickness(0, i == 0 ? 0 : 14, 0, 0) };
@@ -100,9 +107,20 @@ public static class StatsView
         var habits = new StackPanel();
         if (stats.BusiestWeekday is { } day) habits.Children.Add(Fact("You watch most on", day));
         habits.Children.Add(Fact("All time", WatchStats.Hours(stats.AllTime)));
-        if (log.Base > 0) habits.Children.Add(Spaced(Ui.Text($"All time includes about {WatchStats.Hours(log.Base)} from before this log began.", "Meta", "Faint", 12), 8));
+        if (here.Base > 0) habits.Children.Add(Spaced(Ui.Text($"All time includes about {WatchStats.Hours(here.Base)} from before this log began.", "Meta", "Faint", 12), 8));
+        if (estimated > 0)
+        {
+            var note = Ui.Text($"Includes about {WatchStats.Hours(estimated)} watched on your Stremio, Nuvio and tracker accounts, estimated at a typical film and episode length. Streaks and days watched count what this PC played.", "Meta", "Faint", 12);
+            note.TextWrapping = TextWrapping.Wrap;
+            habits.Children.Add(Spaced(note, 8));
+        }
         page.Children.Add(Block("Habits", "sliders", Blue, habits));
         return page;
+    }
+
+    static async Task NameOf(TextBlock text, string imdb, string kind)
+    {
+        try { if ((await Meta.LoadTitle(imdb, kind))?.Name is { Length: > 0 } name) text.Text = name; } catch { }
     }
 
     static T Spaced<T>(T e, double top) where T : FrameworkElement
