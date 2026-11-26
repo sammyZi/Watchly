@@ -61,6 +61,28 @@ public static class Pick
         return !AllowedExt.Contains(System.IO.Path.GetExtension(p.TrimEnd(' ', '.')));
     }
 
+    /// <summary>
+    /// core RUNNABLE: programs, scripts, installers and shortcuts. Never written (<see cref="IsUnsafe"/> keeps everything
+    /// but media off the disk), but a film beside one is usually fake ("install this codec"): worth saying.
+    /// </summary>
+    static readonly HashSet<string> RunnableExt = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".exe", ".scr", ".com", ".pif", ".bat", ".cmd", ".msi", ".msp", ".lnk", ".url", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh", ".hta",
+        ".ps1", ".psm1", ".jar", ".cpl", ".reg", ".dll", ".apk", ".xapk", ".apks", ".aab", ".app", ".dmg", ".pkg", ".sh", ".run", ".bin", ".deb",
+    };
+
+    /// <summary>The paths in <paramref name="files"/> that are programs or scripts.</summary>
+    public static List<string> Runnable(IEnumerable<TorrentFileInfo> files) =>
+        files.Select(f => f.Path).Where(p => RunnableExt.Contains(System.IO.Path.GetExtension(p.TrimEnd(' ', '.')))).ToList();
+
+    /// <summary>core runnableWarning: what to tell the viewer about a release carrying programs; null when it carries none.</summary>
+    public static string? RunnableWarning(List<string> runnable)
+    {
+        if (runnable.Count == 0) return null;
+        var names = string.Join(", ", runnable.Take(2).Select(p => p.TrimEnd(' ', '.').Replace('\\', '/').Split('/')[^1])) + (runnable.Count > 2 ? $" and {runnable.Count - 2} more" : "");
+        return $"This release also holds a program ({names}). Releases like that are usually fake or carry malware — Watchly never downloads it, but consider another release.";
+    }
+
     static TorrentFileInfo Biggest(IEnumerable<TorrentFileInfo> files) => files.Aggregate((a, b) => b.Size > a.Size ? b : a);
 
     /// <summary>

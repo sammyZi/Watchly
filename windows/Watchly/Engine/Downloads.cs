@@ -235,6 +235,12 @@ public sealed class Downloads
                 Log.Warn("download", $"'{meta.Name}': skipped {unsafeFiles.Count} runnable/unsafe file(s): {string.Join(", ", unsafeFiles.Select(i => meta.Files[i].Path))}");
                 Failed?.Invoke($"Skipped {unsafeFiles.Count} file{(unsafeFiles.Count == 1 ? "" : "s")} that aren't video, audio, subtitles or images ({names}{(unsafeFiles.Count > 3 ? "…" : "")}) — programs, archives and disk images are how malware spreads.");
             }
+            // Programs elsewhere in the release than what was picked: never downloaded, but they mark a fake one.
+            else if (Pick.RunnableWarning(Pick.Runnable(meta.Files)) is { } warning)
+            {
+                Log.Warn("download", $"'{meta.Name}': release holds runnable file(s), not downloaded: {string.Join(", ", Pick.Runnable(meta.Files))}");
+                Failed?.Invoke(warning);
+            }
             if (indices.Count == 0) throw new InvalidOperationException(unsafeFiles.Count > 0 ? "This torrent holds no videos — only programs, archives or other files that aren't downloaded." : "No video in this torrent");
 
             var queue = job.QueueIndices is { Count: > 0 } q ? q.Where(i => i < meta.Files.Count && !Pick.IsUnsafe(meta.Files[i].Path)).ToList() : indices;

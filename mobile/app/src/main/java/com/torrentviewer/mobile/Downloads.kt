@@ -517,10 +517,20 @@ object Downloads {
     }
 
     /** Which files this job wants, now the torrent has said what it holds. */
+    /** Downloads already told about a program in their release: once each, not at every resume. */
+    private val warnedRunnable = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
     private fun choose(uri: String, h: TorrentHandle) {
         val ti = runCatching { h.torrentFile() }.getOrNull() ?: return
         val job = _live.value.find { it.job.uri == uri }?.job ?: return
         val files = filesOf(ti)
+        // A program in the release: never downloaded (only the videos are asked for), but said once, as it marks a fake.
+        com.torrentviewer.core.runnableFiles(files.map { it.path }).let { runnable ->
+            com.torrentviewer.core.runnableWarning(runnable)?.takeIf { warnedRunnable.add(uri) }?.let {
+                android.util.Log.w(TAG, "release holds runnable file(s), never downloaded: ${runnable.joinToString()}")
+                Services.watch.notes.tryEmit(it)
+            }
+        }
         val season = seasonVideos(job, files)
         val tagged = job.tags.mapNotNull { pickFile(files, it) }
         val asked = (job.files + season + tagged).distinct().ifEmpty { listOfNotNull(pickFile(files)) }

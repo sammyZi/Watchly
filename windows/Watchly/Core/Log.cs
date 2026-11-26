@@ -25,24 +25,47 @@ public static class Log
 
     static readonly object Gate = new();
 
-    /// <summary>The installed app has no console: every line also goes here, started afresh each launch.</summary>
-    public static readonly string FilePath = Path.Combine(Path.GetTempPath(), "watchly.log");
+    /// <summary>Every run's log, kept: the last <see cref="Keep"/> of them, newest by name.</summary>
+    public static readonly string Dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Watchly", "logs");
+    const int Keep = 10;
+
+    /// <summary>This run's: watchly-&lt;start&gt;-&lt;pid&gt;.log, its own file, so a restart after a crash wipes nothing.</summary>
+    public static readonly string FilePath = Path.Combine(Dir, $"watchly-{DateTime.Now:yyyyMMdd-HHmmss}-{Environment.ProcessId}.log");
+
+    /// <summary>The last line of a run that closed; a log without it ended in a crash.</summary>
+    const string Closed = "[app] closed";
 
     static readonly StreamWriter? File = Open();
-
-    /// <summary>The run before this one's log: a crash and its restart wiped what it said otherwise.</summary>
-    public static readonly string PreviousPath = Path.Combine(Path.GetTempPath(), "watchly.previous.log");
 
     static StreamWriter? Open()
     {
         try
         {
-            // Only while nothing holds it: a second Watchly opening would move the live one's log away.
-            try { System.IO.File.Move(FilePath, PreviousPath, overwrite: true); } catch { }
-            return new StreamWriter(new FileStream(FilePath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true };
+            Directory.CreateDirectory(Dir);
+            var old = new DirectoryInfo(Dir).GetFiles("watchly-*.log").OrderByDescending(f => f.Name).ToList();
+            foreach (var f in old.Skip(Keep - 1)) try { f.Delete(); } catch { }
+            var writer = new StreamWriter(new FileStream(FilePath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true };
+            if (old.FirstOrDefault() is { } last) writer.WriteLine(LastRun(last));
+            return writer;
         }
-        catch { return null; } // a second Watchly holds it
+        catch { return null; }
     }
+
+    /// <summary>How the run before ended: closed, or not — then the crash dump Windows wrote for it, if any.</summary>
+    static string LastRun(FileInfo last)
+    {
+        string? tail = null;
+        try { using var r = new StreamReader(new FileStream(last.FullName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)); tail = r.ReadToEnd(); } catch { }
+        if (tail?.TrimEnd().EndsWith(Closed) == true) return $"{DateTime.Now:HH:mm:ss.fff} [app] last run ({last.Name}) closed normally";
+        var dumps = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CrashDumps");
+        var dump = Directory.Exists(dumps)
+            ? new DirectoryInfo(dumps).GetFiles("Watchly.exe.*.dmp").Where(d => d.LastWriteTime >= last.CreationTime).OrderByDescending(d => d.LastWriteTime).FirstOrDefault()
+            : null;
+        return $"{DateTime.Now:HH:mm:ss.fff} [app] last run ({last.Name}) did not close: it crashed or was killed" + (dump is null ? "" : $"; crash dump {dump.FullName}");
+    }
+
+    /// <summary>Marks this run's log as closed normally.</summary>
+    public static void Close() => Info("app", "closed");
 
     static void Write(string tag, string message, ConsoleColor color)
     {

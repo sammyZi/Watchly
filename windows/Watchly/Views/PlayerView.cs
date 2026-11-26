@@ -40,8 +40,15 @@ static class VlcLibrary
     static readonly Dictionary<string, (long At, int Since)> heard = new();
 
     /// <summary>libVLC's warnings and errors into the log, each kind at most every 5 s with a count of the rest.</summary>
+    /// <summary>Until when every libVLC line is logged, debug ones too: the opening, where a native crash leaves nothing else.</summary>
+    static long verboseUntil;
+
+    /// <summary>Log all of libVLC for the next <paramref name="ms"/>; the log flushes each line, so a crash's last step shows.</summary>
+    public static void Verbose(int ms) => verboseUntil = Environment.TickCount64 + ms;
+
     static void Listen(LibVLC lib) => lib.Log += (_, e) =>
     {
+        if (Environment.TickCount64 < verboseUntil) { Log.Player($"vlc[{e.Level}] {e.Module}: {e.Message}"); return; }
         if (e.Level < LogLevel.Warning) return;
         var key = $"{e.Module}: {e.Message}";
         // Numbers in a message (a timestamp, a delay) would make every line a kind of its own.
@@ -506,6 +513,13 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
                 var resumeRatio = request.ResumeAt > 0 && length > 0 ? request.ResumeAt / length : 0;
                 session = await StreamSession.Start(request.Torrent!, request.FileIndex, shell.Settings.RemoveFilesAfterStop, request.HistoryUri, life.Token, request.ResumeAt > 0, resumeRatio);
                 if (disposed) { await session.DisposeAsync(); return; }
+                // A program in the release: never fetched (only the video and its subtitles are), but it marks a fake.
+                var runnable = Pick.Runnable(session.Meta.Files);
+                if (Pick.RunnableWarning(runnable) is { } warning)
+                {
+                    Log.Warn("stream", $"release holds runnable file(s), never fetched: {string.Join(", ", runnable)}");
+                    shell.Toast(warning, true);
+                }
                 session.WholeFile = shell.Settings.StreamWholeFile;
                 url = session.Url;
             }
@@ -581,6 +595,9 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
             slaveTrackLabels.Clear();
             slaveTracks.Clear();
         }
+        Log.Player($"open {url} at {startSeconds:0.#} s");
+        // Every libVLC line through the opening: a native crash there leaves only this (and a dump in CrashDumps).
+        VlcLibrary.Verbose(30_000);
         player.Play(media);
         player.SetRate((float)rate);
         old?.Dispose();
@@ -619,22 +636,37 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
     /// A size up or down. libVLC sizes subtitle text when its instance starts, so the video reopens
     /// where it is in a player on that size's instance, with the same subtitle picked.
     /// </summary>
-    void ResizeSubs(int step)
+    async void ResizeSubs(int step)
     {
+        if (resizing) return;
         var next = shell.Settings.Resized(step);
         if (next.SubSize == shell.Settings.SubSize || media is null) return;
-        shell.ChangeSettings(next);
-        var spu = player.Spu;
-        restoreSub = (slaveTracks.FirstOrDefault(kv => kv.Value == spu).Key, spu);
-        ShowHud($"Subtitle size: {SizeName(next.SubSize)}");
-        var old = player;
-        // Stop waits for libVLC's threads: off the UI thread, like Close.
-        _ = Task.Run(() => { try { old.Stop(); old.Dispose(); } catch { } });
-        vlc = VlcLibrary.For(next.SubRel);
-        player = NewPlayer();
-        video.MediaPlayer = player;
-        Load(media.Mrl, current / 1000.0);
+        resizing = true;
+        try
+        {
+            shell.ChangeSettings(next);
+            var spu = player.Spu;
+            restoreSub = (slaveTracks.FirstOrDefault(kv => kv.Value == spu).Key, spu);
+            ShowHud($"Subtitle size: {SizeName(next.SubSize)}");
+            var old = player;
+            // Stopped before the window goes to the new player: libVLC drawing into a window taken from it
+            // crashed the app (an access violation in msvcrt). Stop waits for libVLC's threads: off the UI thread.
+            await Task.Run(() => { try { old.Stop(); } catch { } });
+            if (disposed) return;
+            vlc = VlcLibrary.For(next.SubRel);
+            player = NewPlayer();
+            video.MediaPlayer = player;
+            _ = Task.Run(() => { try { old.Dispose(); } catch { } });
+            Load(media.Mrl, current / 1000.0);
+        }
+        finally
+        {
+            resizing = false;
+        }
     }
+
+    /// <summary>A subtitle-size swap under way: a second press waits for it, rather than swapping a player mid-stop.</summary>
+    bool resizing;
 
     static string SizeName(string key) => char.ToUpperInvariant(key[0]) + key[1..];
 
@@ -665,6 +697,36 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
             Log.Player($"audio: dropped after {why} (track {had}) — putting it back");
             try { player.SetAudioTrack(had); } catch { }
         }));
+    }
+
+    /// <summary>The torrent's subtitle files already copied out and attached, by their path in the torrent.</summary>
+    readonly HashSet<string> torrentSubs = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// A copy of a torrent's subtitle file for libVLC, in the stream cache (so it is never kept as a saved subtitle), or
+    /// null while it isn't whole on disk: shorter than the torrent says, or holding zero bytes where text should be
+    /// (MonoTorrent's cache not yet written out). UTF-16 files, which hold zero bytes by nature, are known by their mark.
+    /// </summary>
+    string? SubtitleCopy(string path)
+    {
+        try
+        {
+            var bytes = File.ReadAllBytes(path);
+            var expected = session?.Meta.Files.FirstOrDefault(f => path.EndsWith(f.Path.Replace('/', Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))?.Size;
+            if (bytes.Length == 0 || (expected is > 0 && bytes.Length < expected)) return null;
+            var utf16 = bytes.Length >= 2 && ((bytes[0] == 0xFF && bytes[1] == 0xFE) || (bytes[0] == 0xFE && bytes[1] == 0xFF));
+            if (!utf16 && Array.IndexOf(bytes, (byte)0) >= 0) return null;
+            var dir = Path.Combine(Paths.StreamCache, "subs");
+            Directory.CreateDirectory(dir);
+            var copy = Path.Combine(dir, $"{Math.Abs(StringComparer.OrdinalIgnoreCase.GetHashCode(path)):x8}-{Path.GetFileName(path)}");
+            File.WriteAllBytes(copy, bytes);
+            return copy;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("player", $"subtitle not ready to attach '{Path.GetFileName(path)}': {ex.Message}");
+            return null;
+        }
     }
 
     void AddSlave(string path, bool select)
@@ -751,13 +813,23 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
             ShowHud("Skipped intro");
         }
 
-        if (session is not null)
+        // The torrent's own subtitle files, once the film is playing and only as a checked copy: handed to libVLC while it
+        // was still opening the film, straight from MonoTorrent's file — its last pieces still in the disk cache, zeros on
+        // disk — libVLC's subtitle reader ran off the end and the app crashed (an access violation in msvcrt.dll).
+        if (session is not null && IsPlayingSafe)
         {
             foreach (var path in session.ReadySubtitles())
             {
-                if (!externalSubs.Any(s => s.Path.Equals(path, StringComparison.OrdinalIgnoreCase)))
-                    externalSubs.Add(new SavedSub(path, Path.GetFileName(path)));
-                AddSlave(path, false);
+                if (!torrentSubs.Add(path)) continue;
+                if (SubtitleCopy(path) is not { } copy)
+                {
+                    // Not whole on disk yet: looked at again next tick.
+                    torrentSubs.Remove(path);
+                    continue;
+                }
+                if (!externalSubs.Any(s => s.Path.Equals(copy, StringComparison.OrdinalIgnoreCase)))
+                    externalSubs.Add(new SavedSub(copy, Path.GetFileName(path)));
+                AddSlave(copy, false);
             }
         }
 
@@ -2563,15 +2635,12 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
     /// <summary>One button of the bottom row: icon beside its label, as Netflix lays it out.</summary>
     Button Action(string icon, string label, bool on, Action onClick)
     {
-        var tint = on ? RedLight : Brushes.White;
-        var glyph = WIcon(icon, 18, tint);
+        // Icons only, as on the phone: the name is the tooltip.
+        var glyph = WIcon(icon, 22, on ? RedLight : Brushes.White);
         glyph.VerticalAlignment = VerticalAlignment.Center;
-        var labelText = WText(label, 13, tint, FontWeights.Medium);
-        labelText.VerticalAlignment = VerticalAlignment.Center;
-        labelText.Margin = new Thickness(8, 0, 0, 0);
-        var b = Controls.Ui.Button(new StackPanel { Orientation = Orientation.Horizontal, Children = { glyph, labelText } }, () => { onClick(); Bump(); }, "Bare", label);
-        b.Padding = new Thickness(10, 8, 10, 8);
-        b.Margin = new Thickness(4, 0, 4, 0);
+        var b = Controls.Ui.Button(glyph, () => { onClick(); Bump(); }, "Bare", label);
+        b.Padding = new Thickness(12);
+        b.Margin = new Thickness(6, 0, 6, 0);
         b.Tag = 8;
         return b;
     }
@@ -3066,12 +3135,14 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
         var m = media;
         var s = session;
         // All of it off the UI thread, stream last: libVLC reads from it until it stops.
-        var stopped = Task.Run(() =>
-        {
-            try { p.Stop(); } catch { }
-            try { m?.Dispose(); p.Dispose(); } catch { }
-        });
-        await stopped;
+        Log.Player("close: stopping libVLC");
+        await Task.Run(() => { try { p.Stop(); } catch { } });
+        Log.Player("close: libVLC stopped, releasing the player");
+        // Only now, with libVLC stopped, does the video window let go of it. Taken away while libVLC still ran —
+        // Back pressed on a film stuck opening — it drew into a window that was gone, and the app crashed
+        // (an access violation in msvcrt.dll).
+        video.MediaPlayer = null;
+        await Task.Run(() => { try { m?.Dispose(); p.Dispose(); } catch { } });
         // libVLC has let go of the video window: close it and the controls window for good.
         // The app's window takes focus first: closing an active owned window hands focus to
         // whatever app is behind, and Watchly dropped out of sight between episodes.
@@ -3110,7 +3181,7 @@ public sealed partial class PlayerView : UserControl, IDisposable, IPartyPlayer
         // only hides when the VideoView unloads — and that waits for libVLC and the torrent
         // to finish closing, seconds after Back or closing the app. Hide it now.
         if (Window.GetWindow(overlay) is { } controls && controls != Window.GetWindow(this)) controls.Hide();
-        video.MediaPlayer = null;
+        // The video window keeps its player until CloseCore has stopped libVLC: see there.
     }
 }
 

@@ -604,7 +604,7 @@ private fun Hero(pager: PagerState, titles: List<Title>, onOpen: (Title) -> Unit
             val start = titles.getOrNull(page) ?: return@HorizontalPager
             // The shelf row carries no logo or runtime; the full entry does.
             val t by produceState(start, start.imdb) { Meta.title(start.imdb, start.kind)?.let { value = it } }
-            // The whole billboard opens the title, as Watch does; the buttons keep their own taps.
+            // The whole billboard opens the title: no Watch button, the card is the button.
             val open = Modifier.fillMaxSize().clickable(remember { MutableInteractionSource() }, indication = null) { onOpen(t) }
             if (wide) {
                 Box(open) {
@@ -613,20 +613,18 @@ private fun Hero(pager: PagerState, titles: List<Title>, onOpen: (Title) -> Unit
                         TitleMark(t, Modifier.widthIn(max = 300.dp), maxHeight = 72.dp, style = Type.display)
                         Facts(t.copy(genres = t.genres.take(2)), Modifier.padding(top = 12.dp))
                         t.plot?.let { Text(it, Modifier.padding(top = 8.dp), style = Type.body.copy(color = Ink.text.copy(alpha = 0.78f)), maxLines = 3, overflow = TextOverflow.Ellipsis) }
-                        HeroButtons(t, onOpen, Modifier.padding(top = 16.dp).widthIn(min = 200.dp))
                     }
                 }
             } else {
                 Box(open) {
                     Artwork(t.wide, t.title, Modifier.fillMaxSize().bottomScrim(0.35f), fill = false)
-                    // As Netflix and Disney+ stack it: the logo, one line of facts, the genres under it, then Watch
-                    // across, with room under it for the dots.
+                    // As Netflix and Disney+ stack it: the logo, one line of facts, the genres under it, with room under
+                    // it for the dots.
                     Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(start = EDGE, end = EDGE, bottom = 34.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(Modifier.widthIn(max = 260.dp), contentAlignment = Alignment.Center) {
                             TitleMark(t, maxHeight = 88.dp, style = Type.display.copy(textAlign = TextAlign.Center))
                         }
                         HeroFacts(t, Modifier.padding(top = 14.dp))
-                        HeroButtons(t, onOpen, Modifier.padding(top = 18.dp).width(200.dp))
                     }
                 }
             }
@@ -689,10 +687,4 @@ private fun HeroFacts(t: Title, modifier: Modifier) {
             overflow = TextOverflow.Ellipsis,
         )
     }
-}
-
-/** Watch, the one button: My List is on the title's own page. */
-@Composable
-private fun HeroButtons(t: Title, onOpen: (Title) -> Unit, modifier: Modifier) {
-    Button("Watch", { onOpen(t) }, modifier, icon = L.drawable.lucide_ic_play, primary = true)
 }

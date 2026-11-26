@@ -882,7 +882,7 @@ fun SettingsScreen(watch: Watch, who: Profile, onSwitchProfile: () -> Unit, onEd
                     Text(me.name, style = Type.title.copy(fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
                         when {
-                            me.isGuest -> "Guest keeps Continue Watching on this phone; My List and sign-ins go when the app closes."
+                            me.isGuest -> "Guest keeps nothing — history, My List and sign-ins go when the app closes."
                             profiles.isEmpty() -> "One library on this phone. Add profiles to keep a library, My List and resume points each."
                             else -> "Library, My List and resume points belong to this profile."
                         },

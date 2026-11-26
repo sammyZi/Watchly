@@ -100,6 +100,15 @@ class Watch(val engine: TorrentStream) {
 
     private fun uriOf(raw: String) = if (SettingsStore.value.value.addTrackers) withTrackers(raw) else raw
 
+    /** A release with a program in it is usually fake: said to the viewer, and logged. Only its video and subtitles are ever fetched. */
+    private fun warnRunnable(found: TorrentMeta) {
+        val runnable = runnableFiles(found.files.map { it.path })
+        runnableWarning(runnable)?.let {
+            engine.note("release holds runnable file(s), never fetched: ${runnable.joinToString()}")
+            notes.tryEmit(it)
+        }
+    }
+
     private suspend fun inspect(target: Item): TorrentMeta? {
         val ticket = ++gen
         source = uriOf(target.uri)
@@ -111,6 +120,7 @@ class Watch(val engine: TorrentStream) {
             if (ticket != gen) return null
             torboxIndexed = true
             meta = found
+            warnRunnable(found)
             return found
         }
         return try {
@@ -118,6 +128,7 @@ class Watch(val engine: TorrentStream) {
             if (ticket != gen) return null
             torboxIndexed = false
             meta = found
+            warnRunnable(found)
             found
         } catch (e: Exception) {
             if (ticket != gen) return null

@@ -534,6 +534,19 @@ class LibTest {
         assertNull(SubtitleSync.match(emptyList(), 5_000, 0))
     }
 
+    @Test fun runnableInRelease() {
+        val files = listOf(
+            "Movie.2020.1080p/Movie.2020.1080p.mkv", "Movie.2020.1080p/Codec Installer.exe", "Movie.2020.1080p/Play.LNK",
+            "Movie.2020.1080p/Movie.mp4.exe. ", "Movie.2020.1080p/subs/English.srt", "Movie.2020.1080p/Sample.mp4", "app.apk",
+        )
+        assertEquals(
+            listOf("Movie.2020.1080p/Codec Installer.exe", "Movie.2020.1080p/Play.LNK", "Movie.2020.1080p/Movie.mp4.exe. ", "app.apk"),
+            runnableFiles(files),
+        )
+        assertEquals(null, runnableWarning(emptyList()))
+        assertTrue(runnableWarning(runnableFiles(files))!!.contains("Codec Installer.exe, Play.LNK and 2 more"))
+    }
+
     @Test fun watchStats() {
         val fmt = java.text.SimpleDateFormat("yyyy-MM-dd")
         val now = fmt.parse("2026-11-14")!!.time + 12 * 3600_000L

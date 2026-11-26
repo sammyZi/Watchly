@@ -16,6 +16,12 @@ public partial class App : Application
 
     const int ATTACH_PARENT_PROCESS = -1;
 
+    protected override void OnExit(ExitEventArgs e)
+    {
+        Log.Close();
+        base.OnExit(e);
+    }
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -33,7 +39,7 @@ public partial class App : Application
             return;
         }
 
-        Log.Info("app", "Watchly starting up...");
+        Log.Info("app", $"Watchly {typeof(App).Assembly.GetName().Version} starting up (pid {Environment.ProcessId}, log {Log.FilePath})");
         var settings = AppSettings.Load();
         Theme.Apply(settings.ThemeMode);
         Theme.SetAmoled(settings.Amoled);
@@ -55,7 +61,7 @@ public partial class App : Application
             args.SetObserved();
         };
         // On a thread of its own (a library's pool work, as MonoTorrent's peer exchange crashed): the app goes
-        // whatever is done here, but its last line says why, in the log kept as watchly.previous.log.
+        // whatever is done here, but its last line says why, in its own log under %LOCALAPPDATA%\Watchly\logs.
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
             Log.Error("app", "Fatal: the app is closing", args.ExceptionObject as Exception);
 

@@ -807,7 +807,9 @@ public sealed class StreamSession : IAsyncDisposable
         Meta = meta;
         FileIndex = fileIndex;
         this.http = http;
-        Url = http.FullUri;
+        // The file's name on the end, as the phone's server does: from a bare ".../<guid>/" libVLC 3.0.23 crashed
+        // (strlen of NULL, setting the item's meta) on a release whose MKV carries no title. MonoTorrent serves either.
+        Url = http.FullUri + Uri.EscapeDataString(Path.GetFileName(meta.Files[fileIndex].Path));
         this.window = window;
         Borrowed = borrowed;
         this.deleteFiles = deleteFiles;
