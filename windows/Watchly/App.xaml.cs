@@ -16,9 +16,12 @@ public partial class App : Application
 
     const int ATTACH_PARENT_PROCESS = -1;
 
+    /// <summary>This process only handed a link to the Watchly already open: it has no log to close.</summary>
+    static bool forwarded;
+
     protected override void OnExit(ExitEventArgs e)
     {
-        Log.Close();
+        if (!forwarded) Log.Close();
         base.OnExit(e);
     }
 
@@ -36,6 +39,20 @@ public partial class App : Application
         {
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
             Shutdown(Smoke.Run(this));
+            return;
+        }
+
+        // A magnet, a .torrent, or an addon site's Install link (the installer registers stremio://).
+        // And a watch party invite (watchly://party/…, the installer registers watchly://).
+        var incoming = e.Args.FirstOrDefault(Opens);
+        // A Watchly already open takes it: a second one would fight it for the torrent ports. Before the first log
+        // line: a process that only hands a link on opened a log of its own, which pushed real runs' logs out and
+        // read the open one's as a crash.
+        single = new Mutex(true, Pipe, out var first);
+        if (!first && incoming is not null && Forward(incoming))
+        {
+            forwarded = true;
+            Shutdown();
             return;
         }
 
@@ -64,17 +81,6 @@ public partial class App : Application
         // whatever is done here, but its last line says why, in its own log under %LOCALAPPDATA%\Watchly\logs.
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
             Log.Error("app", "Fatal: the app is closing", args.ExceptionObject as Exception);
-
-        // A magnet, a .torrent, or an addon site's Install link (the installer registers stremio://).
-        // And a watch party invite (watchly://party/…, the installer registers watchly://).
-        var incoming = e.Args.FirstOrDefault(Opens);
-        // A Watchly already open takes it: a second one would fight it for the torrent ports.
-        single = new Mutex(true, Pipe, out var first);
-        if (!first && incoming is not null && Forward(incoming))
-        {
-            Shutdown();
-            return;
-        }
 
         var window = new MainWindow(incoming);
         MainWindow = window;

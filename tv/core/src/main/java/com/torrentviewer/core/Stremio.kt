@@ -6,6 +6,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
@@ -453,14 +454,18 @@ object Stremio {
         if (key == null) return
         val owner = profile
         AppScope.launch {
-            runCatching {
+            // One at a time: a film finished is marked watched and taken off My List at once, and two reads before
+            // either write lost one of them (the watched mark, or the removal).
+            writes.withLock { runCatching {
                 val old = call("datastoreGet", JSONObject().put("collection", "libraryItem").put("ids", JSONArray().put(id)).put("all", false), owner)
                     .optJSONArray("result")?.objects()?.firstOrNull()
                 val item = libraryItem(old, id, name, type, poster, inLibrary, change = change)
                 call("datastorePut", JSONObject().put("collection", "libraryItem").put("changes", JSONArray().put(item)), owner)
-            }.onFailure { Log.w("stremio", "update: ${it.message}") }
+            }.onFailure { Log.w("stremio", "update: ${it.message}") } }
         }
     }
+
+    private val writes = kotlinx.coroutines.sync.Mutex()
 
     private fun typeOf(kind: String?) = if (kind == "movie") "movie" else "series"
 

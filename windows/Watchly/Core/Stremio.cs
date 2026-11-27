@@ -526,6 +526,9 @@ public static class Stremio
         var owner = profile;
         _ = Task.Run(async () =>
         {
+            // One at a time: a film finished is marked watched and taken off My List at once, and two reads before
+            // either write lost one of them (the watched mark, or the removal).
+            await Writes.WaitAsync();
             try
             {
                 var got = await Call("datastoreGet", new JsonObject { ["collection"] = "libraryItem", ["ids"] = new JsonArray(id), ["all"] = false }, owner);
@@ -537,8 +540,14 @@ public static class Stremio
             {
                 Log.Warn("stremio", $"update: {e.Message}");
             }
+            finally
+            {
+                Writes.Release();
+            }
         });
     }
+
+    static readonly SemaphoreSlim Writes = new(1, 1);
 
     static string? PosterOf(HistoryItem at) => History.IsRemote(at.Poster) ? at.Poster : null;
 

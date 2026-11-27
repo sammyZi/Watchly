@@ -220,6 +220,8 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
     // Off again whenever kids mode changes, so a kids profile never lands on the torrent list.
     var torrents by rememberSaveable(Kids.on) { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    /** Ratings being looked up for a filtered search: apart from [busy], so neither ends the other's spinner. */
+    var rating by remember { mutableStateOf(false) }
     var recents by remember { mutableStateOf(Searches.load()) }
     // Filters: null is "any".
     var kind by rememberSaveable { mutableStateOf<String?>(null) }
@@ -285,17 +287,21 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
     LaunchedEffect(results, atLeast) {
         val list = results ?: return@LaunchedEffect
         if (atLeast == null || list.none { it.rating == null && it.imdb.startsWith("tt") }) return@LaunchedEffect
-        busy = true
+        rating = true
         val gate = kotlinx.coroutines.sync.Semaphore(4)
-        val rated = coroutineScope {
-            list.map { t ->
-                async {
-                    if (t.rating != null || !t.imdb.startsWith("tt")) t
-                    else gate.withPermit { Meta.ratingOf(t.imdb, t.kind)?.let { t.copy(rating = it) } ?: t }
-                }
-            }.awaitAll()
+        // Cleared however it ends: the filter taken off mid-lookup cancels this, and the spinner turned on for good.
+        val rated = try {
+            coroutineScope {
+                list.map { t ->
+                    async {
+                        if (t.rating != null || !t.imdb.startsWith("tt")) t
+                        else gate.withPermit { Meta.ratingOf(t.imdb, t.kind)?.let { t.copy(rating = it) } ?: t }
+                    }
+                }.awaitAll()
+            }
+        } finally {
+            rating = false
         }
-        busy = false
         // Unchanged when none had a score to find: no new list, so this doesn't run again for it.
         if (rated != list) { results = rated; keep() }
     }
@@ -410,7 +416,7 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
                 onSubmit = { recents = Searches.remember(query) },
                 trailing = {
                     when {
-                        busy -> Spinner(size = 20.dp)
+                        busy || rating -> Spinner(size = 20.dp)
                         query.isNotEmpty() -> Tap({ query = "" }, shape = CircleShape) { Lc(L.drawable.lucide_ic_x, Modifier.padding(4.dp), tint = Ink.muted, size = 18.dp) }
                     }
                 },
