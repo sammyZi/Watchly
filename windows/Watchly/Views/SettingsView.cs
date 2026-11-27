@@ -674,7 +674,9 @@ public sealed class SettingsView : UserControl
     {
         var box = new StackPanel();
         var guestWord = shell.Who?.IsGuest == true ? " As Guest it's forgotten when the app closes." : "";
-        if (Nuvio.Connected && nuvioChoices is { } choices)
+        // Also straight after signing in, when nothing is saved until a profile is picked: asking only once connected,
+        // an account with two profiles was shown the empty sign-in form again and could never get in.
+        if (nuvioChoices is { } choices && (Nuvio.Connected || Nuvio.Choosing))
         {
             var ask = Ui.Text("Which Nuvio profile is this?", "Label", "Text", 15, FontWeights.SemiBold);
             ask.Margin = new Thickness(0, 0, 0, 10);
@@ -742,19 +744,28 @@ public sealed class SettingsView : UserControl
             password.PasswordChanged += (_, _) => hintWord.Visibility = password.Password.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
             async void SignIn()
             {
-                if (nuvioBusy) return;
-                if (!email.Text.Contains('@') || password.Password.Length == 0) { shell.Toast("Enter your Nuvio email and password", true); return; }
+                // Each step in the log (never the email or password): a failed sign-in left nothing there to go on.
+                if (nuvioBusy) { Log.Info("nuvio", "sign-in pressed while one is still under way"); return; }
+                if (!email.Text.Contains('@') || password.Password.Length == 0)
+                {
+                    Log.Info("nuvio", $"sign-in pressed without an email ({email.Text.Contains('@')}) or a password ({password.Password.Length > 0})");
+                    shell.Toast("Enter your Nuvio email and password", true);
+                    return;
+                }
+                Log.Info("nuvio", $"sign-in: sending (profile {(shell.Who?.IsGuest == true ? "guest" : "named")})");
                 nuvioBusy = true;
                 Render();
                 try
                 {
                     var all = await Nuvio.SignIn(nuvioEmail, nuvioPassword);
                     nuvioPassword = "";
+                    Log.Info("nuvio", $"sign-in: signed in, {all.Count} profile(s)");
                     if (all.Count > 1) nuvioChoices = all;
                     else shell.Toast($"Signed in to Nuvio{(Nuvio.Email is { } e ? $" as {e}" : "")}");
                 }
                 catch (Exception e)
                 {
+                    Log.Warn("nuvio", $"sign-in failed: {e.GetType().Name}: {e.Message}{(e.InnerException is { } inner ? $" ({inner.Message})" : "")}");
                     shell.Toast(e.Message, true);
                 }
                 finally

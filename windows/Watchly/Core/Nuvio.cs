@@ -221,13 +221,23 @@ public static class Nuvio
         using var timer = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         using var req = new HttpRequestMessage(method, Api + path);
         req.Headers.Add("apikey", Key);
+        // An app's name, not the browser-like one the app's other requests carry: Nuvio's gateway answers any "Mozilla"
+        // with 429 and Retry-After 600 — every sign-in failed "after too many tries" on the first one.
+        req.Headers.UserAgent.ParseAdd(Agent);
         if (s is not null) req.Headers.Add("Authorization", $"Bearer {s.Access}");
         if (body is not null) req.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
         using var res = await Net.Http.SendAsync(req, timer.Token).ConfigureAwait(false);
         var text = await res.Content.ReadAsStringAsync(timer.Token).ConfigureAwait(false);
-        if (!res.IsSuccessStatusCode) throw new NuvioRefused((int)res.StatusCode, text, res.Headers.RetryAfter?.Delta);
+        if (!res.IsSuccessStatusCode)
+        {
+            // Nuvio's own reply in the log (no token or password is in it): a refused sign-in said nothing there before.
+            Log.Warn("nuvio", $"{method} {path.Split('?')[0]}: {(int)res.StatusCode}, retry after {res.Headers.RetryAfter?.Delta?.TotalSeconds.ToString() ?? "-"} s: {text[..Math.Min(text.Length, 300)]}");
+            throw new NuvioRefused((int)res.StatusCode, text, res.Headers.RetryAfter?.Delta);
+        }
         return text;
     }
+
+    static readonly string Agent = $"Watchly/{typeof(Nuvio).Assembly.GetName().Version?.ToString(3) ?? "2"} (Windows)";
 
     sealed class NuvioRefused(int code, string body, TimeSpan? wait) : HttpRequestException(code == 429 ? Busy(wait) : Error(body) ?? $"Nuvio answered {code}")
     {
@@ -264,6 +274,9 @@ public static class Nuvio
         ParseProfiles(await Rpc("sync_pull_profiles", new JsonObject(), profile, profiled: false).ConfigureAwait(false) ?? throw new HttpRequestException("Not signed in to Nuvio"));
 
     /// <summary>Watch as <paramref name="p"/>: its library and where it left films are pulled, and its addons come across.</summary>
+    /// <summary>Signed in, and which of the account's profiles not yet picked: nothing is saved until <see cref="Choose"/>.</summary>
+    public static bool Choosing => pending?.Owner == profile;
+
     public static void Choose(NuvioProfile p)
     {
         var owner = profile;
