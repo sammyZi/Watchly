@@ -28,7 +28,9 @@ public static class Net
         {
             Timeout = System.Threading.Timeout.InfiniteTimeSpan,
         };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Watchly/1.0");
+        // An app's name, as the phone's ("WatchlyTV/2"), never a browser's: Nuvio's sign-in answered any "Mozilla" with
+        // 429 "too many tries", and SubDL's file server with 403 — no subtitle from there ever downloaded.
+        client.DefaultRequestHeaders.UserAgent.ParseAdd($"Watchly/{typeof(Net).Assembly.GetName().Version?.ToString(3) ?? "2"} (Windows)");
         return client;
     }
 

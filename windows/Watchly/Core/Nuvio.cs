@@ -221,9 +221,6 @@ public static class Nuvio
         using var timer = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         using var req = new HttpRequestMessage(method, Api + path);
         req.Headers.Add("apikey", Key);
-        // An app's name, not the browser-like one the app's other requests carry: Nuvio's gateway answers any "Mozilla"
-        // with 429 and Retry-After 600 — every sign-in failed "after too many tries" on the first one.
-        req.Headers.UserAgent.ParseAdd(Agent);
         if (s is not null) req.Headers.Add("Authorization", $"Bearer {s.Access}");
         if (body is not null) req.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
         using var res = await Net.Http.SendAsync(req, timer.Token).ConfigureAwait(false);
@@ -236,8 +233,6 @@ public static class Nuvio
         }
         return text;
     }
-
-    static readonly string Agent = $"Watchly/{typeof(Nuvio).Assembly.GetName().Version?.ToString(3) ?? "2"} (Windows)";
 
     sealed class NuvioRefused(int code, string body, TimeSpan? wait) : HttpRequestException(code == 429 ? Busy(wait) : Error(body) ?? $"Nuvio answered {code}")
     {
