@@ -179,6 +179,30 @@ private val WIKI_HEADERS = NetworkHeaders.Builder().set("User-Agent", WIKI_AGENT
 private const val ART_RETRIES = 2
 private const val ART_RETRY_MS = 2_500L
 
+/**
+ * Pictures fetched into the disk cache ahead of a scroll, so a row finds them there. Gentle, as metahub's limit is
+ * per address: Wi-Fi only, after what's on screen has had its turn, none already on disk, one at a time with a pause.
+ */
+suspend fun precacheArt(context: android.content.Context, urls: List<String>) {
+    val network = context.getSystemService(android.net.ConnectivityManager::class.java) ?: return
+    val loader = coil3.SingletonImageLoader.get(context)
+    kotlinx.coroutines.delay(4_000)
+    var fetched = 0
+    for (url in urls) {
+        // Off Wi-Fi now, or never on it: only what's scrolled to.
+        if (network.isActiveNetworkMetered) break
+        if (loader.diskCache?.openSnapshot(url)?.use { true } == true) continue
+        // Tiny: the disk keeps the file as it came; only this decode is small.
+        loader.execute(
+            ImageRequest.Builder(context).data(url).httpHeaders(ART_HEADERS).size(48)
+                .memoryCachePolicy(coil3.request.CachePolicy.DISABLED).build(),
+        )
+        fetched++
+        kotlinx.coroutines.delay(300)
+    }
+    if (fetched > 0) android.util.Log.i("Watchly", "art: $fetched picture(s) cached ahead")
+}
+
 /** How long a picture fades in. The TV sets 0: each fading card is a redraw per frame, a row at a time. */
 var ArtFadeMs = 300
 

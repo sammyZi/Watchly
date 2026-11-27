@@ -37,6 +37,16 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.drag
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -129,7 +139,9 @@ import com.torrentviewer.core.ADDON_SHELF
 import com.torrentviewer.core.TOP_SHELF
 import com.torrentviewer.core.imdbScore
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.composables.icons.lucide.R as L
@@ -267,6 +279,25 @@ fun SearchScreen(watch: Watch, onOpen: (Title) -> Unit) {
         }
         busy = false
         keep()
+    }
+    // A search's answers carry no IMDb score (a catalogue's do): with a rating asked for, each one's is looked up —
+    // kept once known, four at a time — or "IMDb 7+" found nothing at all.
+    LaunchedEffect(results, atLeast) {
+        val list = results ?: return@LaunchedEffect
+        if (atLeast == null || list.none { it.rating == null && it.imdb.startsWith("tt") }) return@LaunchedEffect
+        busy = true
+        val gate = kotlinx.coroutines.sync.Semaphore(4)
+        val rated = coroutineScope {
+            list.map { t ->
+                async {
+                    if (t.rating != null || !t.imdb.startsWith("tt")) t
+                    else gate.withPermit { Meta.ratingOf(t.imdb, t.kind)?.let { t.copy(rating = it) } ?: t }
+                }
+            }.awaitAll()
+        }
+        busy = false
+        // Unchanged when none had a score to find: no new list, so this doesn't run again for it.
+        if (rated != list) { results = rated; keep() }
     }
     val browsing = query.trim().length < 2
     val titles = results?.let { list ->
@@ -2028,7 +2059,7 @@ private fun TrackerSection(t: com.torrentviewer.core.Tracker) {
     }
 }
 
-/** Custom, then the presets, three to a row; Custom opens hue, strength and brightness sliders under the grid. */
+/** Custom, then the presets, three to a row; Custom opens a colour square, a hue strip and a hex code under the grid. */
 @Composable
 private fun AccentPicker(current: Int, onPick: (Int) -> Unit) {
     val custom = ACCENTS.none { it.second == current }
@@ -2072,20 +2103,84 @@ private fun AccentPicker(current: Int, onPick: (Int) -> Unit) {
                 repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
-        if (editing) Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            // Saved when the finger lifts, not on every frame of the drag.
-            listOf(
-                Triple("Hue", h / 360f) { x: Float -> h = x * 360f },
-                Triple("Strength", s) { x: Float -> s = x },
-                Triple("Brightness", v) { x: Float -> v = x },
-            ).forEach { (label, value, change) ->
-                Text(label, style = Type.meta.copy(color = Ink.faint))
-                androidx.compose.material3.Slider(
-                    value, change, onValueChangeFinished = { onPick(android.graphics.Color.HSVToColor(floatArrayOf(h, s, v))) },
-                    colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = Color(mixed), activeTrackColor = Color(mixed), inactiveTrackColor = Ink.surface2),
-                )
-            }
+        // Saved when the finger lifts, not on every frame of the drag.
+        if (editing) ColourMixer(h, s, v, { nh, ns, nv -> h = nh; s = ns; v = nv }) { onPick(android.graphics.Color.HSVToColor(floatArrayOf(h, s, v))) }
+    }
+}
+
+/**
+ * A colour of one's own, laid out as phone pickers do (iOS's spectrum, Material's HSV): a square for strength across
+ * and brightness down, a rainbow strip for the hue, and the hex code to type one in exactly.
+ */
+@Composable
+private fun ColourMixer(h: Float, s: Float, v: Float, onChange: (Float, Float, Float) -> Unit, onDone: () -> Unit) {
+    val argb = android.graphics.Color.HSVToColor(floatArrayOf(h, s, v))
+    val pure = Color(android.graphics.Color.HSVToColor(floatArrayOf(h, 1f, 1f)))
+    // The gestures outlive a recomposition: they read these, always the latest.
+    val now by rememberUpdatedState(Triple(h, s, v))
+    val change by rememberUpdatedState(onChange)
+    val done by rememberUpdatedState(onDone)
+    Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Box(
+            Modifier.fillMaxWidth().aspectRatio(1.6f).clip(RoundedCornerShape(14.dp))
+                .drawBehind {
+                    drawRect(Brush.horizontalGradient(listOf(Color.White, pure)))
+                    drawRect(Brush.verticalGradient(listOf(Color.Transparent, Color.Black)))
+                    val at = Offset(s * size.width, (1 - v) * size.height)
+                    drawCircle(Color.White, 13.dp.toPx(), at)
+                    drawCircle(Color(argb), 10.dp.toPx(), at)
+                }
+                .track({ p, box -> change(now.first, (p.x / box.width).coerceIn(0f, 1f), 1f - (p.y / box.height).coerceIn(0f, 1f)) }) { done() },
+        )
+        Box(
+            Modifier.padding(top = 14.dp).fillMaxWidth().height(28.dp).clip(CircleShape)
+                .drawBehind {
+                    drawRect(Brush.horizontalGradient((0..6).map { Color(android.graphics.Color.HSVToColor(floatArrayOf(it * 60f, 1f, 1f))) }))
+                    val r = size.height / 2
+                    val at = Offset((h / 360f * size.width).coerceIn(r, size.width - r), r)
+                    drawCircle(Color.White, r - 1.dp.toPx(), at)
+                    drawCircle(pure, r - 4.dp.toPx(), at)
+                }
+                .track({ p, box -> change((p.x / box.width).coerceIn(0f, 1f) * 359.9f, now.second, now.third) }) { done() },
+        )
+        // Follows the square and the strip; a full code typed in moves them, and isn't rewritten by its own echo.
+        var hex by remember { mutableStateOf(hexOf(argb)) }
+        var typedAs by remember { mutableStateOf(argb) }
+        LaunchedEffect(argb) { if (argb != typedAs) { hex = hexOf(argb); typedAs = argb } }
+        Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(44.dp).clip(CircleShape).background(Color(argb)).border(1.dp, Ink.stroke, CircleShape))
+            Field(
+                hex,
+                { typed ->
+                    hex = "#" + typed.uppercase().filter { it.isDigit() || it in 'A'..'F' }.take(6)
+                    parseHex(hex)?.let { c ->
+                        val f = FloatArray(3).also { android.graphics.Color.colorToHSV(c, it) }
+                        typedAs = android.graphics.Color.HSVToColor(f)
+                        change(f[0], f[1], f[2])
+                        done()
+                    }
+                },
+                "#FF4D6D", Modifier.padding(start = 12.dp).weight(1f), action = ImeAction.Done, capitals = true,
+            )
         }
+    }
+}
+
+/** "#RRGGBB" (the # optional) as an opaque colour; null until all six digits are there. */
+internal fun parseHex(text: String): Int? = text.removePrefix("#")
+    .takeIf { it.length == 6 && it.all { c -> c.isDigit() || c.uppercaseChar() in 'A'..'F' } }
+    ?.let { (0xFF000000 or it.toLong(16)).toInt() }
+
+private fun hexOf(argb: Int) = "#%06X".format(argb and 0xFFFFFF)
+
+/** Down and drag, each spot reported with this box's size, [onEnd] as the finger lifts; consumed, so the page doesn't scroll. */
+private fun Modifier.track(onMove: (Offset, IntSize) -> Unit, onEnd: () -> Unit) = pointerInput(Unit) {
+    awaitEachGesture {
+        val down = awaitFirstDown()
+        down.consume()
+        onMove(down.position, size)
+        drag(down.id) { it.consume(); onMove(it.position, size) }
+        onEnd()
     }
 }
 

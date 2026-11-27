@@ -38,6 +38,18 @@ object Services {
 
     fun init(context: Context) {
         if (::engine.isInitialized) return
+        // Pictures 8 at a time from one host, not OkHttp's 5, with as many connections kept: metahub, where
+        // posters come from, is one HTTP/1.1 server, ~0.6 s a picture here and 1-3 s on mobile data, so a
+        // screen of posters came in slow waves of five. The same requests, only closer together.
+        coil3.SingletonImageLoader.setSafe { ctx ->
+            val client = okhttp3.OkHttpClient.Builder()
+                .dispatcher(okhttp3.Dispatcher().apply { maxRequestsPerHost = 8 })
+                .connectionPool(okhttp3.ConnectionPool(8, 5, java.util.concurrent.TimeUnit.MINUTES))
+                .build()
+            coil3.ImageLoader.Builder(ctx)
+                .components { add(coil3.network.okhttp.OkHttpNetworkFetcherFactory(callFactory = { client })) }
+                .build()
+        }
         Kv.init(context)
         SettingsStore.load()
         Profiles.load()

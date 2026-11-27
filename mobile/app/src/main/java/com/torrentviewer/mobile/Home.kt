@@ -395,6 +395,15 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
     val byKey = homeRows.associateBy { it.key }
     val context = androidx.compose.ui.platform.LocalContext.current
 
+    // Every row's posters, in the page's order, fetched ahead (gently, on Wi-Fi) so a scroll finds them on disk.
+    val ahead = buildMap<String, List<Title>> {
+        put("list", watchlist)
+        charts.forEach { (kind, _, titles) -> put("chart:$kind", titles) }
+        put("because", because.flatMap { it.second })
+        visible.forEach { put("shelf:${it.key}", rows[it.key].orEmpty()) }
+    }.let { all -> order.filter { it !in settings.homeHidden }.flatMap { all[it].orEmpty() } }.mapNotNull { it.poster ?: it.wide }.distinct()
+    LaunchedEffect(ahead) { com.torrentviewer.core.precacheArt(context, ahead) }
+
     // What the top edge's frost blurs: the rows passing under it.
     val haze = dev.chrisbanes.haze.rememberHazeState()
     Box(Modifier.fillMaxSize()) {
@@ -481,6 +490,8 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
 
     releases?.let { all -> ReleasesSheet(all, watch) { releases = null } }
     if (joiningParty) JoinPartySheet(who) { joiningParty = false }
+    // Frosted over the page, as a film's sheets are over its page.
+    androidx.compose.runtime.CompositionLocalProvider(LocalPageHaze provides haze) {
     if (state.editing) BottomSheet("Edit Home", { state.editing = false }) { HomeEditor(order.map { it to byKey.getValue(it).name }, settings) }
     if (comingAll) BottomSheet("Upcoming", { comingAll = false }) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = EDGE, vertical = 4.dp)) {
@@ -499,6 +510,7 @@ fun HomeScreen(state: HomeState, watch: Watch, who: Profile, onOpen: (Title) -> 
             }
             Spacer(Modifier.height(12.dp))
         }
+    }
     }
 }
 

@@ -320,6 +320,17 @@ object Meta {
         (meta.optJSONArray("genre") ?: meta.optJSONArray("genres"))?.let { g -> (0 until g.length()).map { g.optString(it) } }.orEmpty()
     }.getOrDefault(emptyList())
 
+    /**
+     * Just a title's IMDb score, for a search filtered by rating: Cinemeta's search answers carry none, so "IMDb 7+"
+     * found nothing. Nothing built but the number, kept as [title] is; null when IMDb has none.
+     */
+    suspend fun ratingOf(imdb: String, kind: String): String? = runCatching {
+        remember("rating:$imdb", { it }, { it }) {
+            val type = if (kind == "tv") "series" else "movie"
+            JSONObject(cinemeta("$BASE/$type/$imdb.json", quiet = true)).getJSONObject("meta").optString("imdbRating")
+        }.takeIf { it.isNotBlank() }
+    }.getOrNull()
+
     private suspend fun fromAddons(id: String, kind: String): Title? {
         val first = if (kind == "tv") "series" else "movie"
         for (a in Addons.list.value) for (type in a.metaTypes(id, first)) {
