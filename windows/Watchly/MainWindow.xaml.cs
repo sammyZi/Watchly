@@ -802,11 +802,17 @@ public partial class MainWindow : Window
         SetOpening(null);
     }
 
-    /// <summary>A link handed over by another Watchly the browser started (see App): opened once someone is in.</summary>
-    public void Incoming(string source)
+    /// <summary>To the front, unminimised: Watchly opened again while it was open.</summary>
+    public void Reveal()
     {
         if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
         Activate();
+    }
+
+    /// <summary>A link handed over by another Watchly the browser started (see App): opened once someone is in.</summary>
+    public void Incoming(string source)
+    {
+        Reveal();
         if (Who is null) waitingToOpen = source;
         else OpenIncoming(source);
     }
@@ -1676,6 +1682,7 @@ public partial class MainWindow : Window
         e.Cancel = true;
         shuttingDown = true;
         Hide();
+        App.LetGo();
         async Task Cleanup()
         {
             if (PlayerHost.Content is PlayerView player) await player.Shutdown();

@@ -45,11 +45,11 @@ public partial class App : Application
         // A magnet, a .torrent, or an addon site's Install link (the installer registers stremio://).
         // And a watch party invite (watchly://party/…, the installer registers watchly://).
         var incoming = e.Args.FirstOrDefault(Opens);
-        // A Watchly already open takes it: a second one would fight it for the torrent ports. Before the first log
-        // line: a process that only hands a link on opened a log of its own, which pushed real runs' logs out and
-        // read the open one's as a crash.
+        // A Watchly already open takes it — and with no link, just comes to the front: a second one would fight it for
+        // the torrent ports. Before the first log line: a process that only hands a link on opened a log of its own,
+        // which pushed real runs' logs out and read the open one's as a crash.
         single = new Mutex(true, Pipe, out var first);
-        if (!first && incoming is not null && Forward(incoming))
+        if (!first && Forward(incoming ?? Show))
         {
             forwarded = true;
             Shutdown();
@@ -107,11 +107,31 @@ public partial class App : Application
     /// <summary>Held for the app's life; let go, a second Watchly would think it was the first.</summary>
     static Mutex? single;
 
+    /// <summary>
+    /// Closing (the window gone, the torrents still stopping): Watchly opened again now is a new one, not this one
+    /// brought to the front, which would never show. Called on the UI thread, which owns the mutex.
+    /// </summary>
+    public static void LetGo()
+    {
+        try { single?.ReleaseMutex(); } catch { } // not ours: a second Watchly whose first didn't answer
+        single?.Dispose();
+        single = null;
+    }
+
+    /// <summary>What a second Watchly opened with no link sends: the open one comes to the front.</summary>
+    const string Show = "watchly:show";
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool AllowSetForegroundWindow(int dwProcessId);
+
     /// <summary>Hands a link to the Watchly already open; false when none answered, so this one opens it.</summary>
     static bool Forward(string link)
     {
         try
         {
+            // This process was started by the person, so it may bring a window forward; it lets the open Watchly do
+            // so, or Windows only flashes its taskbar button.
+            AllowSetForegroundWindow(-1);
             using var pipe = new System.IO.Pipes.NamedPipeClientStream(".", Pipe, System.IO.Pipes.PipeDirection.Out);
             pipe.Connect(1500);
             using var writer = new StreamWriter(pipe);
@@ -137,8 +157,10 @@ public partial class App : Application
                 await server.WaitForConnectionAsync();
                 using var reader = new StreamReader(server);
                 var link = (await reader.ReadToEndAsync()).Trim();
+                if (link == Show)
+                    _ = window.Dispatcher.BeginInvoke(window.Reveal);
                 // Only what the command line could have brought: nothing else is acted on.
-                if (link.Length > 0 && link.Length < 8192 && Opens(link))
+                else if (link.Length > 0 && link.Length < 8192 && Opens(link))
                     _ = window.Dispatcher.BeginInvoke(() => window.Incoming(link));
             }
             catch (Exception e)
