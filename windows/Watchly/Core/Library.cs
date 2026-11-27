@@ -287,14 +287,26 @@ public static class Saved
     public static HashSet<string> WatchedFilms(IEnumerable<HistoryItem> history) =>
         history.Where(SeenThrough).Select(h => h.Imdb).OfType<string>().Concat(Trackers.Synced.Films).ToHashSet();
 
-    /// <summary>core watchedShelf: the Library's Watched tab — films seen through, here or on an account, newest first.</summary>
+    /// <summary>
+    /// core watchedShelf: the Library's Watched tab, newest first — films seen through, and series with an episode
+    /// seen through, here or on an account.
+    /// </summary>
     public static List<Title> WatchedShelf(IEnumerable<HistoryItem> history)
     {
+        static string Poster(string id) => $"https://images.metahub.space/poster/medium/{id}/img";
+        // Any of its files played to WatchedAt: a film's one, or one of a series' episodes.
+        static bool Through(HistoryItem h) =>
+            h.Positions?.Any(p => h.DurationOf(p.Key) is > 0 and var of && p.Value / of >= Stremio.WatchedAt) == true;
+        var all = history.ToList();
+        var seen = all.Where(Through).Select(h => h.Imdb).OfType<string>().ToHashSet();
+        var here = History.LatestPerTitle(all).Where(h => h.Imdb is { } id && seen.Contains(id))
+            .Select(h => (At: h.LastPlayed, Title: new Title { Imdb = h.Imdb!, Kind = h.Kind == "tv" ? "tv" : "movie", Name = h.DisplayName.Split(" · ")[0], Poster = h.Poster ?? Poster(h.Imdb!) }));
+        var accounts = Trackers.Synced;
         var names = Lists().SelectMany(a => a.Seen).GroupBy(s => s.Imdb).ToDictionary(g => g.Key, g => g.First().Title);
-        var here = History.LatestPerTitle(history.ToList()).Where(h => SeenThrough(h) && h.Imdb is not null)
-            .Select(h => new Title { Imdb = h.Imdb!, Kind = "movie", Name = h.Title, Poster = h.Poster ?? $"https://images.metahub.space/poster/medium/{h.Imdb}/img" });
-        var there = Trackers.Synced.Films.Select(id => new Title { Imdb = id, Kind = "movie", Name = names.GetValueOrDefault(id) ?? "", Poster = $"https://images.metahub.space/poster/medium/{id}/img" });
-        return KidsMode.Only(here.Concat(there).DistinctBy(t => t.Imdb));
+        Title There(string id, string kind) => new() { Imdb = id, Kind = kind, Name = names.GetValueOrDefault(id) ?? "", Poster = Poster(id) };
+        var films = accounts.Films.Select(id => (At: accounts.FinishedAt.GetValueOrDefault(id), Title: There(id, "movie")));
+        var shows = accounts.Episodes.Where(e => e.Value.Count > 0).Select(e => (At: accounts.FinishedAt.GetValueOrDefault(e.Key), Title: There(e.Key, "tv")));
+        return KidsMode.Only(here.Concat(films).Concat(shows).OrderByDescending(x => x.At).Select(x => x.Title).DistinctBy(t => t.Imdb));
     }
 
     /// <summary>The signed-in accounts whose library is a saved list, by name.</summary>

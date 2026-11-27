@@ -140,7 +140,7 @@ public sealed class LibraryView : UserControl
             var body = titles.Count > 0
                 ? Ui.Grid(titles)
                 : view == "watched"
-                    ? Ui.Empty("check-circle", "Nothing watched yet", "Films you watch to the end collect here, and leave My List.")
+                    ? Ui.Empty("check-circle", "Nothing watched yet", "Films you watch to the end, and series you have watched episodes of, collect here. A finished film leaves My List.")
                     : Ui.Empty(view == "later" ? "bookmark" : "heart",
                         view == "later" ? "Nothing in My List" : "No favourites yet",
                         $"Open any title and use the {(view == "later" ? "bookmark" : "heart")} in the top corner to put it here.");
